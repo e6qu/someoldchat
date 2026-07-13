@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message AccessLog {
+  string workspace_id = 1;
+  string user_id = 2;
+  string username = 3;
+  int64 created_at = 4;
+  string ip = 5;
+  string user_agent = 6;
+}
+
+message RecordAccessRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string ip = 3;
+  string user_agent = 4;
+}
+
+message AccessLogsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int64 before = 3;
+  int32 limit = 4;
+  int32 page = 5;
+}
+
+message AccessLogsResponse {
+  repeated AccessLog logs = 1;
+  bool has_more = 2;
+}
+
+message AccessMutationResponse {
+  bool ok = 1;
+}
+
+message IntegrationLog {
+  string app_id = 1;
+  string app_type = 2;
+  string change_type = 3;
+  string channel_id = 4;
+  int64 date_unix = 5;
+  string scope = 6;
+  string service_id = 7;
+  string service_type = 8;
+  string user_id = 9;
+  string user_name = 10;
+}
+
+message IntegrationLogsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string change_type = 4;
+  string service_id = 5;
+  string user_filter = 6;
+  int32 count = 7;
+  int32 page = 8;
+}
+
+message IntegrationLogsResponse {
+  repeated IntegrationLog logs = 1;
+  int32 page = 2;
+  int32 pages = 3;
+  int32 total = 4;
+}
+
+service AccessLogsService {
+  rpc RecordAccess(RecordAccessRequest) returns (AccessMutationResponse);
+  rpc AccessLogs(AccessLogsRequest) returns (AccessLogsResponse);
+  rpc IntegrationLogs(IntegrationLogsRequest) returns (IntegrationLogsResponse);
+}

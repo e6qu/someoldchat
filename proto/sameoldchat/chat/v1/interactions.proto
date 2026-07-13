@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message ReadCursor {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string last_read = 4;
+  string updated_at = 5;
+}
+
+message MarkReadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+}
+
+service InteractionsService {
+  rpc MarkRead(MarkReadRequest) returns (ReadCursor);
+}

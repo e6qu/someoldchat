@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/presence.proto";
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+message File {
+  string id = 1;
+  string workspace_id = 2;
+  string uploader = 3;
+  string name = 4;
+  string title = 5;
+  string mime_type = 6;
+  int64 size = 7;
+  string created_at = 8;
+  bool deleted = 9;
+  string public_token = 10;
+}
+
+message FilePage {
+  repeated File files = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message RemoteFile {
+  string id = 1;
+  string workspace_id = 2;
+  string external_id = 3;
+  string title = 4;
+  string file_type = 5;
+  string external_url = 6;
+  string preview_image = 7;
+  string indexable_contents = 8;
+  int64 created_at = 9;
+  bool deleted = 10;
+  repeated string shared_channels = 11;
+}
+
+message RemoteFilePage {
+  repeated RemoteFile files = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message RemoteFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  string external_id = 4;
+}
+
+message AddRemoteFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string external_id = 3;
+  string title = 4;
+  string file_type = 5;
+  string external_url = 6;
+  string preview_image = 7;
+  string indexable_contents = 8;
+}
+
+message RemoteFilesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message ShareRemoteFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  string external_id = 4;
+  repeated string channels = 5;
+}
+
+message UpdateRemoteFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  string external_id = 4;
+  string title = 5;
+  string file_type = 6;
+  string external_url = 7;
+  string preview_image = 8;
+  string indexable_contents = 9;
+  repeated string update_fields = 10;
+}
+
+message FileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+}
+
+message FileCommentDeleteRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  string comment_id = 4;
+}
+
+message FilesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message DeleteFileResponse {
+  bool ok = 1;
+}
+
+message UploadFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string title = 4;
+  string mime_type = 5;
+  int64 size = 6;
+}
+
+message DownloadFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+}
+
+message PublicFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+}
+
+message PublicFileTokenRequest {
+  string token = 1;
+}
+
+message UploadFilePart {
+  oneof part {
+    UploadFileRequest metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message DownloadFilePart {
+  oneof part {
+    File metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message UserPhotoUploadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string mime_type = 3;
+  int64 size = 4;
+}
+
+message UserPhotoUploadPart {
+  oneof part {
+    UserPhotoUploadRequest metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message UserPhotoDownloadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string token = 3;
+}
+
+message UserPhotoMetadata {
+  string mime_type = 1;
+  int64 size = 2;
+  string token = 3;
+}
+
+message UserPhotoDownloadPart {
+  oneof part {
+    UserPhotoMetadata metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message UserPhotoDeleteRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+service FilesService {
+  rpc FileInfo(FileRequest) returns (File);
+  rpc DeleteFile(FileRequest) returns (DeleteFileResponse);
+  rpc DeleteFileComment(FileCommentDeleteRequest) returns (DeleteFileResponse);
+  rpc Files(FilesRequest) returns (FilePage);
+  rpc SharePublicURL(PublicFileRequest) returns (File);
+  rpc RevokePublicURL(PublicFileRequest) returns (File);
+  rpc AddRemoteFile(AddRemoteFileRequest) returns (RemoteFile);
+  rpc RemoteFileInfo(RemoteFileRequest) returns (RemoteFile);
+  rpc RemoteFiles(RemoteFilesRequest) returns (RemoteFilePage);
+  rpc RemoveRemoteFile(RemoteFileRequest) returns (DeleteFileResponse);
+  rpc ShareRemoteFile(ShareRemoteFileRequest) returns (RemoteFile);
+  rpc UpdateRemoteFile(UpdateRemoteFileRequest) returns (RemoteFile);
+}
+
+service ChatService {
+  rpc UploadFile(stream UploadFilePart) returns (File);
+  rpc DownloadFile(DownloadFileRequest) returns (stream DownloadFilePart);
+  rpc DownloadPublicFile(PublicFileTokenRequest) returns (stream DownloadFilePart);
+  rpc UploadUserPhoto(stream UserPhotoUploadPart) returns (User);
+  rpc DownloadUserPhoto(UserPhotoDownloadRequest) returns (stream UserPhotoDownloadPart);
+  rpc DeleteUserPhoto(UserPhotoDeleteRequest) returns (MutationResponse);
+}

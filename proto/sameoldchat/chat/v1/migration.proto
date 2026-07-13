@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message MigrationExchangeRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string user_ids = 3;
+  bool to_old = 4;
+}
+
+message MigrationExchangeResponse {
+  string workspace_id = 1;
+  map<string, string> user_id_map = 2;
+  repeated string invalid_user_ids = 3;
+}
+
+service MigrationService {
+  rpc Exchange(MigrationExchangeRequest) returns (MigrationExchangeResponse);
+}

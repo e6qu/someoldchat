@@ -1,0 +1,134 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversations.proto";
+
+message OpenConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string users = 3;
+}
+
+message CreateConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  bool private = 4;
+}
+
+message ConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message InviteConversationMembersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string users = 4;
+}
+
+message KickConversationMemberRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string target_id = 4;
+}
+
+message MutationResponse {
+  bool ok = 1;
+}
+
+message RenameConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string name = 4;
+}
+
+message SetConversationTopicRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string topic = 4;
+}
+
+message SetConversationPurposeRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string purpose = 4;
+}
+
+message SetConversationArchivedRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  bool archived = 4;
+}
+
+message DeleteConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message ConversationAccessGroupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string group_id = 4;
+}
+
+message ConversationAccessGroupsResponse {
+  repeated string group_ids = 1;
+}
+
+message ConvertConversationToPrivateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message AdminConversationTeamsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  repeated string team_ids = 6;
+  bool org_channel = 7;
+}
+
+message AdminConversationTeamsResponse {
+  repeated string team_ids = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+service ConversationMutationsService {
+  rpc OpenConversation(OpenConversationRequest) returns (Conversation);
+  rpc CreateConversation(CreateConversationRequest) returns (Conversation);
+  rpc JoinConversation(ConversationRequest) returns (Conversation);
+  rpc InviteConversationMembers(InviteConversationMembersRequest) returns (Conversation);
+  rpc LeaveConversation(ConversationRequest) returns (MutationResponse);
+  rpc KickConversationMember(KickConversationMemberRequest) returns (MutationResponse);
+  rpc RenameConversation(RenameConversationRequest) returns (Conversation);
+  rpc SetConversationTopic(SetConversationTopicRequest) returns (Conversation);
+  rpc SetConversationPurpose(SetConversationPurposeRequest) returns (Conversation);
+  rpc SetConversationArchived(SetConversationArchivedRequest) returns (Conversation);
+  rpc AdminRenameConversation(RenameConversationRequest) returns (Conversation);
+  rpc AdminSetConversationArchived(SetConversationArchivedRequest) returns (Conversation);
+  rpc AdminDeleteConversation(DeleteConversationRequest) returns (MutationResponse);
+  rpc AdminAddConversationAccessGroup(ConversationAccessGroupRequest) returns (MutationResponse);
+  rpc AdminRemoveConversationAccessGroup(ConversationAccessGroupRequest) returns (MutationResponse);
+  rpc AdminListConversationAccessGroups(ConversationRequest) returns (ConversationAccessGroupsResponse);
+  rpc AdminInviteConversationMembers(InviteConversationMembersRequest) returns (Conversation);
+  rpc AdminConvertConversationToPrivate(ConvertConversationToPrivateRequest) returns (Conversation);
+  rpc AdminConversationTeams(AdminConversationTeamsRequest) returns (AdminConversationTeamsResponse);
+  rpc AdminSetConversationTeams(AdminConversationTeamsRequest) returns (MutationResponse);
+}

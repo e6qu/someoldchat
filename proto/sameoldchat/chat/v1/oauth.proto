@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message OAuthExchangeRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  string code = 3;
+  string redirect_uri = 4;
+}
+
+message OAuthToken {
+  string access_token = 1;
+  string client_id = 2;
+  string app_id = 3;
+  string workspace_id = 4;
+  string user_id = 5;
+  repeated string scopes = 6;
+  string token_type = 7;
+}
+
+service OAuthService {
+  rpc ExchangeOAuth(OAuthExchangeRequest) returns (OAuthToken);
+}

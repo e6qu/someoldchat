@@ -1,0 +1,71 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message TokenRecord {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string scopes = 3;
+  bool revoked = 4;
+}
+
+message SessionRecord {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string scopes = 3;
+  string expires_at = 4;
+  bool revoked = 5;
+}
+
+message TokenRequest {
+  string token = 1;
+}
+
+message AuthRevokeResponse {
+  bool ok = 1;
+}
+
+message CreateSessionRequest {
+  string token = 1;
+  SessionRecord session = 2;
+}
+
+message AuthMethodRequest {
+  string workspace_id = 1;
+  string provider = 2;
+  bool enabled = 3;
+}
+
+message AuthMethod {
+  string workspace_id = 1;
+  string provider = 2;
+  bool enabled = 3;
+}
+
+message ExternalIdentityRequest {
+  string workspace_id = 1;
+  string provider = 2;
+  string subject = 3;
+  string user_id = 4;
+}
+
+message ExternalIdentity {
+  string workspace_id = 1;
+  string provider = 2;
+  string subject = 3;
+  string user_id = 4;
+}
+
+service AuthService {
+  rpc LookupToken(TokenRequest) returns (TokenRecord);
+  rpc LookupSession(TokenRequest) returns (SessionRecord);
+  rpc RevokeSession(TokenRequest) returns (AuthRevokeResponse);
+  rpc RevokeToken(TokenRequest) returns (AuthRevokeResponse);
+  rpc CreateSession(CreateSessionRequest) returns (AuthRevokeResponse);
+  rpc GetAuthMethod(AuthMethodRequest) returns (AuthMethod);
+  rpc SetAuthMethod(AuthMethodRequest) returns (AuthRevokeResponse);
+  rpc GetExternalIdentity(ExternalIdentityRequest) returns (ExternalIdentity);
+  rpc CreateExternalIdentity(ExternalIdentityRequest) returns (AuthRevokeResponse);
+}

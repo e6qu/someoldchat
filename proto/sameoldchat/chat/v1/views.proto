@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message View {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string type = 4;
+  string external_id = 5;
+  string payload = 6;
+  string hash = 7;
+  string root_view_id = 8;
+  string previous_view_id = 9;
+  int64 created_at_unix_nano = 10;
+  int64 updated_at_unix_nano = 11;
+}
+
+message OpenViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+  string payload = 4;
+}
+
+message PublishViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  string payload = 4;
+  string hash = 5;
+}
+
+message PushViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+  string payload = 4;
+}
+
+message UpdateViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string view_id = 3;
+  string external_id = 4;
+  string payload = 5;
+  string hash = 6;
+}
+
+service ViewsService {
+  rpc OpenView(OpenViewRequest) returns (View);
+  rpc PublishView(PublishViewRequest) returns (View);
+  rpc PushView(PushViewRequest) returns (View);
+  rpc UpdateView(UpdateViewRequest) returns (View);
+}

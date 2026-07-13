@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+message UserGroup {
+  string workspace_id = 1;
+  string id = 2;
+  string name = 3;
+  string handle = 4;
+  string description = 5;
+  string creator_id = 6;
+  string updated_by = 7;
+  int64 created_at = 8;
+  int64 updated_at = 9;
+  int64 deleted_at = 10;
+  bool enabled = 11;
+  repeated string users = 12;
+  repeated string channels = 13;
+}
+
+message UserGroupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string user_group_id = 3;
+}
+
+message UserGroupsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  bool include_disabled = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message CreateUserGroupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string handle = 4;
+  string description = 5;
+}
+
+message UpdateUserGroupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string user_group_id = 3;
+  string name = 4;
+  string handle = 5;
+  string description = 6;
+}
+
+message UserGroupUsersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string user_group_id = 3;
+  repeated string users = 4;
+}
+
+message UserGroupPage {
+  repeated UserGroup usergroups = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message UserGroupUsersResponse {
+  repeated string users = 1;
+}
+
+message UserGroupChannelsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string user_group_id = 3;
+  repeated string channels = 4;
+}
+
+message UserGroupChannelsResponse {
+  repeated string channels = 1;
+}
+
+message AdminUserGroupTeamsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string usergroup_id = 3;
+  repeated string team_ids = 4;
+}
+
+service UserGroupsService {
+  rpc CreateUserGroup(CreateUserGroupRequest) returns (UserGroup);
+  rpc UpdateUserGroup(UpdateUserGroupRequest) returns (UserGroup);
+  rpc EnableUserGroup(UserGroupRequest) returns (UserGroup);
+  rpc DisableUserGroup(UserGroupRequest) returns (UserGroup);
+  rpc UserGroups(UserGroupsRequest) returns (UserGroupPage);
+  rpc UserGroupUsers(UserGroupRequest) returns (UserGroupUsersResponse);
+  rpc SetUserGroupUsers(UserGroupUsersRequest) returns (UserGroup);
+  rpc UserGroupChannels(UserGroupRequest) returns (UserGroupChannelsResponse);
+  rpc AddUserGroupChannels(UserGroupChannelsRequest) returns (MutationResponse);
+  rpc RemoveUserGroupChannels(UserGroupChannelsRequest) returns (MutationResponse);
+  rpc AdminAddUserGroupTeams(AdminUserGroupTeamsRequest) returns (MutationResponse);
+}

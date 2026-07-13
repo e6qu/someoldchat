@@ -1,0 +1,3 @@
+.terraform/
+.activator.zip
+__pycache__/
