@@ -1,0 +1,120 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message Message {
+  string id = 1;
+  string workspace_id = 2;
+  string conversation_id = 3;
+  string author_id = 4;
+  string text = 5;
+  string thread_timestamp = 6;
+  string created_at = 7;
+  bool deleted = 8;
+  map<string, string> unfurls = 9;
+}
+
+message PostRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string text = 4;
+  string thread_timestamp = 5;
+  string idempotency_key = 6;
+}
+
+message EphemeralMessage {
+  string workspace_id = 1;
+  string conversation_id = 2;
+  string author_id = 3;
+  string recipient_id = 4;
+  string text = 5;
+  string timestamp = 6;
+}
+
+message PostEphemeralRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string recipient_id = 4;
+  string text = 5;
+}
+
+message UpdateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  string text = 5;
+}
+
+message UnfurlRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  map<string, string> unfurls = 5;
+}
+
+message DeleteRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+}
+
+message PermalinkRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+}
+
+message PermalinkResponse {
+  string permalink = 1;
+}
+
+message MessagePage {
+  repeated Message messages = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message HistoryRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message RepliesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+
+message SearchRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+service MessagesService {
+  rpc Post(PostRequest) returns (Message);
+  rpc PostEphemeral(PostEphemeralRequest) returns (EphemeralMessage);
+  rpc Update(UpdateRequest) returns (Message);
+  rpc Unfurl(UnfurlRequest) returns (Message);
+  rpc Delete(DeleteRequest) returns (Message);
+  rpc Permalink(PermalinkRequest) returns (PermalinkResponse);
+  rpc History(HistoryRequest) returns (MessagePage);
+  rpc Replies(RepliesRequest) returns (MessagePage);
+  rpc Search(SearchRequest) returns (MessagePage);
+}

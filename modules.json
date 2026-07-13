@@ -1,0 +1,43 @@
+{
+  "modules": [
+    {
+      "name": "chat",
+      "api_import": "github.com/sameoldchat/sameoldchat/internal/modules/chat/api",
+      "implementation_import": "github.com/sameoldchat/sameoldchat/internal/service",
+      "transport_import": "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc",
+      "blob_import": "github.com/sameoldchat/sameoldchat/internal/blob",
+      "implementation_type": "Messages",
+      "dependencies": ["store.Store"]
+    }
+  ],
+  "targets": [
+    {
+      "name": "monolith",
+      "mode": "monolith",
+      "storage": "memory",
+      "processes": {"app": ["chat"]},
+      "replicas": {"app": 1}
+    },
+    {
+      "name": "separate-chat",
+      "mode": "separate",
+      "storage": "memory",
+      "processes": {"http": [], "chat": ["chat"]},
+      "replicas": {"http": 1, "chat": 1}
+    },
+    {
+      "name": "monolith-replicated",
+      "mode": "monolith",
+      "storage": "dqlite",
+      "processes": {"app": ["chat"]},
+      "replicas": {"app": 3}
+    },
+    {
+      "name": "separate-chat-replicated",
+      "mode": "separate",
+      "storage": "dqlite",
+      "processes": {"http": [], "chat": ["chat"]},
+      "replicas": {"http": 3, "chat": 2}
+    }
+  ]
+}

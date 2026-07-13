@@ -1,0 +1,119 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+import "sameoldchat/chat/v1/messages.proto";
+
+message Reaction {
+  string message_id = 1;
+  string name = 2;
+  string user_id = 3;
+  string created_at = 4;
+}
+
+message ReactionPage {
+  repeated Reaction reactions = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message UserReaction {
+  string conversation_id = 1;
+  Message message = 2;
+  Reaction reaction = 3;
+}
+
+message UserReactionPage {
+  repeated UserReaction items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message Pin {
+  string message_id = 1;
+  string user_id = 2;
+  string created_at = 3;
+}
+
+message PinPage {
+  repeated Pin pins = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message ReactionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  string name = 5;
+}
+
+message ReactionPageRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+
+message UserReactionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message PinRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+}
+
+message PinsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message Star {
+  string message_id = 1;
+  string conversation_id = 2;
+  string user_id = 3;
+  string created_at = 4;
+  Message message = 5;
+}
+
+message StarsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message StarPage {
+  repeated Star stars = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+service ReactionsService {
+  rpc AddReaction(ReactionRequest) returns (MutationResponse);
+  rpc RemoveReaction(ReactionRequest) returns (MutationResponse);
+  rpc Reactions(ReactionPageRequest) returns (ReactionPage);
+  rpc UserReactions(UserReactionsRequest) returns (UserReactionPage);
+  rpc AddPin(PinRequest) returns (MutationResponse);
+  rpc RemovePin(PinRequest) returns (MutationResponse);
+  rpc Pins(PinsRequest) returns (PinPage);
+  rpc AddStar(PinRequest) returns (MutationResponse);
+  rpc RemoveStar(PinRequest) returns (MutationResponse);
+  rpc Stars(StarsRequest) returns (StarPage);
+}
