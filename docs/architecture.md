@@ -12,7 +12,7 @@ not call the Slack-compatible interface over HTTP.
 
 ## Implementation principles
 
-The program fails fast and fails loud. Missing, invalid, or contradictory
+The program fails fast and fails loudly. Missing, invalid, or contradictory
 configuration is an error; it is never silently replaced with a default
 backend, empty value, alternate algorithm, or no-op implementation.
 
@@ -61,8 +61,10 @@ boundary so an invalid composition cannot panic or silently skip file behavior.
 
 ## Crash-only operation
 
-SameOldChat is crash-only. A process, worker, database node, or complete active
-stack may be terminated abruptly at any point; recovery uses the same validated
+SameOldChat follows the crash-only design described by the
+[Crash-Only Software](https://lwn.net/Articles/191059/) principle. A process,
+worker, database node, or active deployment may be terminated abruptly at any
+point; recovery uses the same validated
 startup path as ordinary activation. There is no correctness-critical graceful
 shutdown protocol and no user action required to repair a crashed component.
 
@@ -111,7 +113,7 @@ so lease expiry represents a crashed or fenced worker rather than a slow
 healthy worker; this is never an alternate implementation path.
 
 Both deployment modes may run multiple replicas. In monolith mode each replica
-contains the complete direct-call composition and all replicas use the same
+contains the direct-call composition and all replicas use the same
 qualified durable stores. In separate mode module processes have independent
 replica counts and communicate through the selected transport; each module's
 replicas still use the module's state store and must be replaceable without
@@ -149,7 +151,7 @@ next scheduled wake, and bounded activation bookkeeping.
 
 The runnable `cmd/activator` binds that role to the standalone lifecycle SQLite
 control store, verified snapshot manager, explicit command driver, and bounded
-reverse proxy. It requires complete configuration and never becomes a no-op
+reverse proxy. It requires its declared configuration and never becomes a no-op
 activator when lifecycle commands or snapshot credentials are absent.
 
 The runnable `cmd/worker` is a stateless outbox and scheduled-message replica.
@@ -187,20 +189,13 @@ internal/
   realtime/       SSE registration and replay
   blob/           external file objects and storage port
   lifecycle/      state machine, fencing, snapshots
-  dependencies/   generated dependency evidence readers
-templates/
-static/
-spec/
-  upstream/       immutable pinned source copies
-  patches/        explicit overlays with rationale
-  generated/      normalized contracts and fixtures
-migrations/
-tests/
-  contract/
-  sdk/
-  integration/
-  lifecycle/
-  browser/
+  modules/        stable module APIs and transport implementations
+  generated/      generated composition bindings
+proto/            gRPC service schemas
+specs/            project requirements and pinned contract sources
+deploy/           provider-specific infrastructure modules
+sdk/              SDK qualification programs
+docs/             architecture, operations, and deployment guidance
 ```
 
 Module API packages are the separable seams. The generated composition root
@@ -273,14 +268,14 @@ for blobs/snapshots. The volume or verified snapshot survives shutdown.
 ### Production
 
 Activator, independent 0..N web/API and worker deployments, object storage,
-and a three-or-more-node dqlite stateful deployment while active. During full
-hibernation all of those nodes stop after a verified snapshot is published.
+and a three-or-more-node dqlite stateful deployment while active. During
+application hibernation those nodes stop after a verified snapshot is
+published.
 
 Managed-container platforms MAY place the stateless tiers directly on their
 serverless container service while using lifecycle-controlled companion compute
 for dqlite when the managed service cannot provide stable raw-TCP peer identity.
-This remains a supported hosting profile as long as every component is managed
-by the same activator and the complete stack still hibernates.
+This remains a qualification target until the required provider tests pass.
 
 ## Scalability rules
 
@@ -294,3 +289,7 @@ by the same activator and the complete stack still hibernates.
 - Migrations run as a fenced singleton before general traffic is admitted.
 - Startup and shutdown are observable state transitions, not shell-script
   timing assumptions.
+
+Related documents: [module boundaries](modules.md), [operations](operations.md),
+[deployment](deployment.md), [persistence specification](../specs/persistence.md),
+and [scale-to-zero specification](../specs/scale-to-zero.md).

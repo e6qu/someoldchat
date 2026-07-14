@@ -1,4 +1,4 @@
-# SameOldChat full-stack scale-to-zero specification
+# SameOldChat application scale-to-zero specification
 
 ## Goal
 
@@ -137,7 +137,8 @@ A manifest MUST include:
 
 ## Failure behavior
 
-- Restore failure MUST try older compatible known-good generations in order.
+- Restore failure MUST select older compatible known-good generations in order
+  as an explicit recovery policy.
 - A failed generation MUST be quarantined without deletion.
 - Partial dqlite bootstrap MUST be destroyed or fenced before another attempt.
 - The activator MUST never route traffic to a partly restored stack.
@@ -178,7 +179,12 @@ size and infrastructure startup. They MUST NOT be invented before measurement.
 - Client timeout does not cancel wake.
 - Mutation arriving during quiescence is processed once or explicitly rejected.
 - Snapshot upload interruption preserves the prior manifest.
-- Corrupt newest snapshot falls back to an older generation.
+- Corrupt newest snapshot selects an older compatible generation according to
+  the recovery policy.
 - Restore under a newer compatible schema runs migration once.
 - Scheduled work wakes early and executes once.
 - Stale-generation processes cannot write after hibernation begins.
+
+Related documents: [architecture](../docs/architecture.md),
+[operations](../docs/operations.md), [deployment](../docs/deployment.md), and
+[hosting specification](hosting.md).

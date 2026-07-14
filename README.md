@@ -1,17 +1,18 @@
 # SameOldChat
 
 SameOldChat is a self-hostable, Slack-compatible chat system with a Go
-backend, an HTMX interface, SQLite/dqlite persistence, and full-stack
-scale-to-zero through verified snapshot and request-triggered restoration.
+backend, an HTMX interface, SQLite or dqlite persistence, and explicit
+request-triggered restoration for deployments that support scale-to-zero.
 
 ## Documents
 
-- [Delivery plan](PLAN.md)
+- [Project status and planned work](PLAN.md)
 - [Architecture and operational documentation](docs/README.md)
 - [Separable module architecture](docs/modules.md)
 - [dqlite qualification](docs/dqlite.md)
 - [SDK qualification inventory](specs/sdk-compatibility.yaml)
-- [Normative specifications](specs/README.md)
+- [Specifications and pinned contract sources](specs/README.md)
+- [Terminology](docs/terminology.md)
 
 ## Core constraints
 
@@ -24,13 +25,15 @@ scale-to-zero through verified snapshot and request-triggered restoration.
 - A small logical activator endpoint remains reachable to restore the stack.
 - Runtime and build inputs use the newest eligible stable release only after a
   mandatory 24-hour publication quarantine.
-- Supported hosting targets include ordinary Linux VMs, AWS ECS/Fargate,
-  Google Cloud Run, and Azure Container Apps, with companion database compute
-  where a managed container platform cannot safely host dqlite.
+- The repository contains deployment guidance for Linux virtual machines,
+  AWS Elastic Container Service, Google Cloud Run, and Azure Container Apps.
+  The AWS Elastic Container Service scale-to-zero module is the current
+  provider-specific infrastructure implementation; the other profiles require
+  their stated qualification work.
 
-The documents define the current architecture and its remaining qualification
-work. The implementation is intentionally incremental: each vertical slice is
-kept portable across direct-call monolith and distributed gRPC assembly.
+The documents distinguish implemented behavior from qualification work. The
+same module interfaces support direct Go calls in monolith mode and generated
+gRPC adapters in distributed mode.
 
 ## Development commands
 

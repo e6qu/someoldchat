@@ -4,6 +4,6 @@
 /dist/
 
 # Generated catalogs and local evidence are not source contracts.
-/spec/generated/*
-/spec/evidence/*
+/specs/generated/*
+/specs/evidence/*
 *.local.yaml

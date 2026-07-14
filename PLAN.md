@@ -1,4 +1,9 @@
-# SameOldChat Plan
+# SameOldChat project status and planned work
+
+This document records current implementation status and work that remains
+before a deployment profile or compatibility claim can be treated as
+qualified. It is not a description of behavior that the repository does not
+implement yet.
 
 ## Objective
 
@@ -10,7 +15,7 @@ Build SameOldChat, a multi-workspace chat application with:
 - SQLite for local and small deployments;
 - dqlite as the production replicated SQLite implementation;
 - stateless application processes that scale from zero;
-- full-stack hibernation in which the database is snapshotted and stopped;
+- application hibernation in which the database is snapshotted and stopped;
 - a minimal always-reachable activator that wakes the stack on demand;
 - dependency admission that selects the newest eligible stable release only
   after a mandatory 24-hour publication quarantine;
@@ -19,7 +24,7 @@ Build SameOldChat, a multi-workspace chat application with:
   Container Apps, subject to the persistence qualification rules.
 
 The compatibility target is a pinned, reproducible contract. The archived
-Slack specifications alone are not a complete description of Slack behavior,
+Slack specifications alone do not describe all Slack behavior,
 so every inferred or observed behavior must retain its provenance.
 
 ## Governing specifications
@@ -85,7 +90,7 @@ Exit criteria:
 
 ### Phase 2: Core Slack API vertical slice
 
-Implement the first complete slice:
+Implement the first usable slice:
 
 - authentication and scope enforcement;
 - `auth.*`;
@@ -120,7 +125,7 @@ Exit criteria:
 - A user can complete the core chat workflow after a cold wake.
 - Terminating a web replica during live delivery loses no committed event.
 
-### Phase 4: Full-stack hibernation and activation
+### Phase 4: Application hibernation and activation
 
 - Implement the always-on activator as a separately deployable small service.
 - Implement the lifecycle state machine and fencing epochs.
