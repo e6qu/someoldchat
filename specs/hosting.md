@@ -15,7 +15,7 @@ Provider integrations MUST be adapters around one lifecycle protocol. Domain,
 API, HTMX, persistence-query, and snapshot code MUST remain provider-neutral.
 
 All application units MUST be stateless replicas over durable state stores.
-Monolith deployments MAY run multiple replicas of the complete composition;
+Monolith deployments MAY run multiple replicas of the direct-call composition;
 separate deployments MAY assign independent replica counts to each module.
 Replica count MUST NOT change data ownership or require sticky sessions. The
 in-memory backend is a one-replica development profile and MUST be rejected for
@@ -109,7 +109,7 @@ firewall guidance, TLS termination, upgrade, backup, and restore commands.
   on Cloud Run and starts temporary Compute Engine database nodes, or another
   explicitly qualified raw-TCP stateful target, through the lifecycle driver.
 - All companion database nodes MUST stop after snapshot publication, preserving
-  full-stack scale-to-zero apart from the request-triggered control plane.
+  application scale-to-zero apart from the request-triggered control plane.
 
 ## Azure Container Apps profile
 
@@ -173,3 +173,7 @@ ready.
 - Rotate secrets and snapshot encryption keys.
 - Prove that provider IAM cannot access unrelated resources.
 - Report cold-start duration and idle baseline cost.
+
+Related documents: [deployment guide](../docs/deployment.md),
+[architecture](../docs/architecture.md), and
+[scale-to-zero specification](scale-to-zero.md).

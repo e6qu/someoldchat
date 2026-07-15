@@ -110,8 +110,8 @@ If the current snapshot fails verification or restoration, the activator marks
 that generation unusable and the stack enters `FAILED`, preserving evidence and
 exposing an operator-safe status endpoint without leaking internal details
 publicly. Restoring an older retained generation is an explicit, authenticated
-operator action with its own generation and compatibility checks; it is not an
-automatic fallback.
+operator action with its own generation and compatibility checks. It is a
+recovery selection, not an implicit implementation fallback.
 
 The lifecycle controller rejects wake attempts while `FAILED`. An operator must
 explicitly acknowledge the failure, which advances the fencing generation and

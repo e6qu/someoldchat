@@ -1,5 +1,10 @@
 # SameOldChat deployment guide
 
+This guide separates current infrastructure from deployment profiles that still
+need qualification. The current provider-specific implementation is the AWS
+Elastic Container Service module in
+[deploy/ecs-scale-zero](../deploy/ecs-scale-zero/README.md).
+
 ## Deployment philosophy
 
 SameOldChat ships one provider-neutral application and multiple lifecycle
@@ -129,3 +134,7 @@ Each provider implementation MUST ship:
 - cost-sensitive defaults;
 - upgrade and rollback instructions; and
 - an automated qualification report.
+
+Related documents: [architecture](architecture.md), [operations](operations.md),
+[hosting specification](../specs/hosting.md), and
+[scale-to-zero specification](../specs/scale-to-zero.md).

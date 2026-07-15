@@ -25,14 +25,14 @@ stale generated files fail `make check`.
 
 Build tags are reserved for coarse binary roles. They must not encode every
 local/remote combination. The current targets include a direct-call monolith
-and a separate chat process using the explicit TLS gRPC adapter. The transport
+and a separate `sameoldchat-chatd` process using the explicit TLS gRPC adapter. The transport
 is selected by composition, not by business logic. No remote transport is
-silently substituted for the local mode. The server and chatd composition
+silently substituted for the local mode. The server and `sameoldchat-chatd` composition
 roots consume generated transport bindings, so the declared module seam is
 the source of truth for both local and distributed assembly.
 
-Both targets can run multiple replicas. Monolith replicas contain the complete
-direct-call composition and share the qualified state store. Separate module
+Both targets can run multiple replicas. Monolith replicas contain the direct
+call composition and share the qualified state store. Separate module
 processes have independent replica counts and share the state store owned by
 that module. In-memory storage is restricted to one development replica;
 replicated targets must select a qualified durable backend.
@@ -40,10 +40,8 @@ replicated targets must select a qualified durable backend.
 The runtime shapes are explicit:
 
 ```sh
-# Monolith: HTTP, web, API, and chat are direct calls in each replica.
 sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db'
 
-# Separate: chatd owns chat state; HTTP replicas use TLS gRPC.
 sameoldchat-chatd -listen :9443 -store sqlite -db 'file:chat.db' \
   -tls-cert chat.crt -tls-key chat.key \
   -tls-client-ca ca.crt \
@@ -61,7 +59,7 @@ counts are topology data rather than transport fallbacks. No local chat store
 is opened by the HTTP process in gRPC mode.
 
 Authentication lookups also cross the module seam: HTTP replicas use the
-generated remote token/session stores, while `chatd` owns their durable records.
+generated remote token/session stores, while `sameoldchat-chatd` owns their durable records.
 No separate HTTP replica keeps authoritative authentication state in memory.
 Session revocation crosses the same seam as an explicit durable mutation; the
 HTTP replica never treats a local cookie or process cache as authoritative.

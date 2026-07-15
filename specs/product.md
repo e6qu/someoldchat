@@ -2,7 +2,7 @@
 
 ## Scope
 
-SameOldChat MUST provide a multi-workspace Slack-like chat experience and a
+SameOldChat MUST provide a multi-workspace Slack-compatible chat experience and a
 Slack-compatible platform API implemented in Go. The human interface MUST use
 server-rendered HTML enhanced with HTMX. SQLite MUST be the default persistence
 implementation and dqlite MUST be selectable without changing domain logic.
@@ -20,7 +20,7 @@ The product MUST support:
 - Slack-compatible methods, objects, errors, pagination, events, OAuth,
   interactivity, and protocols selected in the compatibility ledger;
 - durable event delivery and scheduled work; and
-- full hibernation and request-triggered restoration.
+- application hibernation and request-triggered restoration.
 
 ## HTMX requirements
 
@@ -50,13 +50,14 @@ The product MUST support:
 - File bodies MUST NOT be stored as large relational blobs.
 - A hot conversation MUST NOT require locking an entire workspace.
 - The system MUST apply bounded concurrency, timeouts, and backpressure.
-- The default deployment MUST be capable of full-stack scale-to-zero.
+- The default deployment MUST be capable of application scale-to-zero.
 
 ## Hosting
 
 - SameOldChat MUST support self-hosting on ordinary Linux virtual machines.
 - It MUST provide qualified deployment profiles for AWS ECS on Fargate, Google
-  Cloud Run, and Azure Container Apps.
+  Cloud Run, and Azure Container Apps, subject to the qualification levels in
+  the hosting specification.
 - Hosting adapters MUST preserve the same snapshot, fencing, wake, and
   compatibility semantics.
 - A profile MUST NOT claim pure managed-container dqlite support unless stable
@@ -81,3 +82,6 @@ The initial milestone does not promise visual pixel equivalence, voice/video
 huddles, every enterprise administration workflow, or behavior that exists
 only in Slack's private clients. Those may be added through explicit,
 source-backed compatibility entries.
+
+Related documents: [terminology](../docs/terminology.md),
+[architecture](../docs/architecture.md), and [compatibility specification](api-compatibility.md).

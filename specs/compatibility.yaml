@@ -9,7 +9,7 @@ sources:
     kind: openapi
     upstream: https://github.com/slackapi/slack-api-specs
     revision: bc08db49625630e3585bf2f1322128ea04f2a7f3
-    path: spec/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json
+    path: specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json
     sha256: 742a5c977180a829df8767cf57bc417d99b3713583aee83741efb9c08ca731e7
     license: MIT
     retrieved_at: 2026-07-12T19:00:00Z
@@ -17,7 +17,7 @@ sources:
     kind: asyncapi
     upstream: https://github.com/slackapi/slack-api-specs
     revision: bc08db49625630e3585bf2f1322128ea04f2a7f3
-    path: spec/upstream/slack-api-specs/events-api/slack_events_api_async_v1.json
+    path: specs/upstream/slack-api-specs/events-api/slack_events_api_async_v1.json
     sha256: a491c82393abf9ef1aa38334cf71c747fbc2ea7a2b78533882ea24c888fe84be
     license: MIT
     retrieved_at: 2026-07-12T19:00:00Z
@@ -25,7 +25,7 @@ sources:
     kind: json-schema
     upstream: https://github.com/slackapi/slack-api-specs
     revision: bc08db49625630e3585bf2f1322128ea04f2a7f3
-    path: spec/upstream/slack-api-specs/events-api/slack_common_event_wrapper_schema.json
+    path: specs/upstream/slack-api-specs/events-api/slack_common_event_wrapper_schema.json
     sha256: f6d1704676f4866fc62704086a916dd4c3d9f53a570b9e2976a80450e641d05a
     license: MIT
     retrieved_at: 2026-07-12T19:00:00Z

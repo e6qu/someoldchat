@@ -38,3 +38,7 @@ java -cp "sdk/java-slack-api/target/classes:$(cat /tmp/soc-java-classpath)" same
 ```
 
 The fixture is test-only and is not a production composition root.
+
+Related documents: [SDK source inventory](../specs/sdk-compatibility.yaml),
+[compatibility specification](../specs/api-compatibility.md), and
+[repository build instructions](../README.md).
