@@ -59,28 +59,28 @@ operations:
     status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.replies
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.add
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.remove
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.get
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.list
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: pins.add
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: pins.remove
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: pins.list
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: search.messages
     status: schema-compatible

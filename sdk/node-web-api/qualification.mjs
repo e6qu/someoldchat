@@ -40,9 +40,32 @@ const profile = await client.users.profile.get({ user: "U1" });
 assert.equal(profile.ok, true);
 assert.equal(profile.profile.display_name, "alice");
 
-const history = await client.conversations.history({ channel: "C1", limit: 1 });
+const root = await client.chat.postMessage({ channel: "C1", text: "thread root" });
+assert.equal(root.ok, true);
+const reply = await client.chat.postMessage({ channel: "C1", text: "thread reply", thread_ts: root.ts });
+assert.equal(reply.ok, true);
+const replies = await client.conversations.replies({ channel: "C1", ts: root.ts, limit: 2 });
+assert.equal(replies.ok, true);
+assert.equal(replies.messages.length, 2);
+
+const reaction = await client.reactions.add({ channel: "C1", timestamp: root.ts, name: "thumbsup" });
+assert.equal(reaction.ok, true);
+const reactions = await client.reactions.get({ channel: "C1", timestamp: root.ts });
+assert.equal(reactions.ok, true);
+assert.equal(reactions.message.reactions.length, 1);
+const pinsAdded = await client.pins.add({ channel: "C1", timestamp: root.ts });
+assert.equal(pinsAdded.ok, true);
+const pins = await client.pins.list({ channel: "C1" });
+assert.equal(pins.ok, true);
+assert.equal(pins.items.length, 1);
+const pinsRemoved = await client.pins.remove({ channel: "C1", timestamp: root.ts });
+assert.equal(pinsRemoved.ok, true);
+const reactionRemoved = await client.reactions.remove({ channel: "C1", timestamp: root.ts, name: "thumbsup" });
+assert.equal(reactionRemoved.ok, true);
+
+const history = await client.conversations.history({ channel: "C1", limit: 10 });
 assert.equal(history.ok, true);
-assert.equal(history.messages.length, 1);
+assert.equal(history.messages.length, 3);
 assert.equal(history.has_more, false);
 
 const users = await client.users.list({ limit: 1 });

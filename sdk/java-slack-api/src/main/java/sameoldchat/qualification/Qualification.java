@@ -10,9 +10,16 @@ import com.slack.api.methods.response.conversations.ConversationsHistoryResponse
 import com.slack.api.methods.response.conversations.ConversationsInfoResponse;
 import com.slack.api.methods.response.conversations.ConversationsListResponse;
 import com.slack.api.methods.response.conversations.ConversationsMembersResponse;
+import com.slack.api.methods.response.conversations.ConversationsRepliesResponse;
 import com.slack.api.methods.response.users.UsersListResponse;
 import com.slack.api.methods.response.users.UsersInfoResponse;
 import com.slack.api.methods.response.users.profile.UsersProfileGetResponse;
+import com.slack.api.methods.response.pins.PinsAddResponse;
+import com.slack.api.methods.response.pins.PinsListResponse;
+import com.slack.api.methods.response.pins.PinsRemoveResponse;
+import com.slack.api.methods.response.reactions.ReactionsAddResponse;
+import com.slack.api.methods.response.reactions.ReactionsGetResponse;
+import com.slack.api.methods.response.reactions.ReactionsRemoveResponse;
 
 public final class Qualification {
     private Qualification() {}
@@ -85,13 +92,72 @@ public final class Qualification {
             require(profile.isOk() && profile.getProfile() != null
                             && "alice".equals(profile.getProfile().getDisplayName()), "users.profile.get failed");
 
+            ChatPostMessageResponse root = methods.chatPostMessage(
+                    com.slack.api.methods.request.chat.ChatPostMessageRequest.builder()
+                            .channel("C1")
+                            .text("thread root")
+                            .build());
+            require(root.isOk(), "thread root failed: " + root.getError());
+            ChatPostMessageResponse reply = methods.chatPostMessage(
+                    com.slack.api.methods.request.chat.ChatPostMessageRequest.builder()
+                            .channel("C1")
+                            .text("thread reply")
+                            .threadTs(root.getTs())
+                            .build());
+            require(reply.isOk(), "thread reply failed: " + reply.getError());
+            ConversationsRepliesResponse replies = methods.conversationsReplies(
+                    com.slack.api.methods.request.conversations.ConversationsRepliesRequest.builder()
+                            .channel("C1")
+                            .ts(root.getTs())
+                            .limit(2)
+                            .build());
+            require(replies.isOk() && replies.getMessages() != null && replies.getMessages().size() == 2,
+                    "conversations.replies failed");
+            ReactionsAddResponse reaction = methods.reactionsAdd(
+                    com.slack.api.methods.request.reactions.ReactionsAddRequest.builder()
+                            .channel("C1")
+                            .timestamp(root.getTs())
+                            .name("thumbsup")
+                            .build());
+            require(reaction.isOk(), "reactions.add failed: " + reaction.getError());
+            ReactionsGetResponse reactions = methods.reactionsGet(
+                    com.slack.api.methods.request.reactions.ReactionsGetRequest.builder()
+                            .channel("C1")
+                            .timestamp(root.getTs())
+                            .build());
+            require(reactions.isOk() && reactions.getMessage() != null
+                            && reactions.getMessage().getReactions() != null
+                            && reactions.getMessage().getReactions().size() == 1, "reactions.get failed");
+            PinsAddResponse pin = methods.pinsAdd(
+                    com.slack.api.methods.request.pins.PinsAddRequest.builder()
+                            .channel("C1")
+                            .timestamp(root.getTs())
+                            .build());
+            require(pin.isOk(), "pins.add failed: " + pin.getError());
+            PinsListResponse pins = methods.pinsList(
+                    com.slack.api.methods.request.pins.PinsListRequest.builder().channel("C1").build());
+            require(pins.isOk() && pins.getItems() != null && pins.getItems().size() == 1, "pins.list failed");
+            PinsRemoveResponse pinRemoved = methods.pinsRemove(
+                    com.slack.api.methods.request.pins.PinsRemoveRequest.builder()
+                            .channel("C1")
+                            .timestamp(root.getTs())
+                            .build());
+            require(pinRemoved.isOk(), "pins.remove failed: " + pinRemoved.getError());
+            ReactionsRemoveResponse reactionRemoved = methods.reactionsRemove(
+                    com.slack.api.methods.request.reactions.ReactionsRemoveRequest.builder()
+                            .channel("C1")
+                            .timestamp(root.getTs())
+                            .name("thumbsup")
+                            .build());
+            require(reactionRemoved.isOk(), "reactions.remove failed: " + reactionRemoved.getError());
+
             ConversationsHistoryResponse history = methods.conversationsHistory(
                     com.slack.api.methods.request.conversations.ConversationsHistoryRequest.builder()
                             .channel("C1")
-                            .limit(1)
+                            .limit(10)
                             .build());
             require(history.isOk(), "conversations.history failed: " + history.getError());
-            require(history.getMessages() != null && history.getMessages().size() == 1, "history page mismatch");
+            require(history.getMessages() != null && history.getMessages().size() == 3, "history page mismatch");
 
             UsersListResponse users = methods.usersList(
                     com.slack.api.methods.request.users.UsersListRequest.builder().limit(1).build());

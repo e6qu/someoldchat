@@ -1060,6 +1060,21 @@ func TestJSONDuplicateFieldsAreRejected(t *testing.T) {
 	}
 }
 
+func TestFormDuplicateFieldsAcceptIdenticalValuesAndRejectConflicts(t *testing.T) {
+	identical := httptest.NewRequest(http.MethodPost, "/api/conversations.replies", strings.NewReader("channel=C1&ts=1.000000&ts=1.000000"))
+	identical.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	fields, err := decodeFields(httptest.NewRecorder(), identical)
+	if err != nil || fields["ts"] != "1.000000" {
+		t.Fatalf("identical fields=%v err=%v", fields, err)
+	}
+
+	conflicting := httptest.NewRequest(http.MethodPost, "/api/conversations.replies", strings.NewReader("channel=C1&ts=1.000000&ts=2.000000"))
+	conflicting.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := decodeFields(httptest.NewRecorder(), conflicting); err == nil {
+		t.Fatal("conflicting form fields were accepted")
+	}
+}
+
 func TestUpdateAndDeleteMessage(t *testing.T) {
 	handler := testHandler()
 	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=before"))

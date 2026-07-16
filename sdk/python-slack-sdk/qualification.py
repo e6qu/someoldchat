@@ -40,9 +40,32 @@ profile = client.users_profile_get(user="U1")
 assert profile["ok"] is True
 assert profile["profile"]["display_name"] == "alice"
 
-history = client.conversations_history(channel="C1", limit=1)
+root = client.chat_postMessage(channel="C1", text="thread root")
+assert root["ok"] is True
+reply = client.chat_postMessage(channel="C1", text="thread reply", thread_ts=root["ts"])
+assert reply["ok"] is True
+replies = client.conversations_replies(channel="C1", ts=root["ts"], limit=2)
+assert replies["ok"] is True
+assert len(replies["messages"]) == 2
+
+reaction = client.reactions_add(channel="C1", timestamp=root["ts"], name="thumbsup")
+assert reaction["ok"] is True
+reactions = client.reactions_get(channel="C1", timestamp=root["ts"])
+assert reactions["ok"] is True
+assert len(reactions["message"]["reactions"]) == 1
+pins_added = client.pins_add(channel="C1", timestamp=root["ts"])
+assert pins_added["ok"] is True
+pins = client.pins_list(channel="C1")
+assert pins["ok"] is True
+assert len(pins["items"]) == 1
+pins_removed = client.pins_remove(channel="C1", timestamp=root["ts"])
+assert pins_removed["ok"] is True
+reaction_removed = client.reactions_remove(channel="C1", timestamp=root["ts"], name="thumbsup")
+assert reaction_removed["ok"] is True
+
+history = client.conversations_history(channel="C1", limit=10)
 assert history["ok"] is True
-assert len(history["messages"]) == 1
+assert len(history["messages"]) == 3
 assert history["has_more"] is False
 
 users = client.users_list(limit=1)

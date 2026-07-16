@@ -5058,8 +5058,13 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 		return nil, err
 	}
 	for name, values := range r.Form {
-		if len(values) != 1 {
+		if len(values) == 0 {
 			return nil, errors.New("form fields must occur once")
+		}
+		for _, value := range values[1:] {
+			if value != values[0] {
+				return nil, errors.New("form fields must not contain conflicting values")
+			}
 		}
 		fields[name] = values[0]
 	}
