@@ -26,8 +26,8 @@ type Store struct {
 }
 
 func Open(ctx context.Context, config Config) (*Store, error) {
-	if strings.TrimSpace(config.Directory) == "" || strings.TrimSpace(config.Address) == "" || strings.TrimSpace(config.Database) == "" || len(config.Cluster) != 3 {
-		return nil, errors.New("dqlite requires directory, address, database, and exactly three cluster addresses")
+	if strings.TrimSpace(config.Directory) == "" || strings.TrimSpace(config.Address) == "" || strings.TrimSpace(config.Database) == "" {
+		return nil, errors.New("dqlite requires directory, address, and database; cluster seeds are optional for the bootstrap node")
 	}
 	options := []app.Option{app.WithAddress(config.Address), app.WithVoters(3)}
 	options = append(options, app.WithCluster(append([]string(nil), config.Cluster...)))
