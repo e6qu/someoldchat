@@ -7,7 +7,12 @@ import com.slack.api.methods.response.api.ApiTestResponse;
 import com.slack.api.methods.response.auth.AuthTestResponse;
 import com.slack.api.methods.response.chat.ChatPostMessageResponse;
 import com.slack.api.methods.response.conversations.ConversationsHistoryResponse;
+import com.slack.api.methods.response.conversations.ConversationsInfoResponse;
+import com.slack.api.methods.response.conversations.ConversationsListResponse;
+import com.slack.api.methods.response.conversations.ConversationsMembersResponse;
 import com.slack.api.methods.response.users.UsersListResponse;
+import com.slack.api.methods.response.users.UsersInfoResponse;
+import com.slack.api.methods.response.users.profile.UsersProfileGetResponse;
 
 public final class Qualification {
     private Qualification() {}
@@ -38,6 +43,47 @@ public final class Qualification {
             require(posted.isOk(), "chat.postMessage failed: " + posted.getError());
             require("C1".equals(posted.getChannel()), "chat.postMessage channel mismatch");
             require(posted.getTs() != null && !posted.getTs().isBlank(), "chat.postMessage ts missing");
+
+            com.slack.api.methods.response.chat.ChatUpdateResponse updated = methods.chatUpdate(
+                    com.slack.api.methods.request.chat.ChatUpdateRequest.builder()
+                            .channel("C1")
+                            .ts(posted.getTs())
+                            .text("java qualification updated")
+                            .build());
+            require(updated.isOk(), "chat.update failed: " + updated.getError());
+            com.slack.api.methods.response.chat.ChatDeleteResponse deleted = methods.chatDelete(
+                    com.slack.api.methods.request.chat.ChatDeleteRequest.builder()
+                            .channel("C1")
+                            .ts(posted.getTs())
+                            .build());
+            require(deleted.isOk(), "chat.delete failed: " + deleted.getError());
+
+            ConversationsInfoResponse conversation = methods.conversationsInfo(
+                    com.slack.api.methods.request.conversations.ConversationsInfoRequest.builder()
+                            .channel("C1")
+                            .build());
+            require(conversation.isOk() && conversation.getChannel() != null
+                            && "C1".equals(conversation.getChannel().getId()), "conversations.info failed");
+            ConversationsMembersResponse members = methods.conversationsMembers(
+                    com.slack.api.methods.request.conversations.ConversationsMembersRequest.builder()
+                            .channel("C1")
+                            .limit(1)
+                            .build());
+            require(members.isOk() && members.getMembers() != null && members.getMembers().size() == 1
+                            && "U1".equals(members.getMembers().get(0)), "conversations.members failed");
+            ConversationsListResponse conversations = methods.conversationsList(
+                    com.slack.api.methods.request.conversations.ConversationsListRequest.builder()
+                            .limit(1)
+                            .build());
+            require(conversations.isOk() && conversations.getChannels() != null
+                            && conversations.getChannels().size() == 1, "conversations.list failed");
+            UsersInfoResponse user = methods.usersInfo(
+                    com.slack.api.methods.request.users.UsersInfoRequest.builder().user("U1").build());
+            require(user.isOk() && user.getUser() != null && "U1".equals(user.getUser().getId()), "users.info failed");
+            UsersProfileGetResponse profile = methods.usersProfileGet(
+                    com.slack.api.methods.request.users.profile.UsersProfileGetRequest.builder().user("U1").build());
+            require(profile.isOk() && profile.getProfile() != null
+                            && "alice".equals(profile.getProfile().getDisplayName()), "users.profile.get failed");
 
             ConversationsHistoryResponse history = methods.conversationsHistory(
                     com.slack.api.methods.request.conversations.ConversationsHistoryRequest.builder()

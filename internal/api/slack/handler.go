@@ -170,6 +170,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/dnd.setSnooze", h.dndSetSnooze)
 	mux.HandleFunc("GET /api/dnd.teamInfo", h.dndTeamInfo)
 	mux.HandleFunc("GET /api/users.profile.get", h.getUserProfile)
+	mux.HandleFunc("POST /api/users.profile.get", h.getUserProfile)
 	mux.HandleFunc("GET /api/users.list", h.usersList)
 	mux.HandleFunc("POST /api/users.list", h.usersList)
 	mux.HandleFunc("POST /api/users.profile.set", h.setUserProfile)

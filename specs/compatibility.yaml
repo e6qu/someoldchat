@@ -32,31 +32,31 @@ sources:
 
 operations:
   - method: api.test
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: auth.revoke
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: auth.test
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: chat.postMessage
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: chat.meMessage
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: chat.update
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: chat.delete
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: chat.getPermalink
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.history
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.replies
     status: schema-compatible
@@ -86,19 +86,19 @@ operations:
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: users.info
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.info
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.list
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: users.conversations
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.members
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: team.info
     status: schema-compatible
@@ -167,7 +167,7 @@ operations:
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: users.list
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: users.lookupByEmail
     status: schema-compatible
@@ -179,7 +179,7 @@ operations:
     status: schema-compatible
     provenance: slack-api-specs-openapi
   - method: users.profile.get
-    status: schema-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
   - method: users.profile.set
     status: schema-compatible
