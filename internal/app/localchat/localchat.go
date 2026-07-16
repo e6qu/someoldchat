@@ -96,8 +96,8 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	if config.Backend == BackendSQLite && (config.DSN == "" || config.DqliteDirectory != "" || config.DqliteAddress != "" || len(config.DqliteCluster) != 0 || config.DqliteDatabase != "") {
 		return Runtime{}, errors.New("SQLite storage requires only a DSN")
 	}
-	if config.Backend == BackendDqlite && (config.DSN != "" || config.DqliteDirectory == "" || config.DqliteAddress == "" || config.DqliteDatabase == "" || len(config.DqliteCluster) != 3) {
-		return Runtime{}, errors.New("dqlite storage requires directory, address, database, and exactly three cluster addresses")
+	if config.Backend == BackendDqlite && (config.DSN != "" || config.DqliteDirectory == "" || config.DqliteAddress == "" || config.DqliteDatabase == "") {
+		return Runtime{}, errors.New("dqlite storage requires directory, address, and database; cluster seeds are optional for the bootstrap node")
 	}
 	var chatStore store.Store
 	var closer io.Closer
