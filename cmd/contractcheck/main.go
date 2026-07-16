@@ -5,11 +5,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -24,10 +26,20 @@ type source struct {
 }
 
 type compatibilityLedger struct {
-	Operations []struct {
-		Method string `yaml:"method"`
-		Status string `yaml:"status"`
-	} `yaml:"operations"`
+	Operations []operation `yaml:"operations"`
+}
+
+type operation struct {
+	Method string `yaml:"method"`
+	Status string `yaml:"status"`
+}
+
+var statusRank = map[string]int{
+	"unimplemented":          0,
+	"schema-compatible":      1,
+	"sdk-compatible":         2,
+	"behavior-compatible":    3,
+	"verified-against-slack": 4,
 }
 
 var sources = []source{
@@ -37,10 +49,30 @@ var sources = []source{
 }
 
 func main() {
-	if err := verify(); err != nil {
-		fmt.Fprintln(os.Stderr, "contractcheck:", err)
-		os.Exit(1)
+	ratchetBase := flag.String("ratchet-base", "", "git ref whose compatibility ledger must not regress")
+	report := flag.Bool("report", false, "print compatibility progress")
+	flag.Parse()
+	if flag.NArg() != 0 {
+		fail(errors.New("contractcheck does not accept positional arguments"))
 	}
+	if err := verify(); err != nil {
+		fail(err)
+	}
+	if *ratchetBase != "" {
+		if err := ratchet(*ratchetBase); err != nil {
+			fail(err)
+		}
+	}
+	if *report {
+		if err := printReport(); err != nil {
+			fail(err)
+		}
+	}
+}
+
+func fail(err error) {
+	fmt.Fprintln(os.Stderr, "contractcheck:", err)
+	os.Exit(1)
 }
 
 func verify() error {
@@ -76,8 +108,8 @@ func verify() error {
 	if openapi.Swagger != "2.0" {
 		return fmt.Errorf("OpenAPI version = %q", openapi.Swagger)
 	}
-	var compatibility compatibilityLedger
-	if err := yaml.Unmarshal(ledger, &compatibility); err != nil {
+	compatibility, err := decodeLedger(ledger)
+	if err != nil {
 		return fmt.Errorf("decode compatibility ledger: %w", err)
 	}
 	seenMethods := make(map[string]struct{}, len(compatibility.Operations))
@@ -114,6 +146,73 @@ func verify() error {
 	}
 	if err := verifyHandlerRegistrations(implementedMethods, seenMethods); err != nil {
 		return err
+	}
+	return nil
+}
+
+func decodeLedger(body []byte) (compatibilityLedger, error) {
+	var ledger compatibilityLedger
+	if err := yaml.Unmarshal(body, &ledger); err != nil {
+		return compatibilityLedger{}, err
+	}
+	return ledger, nil
+}
+
+func ratchet(baseRef string) error {
+	command := exec.Command("git", "show", baseRef+":specs/compatibility.yaml")
+	body, err := command.Output()
+	if err != nil {
+		return fmt.Errorf("read compatibility ledger from %q: %w", baseRef, err)
+	}
+	baseline, err := decodeLedger(body)
+	if err != nil {
+		return fmt.Errorf("decode compatibility ledger from %q: %w", baseRef, err)
+	}
+	currentBody, err := os.ReadFile("specs/compatibility.yaml")
+	if err != nil {
+		return err
+	}
+	current, err := decodeLedger(currentBody)
+	if err != nil {
+		return fmt.Errorf("decode current compatibility ledger: %w", err)
+	}
+	if len(current.Operations) < len(baseline.Operations) {
+		return fmt.Errorf("compatibility ledger operation count regressed: got %d, want at least %d", len(current.Operations), len(baseline.Operations))
+	}
+	currentByMethod := make(map[string]operation, len(current.Operations))
+	for _, item := range current.Operations {
+		currentByMethod[item.Method] = item
+	}
+	for _, previous := range baseline.Operations {
+		currentItem, ok := currentByMethod[previous.Method]
+		if !ok {
+			return fmt.Errorf("compatibility ledger operation %q was removed", previous.Method)
+		}
+		if statusRank[currentItem.Status] < statusRank[previous.Status] {
+			return fmt.Errorf("compatibility ledger operation %q regressed from %q to %q", previous.Method, previous.Status, currentItem.Status)
+		}
+	}
+	return nil
+}
+
+func printReport() error {
+	body, err := os.ReadFile("specs/compatibility.yaml")
+	if err != nil {
+		return err
+	}
+	ledger, err := decodeLedger(body)
+	if err != nil {
+		return fmt.Errorf("decode compatibility ledger: %w", err)
+	}
+	counts := make(map[string]int, len(statusRank))
+	for _, item := range ledger.Operations {
+		counts[item.Status]++
+	}
+	total := len(ledger.Operations)
+	implemented := total - counts["unimplemented"]
+	fmt.Printf("operations=%d implemented=%d/%d verified-against-slack=%d/%d\n", total, implemented, total, counts["verified-against-slack"], total)
+	for _, status := range []string{"unimplemented", "schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
+		fmt.Printf("%s=%d\n", status, counts[status])
 	}
 	return nil
 }
