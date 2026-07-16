@@ -1836,7 +1836,7 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				return domain.ConversationPage{}, err
 			}
 			for _, message := range s.messages[conversation.ID] {
-				if !message.Deleted && message.CreatedAt.After(lastRead) {
+				if !message.Deleted && domain.NewMessageTimestamp(message.CreatedAt) > domain.NewMessageTimestamp(lastRead) {
 					conversation.UnreadCount++
 				}
 			}
@@ -1962,7 +1962,7 @@ func (s *Store) GetMessageByCreatedAt(_ context.Context, conversation domain.Con
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, message := range s.messages[conversation] {
-		if message.CreatedAt.Equal(createdAt) {
+		if domain.NewMessageTimestamp(message.CreatedAt) == domain.NewMessageTimestamp(createdAt) {
 			return message, nil
 		}
 	}
