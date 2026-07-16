@@ -34,6 +34,8 @@ type sdk struct {
 	Note      string `yaml:"note"`
 }
 
+var validSuiteStatuses = map[string]struct{}{"pending": {}, "passed": {}}
+
 func main() {
 	requireQualified := flag.Bool("require-qualified", false, "require immutable artifacts and passing SDK suites")
 	flag.Parse()
@@ -56,6 +58,9 @@ func main() {
 		if item.ID == "" || item.Package == "" || item.Release == "" || item.Revision == "" || item.SHA256 == "" || item.Suite == "" {
 			fail(fmt.Errorf("SDK %q is incomplete", item.ID))
 		}
+		if _, ok := validSuiteStatuses[item.Suite]; !ok {
+			fail(fmt.Errorf("SDK %q has invalid suite status %q", item.ID, item.Suite))
+		}
 		if item.Suite == "passed" && item.SuitePath == "" {
 			fail(fmt.Errorf("SDK %q reports a passed suite without suite_path", item.ID))
 		}
@@ -70,6 +75,9 @@ func main() {
 	for _, item := range value.Bolt {
 		if item.ID == "" || item.Package == "" || item.Release == "" || item.Suite == "" {
 			fail(fmt.Errorf("Bolt SDK %q is incomplete", item.ID))
+		}
+		if _, ok := validSuiteStatuses[item.Suite]; !ok {
+			fail(fmt.Errorf("Bolt SDK %q has invalid suite status %q", item.ID, item.Suite))
 		}
 		if item.Suite == "passed" && (item.Revision == "" || item.Artifact == "" || item.SHA256 == "" || item.SuitePath == "") {
 			fail(fmt.Errorf("Bolt SDK %q reports a passed suite without immutable qualification fields", item.ID))

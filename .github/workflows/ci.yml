@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
@@ -34,6 +36,14 @@ jobs:
 
       - name: Check contracts and SDK inventory
         run: make contract-check sdk-inventory-check
+
+      - name: Ratchet compatibility ledger
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+        run: make contract-ratchet BASE_REF="$BASE_REF"
+
+      - name: Report compatibility progress
+        run: make compatibility-report
 
       - name: Run tests
         run: make test
@@ -65,6 +75,39 @@ jobs:
 
       - name: Validate Terraform
         run: terraform validate
+
+  sdk:
+    name: Official SDK qualification
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Set up Java
+        uses: actions/setup-java@0f481fcb613427c0f801b606911222b5b6f3083a # v5.5.0
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - name: Run official SDK qualification
+        run: make sdk-qualification
 
   dqlite:
     name: dqlite qualification

@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-dqlite proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-dqlite sdk-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -59,8 +59,18 @@ fmt-check:
 contract-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck
 
+compatibility-report:
+	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -report
+
+contract-ratchet:
+	test -n "$(BASE_REF)"
+	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -ratchet-base "$(BASE_REF)"
+
 sdk-inventory-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/sdkcheck
+
+sdk-qualification:
+	./sdk/qualify.sh
 
 check: fmt-check contract-check sdk-inventory-check proto-lint generated-check test
 

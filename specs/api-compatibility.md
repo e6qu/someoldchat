@@ -16,6 +16,30 @@ The repository MUST pin and retain exact revisions of:
 - official Slack Node, Python, Java, and Deno SDK releases; and
 - applicable official Bolt JavaScript, Python, and Java releases.
 
+## Implementation tracking and ratchet
+
+[`compatibility.yaml`](compatibility.yaml) contains one entry for every Web API
+operation in the pinned OpenAPI document. Its status is an ordered record of
+evidence:
+
+1. `unimplemented`: no compatible handler exists;
+2. `schema-compatible`: the request and response shape has a registered local
+   handler;
+3. `sdk-compatible`: the applicable pinned official SDK suites pass;
+4. `behavior-compatible`: local behavior matches the selected contract tests;
+5. `verified-against-slack`: controlled comparison with Slack has passed.
+
+The repository must not remove an operation or lower its status. Pull-request
+CI runs `make contract-ratchet` against the pull request base branch and fails
+if either change occurs. New operations may enter the ledger at
+`unimplemented`, which makes unfinished work visible without weakening the
+existing claim.
+
+Run `make compatibility-report` to print the current operation count and the
+number implemented at each evidence level. The implementation target is
+`verified-against-slack` for every operation; the report does not treat a
+schema-compatible handler as behavior verification.
+
 Community SDKs, including Go SDKs, MAY be test targets but MUST NOT override an
 official source merely because their behavior differs.
 
