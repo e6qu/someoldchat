@@ -53,9 +53,11 @@ uploads are streamed through the module boundary in bounded chunks; metadata
 is committed only after the blob is durably published.
 
 Blob storage is an explicit capability. A configured absolute directory selects
-the filesystem store; no directory selects the typed `blob.Disabled` store,
+the filesystem store; a configured Amazon Simple Storage Service bucket selects
+the provider store; no storage configuration selects the typed `blob.Disabled` store,
 whose operations fail with an explicit unavailable error. The disabled store is
-not an empty-store fallback, and production composition does not use a nil blob
+not an empty-store fallback, and filesystem and Amazon Simple Storage Service
+configuration cannot be selected together. Production composition does not use a nil blob
 store. Directly constructed test services still reject a nil capability at the
 boundary so an invalid composition cannot panic or silently skip file behavior.
 
@@ -194,7 +196,7 @@ internal/
 proto/            gRPC service schemas
 specs/            project requirements and pinned contract sources
 deploy/           provider-specific infrastructure modules
-sdk/              SDK qualification programs
+tests/            application and official SDK qualification tests
 docs/             architecture, operations, and deployment guidance
 ```
 

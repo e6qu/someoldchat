@@ -142,6 +142,7 @@ type Store interface {
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
 	CreateScheduledMessage(context.Context, domain.ScheduledMessage, events.Event) error
 	ListScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
+	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
 	ClaimScheduledMessages(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]domain.ScheduledMessage, error)
 	RenewScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Duration) error

@@ -23,6 +23,8 @@ import (
 func main() {
 	listen := flag.String("listen", "", "gRPC listen address (required)")
 	backend := flag.String("store", "", "storage backend: memory, sqlite, or dqlite (required)")
+	blobS3Bucket := flag.String("blob-s3-bucket", "", "Amazon Simple Storage Service bucket for file storage")
+	blobS3Prefix := flag.String("blob-s3-prefix", "", "Amazon Simple Storage Service key prefix for file storage")
 	dsn := flag.String("db", "", "SQLite DSN; required for local sqlite storage")
 	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory; required for local dqlite storage")
 	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
@@ -61,7 +63,7 @@ func main() {
 		logger.Error("parse dqlite cluster", "error", err)
 		os.Exit(2)
 	}
-	runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobMaxBytes: *blobMaxBytes})
+	runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes})
 	if err != nil {
 		logger.Error("open local chat", "error", err)
 		os.Exit(1)

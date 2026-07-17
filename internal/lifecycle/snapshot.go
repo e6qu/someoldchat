@@ -1,6 +1,8 @@
 package lifecycle
 
 import (
+	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/hmac"
@@ -16,12 +18,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/sameoldchat/sameoldchat/internal/blob"
 )
 
 type Manifest struct {
 	FormatVersion      int    `json:"format_version"`
 	ManifestVersion    int    `json:"manifest_version"`
 	Generation         uint64 `json:"generation"`
+	PreviousGeneration uint64 `json:"previous_generation"`
 	Backend            string `json:"backend"`
 	SchemaVersion      int    `json:"schema_version"`
 	ApplicationVersion string `json:"application_version"`
@@ -40,6 +45,7 @@ type Manifest struct {
 
 type SnapshotManager struct {
 	Root          string
+	ObjectStore   blob.ListStore
 	EncryptionKey []byte
 	SigningKey    []byte
 	KeyID         string
@@ -59,6 +65,19 @@ func NewSnapshotManager(root string, encryptionKey, signingKey []byte, keyID str
 	return SnapshotManager{Root: root, EncryptionKey: append([]byte(nil), encryptionKey...), SigningKey: append([]byte(nil), signingKey...), KeyID: keyID, MaxBytes: maxBytes}, nil
 }
 
+func NewObjectSnapshotManager(store blob.ListStore, encryptionKey, signingKey []byte, keyID string, maxBytes int64) (SnapshotManager, error) {
+	if store == nil {
+		return SnapshotManager{}, errors.New("object snapshot manager requires an object store")
+	}
+	if len(encryptionKey) != 32 || len(signingKey) < 32 {
+		return SnapshotManager{}, errors.New("snapshot keys are too short")
+	}
+	if strings.TrimSpace(keyID) == "" || maxBytes <= 0 {
+		return SnapshotManager{}, errors.New("snapshot key ID and positive size limit are required")
+	}
+	return SnapshotManager{ObjectStore: store, EncryptionKey: append([]byte(nil), encryptionKey...), SigningKey: append([]byte(nil), signingKey...), KeyID: keyID, MaxBytes: maxBytes}, nil
+}
+
 func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest, error) {
 	if metadata.Generation == 0 || metadata.Backend == "" || metadata.SchemaVersion < 1 {
 		return Manifest{}, errors.New("snapshot metadata is incomplete")
@@ -66,23 +85,34 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 	if err := m.ensureMonotonicGeneration(metadata.Generation); err != nil {
 		return Manifest{}, err
 	}
+	previous, previousErr := m.Current(metadata.Generation)
+	if previousErr == nil {
+		metadata.PreviousGeneration = previous.Generation
+	} else if !errors.Is(previousErr, os.ErrNotExist) && !errors.Is(previousErr, blob.ErrNotFound) {
+		return Manifest{}, fmt.Errorf("read previous verified snapshot: %w", previousErr)
+	}
 	source, err := os.Open(sourcePath)
 	if err != nil {
 		return Manifest{}, err
 	}
 	defer source.Close()
-	if err := os.MkdirAll(filepath.Join(m.Root, "artifacts"), 0o700); err != nil {
-		return Manifest{}, err
-	}
-	if err := os.MkdirAll(filepath.Join(m.Root, "manifests"), 0o700); err != nil {
-		return Manifest{}, err
-	}
 	artifactName := fmt.Sprintf("artifacts/%020d.bin", metadata.Generation)
-	artifactPath, err := safePath(m.Root, artifactName)
-	if err != nil {
-		return Manifest{}, err
+	temporaryDirectory := os.TempDir()
+	artifactPath := ""
+	if m.ObjectStore == nil {
+		if err := os.MkdirAll(filepath.Join(m.Root, "artifacts"), 0o700); err != nil {
+			return Manifest{}, err
+		}
+		if err := os.MkdirAll(filepath.Join(m.Root, "manifests"), 0o700); err != nil {
+			return Manifest{}, err
+		}
+		artifactPath, err = safePath(m.Root, artifactName)
+		if err != nil {
+			return Manifest{}, err
+		}
+		temporaryDirectory = filepath.Dir(artifactPath)
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(artifactPath), ".snapshot-*")
+	temporary, err := os.CreateTemp(temporaryDirectory, ".snapshot-*")
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -145,8 +175,23 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 	if err := temporary.Close(); err != nil {
 		return Manifest{}, err
 	}
-	if err := os.Rename(temporaryPath, artifactPath); err != nil {
-		return Manifest{}, err
+	if m.ObjectStore == nil {
+		if err := os.Rename(temporaryPath, artifactPath); err != nil {
+			return Manifest{}, err
+		}
+	} else {
+		upload, err := os.Open(temporaryPath)
+		if err != nil {
+			return Manifest{}, err
+		}
+		defer upload.Close()
+		info, err := upload.Stat()
+		if err != nil {
+			return Manifest{}, err
+		}
+		if _, err := m.ObjectStore.Put(context.Background(), artifactName, info.Size(), upload); err != nil {
+			return Manifest{}, err
+		}
 	}
 	metadata.FormatVersion, metadata.ManifestVersion = 1, 1
 	metadata.Artifact = artifactName
@@ -168,6 +213,26 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 }
 
 func (m SnapshotManager) ensureMonotonicGeneration(next uint64) error {
+	if m.ObjectStore != nil {
+		body, err := m.readObject("current.json")
+		if errors.Is(err, blob.ErrNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read current snapshot manifest: %w", err)
+		}
+		var current Manifest
+		if err := json.Unmarshal(body, &current); err != nil {
+			return fmt.Errorf("decode current snapshot manifest: %w", err)
+		}
+		if err := m.verifyManifest(current); err != nil {
+			return fmt.Errorf("verify current snapshot manifest: %w", err)
+		}
+		if current.Generation >= next {
+			return fmt.Errorf("snapshot generation %d is not newer than current generation %d", next, current.Generation)
+		}
+		return nil
+	}
 	path, err := safePath(m.Root, "current.json")
 	if err != nil {
 		return err
@@ -192,15 +257,30 @@ func (m SnapshotManager) ensureMonotonicGeneration(next uint64) error {
 	return nil
 }
 
+func (m SnapshotManager) readObject(key string) ([]byte, error) {
+	object, reader, err := m.ObjectStore.Open(context.Background(), key)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	if object.Size > m.MaxBytes+aes.BlockSize+sha256.Size {
+		return nil, errors.New("stored snapshot object exceeds the configured size limit")
+	}
+	body, err := io.ReadAll(io.LimitReader(reader, object.Size+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) != object.Size {
+		return nil, errors.New("stored object length does not match provider metadata")
+	}
+	return body, nil
+}
+
 func (m SnapshotManager) Restore(manifest Manifest, outputPath string) error {
 	if err := m.verifyManifest(manifest); err != nil {
 		return err
 	}
-	artifactPath, err := safePath(m.Root, manifest.Artifact)
-	if err != nil {
-		return err
-	}
-	input, err := os.Open(artifactPath)
+	input, err := m.openArtifact(manifest.Artifact)
 	if err != nil {
 		return err
 	}
@@ -260,7 +340,36 @@ func (m SnapshotManager) Restore(manifest Manifest, outputPath string) error {
 	return os.Rename(temporaryPath, outputPath)
 }
 
+func (m SnapshotManager) openArtifact(artifact string) (io.ReadCloser, error) {
+	if m.ObjectStore != nil {
+		_, reader, err := m.ObjectStore.Open(context.Background(), artifact)
+		return reader, err
+	}
+	path, err := safePath(m.Root, artifact)
+	if err != nil {
+		return nil, err
+	}
+	return os.Open(path)
+}
+
 func (m SnapshotManager) Current(generation uint64) (Manifest, error) {
+	if m.ObjectStore != nil {
+		body, err := m.readObject("current.json")
+		if err != nil {
+			return Manifest{}, err
+		}
+		var manifest Manifest
+		if err := json.Unmarshal(body, &manifest); err != nil {
+			return Manifest{}, err
+		}
+		if manifest.Generation == 0 || manifest.Generation > generation {
+			return Manifest{}, errors.New("snapshot generation is newer than the recovery fence")
+		}
+		if err := m.verifyManifest(manifest); err != nil {
+			return Manifest{}, err
+		}
+		return manifest, nil
+	}
 	path, err := safePath(m.Root, "current.json")
 	if err != nil {
 		return Manifest{}, err
@@ -283,6 +392,33 @@ func (m SnapshotManager) Current(generation uint64) (Manifest, error) {
 }
 
 func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
+	if m.ObjectStore != nil {
+		objects, err := m.ObjectStore.List(context.Background(), "manifests/")
+		if err != nil {
+			return Manifest{}, err
+		}
+		var newest Manifest
+		for _, object := range objects {
+			if !strings.HasSuffix(object.Key, ".json") {
+				continue
+			}
+			body, err := m.readObject(object.Key)
+			if err != nil {
+				continue
+			}
+			var manifest Manifest
+			if json.Unmarshal(body, &manifest) != nil || manifest.Generation == 0 || manifest.Generation > maxGeneration || manifest.Generation <= newest.Generation {
+				continue
+			}
+			if err := m.verifyManifest(manifest); err == nil {
+				newest = manifest
+			}
+		}
+		if newest.Generation > 0 {
+			return newest, nil
+		}
+		return Manifest{}, errors.New("no verified snapshot is available at or before recovery generation")
+	}
 	manifestDirectory, err := safePath(m.Root, "manifests")
 	if err != nil {
 		return Manifest{}, err
@@ -342,6 +478,21 @@ func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
 }
 
 func (m SnapshotManager) verifyManifest(manifest Manifest) error {
+	if manifest.FormatVersion != 1 || manifest.ManifestVersion != 1 || manifest.Generation == 0 || manifest.Backend == "" || manifest.SchemaVersion < 1 {
+		return errors.New("snapshot manifest format or metadata is invalid")
+	}
+	if manifest.PlaintextBytes < 0 || manifest.CiphertextBytes != manifest.PlaintextBytes || len(manifest.PlaintextSHA256) != sha256.Size*2 || len(manifest.CiphertextSHA256) != sha256.Size*2 {
+		return errors.New("snapshot manifest size or digest metadata is invalid")
+	}
+	if _, err := hex.DecodeString(manifest.PlaintextSHA256); err != nil {
+		return errors.New("snapshot manifest plaintext digest is invalid")
+	}
+	if _, err := hex.DecodeString(manifest.CiphertextSHA256); err != nil {
+		return errors.New("snapshot manifest ciphertext digest is invalid")
+	}
+	if strings.TrimSpace(manifest.CreatedAt) == "" || strings.TrimSpace(manifest.VerifiedAt) == "" || strings.TrimSpace(manifest.Artifact) == "" {
+		return errors.New("snapshot manifest provenance is incomplete")
+	}
 	if manifest.KeyID != m.KeyID || manifest.Signature == "" {
 		return errors.New("snapshot manifest authentication failed")
 	}
@@ -352,20 +503,34 @@ func (m SnapshotManager) verifyManifest(manifest Manifest) error {
 }
 
 func (m SnapshotManager) verifyArtifact(manifest Manifest) error {
-	path, err := safePath(m.Root, manifest.Artifact)
-	if err != nil {
-		return err
-	}
-	input, err := os.Open(path)
+	input, err := m.openArtifact(manifest.Artifact)
 	if err != nil {
 		return err
 	}
 	defer input.Close()
-	stat, err := input.Stat()
-	if err != nil {
-		return err
+	objectSize := int64(-1)
+	if m.ObjectStore != nil {
+		object, sizeReader, err := m.ObjectStore.Open(context.Background(), manifest.Artifact)
+		if err != nil {
+			return err
+		}
+		closeErr := sizeReader.Close()
+		if closeErr != nil {
+			return closeErr
+		}
+		objectSize = object.Size
+	} else {
+		statInput, ok := input.(interface{ Stat() (os.FileInfo, error) })
+		if !ok {
+			return errors.New("filesystem snapshot artifact does not expose file metadata")
+		}
+		stat, err := statInput.Stat()
+		if err != nil {
+			return err
+		}
+		objectSize = stat.Size()
 	}
-	if stat.Size() != manifest.CiphertextBytes+aes.BlockSize+sha256.Size {
+	if objectSize != manifest.CiphertextBytes+aes.BlockSize+sha256.Size {
 		return errors.New("snapshot artifact size mismatch")
 	}
 	var nonce [aes.BlockSize]byte
@@ -399,11 +564,19 @@ func (m SnapshotManager) verifyArtifact(manifest Manifest) error {
 }
 
 func (m SnapshotManager) publishManifest(manifest Manifest) error {
-	path, err := safePath(m.Root, fmt.Sprintf("manifests/%020d.json", manifest.Generation))
+	body, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
 		return err
 	}
-	body, err := json.MarshalIndent(manifest, "", "  ")
+	if m.ObjectStore != nil {
+		manifestKey := fmt.Sprintf("manifests/%020d.json", manifest.Generation)
+		if _, err := m.ObjectStore.Put(context.Background(), manifestKey, int64(len(body)), bytes.NewReader(body)); err != nil {
+			return err
+		}
+		_, err := m.ObjectStore.Put(context.Background(), "current.json", int64(len(body)), bytes.NewReader(body))
+		return err
+	}
+	path, err := safePath(m.Root, fmt.Sprintf("manifests/%020d.json", manifest.Generation))
 	if err != nil {
 		return err
 	}

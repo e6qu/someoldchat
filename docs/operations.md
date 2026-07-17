@@ -36,10 +36,10 @@ next scheduled deadline. The controller:
 2. Drains in-flight commands and required outbox work.
 3. Records the next scheduled wake deadline outside the database.
 4. Stops general workers and leaves only the lifecycle path active.
-5. Creates a consistent snapshot using the selected backend provider.
-6. Encrypts, uploads, re-downloads or independently reads, and verifies it.
-7. Atomically publishes a signed manifest while retaining older generations.
-8. Stops the database and remaining application processes.
+5. Stops the database and remaining application processes.
+6. Creates a consistent snapshot using the selected backend provider.
+7. Encrypts, uploads, re-downloads or independently reads, and verifies it.
+8. Atomically publishes a signed manifest while retaining older generations.
 9. Optionally releases active database volumes after snapshot publication.
 10. Marks the stack `HIBERNATED`.
 
@@ -61,11 +61,13 @@ operator recovery.
 The activator deduplicates concurrent wake requests using one lifecycle
 generation. It then:
 
-1. Moves to `WAKING` and starts the persistence resources.
-2. Fetches and verifies the authoritatively published current snapshot manifest
-   and object; incompatibility fails the wake attempt.
-3. Restores SQLite or bootstraps the dqlite cluster from the restored database
-   according to the tested backend procedure.
+1. Moves to `WAKING` and fetches the authoritatively published current snapshot
+   manifest.
+2. Verifies the snapshot manifest and restores the selected snapshot format
+   before starting persistence. SQLite restores one database file; dqlite
+   restores its stopped state directory according to Canonical's documented
+   filesystem procedure.
+3. Starts the persistence resources.
 4. Runs integrity checks.
 5. Runs a fenced migration job if the binary requires a newer schema.
 6. Starts workers and web/API replicas.
@@ -152,6 +154,12 @@ Record metrics and structured events for:
 - migration version;
 - dependency policy report age; and
 - Slack compatibility suite status.
+
+The standalone activator publishes bounded Prometheus-compatible aggregates at
+`GET /metrics`. The endpoint contains lifecycle state and generation, wake and
+snapshot durations, snapshot sizes, restore failures, and buffered or rejected
+request counts and bytes. It does not expose request identifiers, tenant data,
+credentials, or snapshot locations.
 
 Outbox replicas run `sameoldchat-worker` with distinct owner IDs and the same
 authoritative backend. Blob cleanup replicas run `sameoldchat-blobgc` with

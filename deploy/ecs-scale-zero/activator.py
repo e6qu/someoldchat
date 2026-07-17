@@ -19,6 +19,7 @@ class ActivationError(RuntimeError):
 
 CLUSTER = os.environ["CLUSTER"]
 TASK_DEFINITION = os.environ["TASK_DEFINITION"]
+TASK_FAMILY = TASK_DEFINITION.rsplit("/", 1)[-1].split(":", 1)[0]
 SUBNETS = os.environ["SUBNETS"].split(",")
 SECURITY_GROUPS = os.environ["SECURITY_GROUPS"].split(",")
 PORT = int(os.environ["PORT"])
@@ -26,14 +27,19 @@ REPLICAS = int(os.environ["REPLICAS"])
 STARTUP_TIMEOUT = int(os.environ["STARTUP_TIMEOUT"])
 REQUEST_TIMEOUT = int(os.environ["REQUEST_TIMEOUT"])
 STATE = dynamodb.Table(os.environ["STATE_TABLE"])
+STATE_CLIENT = dynamodb.meta.client
+SCALE_DOWN_LOCK = "scale-down"
 
 
-def response(status, body):
-    return {"statusCode": status, "headers": {"content-type": "text/plain; charset=utf-8"}, "body": body, "isBase64Encoded": False}
+def response(status, body, retry_after=None):
+    headers = {"content-type": "text/plain; charset=utf-8"}
+    if retry_after is not None:
+        headers["retry-after"] = str(retry_after)
+    return {"statusCode": status, "headers": headers, "body": body, "isBase64Encoded": False}
 
 
 def running_tasks():
-    pages = ecs.get_paginator("list_tasks").paginate(cluster=CLUSTER, desiredStatus="RUNNING", family=TASK_DEFINITION.split(":")[-2])
+    pages = ecs.get_paginator("list_tasks").paginate(cluster=CLUSTER, desiredStatus="RUNNING", family=TASK_FAMILY)
     arns = [arn for page in pages for arn in page.get("taskArns", [])]
     if not arns:
         return []
@@ -102,7 +108,26 @@ def start_tasks():
 
 def lease(name):
     try:
-        STATE.put_item(Item={"id": name, "expires": int(time.time()) + REQUEST_TIMEOUT + 60}, ConditionExpression="attribute_not_exists(id)")
+        now = int(time.time())
+        STATE_CLIENT.transact_write_items(
+            TransactItems=[
+                {
+                    "ConditionCheck": {
+                        "TableName": STATE.table_name,
+                        "Key": {"id": {"S": SCALE_DOWN_LOCK}},
+                        "ConditionExpression": "attribute_not_exists(id) OR expires < :now",
+                        "ExpressionAttributeValues": {":now": {"N": str(now)}},
+                    }
+                },
+                {
+                    "Put": {
+                        "TableName": STATE.table_name,
+                        "Item": {"id": {"S": name}, "expires": {"N": str(now + REQUEST_TIMEOUT + 60)}},
+                        "ConditionExpression": "attribute_not_exists(id)",
+                    }
+                },
+            ]
+        )
     except ClientError as error:
         raise ActivationError("unable to acquire activator lease") from error
 
@@ -112,14 +137,34 @@ def release(name):
 
 
 def stop_if_idle():
-    leases = STATE.scan(ConsistentRead=True, FilterExpression="begins_with(id, :prefix) AND expires > :now", ExpressionAttributeValues={":prefix": "lease:", ":now": int(time.time())}).get("Items", [])
-    if leases:
-        return
-    tasks = running_tasks()
-    if tasks:
-        ecs.stop_task(cluster=CLUSTER, task=tasks[0]["taskArn"], reason="scale-to-zero request complete")
-        for task in tasks[1:]:
+    now = int(time.time())
+    lock_owner = "scale-down:" + str(uuid.uuid4())
+    try:
+        STATE.put_item(
+            Item={"id": SCALE_DOWN_LOCK, "owner": lock_owner, "expires": now + REQUEST_TIMEOUT + 60},
+            ConditionExpression="attribute_not_exists(id) OR expires < :now",
+            ExpressionAttributeValues={":now": now},
+        )
+    except ClientError as error:
+        if error.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return
+        raise ActivationError("unable to acquire scale-down lock") from error
+    try:
+        leases = []
+        scan = {"ConsistentRead": True, "FilterExpression": "begins_with(id, :prefix) AND expires > :now", "ExpressionAttributeValues": {":prefix": "lease:", ":now": int(time.time())}}
+        while True:
+            page = STATE.scan(**scan)
+            leases.extend(page.get("Items", []))
+            last_key = page.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan["ExclusiveStartKey"] = last_key
+        if leases:
+            return
+        for task in running_tasks():
             ecs.stop_task(cluster=CLUSTER, task=task["taskArn"], reason="scale-to-zero request complete")
+    finally:
+        STATE.delete_item(Key={"id": SCALE_DOWN_LOCK}, ConditionExpression="owner = :owner", ExpressionAttributeValues={":owner": lock_owner})
 
 
 def handler(event, _context):
@@ -142,7 +187,7 @@ def handler(event, _context):
             else:
                 tasks = ready_tasks(min(request_deadline, time.time() + STARTUP_TIMEOUT), wait_for_tasks=True)
         if not tasks:
-            return response(504, "application did not become ready\n")
+            return response(503, "application did not become ready\n", retry_after=1)
         request_id = event.get("requestContext", {}).get("requestId", str(uuid.uuid4()))
         index = int(hashlib.sha256(request_id.encode()).hexdigest(), 16) % len(tasks)
         _, ip = tasks[index]
@@ -157,14 +202,14 @@ def handler(event, _context):
             body = body.encode()
         remaining = request_deadline - time.time()
         if remaining <= 1:
-            return response(504, "application startup consumed the request deadline\n")
+            return response(503, "application startup consumed the request deadline\n", retry_after=1)
         result = http.request(event.get("requestContext", {}).get("http", {}).get("method", "GET"), target, body=body, headers=headers, timeout=urllib3.Timeout(connect=min(2.0, remaining), read=remaining), retries=False, preload_content=True)
         response_body = base64.b64encode(result.data).decode()
         response_headers = {k: v for k, v in dict(result.headers).items() if k.lower() not in {"connection", "content-length", "transfer-encoding"}}
         return {"statusCode": result.status, "headers": response_headers, "body": response_body, "isBase64Encoded": True}
     except (ActivationError, ClientError, urllib3.exceptions.HTTPError, ValueError) as error:
         print(json.dumps({"error": str(error)}))
-        return response(503, "activator could not serve the request\n")
+        return response(503, "activator could not serve the request\n", retry_after=1)
     finally:
         release(lease_id)
         stop_if_idle()

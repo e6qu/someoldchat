@@ -180,8 +180,11 @@ func validate(value manifest) error {
 			if !ok || replicas < 1 {
 				return fmt.Errorf("target %q process %q must have a positive replica count", item.Name, process)
 			}
-			if item.Storage == "memory" && replicas > 1 {
-				return fmt.Errorf("target %q cannot use memory storage with multiple replicas", item.Name)
+			if len(names) > 0 && (item.Storage == "memory" || item.Storage == "sqlite") && replicas > 1 {
+				return fmt.Errorf("target %q process %q cannot use %s storage with multiple module owners", item.Name, process, item.Storage)
+			}
+			if item.Storage == "dqlite" && len(names) > 0 && replicas < 3 {
+				return fmt.Errorf("target %q process %q owns dqlite modules and requires at least three replicas", item.Name, process)
 			}
 			for _, name := range names {
 				if !known[name] {

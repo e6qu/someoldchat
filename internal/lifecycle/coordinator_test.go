@@ -3,8 +3,15 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+
+	"github.com/sameoldchat/sameoldchat/internal/observability"
 )
+
+func newTestCoordinator(controller *Controller, driver RuntimeDriver, snapshots Snapshotter) (Coordinator, error) {
+	return NewCoordinator(controller, driver, snapshots, observability.NewRegistry())
+}
 
 type coordinatorDriver struct {
 	calls []string
@@ -83,7 +90,8 @@ func TestCoordinatorHibernateAndWake(t *testing.T) {
 	controller := New(StateActive)
 	driver := &coordinatorDriver{}
 	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
-	coordinator, err := NewCoordinator(controller, driver, snapshots)
+	metrics := observability.NewRegistry()
+	coordinator, err := NewCoordinator(controller, driver, snapshots, metrics)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,13 +116,17 @@ func TestCoordinatorHibernateAndWake(t *testing.T) {
 	if len(driver.calls) != 10 || len(snapshots.calls) != 3 {
 		t.Fatalf("driver=%v snapshots=%v", driver.calls, snapshots.calls)
 	}
+	values := metrics.Snapshot()
+	if values.Counters["sameoldchat_snapshot_failures_total"] != 0 || values.Durations["sameoldchat_snapshot_duration"].Count != 1 || values.Durations["sameoldchat_wake_stage_restore"].Count != 1 || values.Gauges["sameoldchat_last_successful_snapshot_unix_seconds"] <= 0 || values.Gauges["sameoldchat_last_successful_restore_unix_seconds"] <= 0 || values.Gauges["sameoldchat_migration_schema_version"] != 1 {
+		t.Fatalf("lifecycle metrics=%+v", values)
+	}
 }
 
 func TestCoordinatorFailureFencesAndFails(t *testing.T) {
 	controller := New(StateActive)
 	driver := &coordinatorDriver{fail: "stop-persistence"}
 	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
-	coordinator, err := NewCoordinator(controller, driver, snapshots)
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,6 +139,26 @@ func TestCoordinatorFailureFencesAndFails(t *testing.T) {
 	}
 }
 
+func TestCoordinatorDoesNotSnapshotAfterDrainFailure(t *testing.T) {
+	controller := New(StateActive)
+	driver := &coordinatorDriver{fail: "drain-servers"}
+	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Hibernate(context.Background(), 0); err == nil {
+		t.Fatal("hibernate succeeded after drain failure")
+	}
+	state, _ := controller.Snapshot()
+	if state != StateFailed {
+		t.Fatalf("state=%s, want failed", state)
+	}
+	if len(snapshots.calls) != 0 {
+		t.Fatalf("snapshot calls=%v, want no snapshot after drain failure", snapshots.calls)
+	}
+}
+
 func TestCoordinatorRecoversPersistedWake(t *testing.T) {
 	controller := New(StateHibernated)
 	fence, err := controller.BeginWake()
@@ -135,7 +167,7 @@ func TestCoordinatorRecoversPersistedWake(t *testing.T) {
 	}
 	driver := &coordinatorDriver{}
 	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: fence, Backend: "sqlite", SchemaVersion: 1}}
-	coordinator, err := NewCoordinator(controller, driver, snapshots)
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +175,79 @@ func TestCoordinatorRecoversPersistedWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, generation := controller.Snapshot()
+	if state != StateActive || generation != fence || len(driver.calls) != 5 || len(snapshots.calls) != 2 {
+		t.Fatalf("state=%s generation=%d driver=%v snapshots=%v", state, generation, driver.calls, snapshots.calls)
+	}
+}
+
+func TestCoordinatorMigrationRunsOncePerActivation(t *testing.T) {
+	controller := New(StateHibernated)
+	fence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: fence, Backend: "sqlite", SchemaVersion: 2}}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	migrations := 0
+	for _, call := range driver.calls {
+		if call == "migration" {
+			migrations++
+		}
+	}
+	if migrations != 1 {
+		t.Fatalf("migration calls=%d, want one per activation: %v", migrations, driver.calls)
+	}
+}
+
+func TestCoordinatorRecoversPersistedWakeAfterProcessRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lifecycle.db")
+	firstStore, err := OpenSQLiteStateStore(path, StateRecord{State: StateHibernated})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := NewPersistent(firstStore)
+	if err != nil {
+		firstStore.Close()
+		t.Fatal(err)
+	}
+	fence, err := first.BeginWake()
+	if err != nil {
+		firstStore.Close()
+		t.Fatal(err)
+	}
+	if err := firstStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	secondStore, err := OpenSQLiteStateStore(path, StateRecord{State: StateActive, Generation: 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondStore.Close()
+	second, err := NewPersistent(secondStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: fence, Backend: "sqlite", SchemaVersion: 1}}
+	coordinator, err := newTestCoordinator(second, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	state, generation := second.Snapshot()
 	if state != StateActive || generation != fence || len(driver.calls) != 5 || len(snapshots.calls) != 2 {
 		t.Fatalf("state=%s generation=%d driver=%v snapshots=%v", state, generation, driver.calls, snapshots.calls)
 	}
@@ -156,7 +261,7 @@ func TestCoordinatorRecoversInterruptedHibernateFromVerifiedSnapshot(t *testing.
 	}
 	driver := &coordinatorDriver{}
 	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: fence, Backend: "sqlite", SchemaVersion: 1}}
-	coordinator, err := NewCoordinator(controller, driver, snapshots)
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
 	if err != nil {
 		t.Fatal(err)
 	}

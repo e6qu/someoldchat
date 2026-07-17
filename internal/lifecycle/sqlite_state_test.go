@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSQLiteStateStoreSurvivesRestartAndFencesCAS(t *testing.T) {
@@ -28,6 +29,33 @@ func TestSQLiteStateStoreSurvivesRestartAndFencesCAS(t *testing.T) {
 	}
 	if err := second.CompareAndSwap(StateRecord{State: StateHibernated, Generation: 4}, StateRecord{State: StateActive, Generation: 6}); err != ErrStateConflict {
 		t.Fatalf("stale CAS error=%v", err)
+	}
+}
+
+func TestSQLiteStateStorePersistsWakeDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lifecycle.db")
+	deadline := time.Date(2026, time.July, 17, 5, 0, 0, 123, time.UTC)
+	store, err := OpenSQLiteStateStore(path, StateRecord{State: StateHibernated, Generation: 4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompareAndSwap(
+		StateRecord{State: StateHibernated, Generation: 4},
+		StateRecord{State: StateHibernated, Generation: 4, WakeDeadline: deadline},
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := OpenSQLiteStateStore(path, StateRecord{State: StateActive, Generation: 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	record, err := restarted.Load()
+	if err != nil || !record.WakeDeadline.Equal(deadline) {
+		t.Fatalf("record=%+v err=%v", record, err)
 	}
 }
 

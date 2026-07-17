@@ -32,527 +32,539 @@ sources:
 
 operations:
   - method: api.test
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: auth.revoke
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: auth.test
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.postMessage
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.meMessage
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.update
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.delete
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.getPermalink
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.history
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.replies
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.get
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reactions.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: pins.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: pins.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: pins.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: search.messages
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.info
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.info
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.list
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.conversations
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.members
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: team.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: team.profile.get
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: emoji.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.identity
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.deletePhoto
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.create
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.join
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.invite
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.leave
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.kick
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.rename
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.setTopic
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.setPurpose
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.archive
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.unarchive
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.close
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.open
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.mark
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.delete
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.upload
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.list
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.lookupByEmail
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.getPresence
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.setPresence
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.profile.get
-    status: sdk-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.profile.set
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
 
   - method: admin.apps.approve
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.apps.approved.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.apps.requests.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.apps.restrict
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.apps.restricted.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.archive
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.convertToPrivate
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.create
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.delete
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.disconnectShared
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.ekm.listOriginalConnectedChannelInfo
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.getConversationPrefs
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.getTeams
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.invite
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.rename
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.restrictAccess.addGroup
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.restrictAccess.listGroups
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.restrictAccess.removeGroup
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.search
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.setConversationPrefs
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.setTeams
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.conversations.unarchive
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.emoji.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.emoji.addAlias
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.emoji.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.emoji.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.emoji.rename
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.inviteRequests.approve
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.inviteRequests.approved.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.inviteRequests.denied.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.inviteRequests.deny
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.inviteRequests.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.admins.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.create
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.owners.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.settings.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.settings.setDefaultChannels
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.settings.setDescription
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.settings.setDiscoverability
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.settings.setIcon
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.teams.settings.setName
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.usergroups.addChannels
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.usergroups.addTeams
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.usergroups.listChannels
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.usergroups.removeChannels
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.assign
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.invite
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.session.invalidate
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.session.reset
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.setAdmin
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.setExpiration
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.setOwner
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: admin.users.setRegular
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.event.authorizations.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.permissions.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.permissions.request
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.permissions.resources.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.permissions.scopes.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.permissions.users.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.permissions.users.request
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: apps.uninstall
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: bots.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: calls.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: calls.end
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: calls.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: calls.participants.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: calls.participants.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: calls.update
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.deleteScheduledMessage
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.postEphemeral
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.scheduleMessage
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.scheduledMessages.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.unfurl
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: dialog.open
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: dnd.endDnd
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: dnd.endSnooze
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: dnd.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: dnd.setSnooze
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: dnd.teamInfo
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.comments.delete
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
+  - method: functions.completeSuccess
+    status: behavior-compatible
+    provenance: slack-reference
+  - method: functions.completeError
+    status: behavior-compatible
+    provenance: slack-reference
   - method: files.remote.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.remote.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.remote.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.remote.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.remote.share
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.remote.update
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.revokePublicURL
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.sharedPublicURL
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: migration.exchange
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: oauth.access
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: oauth.token
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: oauth.v2.access
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reminders.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reminders.complete
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reminders.delete
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reminders.info
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: reminders.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: rtm.connect
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: stars.add
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: stars.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: stars.remove
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: team.accessLogs
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: team.billableInfo
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: team.integrationLogs
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.create
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.disable
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.enable
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.update
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.users.list
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: usergroups.users.update
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.setActive
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.setPhoto
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: views.open
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: views.publish
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: views.push
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: views.update
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: workflows.stepCompleted
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: workflows.stepFailed
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: workflows.updateStep
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-api-specs-openapi
 
-decisions: []
+decisions:
+  - method: functions.completeSuccess
+    evidence: https://docs.slack.dev/reference/methods/functions.completeSuccess/
+    decision: The current official method reference defines this POST method, but the pinned OpenAPI snapshot does not contain it. Track it as a supplemental Slack method until the vendored snapshot is refreshed.
+  - method: functions.completeError
+    evidence: https://docs.slack.dev/reference/methods/functions.completeError/
+    decision: The current official method reference defines this POST method, but the pinned OpenAPI snapshot does not contain it. Track it as a supplemental Slack method until the vendored snapshot is refreshed.

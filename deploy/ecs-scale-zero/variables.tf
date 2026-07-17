@@ -93,6 +93,14 @@ variable "log_retention_days" {
   default = 30
 }
 
+variable "alarm_topic_arn" {
+  type = string
+  validation {
+    condition     = trimspace(var.alarm_topic_arn) != ""
+    error_message = "alarm_topic_arn must identify the SNS topic for deployment alarms"
+  }
+}
+
 variable "websocket_application_image" {
   type = string
   validation {

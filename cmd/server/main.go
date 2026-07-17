@@ -35,6 +35,8 @@ func main() {
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
 	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name; required for local dqlite storage")
 	blobDirectory := flag.String("blob-dir", "", "external blob directory for file storage")
+	blobS3Bucket := flag.String("blob-s3-bucket", "", "Amazon Simple Storage Service bucket for file storage")
+	blobS3Prefix := flag.String("blob-s3-prefix", "", "Amazon Simple Storage Service key prefix for file storage")
 	blobMaxBytes := flag.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
 	chatAddress := flag.String("chat-address", "", "distributed chat gRPC address; required for -chat-mode=grpc")
 	chatCA := flag.String("chat-ca", "", "CA certificate for distributed chat gRPC")
@@ -81,7 +83,7 @@ func main() {
 			logger.Error("parse dqlite cluster", "error", err)
 			os.Exit(2)
 		}
-		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobMaxBytes: *blobMaxBytes})
+		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes})
 		if err != nil {
 			logger.Error("open local chat", "error", err)
 			os.Exit(1)
@@ -116,7 +118,7 @@ func main() {
 			logger.Error("grpc chat requires address, server CA/name, and client certificate/key")
 			os.Exit(2)
 		}
-		if *storeName != "" || *dsn != "" || *dqliteDirectory != "" || *dqliteAddress != "" || *dqliteCluster != "" || *dqliteDatabase != "" || *blobDirectory != "" {
+		if *storeName != "" || *dsn != "" || *dqliteDirectory != "" || *dqliteAddress != "" || *dqliteCluster != "" || *dqliteDatabase != "" || *blobDirectory != "" || *blobS3Bucket != "" || *blobS3Prefix != "" {
 			logger.Error("local storage settings supplied for grpc composition")
 			os.Exit(2)
 		}
@@ -232,7 +234,7 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("GET /readyz", readinessHandler(chatService))
-	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte("<!doctype html><title>SameOldChat</title><h1>SameOldChat</h1>"))
 	})

@@ -23,7 +23,7 @@ func TestTargetProfilesExposeExplicitReplicaTopology(t *testing.T) {
 	if profile.Mode != "separate" || profile.Storage != "dqlite" {
 		t.Fatalf("profile=%+v", profile)
 	}
-	if profile.Processes["http"].Replicas != 3 || profile.Processes["chat"].Replicas != 2 {
+	if profile.Processes["http"].Replicas != 4 || profile.Processes["chat"].Replicas != 3 {
 		t.Fatalf("processes=%+v", profile.Processes)
 	}
 }

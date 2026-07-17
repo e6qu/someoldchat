@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
+	"github.com/sameoldchat/sameoldchat/internal/observability"
 )
 
 type WakeFunc func(context.Context, uint64) error
@@ -23,41 +24,47 @@ type Handler struct {
 	spoolOwner string
 	maxBody    int64
 	wakeWait   time.Duration
+	metrics    *observability.Registry
 }
 
-func NewHandler(controller *lifecycle.Controller, wake WakeFunc) (Handler, error) {
+func NewHandler(controller *lifecycle.Controller, wake WakeFunc, metrics *observability.Registry) (Handler, error) {
 	if controller == nil {
 		return Handler{}, errors.New("activator requires a lifecycle controller")
 	}
 	if wake == nil {
 		return Handler{}, errors.New("activator requires a wake driver")
 	}
-	return Handler{controller: controller, wake: wake}, nil
-}
-
-func NewForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, maxBodyBytes int64, wakeDeadline time.Duration) (Handler, error) {
-	if forward == nil {
-		return Handler{}, errors.New("forwarding activator requires a forward handler")
+	if metrics == nil {
+		return Handler{}, errors.New("activator requires metrics")
 	}
-	if maxBodyBytes <= 0 || wakeDeadline <= 0 {
-		return Handler{}, errors.New("forwarding activator requires positive body and wake limits")
-	}
-	handler, err := NewHandler(controller, wake)
-	if err != nil {
-		return Handler{}, err
-	}
-	handler.forward, handler.maxBody, handler.wakeWait = forward, maxBodyBytes, wakeDeadline
+	handler := Handler{controller: controller, wake: wake, metrics: metrics}
+	handler.recordLifecycleState()
 	return handler, nil
 }
 
-func NewDurableForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, spool Spool, spoolOwner string, maxBodyBytes int64, wakeDeadline time.Duration) (Handler, error) {
+func NewForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, maxBodyBytes int64, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
+	if forward == nil {
+		return Handler{}, errors.New("forwarding activator requires a forward handler")
+	}
+	if maxBodyBytes <= 0 || wakeDeadline <= 0 || metrics == nil {
+		return Handler{}, errors.New("forwarding activator requires positive body, wake, and metrics settings")
+	}
+	handler, err := NewHandler(controller, wake, metrics)
+	if err != nil {
+		return Handler{}, err
+	}
+	handler.forward, handler.maxBody, handler.wakeWait, handler.metrics = forward, maxBodyBytes, wakeDeadline, metrics
+	return handler, nil
+}
+
+func NewDurableForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, spool Spool, spoolOwner string, maxBodyBytes int64, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
 	if spool == nil {
 		return Handler{}, errors.New("durable forwarding activator requires a request spool")
 	}
 	if strings.TrimSpace(spoolOwner) == "" {
 		return Handler{}, errors.New("durable forwarding activator requires a spool owner")
 	}
-	handler, err := NewForwardingHandler(controller, wake, forward, maxBodyBytes, wakeDeadline)
+	handler, err := NewForwardingHandler(controller, wake, forward, maxBodyBytes, wakeDeadline, metrics)
 	if err != nil {
 		return Handler{}, err
 	}
@@ -76,6 +83,7 @@ func (h Handler) RegisterForwarding(mux *http.ServeMux) {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	h.recordLifecycleState()
 	if h.forward == nil {
 		http.Error(w, "forwarding unavailable", http.StatusServiceUnavailable)
 		return
@@ -86,6 +94,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBody)
 	if err := h.ensureActive(r.Context()); err != nil {
+		h.recordRejected(0)
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "service waking", http.StatusServiceUnavailable)
 		return
@@ -102,18 +111,24 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBody)
 	body, err := io.ReadAll(io.LimitReader(r.Body, h.maxBody+1))
 	if err != nil {
+		h.recordRejected(0)
 		http.Error(w, "request body unavailable", http.StatusRequestEntityTooLarge)
 		return
 	}
 	if int64(len(body)) > h.maxBody {
+		h.recordRejected(int64(len(body)))
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
 	id, err := h.spool.Enqueue(context.Background(), r, body)
 	if err != nil {
+		h.recordRejected(int64(len(body)))
+		w.Header().Set("Retry-After", "1")
 		http.Error(w, "request spool unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	h.metrics.AddCounter("sameoldchat_activator_buffered_requests_total", 1)
+	h.metrics.AddCounter("sameoldchat_activator_buffered_bytes_total", uint64(len(body)))
 	result := make(chan spoolResult, 1)
 	go func() {
 		response, err := h.processSpool(context.Background(), id)
@@ -122,6 +137,7 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	select {
 	case value := <-result:
 		if value.err != nil && value.response.status == 0 {
+			h.recordRejected(int64(len(body)))
 			http.Error(w, "service waking", http.StatusServiceUnavailable)
 			return
 		}
@@ -245,6 +261,8 @@ func writeCapturedResponse(w http.ResponseWriter, response capturedResponse) {
 }
 
 func (h Handler) ensureActive(ctx context.Context) error {
+	started := time.Now()
+	defer func() { h.metrics.ObserveDuration("sameoldchat_request_to_active_duration", time.Since(started)) }()
 	waitContext, cancel := context.WithTimeout(ctx, h.wakeWait)
 	defer cancel()
 	for {
@@ -278,12 +296,14 @@ func (h Handler) ensureActive(ctx context.Context) error {
 
 func (h Handler) health(w http.ResponseWriter, _ *http.Request) {
 	state, generation := h.controller.Snapshot()
+	h.recordLifecycleState()
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write([]byte(`{"ok":true,"state":"` + string(state) + `","generation":` + itoa(generation) + `}`))
 }
 
 func (h Handler) activate(w http.ResponseWriter, r *http.Request) {
 	state, _ := h.controller.Snapshot()
+	h.recordLifecycleState()
 	if state == lifecycle.StateActive {
 		w.WriteHeader(http.StatusNoContent)
 		return
@@ -314,6 +334,8 @@ func (h Handler) activate(w http.ResponseWriter, r *http.Request) {
 func (h Handler) startWake(fence uint64) <-chan error {
 	result := make(chan error, 1)
 	go func() {
+		started := time.Now()
+		defer func() { h.metrics.ObserveDuration("sameoldchat_wake_driver_duration", time.Since(started)) }()
 		wakeContext, cancel := context.WithTimeout(context.Background(), h.wakeWait)
 		defer cancel()
 		if err := h.wake(wakeContext, fence); err != nil {
@@ -324,9 +346,37 @@ func (h Handler) startWake(fence uint64) <-chan error {
 			result <- err
 			return
 		}
+		h.recordLifecycleState()
 		result <- nil
 	}()
 	return result
+}
+
+func (h Handler) recordRejected(bodyBytes int64) {
+	h.metrics.AddCounter("sameoldchat_activator_rejected_requests_total", 1)
+	if bodyBytes > 0 {
+		h.metrics.AddCounter("sameoldchat_activator_rejected_bytes_total", uint64(bodyBytes))
+	}
+}
+
+func (h Handler) recordLifecycleState() {
+	state, generation := h.controller.Snapshot()
+	h.metrics.SetGauge("sameoldchat_lifecycle_generation", int64(generation))
+	for _, candidate := range []lifecycle.State{
+		lifecycle.StateActive,
+		lifecycle.StateHibernated,
+		lifecycle.StateWaking,
+		lifecycle.StateQuiescing,
+		lifecycle.StateSnapshot,
+		lifecycle.StateStopping,
+		lifecycle.StateFailed,
+	} {
+		value := int64(0)
+		if state == candidate {
+			value = 1
+		}
+		h.metrics.SetGauge("sameoldchat_lifecycle_state_"+string(candidate), value)
+	}
 }
 
 func itoa(value uint64) string {

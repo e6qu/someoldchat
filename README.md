@@ -9,8 +9,11 @@ request-triggered restoration for deployments that support scale-to-zero.
 - [Project status and planned work](PLAN.md)
 - [Architecture and operational documentation](docs/README.md)
 - [Separable module architecture](docs/modules.md)
+- [Authentication](docs/authentication.md)
 - [dqlite qualification](docs/dqlite.md)
 - [SDK qualification inventory](specs/sdk-compatibility.yaml)
+- [Browser qualification](tests/browser/README.md)
+- [Qualification suites](tests/README.md)
 - [Specifications and pinned contract sources](specs/README.md)
 - [Terminology](docs/terminology.md)
 
@@ -39,6 +42,7 @@ gRPC adapters in distributed mode.
 
 ```sh
 make check
+make browser-qualification
 make build
 make build-static
 make run                    # explicitly selects local mode, memory, and dev credentials

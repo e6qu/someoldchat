@@ -1,7 +1,9 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -33,8 +35,16 @@ func TestHTMXPostMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler.Register(mux)
-	req := httptest.NewRequest(http.MethodPost, "/app/message", strings.NewReader("text=hello"))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	var form bytes.Buffer
+	writer := multipart.NewWriter(&form)
+	if err := writer.WriteField("text", "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/app/message", &form)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("HX-Request", "true")
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	res := httptest.NewRecorder()
@@ -49,7 +59,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	index.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	indexResult := httptest.NewRecorder()
 	mux.ServeHTTP(indexResult, index)
-	if indexResult.Code != http.StatusOK || !strings.Contains(indexResult.Body.String(), "general") || !strings.Contains(indexResult.Body.String(), "hello") || !strings.Contains(indexResult.Body.String(), "unread messages") || !strings.Contains(indexResult.Body.String(), "theme-toggle") || !strings.Contains(indexResult.Body.String(), "data-theme=\"light\"") || !strings.Contains(indexResult.Body.String(), "HX-Request") {
+	if indexResult.Code != http.StatusOK || !strings.Contains(indexResult.Body.String(), "general") || !strings.Contains(indexResult.Body.String(), "hello") || !strings.Contains(indexResult.Body.String(), "unread messages") || !strings.Contains(indexResult.Body.String(), "theme-toggle") || !strings.Contains(indexResult.Body.String(), "data-theme=\"light\"") || !strings.Contains(indexResult.Body.String(), "HX-Request") || !strings.Contains(indexResult.Body.String(), "last_event_id") || !strings.Contains(indexResult.Body.String(), "sessionStorage") || strings.Contains(indexResult.Body.String(), "const events=new EventSource") || !strings.Contains(indexResult.Body.String(), `method="get" action="/app/search"`) || !strings.Contains(indexResult.Body.String(), `name="q"`) {
 		t.Fatalf("index status=%d body=%s", indexResult.Code, indexResult.Body)
 	}
 	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "C1"); err != nil {
@@ -67,6 +77,50 @@ func TestHTMXPostMessage(t *testing.T) {
 	mux.ServeHTTP(replyResult, reply)
 	if replyResult.Code != http.StatusSeeOther || !strings.Contains(replyResult.Header().Get("Location"), "thread=") {
 		t.Fatalf("reply status=%d location=%s", replyResult.Code, replyResult.Header().Get("Location"))
+	}
+}
+
+func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	created := time.Unix(1700000000, 123456789).UTC()
+	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "searchable hello", CreatedAt: created}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedSession(ctx, "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{string(auth.ScopeSearchRead)}, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewBrowser(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	req := httptest.NewRequest(http.MethodGet, "/app/search?q=hello", nil)
+	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+	body := res.Body.String()
+	if res.Code != http.StatusOK || !strings.Contains(body, "searchable hello") || !strings.Contains(body, "Search results") || !strings.Contains(body, `href="/app?channel=C1"`) || !strings.Contains(body, "/app?channel=C1&thread=") {
+		t.Fatalf("status=%d body=%s", res.Code, body)
+	}
+}
+
+func TestNormalizeSearchControlFailsLoudlyOnTemplateDrift(t *testing.T) {
+	markup := `<label class="search" aria-label="Search"><span>⌕</span><input placeholder="Search the workspace" aria-label="Search the workspace"></label>`
+	normalized, err := normalizeSearchControl(markup)
+	if err != nil || !strings.Contains(normalized, `method="get" action="/app/search"`) || !strings.Contains(normalized, `name="q"`) {
+		t.Fatalf("normalized=%q err=%v", normalized, err)
+	}
+	if _, err := normalizeSearchControl(markup + markup); err == nil {
+		t.Fatal("template drift was accepted")
 	}
 }
 

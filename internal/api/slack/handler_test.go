@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"net/url"
 	"strconv"
 	"strings"
@@ -24,6 +26,11 @@ import (
 )
 
 func testHandler() http.Handler {
+	handler, _ := testHandlerWithStore()
+	return handler
+}
+
+func testHandlerWithStore() (http.Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
@@ -42,7 +49,7 @@ func testHandler() http.Handler {
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	s.SeedConversationMember("C2", "U1")
-	s.SeedToken("token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
+	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
 	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "oauth-client", SecretHash: domain.HashToken("oauth-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
@@ -63,7 +70,102 @@ func testHandler() http.Handler {
 	}
 	mux := http.NewServeMux()
 	h.Register(mux)
-	return mux
+	return mux, s
+}
+
+func TestAdminInviteRequestLifecycle(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	for _, request := range []domain.InviteRequest{
+		{ID: "IR-approve", WorkspaceID: "T1", Email: "approve@example.com", RequestedBy: "U1", Status: domain.InviteRequestPending, CreatedAt: now},
+		{ID: "IR-deny", WorkspaceID: "T1", Email: "deny@example.com", RequestedBy: "U1", Status: domain.InviteRequestPending, CreatedAt: now},
+	} {
+		if err := store.CreateInviteRequest(context.Background(), request, events.Event{ID: domain.EventID("event-" + string(request.ID)), WorkspaceID: "T1", ActorID: "U1", Topic: "invite.requested", Payload: string(request.ID), CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	if result := list("/api/admin.inviteRequests.list?team_id=T1&limit=10"); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "IR-approve") {
+		t.Fatalf("pending status=%d body=%s", result.Code, result.Body)
+	}
+	change := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	if result := change("/api/admin.inviteRequests.approve", "team_id=T1&invite_request_id=IR-approve"); result.Code != http.StatusOK {
+		t.Fatalf("approve status=%d body=%s", result.Code, result.Body)
+	}
+	if result := change("/api/admin.inviteRequests.deny", "team_id=T1&invite_request_id=IR-deny"); result.Code != http.StatusOK {
+		t.Fatalf("deny status=%d body=%s", result.Code, result.Body)
+	}
+	if result := list("/api/admin.inviteRequests.approved.list?team_id=T1&limit=10"); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "IR-approve") {
+		t.Fatalf("approved status=%d body=%s", result.Code, result.Body)
+	}
+	if result := list("/api/admin.inviteRequests.denied.list?team_id=T1&limit=10"); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "IR-deny") {
+		t.Fatalf("denied status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+func TestAdminAppRequestsList(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	if err := store.SetAppApproval(context.Background(), "T1", "A2", "R2", domain.AppApprovalRequested, now, events.Event{ID: "event-app-request", WorkspaceID: "T1", ActorID: "U1", Topic: "app.requested", Payload: "A2", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/admin.apps.requests.list?team_id=T1&limit=10", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, req)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "A2") {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+func TestAdminUsersSessionInvalidateRevokesSession(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	if err := store.SeedSession(context.Background(), "session-1", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/admin.users.session.invalidate", strings.NewReader("team_id=T1&session_id=session-1"))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, req)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+func TestDoNotDisturbEndClearsEnabledState(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	now := time.Now().UTC()
+	if err := store.SetDoNotDisturb(context.Background(), domain.DoNotDisturb{WorkspaceID: "T1", UserID: "U1", Enabled: true}, events.Event{ID: "event-dnd-enabled", WorkspaceID: "T1", ActorID: "U1", Topic: "user.dnd_enabled", Payload: "U1", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/dnd.endDnd", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, req)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+	info := httptest.NewRequest(http.MethodGet, "/api/dnd.info", nil)
+	info.Header.Set("Authorization", "Bearer token")
+	infoResult := httptest.NewRecorder()
+	handler.ServeHTTP(infoResult, info)
+	if infoResult.Code != http.StatusOK || !strings.Contains(infoResult.Body.String(), `"dnd_enabled":false`) {
+		t.Fatalf("info status=%d body=%s", infoResult.Code, infoResult.Body)
+	}
 }
 
 func TestOAuthV2AccessHTTPExchangesCode(t *testing.T) {
@@ -94,6 +196,38 @@ func TestOAuthV2AccessHTTPExchangesCode(t *testing.T) {
 	}
 	if !body.OK || body.AccessToken != "" || body.AppID != "A1" || body.AuthedUser.ID != "U1" || body.AuthedUser.AccessToken == "" || body.AuthedUser.TokenType != "user" {
 		t.Fatalf("unexpected body: %s", response.Body)
+	}
+}
+
+func TestOAuthAccessAndTokenHTTPExchangeCodes(t *testing.T) {
+	request := func(path string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(url.Values{
+			"client_id":     {"oauth-client"},
+			"client_secret": {"oauth-secret"},
+			"code":          {"oauth-code"},
+			"redirect_uri":  {"https://callback"},
+		}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		testHandler().ServeHTTP(response, request)
+		return response
+	}
+	for _, path := range []string{"/api/oauth.access", "/api/oauth.token"} {
+		response := request(path)
+		if response.Code != http.StatusOK {
+			t.Fatalf("path=%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		var body struct {
+			OK          bool   `json:"ok"`
+			AccessToken string `json:"access_token"`
+			TeamID      string `json:"team_id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			t.Fatalf("path=%s decode: %v", path, err)
+		}
+		if !body.OK || body.AccessToken == "" || body.TeamID != "T1" {
+			t.Fatalf("path=%s body=%+v", path, body)
+		}
 	}
 }
 
@@ -207,6 +341,47 @@ func TestWorkflowMethodsHTTPPersistLifecycle(t *testing.T) {
 	}
 }
 
+func TestFunctionsCompleteSuccessHTTPValidatesAndCompletes(t *testing.T) {
+	handler := testHandler()
+	request := httptest.NewRequest(http.MethodPost, "/api/functions.completeSuccess", strings.NewReader(url.Values{
+		"function_execution_id": {"execution-http"},
+		"outputs":               {`{"result":"ok"}`},
+	}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+
+	invalid := httptest.NewRequest(http.MethodPost, "/api/functions.completeSuccess", strings.NewReader(url.Values{
+		"function_execution_id": {"execution-http"},
+		"outputs":               {`[]`},
+	}.Encode()))
+	invalid.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	invalid.Header.Set("Authorization", "Bearer token")
+	invalidResponse := httptest.NewRecorder()
+	handler.ServeHTTP(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest || !strings.Contains(invalidResponse.Body.String(), `"error":"invalid_arguments"`) {
+		t.Fatalf("invalid status=%d body=%s", invalidResponse.Code, invalidResponse.Body)
+	}
+}
+
+func TestFunctionsCompleteErrorHTTPValidatesAndCompletes(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/functions.completeError", strings.NewReader(url.Values{
+		"function_execution_id": {"execution-error-http"},
+		"error":                 {"function failed"},
+	}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	testHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
 func TestDialogOpenHTTP(t *testing.T) {
 	handler := testHandler()
 	values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`}}
@@ -259,6 +434,9 @@ func TestMapServiceErrorKeepsHandledFailuresNon500AndDistinct(t *testing.T) {
 	if code, reason := mapServiceError(service.ErrInvalidAppApproval, "app_not_found"); code != http.StatusBadRequest || reason != "invalid_arguments" {
 		t.Fatalf("app approval mapping = %d %q", code, reason)
 	}
+	if code, reason := mapServiceError(errors.New("unexpected dependency failure"), "service_unavailable"); code != http.StatusServiceUnavailable || reason != "service_unavailable" {
+		t.Fatalf("unknown handled failure mapping = %d %q, want 503 service_unavailable", code, reason)
+	}
 }
 
 func TestCallsLifecycle(t *testing.T) {
@@ -278,6 +456,22 @@ func TestCallsLifecycle(t *testing.T) {
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &response); err != nil || response.Call.ID == "" {
 		t.Fatalf("add response=%s err=%v", created.Body, err)
+	}
+	update := httptest.NewRequest(http.MethodPost, "/api/calls.update", strings.NewReader("id="+response.Call.ID+"&title=Updated%20call"))
+	update.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	update.Header.Set("Authorization", "Bearer token")
+	updated := httptest.NewRecorder()
+	handler.ServeHTTP(updated, update)
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"title":"Updated call"`) {
+		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
+	}
+	participantsAdd := httptest.NewRequest(http.MethodPost, "/api/calls.participants.add", strings.NewReader("id="+response.Call.ID+"&users=U2"))
+	participantsAdd.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	participantsAdd.Header.Set("Authorization", "Bearer token")
+	participantsAdded := httptest.NewRecorder()
+	handler.ServeHTTP(participantsAdded, participantsAdd)
+	if participantsAdded.Code != http.StatusOK {
+		t.Fatalf("participants add status=%d body=%s", participantsAdded.Code, participantsAdded.Body)
 	}
 	info := httptest.NewRequest(http.MethodGet, "/api/calls.info?id="+response.Call.ID, nil)
 	info.Header.Set("Authorization", "Bearer token")
@@ -320,6 +514,21 @@ func TestAdminAppsApprovalHTTPWorkflow(t *testing.T) {
 	handler.ServeHTTP(got, list)
 	if got.Code != http.StatusOK || !strings.Contains(got.Body.String(), "A1") {
 		t.Fatalf("list status=%d body=%s", got.Code, got.Body)
+	}
+	restrict := httptest.NewRequest(http.MethodPost, "/api/admin.apps.restrict", strings.NewReader("team_id=T1&app_id=A1"))
+	restrict.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	restrict.Header.Set("Authorization", "Bearer token")
+	restricted := httptest.NewRecorder()
+	handler.ServeHTTP(restricted, restrict)
+	if restricted.Code != http.StatusOK {
+		t.Fatalf("restrict status=%d body=%s", restricted.Code, restricted.Body)
+	}
+	restrictedList := httptest.NewRequest(http.MethodGet, "/api/admin.apps.restricted.list?team_id=T1&limit=1", nil)
+	restrictedList.Header.Set("Authorization", "Bearer token")
+	restrictedResult := httptest.NewRecorder()
+	handler.ServeHTTP(restrictedResult, restrictedList)
+	if restrictedResult.Code != http.StatusOK || !strings.Contains(restrictedResult.Body.String(), "A1") {
+		t.Fatalf("restricted list status=%d body=%s", restrictedResult.Code, restrictedResult.Body)
 	}
 }
 
@@ -563,6 +772,96 @@ func TestAdminUserGroupAddTeamsValidatesWorkspaceTopology(t *testing.T) {
 	}
 }
 
+func TestUserGroupLifecycle(t *testing.T) {
+	handler := testHandler()
+	form := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Authorization", "Bearer token")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		return res
+	}
+	created := form("/api/usergroups.create", "name=Engineering&handle=engineering")
+	if created.Code != http.StatusOK {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
+	}
+	var createdBody struct {
+		UserGroup struct {
+			ID string `json:"id"`
+		} `json:"usergroup"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createdBody); err != nil || createdBody.UserGroup.ID == "" {
+		t.Fatalf("create body=%s err=%v", created.Body, err)
+	}
+	id := createdBody.UserGroup.ID
+	private := form("/api/admin.conversations.create", "name=Access%20controlled&is_private=true")
+	if private.Code != http.StatusOK {
+		t.Fatalf("private conversation status=%d body=%s", private.Code, private.Body)
+	}
+	var privateBody struct {
+		Channel struct {
+			ID string `json:"id"`
+		} `json:"channel"`
+	}
+	if err := json.Unmarshal(private.Body.Bytes(), &privateBody); err != nil || privateBody.Channel.ID == "" {
+		t.Fatalf("private conversation body=%s err=%v", private.Body, err)
+	}
+	accessAdd := form("/api/admin.conversations.restrictAccess.addGroup", "channel_id="+privateBody.Channel.ID+"&group_id="+id)
+	if accessAdd.Code != http.StatusOK {
+		t.Fatalf("access add status=%d body=%s", accessAdd.Code, accessAdd.Body)
+	}
+	accessList := httptest.NewRequest(http.MethodGet, "/api/admin.conversations.restrictAccess.listGroups?channel_id="+privateBody.Channel.ID, nil)
+	accessList.Header.Set("Authorization", "Bearer token")
+	accessListResult := httptest.NewRecorder()
+	handler.ServeHTTP(accessListResult, accessList)
+	if accessListResult.Code != http.StatusOK || !strings.Contains(accessListResult.Body.String(), id) {
+		t.Fatalf("access list status=%d body=%s", accessListResult.Code, accessListResult.Body)
+	}
+	accessRemove := form("/api/admin.conversations.restrictAccess.removeGroup", "channel_id="+privateBody.Channel.ID+"&group_id="+id)
+	if accessRemove.Code != http.StatusOK {
+		t.Fatalf("access remove status=%d body=%s", accessRemove.Code, accessRemove.Body)
+	}
+	channelAdd := form("/api/admin.usergroups.addChannels", "usergroup="+id+"&channel_ids=C1")
+	if channelAdd.Code != http.StatusOK {
+		t.Fatalf("channel add status=%d body=%s", channelAdd.Code, channelAdd.Body)
+	}
+	channelRemove := form("/api/admin.usergroups.removeChannels", "usergroup="+id+"&channel_ids=C1")
+	if channelRemove.Code != http.StatusOK {
+		t.Fatalf("channel remove status=%d body=%s", channelRemove.Code, channelRemove.Body)
+	}
+	updated := form("/api/usergroups.update", "usergroup="+id+"&name=Engineering%20Updated&handle=engineering-updated")
+	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), "Engineering Updated") {
+		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
+	}
+	setUsers := form("/api/usergroups.users.update", "usergroup="+id+"&users=U1,U2")
+	if setUsers.Code != http.StatusOK {
+		t.Fatalf("users update status=%d body=%s", setUsers.Code, setUsers.Body)
+	}
+	users := httptest.NewRequest(http.MethodGet, "/api/usergroups.users.list?usergroup="+id, nil)
+	users.Header.Set("Authorization", "Bearer token")
+	usersResult := httptest.NewRecorder()
+	handler.ServeHTTP(usersResult, users)
+	if usersResult.Code != http.StatusOK || !strings.Contains(usersResult.Body.String(), `"users":["U1","U2"]`) {
+		t.Fatalf("users list status=%d body=%s", usersResult.Code, usersResult.Body)
+	}
+	listed := httptest.NewRecorder()
+	list := httptest.NewRequest(http.MethodGet, "/api/usergroups.list?include_users=true", nil)
+	list.Header.Set("Authorization", "Bearer token")
+	handler.ServeHTTP(listed, list)
+	if listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), id) || !strings.Contains(listed.Body.String(), `"users":["U1","U2"]`) {
+		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body)
+	}
+	disabled := form("/api/usergroups.disable", "usergroup="+id)
+	if disabled.Code != http.StatusOK || !strings.Contains(disabled.Body.String(), `"date_delete"`) {
+		t.Fatalf("disable status=%d body=%s", disabled.Code, disabled.Body)
+	}
+	enabled := form("/api/usergroups.enable", "usergroup="+id)
+	if enabled.Code != http.StatusOK || !strings.Contains(enabled.Body.String(), `"date_delete":0`) {
+		t.Fatalf("enable status=%d body=%s", enabled.Code, enabled.Body)
+	}
+}
+
 func TestAdminTeamsCreatePersistsNewWorkspace(t *testing.T) {
 	handler := testHandler()
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.teams.create", strings.NewReader("team_domain=second-workspace&team_name=Second%20Workspace&team_description=created"))
@@ -666,9 +965,9 @@ func TestAdminConversationMutationsAreRegistered(t *testing.T) {
 		endpoint string
 		body     string
 	}{
-		{endpoint: "admin.conversations.rename", body: "channel=C1&name=renamed"},
-		{endpoint: "admin.conversations.archive", body: "channel=C1"},
-		{endpoint: "admin.conversations.unarchive", body: "channel=C1"},
+		{endpoint: "admin.conversations.rename", body: "channel_id=C1&name=renamed"},
+		{endpoint: "admin.conversations.archive", body: "channel_id=C1"},
+		{endpoint: "admin.conversations.unarchive", body: "channel_id=C1"},
 	} {
 		handler := testHandler()
 		request := httptest.NewRequest(http.MethodPost, "/api/"+test.endpoint, strings.NewReader(test.body))
@@ -713,7 +1012,7 @@ func TestAdminConversationCreateUsesDurableConversationBoundary(t *testing.T) {
 }
 
 func TestAdminConversationInviteIsRegistered(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.invite", strings.NewReader("channel=C1&users=U2"))
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.invite", strings.NewReader("channel_id=C1&users=U2"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
@@ -724,7 +1023,7 @@ func TestAdminConversationInviteIsRegistered(t *testing.T) {
 }
 
 func TestAdminConversationConvertToPrivateIsRegistered(t *testing.T) {
-	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.convertToPrivate", strings.NewReader("channel=C1"))
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.conversations.convertToPrivate", strings.NewReader("channel_id=C1"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
@@ -784,6 +1083,21 @@ func TestRemoteFileLifecycle(t *testing.T) {
 	handler.ServeHTTP(updated, update)
 	if updated.Code != http.StatusOK || !strings.Contains(updated.Body.String(), `"title":"Updated file"`) {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
+	}
+	info := httptest.NewRequest(http.MethodGet, "/api/files.remote.info?external_id=remote-1", nil)
+	info.Header.Set("Authorization", "Bearer token")
+	infoResult := httptest.NewRecorder()
+	handler.ServeHTTP(infoResult, info)
+	if infoResult.Code != http.StatusOK || !strings.Contains(infoResult.Body.String(), `"external_id":"remote-1"`) {
+		t.Fatalf("info status=%d body=%s", infoResult.Code, infoResult.Body)
+	}
+	remove := httptest.NewRequest(http.MethodPost, "/api/files.remote.remove", strings.NewReader("external_id=remote-1"))
+	remove.Header.Set("Authorization", "Bearer token")
+	remove.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	removeResult := httptest.NewRecorder()
+	handler.ServeHTTP(removeResult, remove)
+	if removeResult.Code != http.StatusOK || !strings.Contains(removeResult.Body.String(), `"ok":true`) {
+		t.Fatalf("remove status=%d body=%s", removeResult.Code, removeResult.Body)
 	}
 }
 
@@ -865,6 +1179,17 @@ func TestMeMessageUsesNarrowResponse(t *testing.T) {
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"ok":true`) || !strings.Contains(res.Body.String(), `"channel":"C1"`) || strings.Contains(res.Body.String(), `"message"`) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestPostEphemeralReturnsMessageTimestamp(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat.postEphemeral", strings.NewReader("channel=C1&user=U2&text=temporary"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	testHandler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"message_ts"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -1022,7 +1347,7 @@ func TestAuthRevokeDurablyInvalidatesToken(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
-	s.SeedToken("token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
+	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
 	authenticator, err := auth.NewStored(s)
 	if err != nil {
 		t.Fatal(err)
@@ -1057,6 +1382,21 @@ func TestJSONDuplicateFieldsAreRejected(t *testing.T) {
 	testHandler().ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "invalid_form_data") {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestFormDuplicateFieldsAcceptIdenticalValuesAndRejectConflicts(t *testing.T) {
+	identical := httptest.NewRequest(http.MethodPost, "/api/conversations.replies", strings.NewReader("channel=C1&ts=1.000000&ts=1.000000"))
+	identical.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	fields, err := decodeFields(httptest.NewRecorder(), identical)
+	if err != nil || fields["ts"] != "1.000000" {
+		t.Fatalf("identical fields=%v err=%v", fields, err)
+	}
+
+	conflicting := httptest.NewRequest(http.MethodPost, "/api/conversations.replies", strings.NewReader("channel=C1&ts=1.000000&ts=2.000000"))
+	conflicting.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if _, err := decodeFields(httptest.NewRecorder(), conflicting); err == nil {
+		t.Fatal("conflicting form fields were accepted")
 	}
 }
 
@@ -1210,6 +1550,22 @@ func TestFileMetadataEndpoints(t *testing.T) {
 	mux.ServeHTTP(listResult, list)
 	if listResult.Code != http.StatusOK || !strings.Contains(listResult.Body.String(), "a.txt") {
 		t.Fatalf("list status=%d body=%s", listResult.Code, listResult.Body)
+	}
+	shared := httptest.NewRequest(http.MethodPost, "/api/files.sharedPublicURL", strings.NewReader("file="+string(file.ID)))
+	shared.Header.Set("Authorization", "Bearer token")
+	shared.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	sharedResult := httptest.NewRecorder()
+	mux.ServeHTTP(sharedResult, shared)
+	if sharedResult.Code != http.StatusOK || !strings.Contains(sharedResult.Body.String(), `"permalink_public"`) {
+		t.Fatalf("share public status=%d body=%s", sharedResult.Code, sharedResult.Body)
+	}
+	revoke := httptest.NewRequest(http.MethodPost, "/api/files.revokePublicURL", strings.NewReader("file="+string(file.ID)))
+	revoke.Header.Set("Authorization", "Bearer token")
+	revoke.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	revokeResult := httptest.NewRecorder()
+	mux.ServeHTTP(revokeResult, revoke)
+	if revokeResult.Code != http.StatusOK || !strings.Contains(revokeResult.Body.String(), `"ok":true`) {
+		t.Fatalf("revoke public status=%d body=%s", revokeResult.Code, revokeResult.Body)
 	}
 	remove := httptest.NewRequest(http.MethodPost, "/api/files.delete", strings.NewReader("file="+string(file.ID)))
 	remove.Header.Set("Authorization", "Bearer token")
@@ -1537,6 +1893,75 @@ func TestUsersDeletePhoto(t *testing.T) {
 	}
 }
 
+func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeUsersProfileWrite: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store, Blob: blobs}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreatePart(textproto.MIMEHeader{
+		"Content-Disposition": {`form-data; name="image"; filename="photo.png"`},
+		"Content-Type":        {"image/png"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("photo")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/users.setPhoto", &body)
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	result := httptest.NewRecorder()
+	mux.ServeHTTP(result, req)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+func TestUsersSetActiveAndAdminTeamRoleLists(t *testing.T) {
+	handler := testHandler()
+	active := httptest.NewRequest(http.MethodPost, "/api/users.setActive", strings.NewReader(""))
+	active.Header.Set("Authorization", "Bearer token")
+	activeResult := httptest.NewRecorder()
+	handler.ServeHTTP(activeResult, active)
+	if activeResult.Code != http.StatusOK || !strings.Contains(activeResult.Body.String(), `"ok":true`) {
+		t.Fatalf("set active status=%d body=%s", activeResult.Code, activeResult.Body)
+	}
+	for _, test := range []struct {
+		endpoint string
+		field    string
+	}{
+		{endpoint: "admin.teams.admins.list", field: "admin_ids"},
+		{endpoint: "admin.teams.owners.list", field: "owner_ids"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/"+test.endpoint+"?team_id=T1&limit=10", nil)
+		req.Header.Set("Authorization", "Bearer token")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"`+test.field+`"`) {
+			t.Fatalf("%s status=%d body=%s", test.endpoint, result.Code, result.Body)
+		}
+	}
+}
+
 func TestDoNotDisturbLifecycle(t *testing.T) {
 	handler := testHandler()
 	info := httptest.NewRequest(http.MethodGet, "/api/dnd.info", nil)
@@ -1545,6 +1970,13 @@ func TestDoNotDisturbLifecycle(t *testing.T) {
 	handler.ServeHTTP(infoResult, info)
 	if infoResult.Code != http.StatusOK || !strings.Contains(infoResult.Body.String(), `"dnd_enabled":false`) || !strings.Contains(infoResult.Body.String(), `"snooze_enabled":false`) {
 		t.Fatalf("initial dnd status=%d body=%s", infoResult.Code, infoResult.Body)
+	}
+	teamInfo := httptest.NewRequest(http.MethodGet, "/api/dnd.teamInfo?users=U1,U2", nil)
+	teamInfo.Header.Set("Authorization", "Bearer token")
+	teamInfoResult := httptest.NewRecorder()
+	handler.ServeHTTP(teamInfoResult, teamInfo)
+	if teamInfoResult.Code != http.StatusOK || !strings.Contains(teamInfoResult.Body.String(), `"users"`) {
+		t.Fatalf("team info status=%d body=%s", teamInfoResult.Code, teamInfoResult.Body)
 	}
 	set := httptest.NewRequest(http.MethodPost, "/api/dnd.setSnooze", strings.NewReader("num_minutes=5"))
 	set.Header.Set("Authorization", "Bearer token")
@@ -1620,12 +2052,43 @@ func TestRemindersLifecycle(t *testing.T) {
 	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"reminder"`) || !strings.Contains(result.Body.String(), `"text":"check-in"`) {
 		t.Fatalf("add status=%d body=%s", result.Code, result.Body)
 	}
+	var added struct {
+		Reminder struct {
+			ID string `json:"id"`
+		} `json:"reminder"`
+	}
+	if err := json.Unmarshal(result.Body.Bytes(), &added); err != nil || added.Reminder.ID == "" {
+		t.Fatalf("add body=%s err=%v", result.Body, err)
+	}
 	list := httptest.NewRequest(http.MethodGet, "/api/reminders.list", nil)
 	list.Header.Set("Authorization", "Bearer token")
 	result = httptest.NewRecorder()
 	handler.ServeHTTP(result, list)
 	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"text":"check-in"`) {
 		t.Fatalf("list status=%d body=%s", result.Code, result.Body)
+	}
+	info := httptest.NewRequest(http.MethodGet, "/api/reminders.info?reminder="+added.Reminder.ID, nil)
+	info.Header.Set("Authorization", "Bearer token")
+	infoResult := httptest.NewRecorder()
+	handler.ServeHTTP(infoResult, info)
+	if infoResult.Code != http.StatusOK || !strings.Contains(infoResult.Body.String(), added.Reminder.ID) {
+		t.Fatalf("info status=%d body=%s", infoResult.Code, infoResult.Body)
+	}
+	complete := httptest.NewRequest(http.MethodPost, "/api/reminders.complete", strings.NewReader("reminder="+added.Reminder.ID))
+	complete.Header.Set("Authorization", "Bearer token")
+	complete.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	completeResult := httptest.NewRecorder()
+	handler.ServeHTTP(completeResult, complete)
+	if completeResult.Code != http.StatusOK || !strings.Contains(completeResult.Body.String(), `"ok":true`) {
+		t.Fatalf("complete status=%d body=%s", completeResult.Code, completeResult.Body)
+	}
+	remove := httptest.NewRequest(http.MethodPost, "/api/reminders.delete", strings.NewReader("reminder="+added.Reminder.ID))
+	remove.Header.Set("Authorization", "Bearer token")
+	remove.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	removeResult := httptest.NewRecorder()
+	handler.ServeHTTP(removeResult, remove)
+	if removeResult.Code != http.StatusOK || !strings.Contains(removeResult.Body.String(), `"ok":true`) {
+		t.Fatalf("delete status=%d body=%s", removeResult.Code, removeResult.Body)
 	}
 }
 

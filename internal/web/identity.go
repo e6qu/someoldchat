@@ -43,6 +43,12 @@ type LoginHandler struct {
 	client     *http.Client
 }
 
+var supportedAuthorizationProviders = map[string]struct{}{
+	"entra":  {},
+	"github": {},
+	"google": {},
+}
+
 func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, lookupUser domain.UserID, publicURL string, stateKey []byte, providers []ProviderConfig) (LoginHandler, error) {
 	if service == nil || workspace == "" || lookupUser == "" || strings.TrimSpace(publicURL) == "" || len(stateKey) < 32 {
 		return LoginHandler{}, errors.New("login requires service, workspace, lookup user, public URL, and a 32-byte state key")
@@ -60,9 +66,20 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		provider.TokenURL = strings.TrimSpace(provider.TokenURL)
 		provider.UserInfoURL = strings.TrimSpace(provider.UserInfoURL)
 		provider.EmailURL = strings.TrimSpace(provider.EmailURL)
-		if provider.Name == "" || provider.ClientID == "" || provider.ClientSecret == "" || provider.AuthorizeURL == "" || provider.TokenURL == "" || provider.UserInfoURL == "" || len(provider.Scopes) == 0 {
+		if provider.Name == "" || provider.ClientID == "" || provider.ClientSecret == "" || provider.AuthorizeURL == "" || provider.TokenURL == "" || provider.UserInfoURL == "" {
 			return LoginHandler{}, fmt.Errorf("provider %q is incomplete", provider.Name)
 		}
+		if _, supported := supportedAuthorizationProviders[provider.Name]; !supported {
+			return LoginHandler{}, fmt.Errorf("provider %q is unsupported", provider.Name)
+		}
+		if provider.Name == "github" && provider.EmailURL == "" {
+			return LoginHandler{}, errors.New("github provider requires an email endpoint")
+		}
+		normalizedScopes, err := normalizeScopes(provider.Scopes)
+		if err != nil {
+			return LoginHandler{}, fmt.Errorf("provider %q scopes: %w", provider.Name, err)
+		}
+		provider.Scopes = normalizedScopes
 		if _, exists := configured[provider.Name]; exists {
 			return LoginHandler{}, fmt.Errorf("provider %q is duplicated", provider.Name)
 		}
@@ -72,6 +89,26 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		return LoginHandler{}, errors.New("at least one authorization provider is required")
 	}
 	return LoginHandler{service: service, workspace: workspace, lookupUser: lookupUser, publicURL: strings.TrimRight(publicURL, "/"), stateKey: append([]byte(nil), stateKey...), providers: configured, client: &http.Client{Timeout: 10 * time.Second}}, nil
+}
+
+func normalizeScopes(values []string) ([]string, error) {
+	if len(values) == 0 {
+		return nil, errors.New("at least one scope is required")
+	}
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, errors.New("scope entries must not be empty")
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	return normalized, nil
 }
 
 func (h LoginHandler) Register(mux *http.ServeMux) {

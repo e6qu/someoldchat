@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"errors"
 	"sync"
+	"time"
 )
 
 type State string
@@ -25,8 +26,9 @@ var (
 )
 
 type StateRecord struct {
-	State      State
-	Generation uint64
+	State        State
+	Generation   uint64
+	WakeDeadline time.Time
 }
 
 type StateStore interface {
@@ -35,10 +37,11 @@ type StateStore interface {
 }
 
 type Controller struct {
-	mu         sync.Mutex
-	state      State
-	generation uint64
-	store      StateStore
+	mu           sync.Mutex
+	state        State
+	generation   uint64
+	wakeDeadline time.Time
+	store        StateStore
 }
 
 func New(initial State) *Controller { return &Controller{state: initial} }
@@ -54,13 +57,38 @@ func NewPersistent(store StateStore) (*Controller, error) {
 	if !validState(record.State) {
 		return nil, errors.New("persistent lifecycle state is invalid")
 	}
-	return &Controller{state: record.State, generation: record.Generation, store: store}, nil
+	return &Controller{state: record.State, generation: record.Generation, wakeDeadline: record.WakeDeadline, store: store}, nil
 }
 
 func (c *Controller) Snapshot() (State, uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.state, c.generation
+}
+
+// Metadata returns the durable lifecycle state and scheduled wake hint.
+// Callers receive a value copy that cannot mutate controller state.
+func (c *Controller) Metadata() StateRecord {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return StateRecord{State: c.state, Generation: c.generation, WakeDeadline: c.wakeDeadline}
+}
+
+// SetWakeDeadline publishes the earliest required wake time for the current
+// fencing generation. A zero deadline clears the hint after the job has been
+// consumed or cancelled.
+func (c *Controller) SetWakeDeadline(fence uint64, deadline time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if fence != c.generation {
+		return ErrStaleFence
+	}
+	deadline = deadline.UTC()
+	if err := c.persistLocked(c.state, c.generation, deadline); err != nil {
+		return err
+	}
+	c.wakeDeadline = deadline
+	return nil
 }
 
 func (c *Controller) BeginWake() (uint64, error) {
@@ -76,11 +104,12 @@ func (c *Controller) BeginWake() (uint64, error) {
 		return 0, ErrWakeInProgress
 	}
 	nextGeneration := c.generation + 1
-	if err := c.persistLocked(StateWaking, nextGeneration); err != nil {
+	if err := c.persistLocked(StateWaking, nextGeneration, time.Time{}); err != nil {
 		return 0, err
 	}
 	c.generation = nextGeneration
 	c.state = StateWaking
+	c.wakeDeadline = time.Time{}
 	return c.generation, nil
 }
 
@@ -98,11 +127,12 @@ func (c *Controller) AcknowledgeFailure(fence uint64) (uint64, error) {
 		return 0, ErrInvalidTransition
 	}
 	nextGeneration := c.generation + 1
-	if err := c.persistLocked(StateHibernated, nextGeneration); err != nil {
+	if err := c.persistLocked(StateHibernated, nextGeneration, time.Time{}); err != nil {
 		return 0, err
 	}
 	c.generation = nextGeneration
 	c.state = StateHibernated
+	c.wakeDeadline = time.Time{}
 	return nextGeneration, nil
 }
 
@@ -120,7 +150,7 @@ func (c *Controller) BeginRecovery(fence uint64) error {
 	default:
 		return ErrInvalidTransition
 	}
-	if err := c.persistLocked(StateWaking, fence); err != nil {
+	if err := c.persistLocked(StateWaking, fence, c.wakeDeadline); err != nil {
 		return err
 	}
 	c.state = StateWaking
@@ -141,7 +171,7 @@ func (c *Controller) BeginHibernate(fence uint64) (uint64, error) {
 		return 0, ErrInvalidTransition
 	}
 	nextGeneration := c.generation + 1
-	if err := c.persistLocked(StateQuiescing, nextGeneration); err != nil {
+	if err := c.persistLocked(StateQuiescing, nextGeneration, c.wakeDeadline); err != nil {
 		return 0, err
 	}
 	c.generation = nextGeneration
@@ -167,7 +197,7 @@ func (c *Controller) Fail(fence uint64) error {
 	if fence != c.generation {
 		return ErrStaleFence
 	}
-	if err := c.persistLocked(StateFailed, c.generation); err != nil {
+	if err := c.persistLocked(StateFailed, c.generation, c.wakeDeadline); err != nil {
 		return err
 	}
 	c.state = StateFailed
@@ -183,18 +213,21 @@ func (c *Controller) transition(fence uint64, from, to State) error {
 	if c.state != from {
 		return ErrInvalidTransition
 	}
-	if err := c.persistLocked(to, c.generation); err != nil {
+	if err := c.persistLocked(to, c.generation, c.wakeDeadline); err != nil {
 		return err
 	}
 	c.state = to
 	return nil
 }
 
-func (c *Controller) persistLocked(next State, generation uint64) error {
+func (c *Controller) persistLocked(next State, generation uint64, wakeDeadline time.Time) error {
 	if c.store == nil {
 		return nil
 	}
-	return c.store.CompareAndSwap(StateRecord{State: c.state, Generation: c.generation}, StateRecord{State: next, Generation: generation})
+	return c.store.CompareAndSwap(
+		StateRecord{State: c.state, Generation: c.generation, WakeDeadline: c.wakeDeadline},
+		StateRecord{State: next, Generation: generation, WakeDeadline: wakeDeadline},
+	)
 }
 
 func validState(state State) bool {

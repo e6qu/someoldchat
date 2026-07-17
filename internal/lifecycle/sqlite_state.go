@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -42,13 +43,39 @@ func (s *SQLiteStateStore) initialize(initial StateRecord) error {
 		`PRAGMA foreign_keys = ON`,
 		`PRAGMA busy_timeout = 5000`,
 		`PRAGMA journal_mode = WAL`,
-		`CREATE TABLE IF NOT EXISTS lifecycle_state (id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS lifecycle_state (id INTEGER PRIMARY KEY CHECK (id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL, wake_deadline TEXT NOT NULL DEFAULT '')`,
 	} {
 		if _, err := s.db.Exec(statement); err != nil {
 			return fmt.Errorf("initialize lifecycle SQLite state store: %w", err)
 		}
 	}
-	_, err := s.db.Exec(`INSERT OR IGNORE INTO lifecycle_state(id, state, generation) VALUES (1, ?, ?)`, initial.State, initial.Generation)
+	var hasWakeDeadline bool
+	rows, err := s.db.Query(`PRAGMA table_info(lifecycle_state)`)
+	if err != nil {
+		return fmt.Errorf("inspect lifecycle SQLite state store schema: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, dataType string
+		var notNull, primaryKey int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return fmt.Errorf("scan lifecycle SQLite state store schema: %w", err)
+		}
+		if name == "wake_deadline" {
+			hasWakeDeadline = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read lifecycle SQLite state store schema: %w", err)
+	}
+	if !hasWakeDeadline {
+		if _, err := s.db.Exec(`ALTER TABLE lifecycle_state ADD COLUMN wake_deadline TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add lifecycle wake deadline: %w", err)
+		}
+	}
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO lifecycle_state(id, state, generation) VALUES (1, ?, ?)`, initial.State, initial.Generation)
 	return err
 }
 
@@ -65,13 +92,18 @@ func (s *SQLiteStateStore) Load() (StateRecord, error) {
 	}
 	var state string
 	var generation uint64
-	if err := s.db.QueryRow(`SELECT state, generation FROM lifecycle_state WHERE id = 1`).Scan(&state, &generation); err != nil {
+	var wakeDeadline string
+	if err := s.db.QueryRow(`SELECT state, generation, wake_deadline FROM lifecycle_state WHERE id = 1`).Scan(&state, &generation, &wakeDeadline); err != nil {
 		return StateRecord{}, err
 	}
 	if !validState(State(state)) {
 		return StateRecord{}, errors.New("lifecycle SQLite state store contains an invalid state")
 	}
-	return StateRecord{State: State(state), Generation: generation}, nil
+	deadline, err := parseWakeDeadline(wakeDeadline)
+	if err != nil {
+		return StateRecord{}, err
+	}
+	return StateRecord{State: State(state), Generation: generation, WakeDeadline: deadline}, nil
 }
 
 func (s *SQLiteStateStore) CompareAndSwap(expected, next StateRecord) error {
@@ -81,7 +113,7 @@ func (s *SQLiteStateStore) CompareAndSwap(expected, next StateRecord) error {
 	if !validState(expected.State) || !validState(next.State) {
 		return errors.New("lifecycle state compare-and-swap contains an invalid state")
 	}
-	result, err := s.db.Exec(`UPDATE lifecycle_state SET state = ?, generation = ? WHERE id = 1 AND state = ? AND generation = ?`, next.State, next.Generation, expected.State, expected.Generation)
+	result, err := s.db.Exec(`UPDATE lifecycle_state SET state = ?, generation = ?, wake_deadline = ? WHERE id = 1 AND state = ? AND generation = ? AND wake_deadline = ?`, next.State, next.Generation, formatWakeDeadline(next.WakeDeadline), expected.State, expected.Generation, formatWakeDeadline(expected.WakeDeadline))
 	if err != nil {
 		return err
 	}
@@ -93,4 +125,22 @@ func (s *SQLiteStateStore) CompareAndSwap(expected, next StateRecord) error {
 		return ErrStateConflict
 	}
 	return nil
+}
+
+func formatWakeDeadline(deadline time.Time) string {
+	if deadline.IsZero() {
+		return ""
+	}
+	return deadline.UTC().Format(time.RFC3339Nano)
+}
+
+func parseWakeDeadline(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode lifecycle wake deadline: %w", err)
+	}
+	return deadline, nil
 }

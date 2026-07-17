@@ -42,7 +42,7 @@ func TestStaticAuthenticatorRejectsWrongToken(t *testing.T) {
 
 func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	store := memory.New()
-	store.SeedToken("token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{string(ScopeChannelsHistory)}})
+	store.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{string(ScopeChannelsHistory)}})
 	authenticator, err := NewStored(store)
 	if err != nil {
 		t.Fatal(err)

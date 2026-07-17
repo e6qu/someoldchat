@@ -535,6 +535,38 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	}
 }
 
+func TestSQLiteEarliestScheduledMessage(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:scheduled-deadline?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, seed := range []func() error{
+		func() error { return s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}) },
+		func() error { return s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}) },
+		func() error { return s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1"}) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := time.Now().UTC().Add(2 * time.Hour).Truncate(time.Second)
+	second := first.Add(time.Hour)
+	for _, value := range []domain.ScheduledMessage{
+		{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "first", PostAt: first, CreatedAt: first},
+		{WorkspaceID: "T1", ID: "Q2", Channel: "C1", Author: "U1", Text: "second", PostAt: second, CreatedAt: second},
+	} {
+		if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: domain.EventID("event-" + string(value.ID)), WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(value.ID), CreatedAt: value.CreatedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.EarliestScheduledMessage(ctx, "T1")
+	if err != nil || !got.Equal(first) {
+		t.Fatalf("deadline=%s err=%v, want %s", got, err, first)
+	}
+}
+
 func TestSQLiteScheduledMessagePaginationContinues(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:scheduled-pagination?mode=memory&cache=shared")
@@ -1320,6 +1352,10 @@ func TestSQLiteLifecycleStatePersistsAndFences(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	deadline := time.Date(2026, time.July, 17, 5, 0, 0, 123, time.UTC)
+	if err := first.SetWakeDeadline(fence, deadline); err != nil {
+		t.Fatal(err)
+	}
 	secondStore, err := Open(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
@@ -1334,11 +1370,81 @@ func TestSQLiteLifecycleStatePersistsAndFences(t *testing.T) {
 	if state != lifecycle.StateWaking || generation != fence {
 		t.Fatalf("state=%s generation=%d", state, generation)
 	}
+	metadata := second.Metadata()
+	if !metadata.WakeDeadline.Equal(deadline) {
+		t.Fatalf("wake deadline=%s, want %s", metadata.WakeDeadline, deadline)
+	}
 	if err := second.Activate(fence); err != nil {
 		t.Fatal(err)
 	}
 	if err := first.Activate(fence); !errors.Is(err, lifecycle.ErrStateConflict) {
 		t.Fatalf("stale controller error=%v", err)
+	}
+}
+
+func TestSQLiteStaleGenerationCannotBeginHibernate(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "stale-hibernate.db")
+	firstStore, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstStore.Close()
+	first, err := lifecycle.NewPersistent(firstStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wakeFence, err := first.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Activate(wakeFence); err != nil {
+		t.Fatal(err)
+	}
+	secondStore, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondStore.Close()
+	second, err := lifecycle.NewPersistent(secondStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.BeginHibernate(wakeFence); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := second.BeginHibernate(wakeFence); !errors.Is(err, lifecycle.ErrStateConflict) {
+		t.Fatalf("stale hibernate error=%v, want state conflict", err)
+	}
+}
+
+func TestSQLiteLifecycleWakeDeadlineMigration(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "legacy-lifecycle.db")
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL); CREATE TABLE lifecycle_state (id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL); INSERT INTO schema_migrations(version, applied_at) VALUES (56, 'legacy'); INSERT INTO lifecycle_state(id, state, generation) VALUES (1, 'hibernated', 7)`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	controller, err := lifecycle.NewPersistent(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := controller.Metadata()
+	if metadata.State != lifecycle.StateHibernated || metadata.Generation != 7 || !metadata.WakeDeadline.IsZero() {
+		t.Fatalf("metadata=%+v, want legacy state without deadline", metadata)
 	}
 }
 
