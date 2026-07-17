@@ -58,7 +58,7 @@ type Config struct {
 
 func ParseCluster(value string) ([]string, error) {
 	if value == "" {
-		return nil, nil
+		return []string{}, nil
 	}
 	parts := strings.Split(value, ",")
 	cluster := make([]string, 0, len(parts))
@@ -132,55 +132,49 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	if config.Backend == BackendSQLite || config.Backend == BackendDqlite {
 		selected, ok := chatStore.(bootstrapStore)
 		if !ok {
-			_ = closer.Close()
-			return Runtime{}, errors.New("selected SQL store does not support bootstrap")
+			return Runtime{}, closeAfterOpen(closer, errors.New("selected SQL store does not support bootstrap"))
 		}
 		if err := bootstrap(ctx, selected); err != nil {
-			_ = closer.Close()
-			return Runtime{}, err
+			return Runtime{}, closeAfterOpen(closer, err)
 		}
 	}
 	tokenStore, ok := chatStore.(auth.TokenStore)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support token lookup")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support token lookup"))
 	}
 	tokenSeeder, ok := chatStore.(TokenSeeder)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support token seeding")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support token seeding"))
 	}
 	sessionStore, ok := chatStore.(auth.SessionStore)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support session lookup")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support session lookup"))
 	}
 	sessionRevoker, ok := chatStore.(auth.SessionRevoker)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support session revocation")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support session revocation"))
 	}
 	sessionSeeder, ok := chatStore.(SessionSeeder)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support session seeding")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support session seeding"))
 	}
 	outboxSource, ok := chatStore.(outbox.Source)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support outbox delivery")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support outbox delivery"))
 	}
 	cleanupSource, ok := chatStore.(blob.CleanupSource)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support blob cleanup")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support blob cleanup"))
 	}
 	scheduledSource, ok := chatStore.(scheduler.Source)
 	if !ok {
-		_ = closer.Close()
-		return Runtime{}, errors.New("selected store does not support scheduled message execution")
+		return Runtime{}, closeAfterOpen(closer, errors.New("selected store does not support scheduled message execution"))
 	}
 	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore), Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, BlobStore: blobStore}, nil
+}
+
+func closeAfterOpen(closer io.Closer, cause error) error {
+	return errors.Join(cause, closer.Close())
 }
 
 func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {

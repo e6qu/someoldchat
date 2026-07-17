@@ -1,16 +1,24 @@
 package main
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/app/localchat"
+	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
+
+type failingAuthenticator struct{}
+
+func (failingAuthenticator) Authenticate(*http.Request) (auth.Principal, error) {
+	return auth.Principal{}, errors.New("session store unavailable")
+}
 
 func TestHealthz(t *testing.T) {
 	mux := http.NewServeMux()
@@ -27,6 +35,52 @@ func TestHealthz(t *testing.T) {
 	}
 	if got := res.Body.String(); got != "ok\n" {
 		t.Fatalf("body = %q, want %q", got, "ok\\n")
+	}
+}
+
+func TestRootRedirectsAuthenticatedUsersToApp(t *testing.T) {
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	result := httptest.NewRecorder()
+	rootHandler(authenticator, true).ServeHTTP(result, request)
+	if result.Code != http.StatusFound || result.Header().Get("Location") != "/app" {
+		t.Fatalf("status=%d location=%q", result.Code, result.Header().Get("Location"))
+	}
+}
+
+func TestRootRedirectsUnauthenticatedUsersToLoginWhenEnabled(t *testing.T) {
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := httptest.NewRecorder()
+	rootHandler(authenticator, true).ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/", nil))
+	if result.Code != http.StatusFound || result.Header().Get("Location") != "/login" {
+		t.Fatalf("status=%d location=%q", result.Code, result.Header().Get("Location"))
+	}
+}
+
+func TestRootReturnsServiceUnavailableForAuthenticationBackendFailure(t *testing.T) {
+	result := httptest.NewRecorder()
+	rootHandler(failingAuthenticator{}, true).ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/", nil))
+	if result.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want %d", result.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestRootRedirectsToAppWhenExternalLoginIsDisabled(t *testing.T) {
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := httptest.NewRecorder()
+	rootHandler(authenticator, false).ServeHTTP(result, httptest.NewRequest(http.MethodGet, "/", nil))
+	if result.Code != http.StatusFound || result.Header().Get("Location") != "/app" {
+		t.Fatalf("status=%d location=%q", result.Code, result.Header().Get("Location"))
 	}
 }
 

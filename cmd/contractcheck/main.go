@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -148,6 +149,9 @@ func verify() error {
 	if err := verifyHandlerRegistrations(implementedMethods, seenMethods); err != nil {
 		return err
 	}
+	if err := verifyQualificationReferences(compatibility.Operations); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -219,12 +223,65 @@ func printReport() error {
 }
 
 func verifyHandlerRegistrations(implementedMethods, ledgerMethods map[string]struct{}) error {
-	file, err := parser.ParseFile(token.NewFileSet(), "internal/api/slack/handler.go", nil, 0)
+	registered, err := registeredHandlerMethods("internal/api/slack/handler.go")
 	if err != nil {
-		return fmt.Errorf("parse Slack handler: %w", err)
+		return err
 	}
-	registered := make(map[string]struct{})
+	for method := range registered {
+		if _, ok := ledgerMethods[method]; !ok {
+			return fmt.Errorf("registered Slack handler %q is absent from compatibility ledger", method)
+		}
+	}
+	for method := range implementedMethods {
+		if _, ok := registered[method]; !ok {
+			return fmt.Errorf("compatibility ledger operation %q has no registered Slack handler", method)
+		}
+	}
+	return nil
+}
+
+func verifyQualificationReferences(operations []operation) error {
+	var sources strings.Builder
+	if err := filepath.WalkDir("tests/official-sdk-qualification", func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || strings.HasSuffix(entry.Name(), ".lock") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		sources.Write(body)
+		return nil
+	}); err != nil {
+		return fmt.Errorf("read official qualification sources: %w", err)
+	}
+	text := sources.String()
+	for _, item := range operations {
+		if item.Status == "unimplemented" {
+			continue
+		}
+		if !strings.Contains(text, item.Method) {
+			return fmt.Errorf("qualified operation %q has no official qualification reference", item.Method)
+		}
+	}
+	return nil
+}
+
+func registeredHandlerMethods(path string) (map[string]struct{}, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		return nil, fmt.Errorf("parse Slack handler: %w", err)
+	}
+	registeredRoutes := make(map[string]struct{})
+	registeredMethods := make(map[string]struct{})
+	var registrationErr error
 	ast.Inspect(file, func(node ast.Node) bool {
+		if registrationErr != nil {
+			return false
+		}
 		call, ok := node.(*ast.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
@@ -237,29 +294,27 @@ func verifyHandlerRegistrations(implementedMethods, ledgerMethods map[string]str
 		if !ok || literal.Kind != token.STRING {
 			return true
 		}
-		route, err := strconv.Unquote(literal.Value)
-		if err != nil {
+		route, unquoteErr := strconv.Unquote(literal.Value)
+		if unquoteErr != nil {
 			return true
 		}
 		parts := strings.Fields(route)
 		if len(parts) != 2 || !strings.HasPrefix(parts[1], "/api/") {
 			return true
 		}
+		if _, exists := registeredRoutes[route]; exists {
+			registrationErr = fmt.Errorf("duplicate Slack handler registration %q", route)
+			return false
+		}
+		registeredRoutes[route] = struct{}{}
 		method := strings.TrimPrefix(parts[1], "/api/")
 		if !strings.Contains(method, "{") {
-			registered[method] = struct{}{}
+			registeredMethods[method] = struct{}{}
 		}
 		return true
 	})
-	for method := range registered {
-		if _, ok := ledgerMethods[method]; !ok {
-			return fmt.Errorf("registered Slack handler %q is absent from compatibility ledger", method)
-		}
+	if registrationErr != nil {
+		return nil, registrationErr
 	}
-	for method := range implementedMethods {
-		if _, ok := registered[method]; !ok {
-			return fmt.Errorf("compatibility ledger operation %q has no registered Slack handler", method)
-		}
-	}
-	return nil
+	return registeredMethods, nil
 }

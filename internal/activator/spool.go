@@ -21,6 +21,7 @@ type Spool interface {
 	Enqueue(context.Context, *http.Request, []byte) (uint64, error)
 	List(context.Context, int) ([]SpooledRequest, error)
 	Claim(context.Context, string, int, time.Duration) ([]SpooledRequest, error)
+	Renew(context.Context, string, uint64, time.Duration) error
 	Delete(context.Context, string, uint64) error
 }
 
@@ -66,22 +67,24 @@ func OpenSQLiteSpool(dsn string, key []byte, limits SpoolLimits) (*SQLiteSpool, 
 	}
 	spool := &SQLiteSpool{db: db, cipher: sealed, limits: limits}
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS activator_request_spool (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, payload BLOB NOT NULL, body_bytes INTEGER NOT NULL DEFAULT 0, lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '')`); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("initialize SQLite request spool: %w", err)
+		return nil, errors.Join(fmt.Errorf("initialize SQLite request spool: %w", err), db.Close())
 	}
 	if err := spool.migrateLeases(context.Background()); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("migrate SQLite request spool leases: %w", err)
+		return nil, errors.Join(fmt.Errorf("migrate SQLite request spool leases: %w", err), db.Close())
 	}
 	return spool, nil
 }
 
-func (s *SQLiteSpool) migrateLeases(ctx context.Context) error {
+func (s *SQLiteSpool) migrateLeases(ctx context.Context) (err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
 	rows, err := tx.QueryContext(ctx, `PRAGMA table_info(activator_request_spool)`)
 	if err != nil {
 		return err
@@ -92,14 +95,12 @@ func (s *SQLiteSpool) migrateLeases(ctx context.Context) error {
 		var name, columnType string
 		var defaultValue any
 		if err := rows.Scan(&index, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		columns[name] = true
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
+		return errors.Join(err, rows.Close())
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -123,31 +124,25 @@ func (s *SQLiteSpool) migrateLeases(ctx context.Context) error {
 		var id uint64
 		var sealed []byte
 		if err := rows.Scan(&id, &sealed); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		payload, err := s.open(sealed)
 		if err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		var request SpooledRequest
 		if err := json.Unmarshal(payload, &request); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 		if int64(len(request.Body)) > s.limits.MaxBodyBytes {
-			_ = rows.Close()
-			return errors.New("existing spooled request exceeds body limit")
+			return errors.Join(errors.New("existing spooled request exceeds body limit"), rows.Close())
 		}
 		if _, err := tx.ExecContext(ctx, `UPDATE activator_request_spool SET body_bytes = ? WHERE id = ?`, len(request.Body), id); err != nil {
-			_ = rows.Close()
-			return err
+			return errors.Join(err, rows.Close())
 		}
 	}
 	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return err
+		return errors.Join(err, rows.Close())
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -155,7 +150,7 @@ func (s *SQLiteSpool) migrateLeases(ctx context.Context) error {
 	return tx.Commit()
 }
 
-func (s *SQLiteSpool) Claim(ctx context.Context, owner string, limit int, lease time.Duration) ([]SpooledRequest, error) {
+func (s *SQLiteSpool) Claim(ctx context.Context, owner string, limit int, lease time.Duration) (requests []SpooledRequest, err error) {
 	if s == nil || s.db == nil || s.cipher == nil {
 		return nil, errors.New("request spool is not initialized")
 	}
@@ -170,7 +165,11 @@ func (s *SQLiteSpool) Claim(ctx context.Context, owner string, limit int, lease 
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `UPDATE activator_request_spool SET lease_owner = ?, lease_until = ? WHERE id IN (SELECT id FROM activator_request_spool WHERE lease_until = '' OR lease_until <= ? ORDER BY id LIMIT ?)`, owner, leaseValue, nowValue, limit); err != nil {
 		return nil, err
 	}
@@ -178,7 +177,7 @@ func (s *SQLiteSpool) Claim(ctx context.Context, owner string, limit int, lease 
 	if err != nil {
 		return nil, err
 	}
-	requests, err := s.decodeRows(rows)
+	requests, err = s.decodeRows(rows)
 	if closeErr := rows.Close(); err == nil {
 		err = closeErr
 	}
@@ -198,7 +197,7 @@ func (s *SQLiteSpool) Close() error {
 	return s.db.Close()
 }
 
-func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body []byte) (uint64, error) {
+func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body []byte) (id uint64, err error) {
 	if s == nil || s.db == nil || s.cipher == nil {
 		return 0, errors.New("request spool is not initialized")
 	}
@@ -220,7 +219,11 @@ func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body [
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			err = errors.Join(err, rollbackErr)
+		}
+	}()
 	var queuedRequests int
 	var queuedBytes int64
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*), COALESCE(SUM(body_bytes), 0) FROM activator_request_spool`).Scan(&queuedRequests, &queuedBytes); err != nil {
@@ -236,14 +239,14 @@ func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body [
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	id, err := result.LastInsertId()
+	lastID, err := result.LastInsertId()
 	if err != nil {
 		return 0, err
 	}
-	if id <= 0 {
+	if lastID <= 0 {
 		return 0, errors.New("request spool did not allocate an ID")
 	}
-	return uint64(id), nil
+	return uint64(lastID), nil
 }
 
 func (s *SQLiteSpool) List(ctx context.Context, limit int) ([]SpooledRequest, error) {
@@ -257,7 +260,6 @@ func (s *SQLiteSpool) List(ctx context.Context, limit int) ([]SpooledRequest, er
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	result, err := s.decodeRows(rows)
 	if closeErr := rows.Close(); err == nil {
 		err = closeErr
@@ -273,6 +275,28 @@ func (s *SQLiteSpool) Delete(ctx context.Context, owner string, id uint64) error
 		return errors.New("request spool delete requires an owner")
 	}
 	result, err := s.db.ExecContext(ctx, `DELETE FROM activator_request_spool WHERE id = ? AND lease_owner = ?`, id, owner)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (s *SQLiteSpool) Renew(ctx context.Context, owner string, id uint64, lease time.Duration) error {
+	if s == nil || s.db == nil {
+		return errors.New("request spool is not initialized")
+	}
+	if strings.TrimSpace(owner) == "" || id == 0 || lease <= 0 {
+		return errors.New("request spool renewal requires an owner, ID, and positive lease")
+	}
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE activator_request_spool SET lease_until = ? WHERE id = ? AND lease_owner = ? AND lease_until > ?`, now.Add(lease).Format(time.RFC3339Nano), id, owner, now.Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}

@@ -3,11 +3,13 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 type Scope string
@@ -127,7 +129,13 @@ func (b Browser) Authenticate(r *http.Request) (Principal, error) {
 		return Principal{}, ErrNotAuthenticated
 	}
 	record, err := b.store.LookupSession(r.Context(), cookie.Value)
-	if err != nil || record.Revoked || !record.ExpiresAt.After(time.Now().UTC()) || record.WorkspaceID == "" || record.UserID == "" {
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return Principal{}, ErrNotAuthenticated
+		}
+		return Principal{}, fmt.Errorf("lookup browser session: %w", err)
+	}
+	if record.Revoked || !record.ExpiresAt.After(time.Now().UTC()) || record.WorkspaceID == "" || record.UserID == "" {
 		return Principal{}, ErrNotAuthenticated
 	}
 	scopes := make(map[Scope]struct{}, len(record.Scopes))
@@ -155,7 +163,13 @@ func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 		token = strings.TrimSpace(r.FormValue("token"))
 	}
 	record, err := s.store.LookupToken(r.Context(), token)
-	if err != nil || record.Revoked || record.WorkspaceID == "" || record.UserID == "" {
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return Principal{}, ErrNotAuthenticated
+		}
+		return Principal{}, fmt.Errorf("lookup access token: %w", err)
+	}
+	if record.Revoked || record.WorkspaceID == "" || record.UserID == "" {
 		return Principal{}, ErrNotAuthenticated
 	}
 	scopes := make(map[Scope]struct{}, len(record.Scopes))

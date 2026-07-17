@@ -27,6 +27,11 @@ module "chat" {
 }
 ```
 
+The module pins Terraform `1.15.8`, the Amazon Web Services provider `6.55.0`,
+and the archive provider `2.8.0`. The committed `.terraform.lock.hcl` records
+the provider package hashes. Run Terraform `1.15.8` with the lock file in
+read-only mode when validating or deploying this module.
+
 There is deliberately no Application Load Balancer and no Elastic Container
 Service managing the application task count. The task definition is launched
 directly so the zero-task state is real. The activator is the always-available
@@ -43,7 +48,13 @@ component.
 
 The module is HTTP-only. It does not pretend that an already-established WebSocket can be transferred between processes. Use a dedicated WebSocket gateway/activator when that transport is required.
 
-The image should be immutable (prefer a digest), contain `/readyz`, and start the server without migrations or other work that is not required for serving requests. `application_task_role_arn` is deliberately required: the application’s AWS permissions must be explicit.
+The image reference must include an immutable SHA-256 digest, contain `/readyz`, and start the server without migrations or other work that is not required for serving requests. `application_task_role_arn` is deliberately required: the application’s AWS permissions must be explicit.
+
+The module scopes its HTTP activator to tasks started with the module-specific
+ECS `startedBy` value. It lists and stops only those tasks, so manually started
+tasks in the same cluster are not treated as scale-to-zero tasks. The module
+name is validated so the derived value remains within the ECS 128-character
+limit and uses characters accepted by the ECS API.
 
 `alarm_topic_arn` is required and receives alarms for activator errors and
 loss of all healthy WebSocket edge targets. The module also creates a
@@ -63,7 +74,7 @@ client → NLB TLS listener → websocket-edge ECS service (always on)
 
 `websocket_edge_image` must contain `cmd/ecs-ws-activator`; the repository includes `Dockerfile.websocket-edge`, built from the repository root with `docker build -f deploy/ecs-scale-zero/Dockerfile.websocket-edge .`. The edge accepts the upgrade, raises the application ECS service desired count, waits for `/readyz`, performs the backend WebSocket handshake, and proxies messages in both directions. When the last connection closes, it sets the application service desired count back to zero. The application service has `ignore_changes = [desired_count]` so Terraform does not undo runtime wake/sleep decisions.
 
-The edge service cannot scale to zero while retaining an open public socket. It is the deliberately small always-on control-plane component; only the WebSocket application service scales to zero. The NLB is also always-on and does cost money through hourly and usage-based NLB/LCU charges, even while the application service has no tasks; see [AWS Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/). Set `websocket_nlb_internal = true` for private clients.
+The edge service cannot scale to zero while retaining an open public socket. It is the deliberately small always-on control-plane component; only the WebSocket application service scales to zero. Each open socket holds a DynamoDB lease that the edge renews periodically; a renewal failure closes that proxy before the lease can expire, so the scale-down path does not terminate an active connection. The NLB is also always-on and does cost money through hourly and usage-based NLB/LCU charges, even while the application service has no tasks; see [AWS Elastic Load Balancing pricing](https://aws.amazon.com/elasticloadbalancing/pricing/). Set `websocket_nlb_internal = true` for private clients.
 
 The role supplied through `websocket_edge_task_role_arn` must allow the edge to
 read and update only the configured WebSocket application service, list and

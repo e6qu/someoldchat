@@ -106,7 +106,7 @@ func newHTTPDeliveryWithClient(target string, client httpDoer) (outbox.Delivery,
 	if client == nil {
 		return nil, errors.New("delivery HTTP client is required")
 	}
-	return func(ctx context.Context, record events.Record) error {
+	return func(ctx context.Context, record events.Record) (returnErr error) {
 		body, err := json.Marshal(record)
 		if err != nil {
 			return err
@@ -121,7 +121,9 @@ func newHTTPDeliveryWithClient(target string, client httpDoer) (outbox.Delivery,
 		if err != nil {
 			return err
 		}
-		defer response.Body.Close()
+		defer func() {
+			returnErr = errors.Join(returnErr, response.Body.Close())
+		}()
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			return fmt.Errorf("delivery returned HTTP %d", response.StatusCode)
 		}

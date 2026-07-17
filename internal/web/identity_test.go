@@ -33,6 +33,25 @@ func TestNewLoginHandlerAcceptsSupportedAuthorizationProviders(t *testing.T) {
 	}
 }
 
+func TestLoginPageSupportsThemeSelection(t *testing.T) {
+	handler, err := NewLoginHandler(service.Messages{Store: memory.New()}, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "google", ClientID: "id", ClientSecret: "secret", AuthorizeURL: "https://provider.test/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/login", nil))
+	body := response.Body.String()
+	for _, required := range []string{`data-theme="light"`, `id="theme-toggle"`, "localStorage", "data-theme=dark", "Continue with Google"} {
+		if !strings.Contains(body, required) {
+			t.Fatalf("login page missing %q: %s", required, body)
+		}
+	}
+}
+
 func TestNewLoginHandlerRejectsUnsupportedOrIncompleteProviders(t *testing.T) {
 	service := service.Messages{Store: memory.New()}
 	base := func(provider ProviderConfig) error {
@@ -57,11 +76,30 @@ func TestNewLoginHandlerRejectsUnsupportedOrIncompleteProviders(t *testing.T) {
 	}
 }
 
+func TestNewLoginHandlerRejectsInsecureOrMalformedURLs(t *testing.T) {
+	service := service.Messages{Store: memory.New()}
+	provider := ProviderConfig{Name: "google", ClientID: "id", ClientSecret: "secret", AuthorizeURL: "https://provider.test/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid"}}
+	if _, err := NewLoginHandler(service, "T1", "U1", "http://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{provider}); err == nil {
+		t.Fatal("insecure public URL was accepted")
+	}
+	provider.TokenURL = "http://provider.test/token"
+	if _, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{provider}); err == nil {
+		t.Fatal("insecure token endpoint was accepted")
+	}
+	provider.TokenURL = "https://provider.test/token"
+	if _, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test/login?next=/app", []byte(strings.Repeat("k", 32)), []ProviderConfig{provider}); err == nil {
+		t.Fatal("public URL with a query was accepted")
+	}
+}
+
 func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
 	service := service.Messages{Store: store}
+	if err := service.SetAuthMethod(context.Background(), domain.AuthMethod{WorkspaceID: "T1", Provider: "google", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
 	providerClient := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/token":
@@ -70,7 +108,7 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer provider-token" {
 				return providerResponse(r, "missing token"), nil
 			}
-			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","name":"Alice"}`), nil
+			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","email_verified":true,"name":"Alice"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -126,6 +164,21 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 	identity, err := store.GetExternalIdentity(context.Background(), "T1", "google", "google-subject")
 	if err != nil || identity.UserID != "U1" {
 		t.Fatalf("identity=%+v err=%v", identity, err)
+	}
+}
+
+func TestGoogleUserInfoRejectsUnverifiedEmail(t *testing.T) {
+	handler, err := NewLoginHandler(service.Messages{Store: memory.New()}, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "google", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://provider.test/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","email_verified":false}`), nil
+	})}
+	if _, err := handler.userInfo(context.Background(), handler.providers["google"], "provider-token", "google"); err == nil || !strings.Contains(err.Error(), "not verified") {
+		t.Fatalf("userInfo error=%v, want unverified email error", err)
 	}
 }
 

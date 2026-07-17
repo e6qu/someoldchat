@@ -67,3 +67,12 @@ func TestRTMEventEncodingIsJSONProtocol(t *testing.T) {
 		t.Fatalf("event=%s", payload)
 	}
 }
+
+func TestRTMEventEncodingRejectsMalformedPayload(t *testing.T) {
+	if _, err := encodeRTMEvent(events.Record{Event: events.Event{Topic: "message.created", Payload: "not-json"}}); err == nil {
+		t.Fatal("expected malformed RTM payload to fail")
+	}
+	if _, err := encodeRTMEvent(events.Record{Event: events.Event{Topic: "message.created", Payload: "null"}}); err == nil {
+		t.Fatal("expected non-object RTM payload to fail")
+	}
+}

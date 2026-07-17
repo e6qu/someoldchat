@@ -27,6 +27,22 @@ func TestPostMessageRejectsForeignUser(t *testing.T) {
 	}
 }
 
+func TestWorkspaceLookupErrorOnlyHidesMissingOrForeignObjects(t *testing.T) {
+	dependencyErr := errors.New("database unavailable")
+	if got := workspaceLookupError(dependencyErr, "", "T1"); !errors.Is(got, dependencyErr) {
+		t.Fatalf("dependency error = %v, want %v", got, dependencyErr)
+	}
+	if got := workspaceLookupError(nil, "T2", "T1"); !errors.Is(got, store.ErrNotFound) {
+		t.Fatalf("foreign object error = %v, want %v", got, store.ErrNotFound)
+	}
+	if got := workspaceLookupError(store.ErrNotFound, "", "T1"); !errors.Is(got, store.ErrNotFound) {
+		t.Fatalf("missing object error = %v, want %v", got, store.ErrNotFound)
+	}
+	if got := workspaceLookupError(nil, "T1", "T1"); got != nil {
+		t.Fatalf("matching object error = %v, want nil", got)
+	}
+}
+
 func TestOAuthExchangeConsumesAuthorizationCode(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
@@ -98,8 +114,15 @@ func TestAuthMethodEnablementIsDurable(t *testing.T) {
 	ctx := context.Background()
 	service := Messages{Store: s}
 	method, err := service.GetAuthMethod(ctx, "T1", "Google")
+	if err != nil || method.Enabled {
+		t.Fatalf("unset auth method=%+v err=%v", method, err)
+	}
+	if err := service.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1", Provider: "Google", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	method, err = service.GetAuthMethod(ctx, "T1", "google")
 	if err != nil || !method.Enabled {
-		t.Fatalf("default auth method=%+v err=%v", method, err)
+		t.Fatalf("enabled auth method=%+v err=%v", method, err)
 	}
 	if err := service.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: "T1", Provider: "GitHub", Enabled: false}); err != nil {
 		t.Fatal(err)

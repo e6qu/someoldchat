@@ -29,8 +29,8 @@ The product MUST support:
 - Basic navigation and message submission MUST remain usable without client
   JavaScript, excluding live-update behavior.
 - Custom JavaScript MUST be limited to behavior not reasonably supplied by
-  HTML and HTMX, such as keyboard shortcuts, focus, composer state, and robust
-  reconnection.
+  HTML and HTMX, such as keyboard shortcuts, focus, composer state, and
+  bounded reconnection.
 - Live updates MUST be replayable after disconnection.
 - Browser surfaces MUST satisfy keyboard and accessibility tests.
 

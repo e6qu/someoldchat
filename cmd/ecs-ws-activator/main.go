@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
-	"hash/fnv"
+	"iter"
 	"log/slog"
 	"net/http"
 	"os"
@@ -46,6 +48,8 @@ type endpoint struct {
 }
 
 const scaleDownLock = "scale-down"
+
+const websocketLeaseRenewalInterval = 5 * time.Minute
 
 func main() {
 	listen := flag.String("listen", "", "HTTP listen address behind the TLS-terminating NLB (required)")
@@ -103,11 +107,20 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "websocket upgrade required", http.StatusBadRequest)
 		return
 	}
-	lease := "ws:" + randomID(r)
+	leaseID, err := randomID()
+	if err != nil {
+		a.fail(w, fmt.Errorf("create websocket lease ID: %w", err))
+		return
+	}
+	lease := "ws:" + leaseID
 	if err := a.acquireLease(r.Context(), lease); err != nil {
 		a.fail(w, err)
 		return
 	}
+	leaseContext, cancelLease := context.WithCancel(context.Background())
+	defer cancelLease()
+	leaseFailures := make(chan error, 1)
+	go a.renewLeaseLoop(leaseContext, lease, leaseFailures)
 	defer func() {
 		if err := a.releaseLease(context.Background(), lease); err != nil {
 			a.logger.Error("release websocket lease failed", "error", err, "lease", lease)
@@ -130,10 +143,19 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 	backendHeaders.Del("Sec-WebSocket-Extensions")
 	backendConn, response, err := (&websocket.Dialer{HandshakeTimeout: 5 * time.Second}).DialContext(r.Context(), backendURL, backendHeaders)
 	if err != nil {
+		if response != nil && response.Body != nil {
+			if closeErr := response.Body.Close(); closeErr != nil {
+				err = errors.Join(err, fmt.Errorf("close failed websocket handshake response: %w", closeErr))
+			}
+		}
 		a.fail(w, fmt.Errorf("connect application websocket: %w", err))
 		return
 	}
-	defer backendConn.Close()
+	defer func() {
+		if closeErr := backendConn.Close(); closeErr != nil {
+			a.logger.Error("close application websocket failed", "error", closeErr)
+		}
+	}()
 	clientHeaders := http.Header{}
 	if protocol := response.Header.Get("Sec-WebSocket-Protocol"); protocol != "" {
 		clientHeaders.Set("Sec-WebSocket-Protocol", protocol)
@@ -142,13 +164,28 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer clientConn.Close()
+	defer func() {
+		if closeErr := clientConn.Close(); closeErr != nil {
+			a.logger.Error("close client websocket failed", "error", closeErr)
+		}
+	}()
+	select {
+	case err := <-leaseFailures:
+		a.logger.Error("websocket lease renewal failed", "error", err, "lease", lease)
+		return
+	default:
+	}
 
 	errorsCh := make(chan error, 2)
 	go proxyMessages(errorsCh, clientConn, backendConn)
 	go proxyMessages(errorsCh, backendConn, clientConn)
-	if err := <-errorsCh; err != nil && !isNormalWebSocketClose(err) {
-		a.logger.Info("websocket proxy closed", "error", err)
+	select {
+	case err := <-errorsCh:
+		if err != nil && !isNormalWebSocketClose(err) {
+			a.logger.Info("websocket proxy closed", "error", err)
+		}
+	case err := <-leaseFailures:
+		a.logger.Error("websocket lease renewal failed", "error", err, "lease", lease)
 	}
 }
 
@@ -169,11 +206,15 @@ func (a *activator) readyEndpoint(ctx context.Context) (endpoint, error) {
 			}
 			response, err := http.DefaultClient.Do(request)
 			cancel()
-			if err == nil {
-				_ = response.Body.Close()
-				if response.StatusCode == http.StatusOK {
-					return candidate, nil
-				}
+			if err != nil {
+				continue
+			}
+			status := response.StatusCode
+			if closeErr := response.Body.Close(); closeErr != nil {
+				return endpoint{}, fmt.Errorf("close readiness response: %w", closeErr)
+			}
+			if status == http.StatusOK {
+				return candidate, nil
 			}
 		}
 		if len(endpoints) == 0 && !started {
@@ -182,7 +223,13 @@ func (a *activator) readyEndpoint(ctx context.Context) (endpoint, error) {
 			}
 			started = true
 		}
-		time.Sleep(250 * time.Millisecond)
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return endpoint{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return endpoint{}, fmt.Errorf("websocket application did not become ready within %s", a.startWait)
 }
@@ -202,39 +249,83 @@ func (a *activator) ensureRunning(ctx context.Context) error {
 }
 
 func (a *activator) runningEndpoints(ctx context.Context) ([]endpoint, error) {
-	input := &ecs.ListTasksInput{Cluster: aws.String(a.cluster), ServiceName: aws.String(a.service), DesiredStatus: ecstypes.DesiredStatusRunning, Family: aws.String(a.family)}
-	output, err := a.ecs.ListTasks(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	if len(output.TaskArns) == 0 {
-		return nil, nil
-	}
-	described, err := a.ecs.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String(a.cluster), Tasks: output.TaskArns})
-	if err != nil {
-		return nil, err
-	}
-	endpoints := make([]endpoint, 0, len(described.Tasks))
-	for _, task := range described.Tasks {
-		if task.LastStatus != aws.String("RUNNING") || task.TaskArn == nil {
-			continue
-		}
-		for _, attachment := range task.Attachments {
-			if attachment.Type == nil || *attachment.Type != "ElasticNetworkInterface" {
-				continue
+	paginator := ecs.NewListTasksPaginator(a.ecs, &ecs.ListTasksInput{Cluster: aws.String(a.cluster), ServiceName: aws.String(a.service), DesiredStatus: ecstypes.DesiredStatusRunning, Family: aws.String(a.family)})
+	endpoints := make([]endpoint, 0)
+	var pageErr error
+	taskARNs := func(yield func(string) bool) {
+		for paginator.HasMorePages() {
+			page, err := paginator.NextPage(ctx)
+			if err != nil {
+				pageErr = err
+				return
 			}
-			for _, detail := range attachment.Details {
-				if detail.Name != nil && detail.Value != nil && *detail.Name == "privateIPv4Address" {
-					endpoints = append(endpoints, endpoint{address: *detail.Value, arn: *task.TaskArn})
+			for _, taskARN := range page.TaskArns {
+				if !yield(taskARN) {
+					return
 				}
 			}
 		}
 	}
+	var describeErr error
+	for batch := range taskARNBatches(taskARNs, 100) {
+		described, err := a.ecs.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String(a.cluster), Tasks: batch})
+		if err != nil {
+			describeErr = err
+			break
+		}
+		for _, task := range described.Tasks {
+			if task.LastStatus != aws.String("RUNNING") || task.TaskArn == nil {
+				continue
+			}
+			for _, attachment := range task.Attachments {
+				if attachment.Type == nil || *attachment.Type != "ElasticNetworkInterface" {
+					continue
+				}
+				for _, detail := range attachment.Details {
+					if detail.Name != nil && detail.Value != nil && *detail.Name == "privateIPv4Address" {
+						endpoints = append(endpoints, endpoint{address: *detail.Value, arn: *task.TaskArn})
+					}
+				}
+			}
+		}
+	}
+	if pageErr != nil {
+		return nil, pageErr
+	}
+	if describeErr != nil {
+		return nil, describeErr
+	}
 	return endpoints, nil
 }
 
+func taskARNBatches(values iter.Seq[string], size int) iter.Seq[[]string] {
+	return func(yield func([]string) bool) {
+		if size <= 0 {
+			return
+		}
+		batch := make([]string, 0, size)
+		for value := range values {
+			batch = append(batch, value)
+			if len(batch) != size {
+				continue
+			}
+			if !yield(append([]string(nil), batch...)) {
+				return
+			}
+			batch = batch[:0]
+		}
+		if len(batch) > 0 {
+			yield(append([]string(nil), batch...))
+		}
+	}
+}
+
 func (a *activator) scaleDownIfIdle(ctx context.Context) error {
-	owner := "scale-down:" + randomID(nil)
+	ownerID, err := randomID()
+	if err != nil {
+		return fmt.Errorf("create scale-down lock owner: %w", err)
+	}
+	owner := "scale-down:" + ownerID
 	acquired, err := a.acquireScaleDownLock(ctx, owner)
 	if err != nil {
 		return err
@@ -264,6 +355,35 @@ func (a *activator) acquireLease(ctx context.Context, lease string) error {
 		{ConditionCheck: &dynamodbtypes.ConditionCheck{TableName: aws.String(a.table), Key: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}}, ConditionExpression: aws.String("attribute_not_exists(id) OR expires < :now"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(now)}}}},
 		{Put: &dynamodbtypes.Put{TableName: aws.String(a.table), Item: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: lease}, "expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(a.startWait + time.Hour).Unix())}}, ConditionExpression: aws.String("attribute_not_exists(id)")}},
 	}})
+	return err
+}
+
+func (a *activator) renewLeaseLoop(ctx context.Context, lease string, failures chan<- error) {
+	timer := time.NewTimer(websocketLeaseRenewalInterval)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			if err := a.renewLease(ctx, lease); err != nil {
+				failures <- fmt.Errorf("renew websocket lease: %w", err)
+				return
+			}
+			timer.Reset(websocketLeaseRenewalInterval)
+		}
+	}
+}
+
+func (a *activator) renewLease(ctx context.Context, lease string) error {
+	_, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:                 aws.String(a.table),
+		Key:                       map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: lease}},
+		UpdateExpression:          aws.String("SET #expires = :expires"),
+		ConditionExpression:       aws.String("attribute_exists(id) AND #expires > :now"),
+		ExpressionAttributeNames:  map[string]string{"#expires": "expires"},
+		ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(time.Hour + a.startWait).Unix())}, ":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Unix())}},
+	})
 	return err
 }
 
@@ -329,14 +449,12 @@ func cloneHeaders(source http.Header) http.Header {
 	return result
 }
 
-func randomID(r *http.Request) string {
-	hash := fnv.New64a()
-	remoteAddress := ""
-	if r != nil {
-		remoteAddress = r.RemoteAddr
+func randomID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", err
 	}
-	_, _ = hash.Write([]byte(remoteAddress + time.Now().UTC().String()))
-	return fmt.Sprintf("%x", hash.Sum64())
+	return hex.EncodeToString(value[:]), nil
 }
 
 func isNormalWebSocketClose(err error) bool {

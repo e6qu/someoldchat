@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,6 +11,18 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
+
+type failingTokenStore struct{ err error }
+
+func (s failingTokenStore) LookupToken(context.Context, string) (domain.TokenRecord, error) {
+	return domain.TokenRecord{}, s.err
+}
+
+type failingSessionStore struct{ err error }
+
+func (s failingSessionStore) LookupSession(context.Context, string) (domain.SessionRecord, error) {
+	return domain.SessionRecord{}, s.err
+}
 
 func TestStaticAuthenticatorReturnsTypedPrincipal(t *testing.T) {
 	principal := Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[Scope]struct{}{ScopeChatWrite: {}}}
@@ -55,6 +68,28 @@ func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	}
 	if !principal.HasScope(ScopeChannelsHistory) || principal.HasScope(ScopeChatWrite) {
 		t.Fatalf("principal = %+v", principal)
+	}
+}
+
+func TestAuthenticatorsPropagateBackendFailures(t *testing.T) {
+	backendErr := errors.New("database unavailable")
+	request := httptest.NewRequest("GET", "/", nil)
+	request.Header.Set("Authorization", "Bearer token")
+	stored, err := NewStored(failingTokenStore{err: backendErr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stored.Authenticate(request); !errors.Is(err, backendErr) {
+		t.Fatalf("stored authentication error = %v, want %v", err, backendErr)
+	}
+	browser, err := NewBrowser(failingSessionStore{err: backendErr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request = httptest.NewRequest("GET", "/", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
+	if _, err := browser.Authenticate(request); !errors.Is(err, backendErr) {
+		t.Fatalf("browser authentication error = %v, want %v", err, backendErr)
 	}
 }
 

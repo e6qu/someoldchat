@@ -33,7 +33,7 @@ type RecoveryNode struct {
 // The caller must stop every node before calling this function. The dqlite
 // binding cannot safely determine whether another process is serving a state
 // directory, so the stopped requirement is explicit at this boundary.
-func RecoverTopology(ctx context.Context, nodes []RecoveryNode) error {
+func RecoverTopology(ctx context.Context, nodes []RecoveryNode) (returnErr error) {
 	if err := validateRecoveryNodes(nodes); err != nil {
 		return err
 	}
@@ -70,7 +70,9 @@ func RecoverTopology(ctx context.Context, nodes []RecoveryNode) error {
 		if cleanupStages {
 			for _, stage := range stages {
 				if stage != "" {
-					_ = os.RemoveAll(stage)
+					if err := os.RemoveAll(stage); err != nil {
+						returnErr = errors.Join(returnErr, fmt.Errorf("remove recovery stage %q: %w", stage, err))
+					}
 				}
 			}
 		}
@@ -196,11 +198,11 @@ func copyRecoveryFile(source, destination string, entry os.DirEntry) error {
 	}
 	info, err := entry.Info()
 	if err != nil {
-		return err
+		return errors.Join(err, input.Close())
 	}
 	output, err := os.OpenFile(destination, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
 	if err != nil {
-		return err
+		return errors.Join(err, input.Close())
 	}
 	_, copyErr := io.Copy(output, input)
 	syncErr := output.Sync()
@@ -230,23 +232,34 @@ func writeRecoveryFile(path string, data []byte) error {
 		return err
 	}
 	temporaryPath := temporary.Name()
-	defer os.Remove(temporaryPath)
+	closed := false
+	cleanup := func(cause error) error {
+		var cleanupErr error
+		if !closed {
+			cleanupErr = temporary.Close()
+			closed = true
+		}
+		cleanupErr = errors.Join(cleanupErr, os.Remove(temporaryPath))
+		return errors.Join(cause, cleanupErr)
+	}
 	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return err
+		return cleanup(err)
 	}
 	if _, err := temporary.Write(data); err != nil {
-		_ = temporary.Close()
-		return err
+		return cleanup(err)
 	}
 	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return err
+		return cleanup(err)
 	}
 	if err := temporary.Close(); err != nil {
-		return err
+		closed = true
+		return errors.Join(err, os.Remove(temporaryPath))
 	}
-	return os.Rename(temporaryPath, path)
+	closed = true
+	if err := os.Rename(temporaryPath, path); err != nil {
+		return errors.Join(err, os.Remove(temporaryPath))
+	}
+	return nil
 }
 
 func syncRecoveryDirectory(path string) error {

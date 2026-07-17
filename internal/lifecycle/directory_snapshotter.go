@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"archive/tar"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -28,7 +29,7 @@ type DirectorySnapshotSourceState uint8
 const DirectorySnapshotSourceStopped DirectorySnapshotSourceState = 1
 
 func NewDirectorySnapshotter(manager SnapshotManager, sourcePath, outputPath string, metadata Manifest, sourceState DirectorySnapshotSourceState) (DirectorySnapshotter, error) {
-	if !filepath.IsAbs(manager.Root) || len(manager.EncryptionKey) != 32 || len(manager.SigningKey) < 32 || strings.TrimSpace(manager.KeyID) == "" {
+	if !manager.configured() {
 		return DirectorySnapshotter{}, errors.New("snapshot manager is not configured")
 	}
 	if sourceState != DirectorySnapshotSourceStopped {
@@ -52,35 +53,49 @@ func (s DirectorySnapshotter) Create(ctx context.Context, generation uint64) (Ma
 	if err := ensureDirectory(s.SourcePath); err != nil {
 		return Manifest{}, err
 	}
-	if err := os.MkdirAll(s.Manager.Root, 0o700); err != nil {
-		return Manifest{}, err
+	temporaryDirectory := os.TempDir()
+	if s.Manager.ObjectStore == nil {
+		if err := os.MkdirAll(s.Manager.Root, 0o700); err != nil {
+			return Manifest{}, err
+		}
+		temporaryDirectory = s.Manager.Root
 	}
-	archiveFile, err := os.CreateTemp(s.Manager.Root, ".directory-snapshot-*")
+	archiveFile, err := os.CreateTemp(temporaryDirectory, ".directory-snapshot-*")
 	if err != nil {
 		return Manifest{}, err
 	}
 	archivePath := archiveFile.Name()
-	defer os.Remove(archivePath)
+	closed := false
+	cleanup := func(cause error) error {
+		var cleanupErr error
+		if !closed {
+			cleanupErr = archiveFile.Close()
+			closed = true
+		}
+		cleanupErr = errors.Join(cleanupErr, os.Remove(archivePath))
+		return errors.Join(cause, cleanupErr)
+	}
 	if err := archiveDirectory(ctx, archiveFile, s.SourcePath); err != nil {
-		_ = archiveFile.Close()
-		return Manifest{}, err
+		return Manifest{}, cleanup(err)
 	}
 	if err := archiveFile.Sync(); err != nil {
-		_ = archiveFile.Close()
-		return Manifest{}, err
+		return Manifest{}, cleanup(err)
 	}
 	if err := archiveFile.Close(); err != nil {
-		return Manifest{}, err
+		closed = true
+		return Manifest{}, errors.Join(err, os.Remove(archivePath))
 	}
-	return s.Manager.Create(archivePath, metadata)
+	closed = true
+	manifest, createErr := s.Manager.Create(ctx, archivePath, metadata)
+	return manifest, errors.Join(createErr, os.Remove(archivePath))
 }
 
-func (s DirectorySnapshotter) Current(_ context.Context, generation uint64) (Manifest, error) {
-	return s.Manager.Current(generation)
+func (s DirectorySnapshotter) Current(ctx context.Context, generation uint64) (Manifest, error) {
+	return s.Manager.Current(ctx, generation)
 }
 
-func (s DirectorySnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (Manifest, error) {
-	return s.Manager.LastVerified(maxGeneration)
+func (s DirectorySnapshotter) LastVerified(ctx context.Context, maxGeneration uint64) (Manifest, error) {
+	return s.Manager.LastVerified(ctx, maxGeneration)
 }
 
 func (s DirectorySnapshotter) Restore(ctx context.Context, manifest Manifest) error {
@@ -101,7 +116,7 @@ func (s DirectorySnapshotter) Restore(ctx context.Context, manifest Manifest) er
 		return err
 	}
 	defer os.Remove(archivePath)
-	if err := s.Manager.Restore(manifest, archivePath); err != nil {
+	if err := s.Manager.Restore(ctx, manifest, archivePath); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -212,12 +227,14 @@ func copyContext(ctx context.Context, destination io.Writer, source io.Reader) (
 	}
 }
 
-func extractDirectory(ctx context.Context, archivePath, destination string, maxBytes int64) error {
+func extractDirectory(ctx context.Context, archivePath, destination string, maxBytes int64) (returnErr error) {
 	input, err := os.Open(archivePath)
 	if err != nil {
 		return err
 	}
-	defer input.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, input.Close())
+	}()
 	reader := tar.NewReader(input)
 	seen := make(map[string]struct{})
 	var expandedBytes int64
@@ -314,6 +331,12 @@ func pathCleanSlash(value string) string {
 }
 
 func replaceDirectory(source, destination string) error {
+	parent := filepath.Dir(destination)
+	journalPath := filepath.Join(parent, "."+filepath.Base(destination)+".swap.json")
+	if err := recoverDirectorySwap(journalPath); err != nil {
+		return err
+	}
+	journal := directorySwapJournal{Source: source, Destination: destination}
 	if info, err := os.Lstat(destination); err == nil {
 		if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 			return fmt.Errorf("snapshot output %q is not a directory", destination)
@@ -324,22 +347,104 @@ func replaceDirectory(source, destination string) error {
 		}
 		backupPath := backup.Name()
 		if err := backup.Close(); err != nil {
-			os.Remove(backupPath)
-			return err
+			return errors.Join(err, os.Remove(backupPath))
 		}
 		if err := os.Remove(backupPath); err != nil {
 			return err
 		}
-		if err := os.Rename(destination, backupPath); err != nil {
-			return err
-		}
-		if err := os.Rename(source, destination); err != nil {
-			restoreErr := os.Rename(backupPath, destination)
-			return errors.Join(err, restoreErr)
-		}
-		return os.RemoveAll(backupPath)
+		journal.Backup = backupPath
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	return os.Rename(source, destination)
+	body, err := json.Marshal(journal)
+	if err != nil {
+		return err
+	}
+	if err := atomicWrite(journalPath, body); err != nil {
+		if journal.Backup != "" {
+			return errors.Join(err, os.Remove(journal.Backup))
+		}
+		return err
+	}
+	if journal.Backup != "" {
+		if err := os.Rename(destination, journal.Backup); err != nil {
+			return errors.Join(err, os.Remove(journalPath))
+		}
+	}
+	if err := os.Rename(source, destination); err != nil {
+		var restoreErr error
+		if journal.Backup != "" {
+			restoreErr = os.Rename(journal.Backup, destination)
+		}
+		return errors.Join(err, restoreErr, os.Remove(journalPath))
+	}
+	if journal.Backup != "" {
+		if err := os.RemoveAll(journal.Backup); err != nil {
+			return err
+		}
+	}
+	return os.Remove(journalPath)
+}
+
+type directorySwapJournal struct {
+	Source      string `json:"source"`
+	Destination string `json:"destination"`
+	Backup      string `json:"backup"`
+}
+
+func recoverDirectorySwap(journalPath string) error {
+	body, err := readRegularFile(journalPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read directory swap journal: %w", err)
+	}
+	var journal directorySwapJournal
+	if err := json.Unmarshal(body, &journal); err != nil {
+		return fmt.Errorf("decode directory swap journal: %w", err)
+	}
+	if !filepath.IsAbs(journal.Source) || !filepath.IsAbs(journal.Destination) || (journal.Backup != "" && !filepath.IsAbs(journal.Backup)) {
+		return errors.New("directory swap journal contains relative paths")
+	}
+	journalParent := filepath.Dir(journalPath)
+	if filepath.Dir(journal.Source) != journalParent || filepath.Dir(journal.Destination) != journalParent || (journal.Backup != "" && filepath.Dir(journal.Backup) != journalParent) {
+		return errors.New("directory swap journal escapes its parent directory")
+	}
+	destinationExists, err := pathExists(journal.Destination)
+	if err != nil {
+		return err
+	}
+	backupExists := false
+	if journal.Backup != "" {
+		backupExists, err = pathExists(journal.Backup)
+		if err != nil {
+			return err
+		}
+	}
+	sourceExists, err := pathExists(journal.Source)
+	if err != nil {
+		return err
+	}
+	switch {
+	case destinationExists && backupExists:
+		if err := os.RemoveAll(journal.Backup); err != nil {
+			return fmt.Errorf("remove completed directory swap backup: %w", err)
+		}
+	case !destinationExists && backupExists:
+		if err := os.Rename(journal.Backup, journal.Destination); err != nil {
+			return fmt.Errorf("restore interrupted directory swap: %w", err)
+		}
+	case !destinationExists && !backupExists && !sourceExists:
+		return errors.New("directory swap journal has no recoverable path")
+	}
+	return os.Remove(journalPath)
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
 }

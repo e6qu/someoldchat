@@ -3325,7 +3325,7 @@ func (s *Server) DeleteUserPhoto(ctx context.Context, input *chatv1.UserPhotoDel
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
-func (s *Server) DownloadFile(input *chatv1.DownloadFileRequest, stream chatv1.ChatService_DownloadFileServer) error {
+func (s *Server) DownloadFile(input *chatv1.DownloadFileRequest, stream chatv1.ChatService_DownloadFileServer) (returnErr error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetFileId() == "" {
 		return status.Error(codes.InvalidArgument, "workspace_id, user_id, and file_id are required")
 	}
@@ -3333,7 +3333,9 @@ func (s *Server) DownloadFile(input *chatv1.DownloadFileRequest, stream chatv1.C
 	if err != nil {
 		return mapError(err)
 	}
-	defer reader.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, reader.Close())
+	}()
 	if err := stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Metadata{Metadata: encodeProtoFile(file)}}); err != nil {
 		return err
 	}
@@ -3357,7 +3359,7 @@ func (s *Server) DownloadFile(input *chatv1.DownloadFileRequest, stream chatv1.C
 	}
 }
 
-func (s *Server) DownloadPublicFile(input *chatv1.PublicFileTokenRequest, stream chatv1.ChatService_DownloadPublicFileServer) error {
+func (s *Server) DownloadPublicFile(input *chatv1.PublicFileTokenRequest, stream chatv1.ChatService_DownloadPublicFileServer) (returnErr error) {
 	if input.GetToken() == "" {
 		return status.Error(codes.InvalidArgument, "token is required")
 	}
@@ -3365,7 +3367,9 @@ func (s *Server) DownloadPublicFile(input *chatv1.PublicFileTokenRequest, stream
 	if err != nil {
 		return mapError(err)
 	}
-	defer reader.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, reader.Close())
+	}()
 	if err := stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Metadata{Metadata: encodeProtoFile(file)}}); err != nil {
 		return err
 	}
@@ -3389,7 +3393,7 @@ func (s *Server) DownloadPublicFile(input *chatv1.PublicFileTokenRequest, stream
 	}
 }
 
-func (s *Server) DownloadUserPhoto(input *chatv1.UserPhotoDownloadRequest, stream chatv1.ChatService_DownloadUserPhotoServer) error {
+func (s *Server) DownloadUserPhoto(input *chatv1.UserPhotoDownloadRequest, stream chatv1.ChatService_DownloadUserPhotoServer) (returnErr error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetToken() == "" {
 		return status.Error(codes.InvalidArgument, "workspace_id, user_id, and token are required")
 	}
@@ -3397,7 +3401,9 @@ func (s *Server) DownloadUserPhoto(input *chatv1.UserPhotoDownloadRequest, strea
 	if err != nil {
 		return mapError(err)
 	}
-	defer reader.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, reader.Close())
+	}()
 	if err := stream.Send(&chatv1.UserPhotoDownloadPart{Part: &chatv1.UserPhotoDownloadPart_Metadata{Metadata: &chatv1.UserPhotoMetadata{MimeType: "application/octet-stream", Token: input.GetToken()}}}); err != nil {
 		return err
 	}

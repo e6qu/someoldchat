@@ -22,7 +22,7 @@ type s3Client interface {
 // and provider-backed lifecycle metadata.
 type ListStore interface {
 	Store
-	List(context.Context, string) ([]Object, error)
+	Walk(context.Context, string, func(Object) error) error
 }
 
 // S3 stores objects in an explicitly selected Amazon Simple Storage Service
@@ -83,10 +83,11 @@ func (s S3) Open(ctx context.Context, key string) (Object, io.ReadCloser, error)
 		return Object{}, nil, err
 	}
 	if output == nil || output.Body == nil || output.ContentLength == nil || *output.ContentLength < 0 || *output.ContentLength > s.maxSize {
+		invalidErr := errors.New("stored object has an invalid size")
 		if output != nil && output.Body != nil {
-			_ = output.Body.Close()
+			return Object{}, nil, errors.Join(invalidErr, output.Body.Close())
 		}
-		return Object{}, nil, errors.New("stored object has an invalid size")
+		return Object{}, nil, invalidErr
 	}
 	return Object{Key: key, Size: *output.ContentLength}, output.Body, nil
 }
@@ -100,34 +101,43 @@ func (s S3) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (s S3) List(ctx context.Context, prefix string) ([]Object, error) {
+// Walk visits listed objects page by page so callers can process a large
+// provider listing without retaining the complete result set.
+func (s S3) Walk(ctx context.Context, prefix string, visit func(Object) error) error {
+	if visit == nil {
+		return errors.New("object listing visitor is required")
+	}
 	objectPrefix := s.prefixWithSlash()
 	if prefix != "" {
 		var err error
 		objectPrefix, err = s.objectKey(prefix)
 		if err != nil {
-			return nil, err
+			return err
 		}
 	}
-	objects := make([]Object, 0)
 	var token *string
 	for {
 		output, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), Prefix: aws.String(objectPrefix), ContinuationToken: token})
 		if err != nil {
-			return nil, err
+			return err
+		}
+		if output == nil {
+			return errors.New("object listing returned an empty response")
 		}
 		for _, item := range output.Contents {
 			if item.Key == nil || item.Size == nil || *item.Size < 0 || *item.Size > s.maxSize {
-				return nil, errors.New("object listing contains an invalid object")
+				return errors.New("object listing contains an invalid object")
 			}
 			key := strings.TrimPrefix(*item.Key, s.prefixWithSlash())
-			objects = append(objects, Object{Key: key, Size: *item.Size})
+			if err := visit(Object{Key: key, Size: *item.Size}); err != nil {
+				return err
+			}
 		}
 		if !aws.ToBool(output.IsTruncated) {
-			return objects, nil
+			return nil
 		}
 		if output.NextContinuationToken == nil || *output.NextContinuationToken == "" {
-			return nil, errors.New("object listing is truncated without a continuation token")
+			return errors.New("object listing is truncated without a continuation token")
 		}
 		token = output.NextContinuationToken
 	}

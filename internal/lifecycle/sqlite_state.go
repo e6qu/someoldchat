@@ -29,8 +29,7 @@ func OpenSQLiteStateStore(dsn string, initial StateRecord) (*SQLiteStateStore, e
 	}
 	store := &SQLiteStateStore{db: db}
 	if err := store.initialize(initial); err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return store, nil
 }
@@ -54,28 +53,30 @@ func (s *SQLiteStateStore) initialize(initial StateRecord) error {
 	if err != nil {
 		return fmt.Errorf("inspect lifecycle SQLite state store schema: %w", err)
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var cid int
 		var name, dataType string
 		var notNull, primaryKey int
 		var defaultValue sql.NullString
 		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return fmt.Errorf("scan lifecycle SQLite state store schema: %w", err)
+			return errors.Join(fmt.Errorf("scan lifecycle SQLite state store schema: %w", err), rows.Close())
 		}
 		if name == "wake_deadline" {
 			hasWakeDeadline = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read lifecycle SQLite state store schema: %w", err)
+		return errors.Join(fmt.Errorf("read lifecycle SQLite state store schema: %w", err), rows.Close())
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close lifecycle SQLite state store schema: %w", err)
 	}
 	if !hasWakeDeadline {
 		if _, err := s.db.Exec(`ALTER TABLE lifecycle_state ADD COLUMN wake_deadline TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add lifecycle wake deadline: %w", err)
 		}
 	}
-	_, err = s.db.Exec(`INSERT OR IGNORE INTO lifecycle_state(id, state, generation) VALUES (1, ?, ?)`, initial.State, initial.Generation)
+	_, err = s.db.Exec(`INSERT OR IGNORE INTO lifecycle_state(id, state, generation, wake_deadline) VALUES (1, ?, ?, ?)`, initial.State, initial.Generation, formatWakeDeadline(initial.WakeDeadline))
 	return err
 }
 

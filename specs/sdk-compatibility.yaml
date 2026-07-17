@@ -80,27 +80,33 @@ bolt:
   - id: bolt-js
     ecosystem: npm
     package: '@slack/bolt'
+    upstream: https://github.com/slackapi/bolt-js
     release: 4.7.3
     revision: 97bfd71a8bbda8534393907018554cfa19be0938
     artifact: slack-bolt-4.7.3.tgz
     sha256: 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
+    license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
+    upstream: https://github.com/slackapi/bolt-python
     release: 1.28.0
     revision: c64d69d2b64801602c849aa56e0ba2d4161e1f98
     artifact: slack_bolt-1.28.0-py2.py3-none-any.whl
     sha256: 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
+    license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt
+    upstream: https://github.com/slackapi/java-slack-sdk
     release: 1.49.0
     revision: 06f512b9d2741ed38573915528c9f66cee90df48
     artifact: bolt-1.49.0.jar
     sha256: 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
+    license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/BoltQualification.java

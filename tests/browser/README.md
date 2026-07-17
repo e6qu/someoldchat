@@ -12,9 +12,9 @@ make browser-qualification
 ```
 
 The suite uses the pinned Playwright version in `package.json` and the lock
-file. It starts `cmd/server` with the local in-memory store and a disposable
-browser session. It does not test a production deployment or use a remote
-authorization provider.
+file. It runs the headless Chromium shell, starts `cmd/server` with the local
+in-memory store, and uses a disposable browser session. It does not test a
+production deployment or use a remote authorization provider.
 
 The browser qualification is separate from the official Slack SDK suites in
 [`../official-sdk-qualification`](../official-sdk-qualification/README.md).

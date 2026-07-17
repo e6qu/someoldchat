@@ -91,7 +91,8 @@ an accepted request body durably before acknowledging it if the sender cannot
 be expected to retry.
 Spool rows are claimed with durable per-replica leases; only the lease owner
 may delete a delivered row, and lease expiry is the crash-recovery path for a
-replica that dies during replay.
+replica that dies during replay. The activator renews the lease while forwarding
+each request, so a slow delivery is not treated as a crashed replica.
 
 ## Snapshot retention and verification
 

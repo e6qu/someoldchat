@@ -11,6 +11,9 @@ against browser behavior, official Slack SDKs, and native dqlite behavior.
   Canonical dqlite binding on Linux with the native library installed.
 - [Persistence qualification](persistence-qualification/README.md) runs the
   same repository contract against SQLite and dqlite.
+- [ECS scale-to-zero qualification](ecs-scale-zero-qualification/README.md)
+  checks the AWS activator's task ownership and ECS request filters without
+  contacting AWS.
 
 Application unit and integration tests remain next to the Go packages they
 test. This directory is reserved for qualification suites with external

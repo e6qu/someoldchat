@@ -73,6 +73,90 @@ func testHandlerWithStore() (http.Handler, *memory.Store) {
 	return mux, s
 }
 
+func TestListInputsNormalizeAndRejectMalformedJSON(t *testing.T) {
+	values, err := parseNormalizedStringList(` ["T1", " T2 ", "T1", ""] `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []string{"T1", "T2"}; !equalStrings(values, got) {
+		t.Fatalf("values=%v, want %v", values, got)
+	}
+	if values == nil {
+		t.Fatal("normalized values are nil")
+	}
+	if _, err := parseNormalizedStringList(`{"id":"T1"}`); err == nil {
+		t.Fatal("JSON object was accepted as a string list")
+	}
+	if _, err := normalizeListFieldValue("team_ids", `{"id":"T1"}`); err == nil {
+		t.Fatal("form JSON object was accepted as a list field")
+	}
+	channels, err := parseConversationIDs(" C1, C2, C1, ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []domain.ConversationID{"C1", "C2"}; !equalConversationIDs(channels, got) {
+		t.Fatalf("channels=%v, want %v", channels, got)
+	}
+	if channels == nil {
+		t.Fatal("normalized channels are nil")
+	}
+	if _, err := parseConversationIDs(`["C1"`); err == nil {
+		t.Fatal("malformed channel JSON was accepted")
+	}
+	users, err := parseCallUsers(`[{"slack_id":"U1"},{"external_id":"U2"},{"slack_id":"U1"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []domain.UserID{"U1", "U2"}; !equalUserIDs(users, got) {
+		t.Fatalf("users=%v, want %v", users, got)
+	}
+	if users == nil {
+		t.Fatal("normalized users are nil")
+	}
+	if _, err := parseCallUsers(`[{"slack_id":"U1"}`); err == nil {
+		t.Fatal("malformed user JSON was accepted")
+	}
+	if _, err := parseCallUsers(`{"slack_id":"U1"}`); err == nil {
+		t.Fatal("JSON object was accepted as a user identifier")
+	}
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalConversationIDs(left, right []domain.ConversationID) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func equalUserIDs(left, right []domain.UserID) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestAdminInviteRequestLifecycle(t *testing.T) {
 	handler, store := testHandlerWithStore()
 	now := time.Now().UTC()
@@ -495,6 +579,33 @@ func TestCallsLifecycle(t *testing.T) {
 	handler.ServeHTTP(ended, end)
 	if ended.Code != http.StatusOK {
 		t.Fatalf("end status=%d body=%s", ended.Code, ended.Body)
+	}
+}
+
+func TestCallsAddAllowsOptionalUsers(t *testing.T) {
+	handler := testHandler()
+	request := httptest.NewRequest(http.MethodPost, "/api/calls.add", strings.NewReader("external_unique_id=external-without-users&join_url=https%3A%2F%2Fcall.example%2Fwithout-users"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	var body struct {
+		OK   bool `json:"ok"`
+		Call struct {
+			Users []string `json:"users"`
+		} `json:"call"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK {
+		t.Fatalf("body=%s", response.Body.String())
+	}
+	if body.Call.Users == nil {
+		t.Fatalf("users must be a nonnil normalized list: %s", response.Body.String())
 	}
 }
 

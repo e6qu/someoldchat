@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -156,8 +157,14 @@ func (h Handler) processSpool(ctx context.Context, currentID uint64) (capturedRe
 		return capturedResponse{}, err
 	}
 	for _, request := range requests {
-		replay, err := http.NewRequestWithContext(ctx, request.Method, request.URL, bytes.NewReader(request.Body))
+		leaseContext, cancelLease := context.WithCancel(ctx)
+		leaseFailures := make(chan error, 1)
+		leaseDone := make(chan struct{})
+		go h.renewSpoolLeaseLoop(leaseContext, cancelLease, request.ID, leaseFailures, leaseDone)
+		replay, err := http.NewRequestWithContext(leaseContext, request.Method, request.URL, bytes.NewReader(request.Body))
 		if err != nil {
+			cancelLease()
+			<-leaseDone
 			return capturedResponse{}, err
 		}
 		replay.Header = request.Header.Clone()
@@ -168,6 +175,13 @@ func (h Handler) processSpool(ctx context.Context, currentID uint64) (capturedRe
 		}
 		capture := newCapturedResponse(h.maxBody)
 		h.forward.ServeHTTP(capture, replay)
+		cancelLease()
+		<-leaseDone
+		select {
+		case leaseErr := <-leaseFailures:
+			return capturedResponse{}, leaseErr
+		default:
+		}
 		if capture.err != nil {
 			return capturedResponse{}, capture.err
 		}
@@ -185,6 +199,31 @@ func (h Handler) processSpool(ctx context.Context, currentID uint64) (capturedRe
 		}
 	}
 	return capturedResponse{}, errors.New("spooled request was not delivered")
+}
+
+func (h Handler) renewSpoolLeaseLoop(ctx context.Context, cancel context.CancelFunc, id uint64, failures chan<- error, done chan<- struct{}) {
+	defer close(done)
+	interval := h.wakeWait / 3
+	if interval <= 0 {
+		interval = time.Nanosecond
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			if err := h.spool.Renew(ctx, h.spoolOwner, id, h.wakeWait); err != nil {
+				if ctx.Err() == nil {
+					cancel()
+					failures <- fmt.Errorf("renew spooled request lease: %w", err)
+				}
+				return
+			}
+			timer.Reset(interval)
+		}
+	}
 }
 
 // removeHopByHopHeaders keeps replayed requests semantically identical while

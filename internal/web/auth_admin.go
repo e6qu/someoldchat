@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +23,11 @@ func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
 
 func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
-	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminAppsWrite) {
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminAppsWrite) {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
@@ -106,7 +111,15 @@ func (h Handler) authMethodSet(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request) bool {
 	principal, err := h.Authenticator.Authenticate(r)
-	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminAppsWrite) {
+	if err != nil {
+		if errors.Is(err, auth.ErrNotAuthenticated) {
+			writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
+		} else {
+			writeAuthAdminJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "authentication_unavailable"})
+		}
+		return false
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminAppsWrite) {
 		writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
 		return false
 	}
@@ -115,7 +128,15 @@ func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request) bool {
 
 func (h Handler) authUserInvite(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
-	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminUsersWrite) {
+	if err != nil {
+		if errors.Is(err, auth.ErrNotAuthenticated) {
+			writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
+		} else {
+			writeAuthAdminJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "authentication_unavailable"})
+		}
+		return
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminUsersWrite) {
 		writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
 		return
 	}

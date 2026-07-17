@@ -153,17 +153,20 @@ func eventRecipient(payload string, recipient domain.UserID) (bool, error) {
 
 func encodeRTMEvent(record events.Record) ([]byte, error) {
 	var object map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(record.Event.Payload), &object); err == nil && object != nil {
-		if _, exists := object["type"]; !exists {
-			encodedType, encodeErr := json.Marshal(record.Event.Topic)
-			if encodeErr != nil {
-				return nil, encodeErr
-			}
-			object["type"] = encodedType
-		}
-		return json.Marshal(object)
+	if err := json.Unmarshal([]byte(record.Event.Payload), &object); err != nil {
+		return nil, fmt.Errorf("decode RTM event payload: %w", err)
 	}
-	return json.Marshal(map[string]string{"type": record.Event.Topic, "data": record.Event.Payload})
+	if object == nil {
+		return nil, errors.New("RTM event payload must be a JSON object")
+	}
+	if _, exists := object["type"]; !exists {
+		encodedType, encodeErr := json.Marshal(record.Event.Topic)
+		if encodeErr != nil {
+			return nil, encodeErr
+		}
+		object["type"] = encodedType
+	}
+	return json.Marshal(object)
 }
 
 func handleRTMCommand(conn *websocket.Conn, message string) error {
@@ -182,7 +185,11 @@ func handleRTMCommand(conn *websocket.Conn, message string) error {
 func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil {
-		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		status := http.StatusUnauthorized
+		if !errors.Is(err, auth.ErrNotAuthenticated) {
+			status = http.StatusServiceUnavailable
+		}
+		http.Error(w, "not authenticated", status)
 		return
 	}
 	if principal.WorkspaceID != h.Workspace || !principal.HasScope(scope) {

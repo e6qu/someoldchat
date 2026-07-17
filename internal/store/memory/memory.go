@@ -323,7 +323,7 @@ func (s *Store) GetAuthMethod(_ context.Context, workspace domain.WorkspaceID, p
 	defer s.mu.RUnlock()
 	value, ok := s.authMethods[authMethodKey(workspace, provider)]
 	if !ok {
-		return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: true}, nil
+		return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: false}, nil
 	}
 	return value, nil
 }
@@ -1524,7 +1524,10 @@ func (s *Store) ListConnectedChannelInfo(_ context.Context, workspace domain.Wor
 	}
 	s.mu.RUnlock()
 	sort.Slice(values, func(i, j int) bool { return values[i].ChannelID < values[j].ChannelID })
-	after, _ := domain.DecodeListCursor(request.Cursor)
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
 	start := 0
 	for start < len(values) && string(values[start].ChannelID) <= after {
 		start++
@@ -1536,7 +1539,10 @@ func (s *Store) ListConnectedChannelInfo(_ context.Context, workspace domain.Wor
 	}
 	var next domain.Cursor
 	if hasMore {
-		next, _ = domain.NewListCursor(string(values[len(values)-1].ChannelID))
+		next, err = domain.NewListCursor(string(values[len(values)-1].ChannelID))
+		if err != nil {
+			return nil, false, "", err
+		}
 	}
 	return values, hasMore, next, nil
 }

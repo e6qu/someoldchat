@@ -46,14 +46,11 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	}
 	database, err := application.Open(ctx, config.Database)
 	if err != nil {
-		_ = application.Close()
-		return nil, err
+		return nil, errors.Join(err, application.Close())
 	}
 	repositories, err := sqlstore.FromDqliteDB(ctx, database)
 	if err != nil {
-		_ = database.Close()
-		_ = application.Close()
-		return nil, err
+		return nil, errors.Join(err, database.Close(), application.Close())
 	}
 	return &Store{Store: repositories, application: application, database: database}, nil
 }
@@ -64,12 +61,16 @@ func (s *Store) Close() error {
 	return errors.Join(dbErr, appErr)
 }
 
-func (s *Store) Health(ctx context.Context) (Health, error) {
+func (s *Store) Health(ctx context.Context) (health Health, err error) {
 	leaderClient, err := s.application.FindLeader(ctx)
 	if err != nil {
 		return Health{}, err
 	}
-	defer leaderClient.Close()
+	defer func() {
+		if closeErr := leaderClient.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
 	leader, err := leaderClient.Leader(ctx)
 	if err != nil {
 		return Health{}, err

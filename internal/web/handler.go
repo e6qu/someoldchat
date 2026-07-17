@@ -482,6 +482,10 @@ func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
+	if !errors.Is(err, auth.ErrNotAuthenticated) {
+		http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	http.Error(w, "not authenticated", http.StatusUnauthorized)
 }
 

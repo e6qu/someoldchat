@@ -53,9 +53,9 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 	if service == nil || workspace == "" || lookupUser == "" || strings.TrimSpace(publicURL) == "" || len(stateKey) < 32 {
 		return LoginHandler{}, errors.New("login requires service, workspace, lookup user, public URL, and a 32-byte state key")
 	}
-	base, err := url.Parse(strings.TrimRight(publicURL, "/"))
-	if err != nil || base.Scheme != "https" || base.Host == "" {
-		return LoginHandler{}, errors.New("login public URL must be an absolute HTTPS URL")
+	publicURL = strings.TrimRight(publicURL, "/")
+	if err := validateHTTPSURL(publicURL, true); err != nil {
+		return LoginHandler{}, fmt.Errorf("login public URL: %w", err)
 	}
 	configured := make(map[string]ProviderConfig, len(providers))
 	for _, provider := range providers {
@@ -72,8 +72,18 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		if _, supported := supportedAuthorizationProviders[provider.Name]; !supported {
 			return LoginHandler{}, fmt.Errorf("provider %q is unsupported", provider.Name)
 		}
+		for label, endpoint := range map[string]string{"authorization": provider.AuthorizeURL, "token": provider.TokenURL, "userinfo": provider.UserInfoURL} {
+			if err := validateHTTPSURL(endpoint, false); err != nil {
+				return LoginHandler{}, fmt.Errorf("provider %q %s endpoint: %w", provider.Name, label, err)
+			}
+		}
 		if provider.Name == "github" && provider.EmailURL == "" {
 			return LoginHandler{}, errors.New("github provider requires an email endpoint")
+		}
+		if provider.EmailURL != "" {
+			if err := validateHTTPSURL(provider.EmailURL, false); err != nil {
+				return LoginHandler{}, fmt.Errorf("provider %q email endpoint: %w", provider.Name, err)
+			}
 		}
 		normalizedScopes, err := normalizeScopes(provider.Scopes)
 		if err != nil {
@@ -89,6 +99,17 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		return LoginHandler{}, errors.New("at least one authorization provider is required")
 	}
 	return LoginHandler{service: service, workspace: workspace, lookupUser: lookupUser, publicURL: strings.TrimRight(publicURL, "/"), stateKey: append([]byte(nil), stateKey...), providers: configured, client: &http.Client{Timeout: 10 * time.Second}}, nil
+}
+
+func validateHTTPSURL(raw string, rejectQueryAndFragment bool) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return errors.New("must be an absolute HTTPS URL without user information")
+	}
+	if rejectQueryAndFragment && (parsed.RawQuery != "" || parsed.Fragment != "") {
+		return errors.New("must not contain a query or fragment")
+	}
+	return nil
 }
 
 func normalizeScopes(values []string) ([]string, error) {
@@ -122,7 +143,7 @@ func (h LoginHandler) Register(mux *http.ServeMux) {
 
 func (h LoginHandler) login(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · SameOldChat</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f8f8fa;color:#1d1c1d;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(420px,calc(100% - 32px));padding:32px;background:#fff;border:1px solid #ddd;border-radius:12px;box-shadow:0 12px 32px #1d1c1d18}h1{margin-top:0}.provider{display:block;margin:12px 0;padding:12px 16px;border-radius:6px;background:#611f69;color:#fff;text-align:center;text-decoration:none;font-weight:700}</style></head><body><main class="card"><h1>Sign in to SameOldChat</h1><p>Choose your organization’s authorization source.</p>`+h.providerLinks()+`</main></body></html>`)
+	_, _ = io.WriteString(w, `<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · SameOldChat</title><style>:root{color-scheme:light;--bg:#f8f8fa;--card:#fff;--text:#1d1c1d;--muted:#696969;--line:#ddd;--accent:#611f69;--shadow:0 12px 32px #1d1c1d18}html[data-theme=dark]{color-scheme:dark;--bg:#1a1d21;--card:#222529;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45;--shadow:0 12px 32px #0006}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--text);font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(420px,calc(100% - 32px));padding:32px;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow)}h1{margin-top:0}.intro{color:var(--muted)}.provider{display:block;margin:12px 0;padding:12px 16px;border-radius:6px;background:var(--accent);color:#fff;text-align:center;text-decoration:none;font-weight:700}.theme-toggle{float:right;border:1px solid var(--line);border-radius:5px;padding:6px 9px;background:transparent;color:var(--text);cursor:pointer}</style></head><body><main class="card"><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle dark mode">☾</button><h1>Sign in to SameOldChat</h1><p class="intro">Choose your organization’s authorization source.</p>`+h.providerLinks()+`</main><script>(function(){var root=document.documentElement;var saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){var dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')})})();</script></body></html>`)
 }
 
 func (h LoginHandler) providerLinks() string {
@@ -162,7 +183,15 @@ func (h LoginHandler) begin(w http.ResponseWriter, r *http.Request, name string)
 		return
 	}
 	method, err := h.service.GetAuthMethod(r.Context(), h.workspace, name)
-	if err != nil || !method.Enabled {
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, "authorization method unavailable", status)
+		return
+	}
+	if !method.Enabled {
 		http.Error(w, "authorization method is disabled", http.StatusNotFound)
 		return
 	}
@@ -189,7 +218,15 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	method, err := h.service.GetAuthMethod(r.Context(), h.workspace, name)
-	if err != nil || !method.Enabled {
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+		}
+		http.Error(w, "authorization method unavailable", status)
+		return
+	}
+	if !method.Enabled {
 		http.Error(w, "authorization method is disabled", http.StatusNotFound)
 		return
 	}
@@ -238,9 +275,26 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 			}
 		}
 	} else {
-		err = linkErr
+		http.Error(w, "authorization identity store unavailable", http.StatusServiceUnavailable)
+		return
 	}
-	if err != nil || linkErr != nil || user.Deleted {
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, "authorization identity is not provisioned", status)
+		return
+	}
+	if linkErr != nil {
+		status := http.StatusServiceUnavailable
+		if errors.Is(linkErr, store.ErrNotFound) {
+			status = http.StatusForbidden
+		}
+		http.Error(w, "authorization identity is not provisioned", status)
+		return
+	}
+	if user.Deleted {
 		http.Error(w, "authorization identity is not provisioned", http.StatusForbidden)
 		return
 	}
@@ -264,7 +318,7 @@ type tokenResponse struct {
 	AccessToken string `json:"access_token"`
 }
 
-func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig, code, verifier, name string) (string, error) {
+func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig, code, verifier, name string) (returnToken string, returnErr error) {
 	if strings.TrimSpace(code) == "" {
 		return "", errors.New("authorization code is required")
 	}
@@ -279,7 +333,9 @@ func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig,
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, response.Body.Close())
+	}()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("token endpoint returned %s", response.Status)
 	}
@@ -290,7 +346,7 @@ func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig,
 	return value.AccessToken, nil
 }
 
-func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, token, name string) (externalIdentity, error) {
+func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, token, name string) (returnIdentity externalIdentity, returnErr error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, provider.UserInfoURL, nil)
 	if err != nil {
 		return externalIdentity{}, err
@@ -301,7 +357,9 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 	if err != nil {
 		return externalIdentity{}, err
 	}
-	defer response.Body.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, response.Body.Close())
+	}()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return externalIdentity{}, fmt.Errorf("userinfo endpoint returned %s", response.Status)
 	}
@@ -309,6 +367,7 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 		Subject           string `json:"sub"`
 		ID                any    `json:"id"`
 		Email             string `json:"email"`
+		EmailVerified     bool   `json:"email_verified"`
 		Login             string `json:"login"`
 		Name              string `json:"name"`
 		PreferredUsername string `json:"preferred_username"`
@@ -332,13 +391,16 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 			return externalIdentity{}, err
 		}
 	}
+	if name == "google" && !value.EmailVerified {
+		return externalIdentity{}, errors.New("google email is not verified")
+	}
 	if identity.Subject == "" || identity.Email == "" {
 		return externalIdentity{}, errors.New("userinfo identity is incomplete")
 	}
 	return identity, nil
 }
 
-func (h LoginHandler) githubEmail(ctx context.Context, endpoint, token string) (string, error) {
+func (h LoginHandler) githubEmail(ctx context.Context, endpoint, token string) (returnEmail string, returnErr error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return "", err
@@ -349,7 +411,9 @@ func (h LoginHandler) githubEmail(ctx context.Context, endpoint, token string) (
 	if err != nil {
 		return "", err
 	}
-	defer response.Body.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, response.Body.Close())
+	}()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("github email endpoint returned %s", response.Status)
 	}

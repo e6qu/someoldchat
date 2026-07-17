@@ -59,6 +59,23 @@ func TestSQLiteStateStorePersistsWakeDeadline(t *testing.T) {
 	}
 }
 
+func TestSQLiteStateStorePersistsInitialWakeDeadline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lifecycle.db")
+	deadline := time.Date(2026, time.July, 17, 6, 0, 0, 456, time.UTC)
+	store, err := OpenSQLiteStateStore(path, StateRecord{State: StateHibernated, Generation: 4, WakeDeadline: deadline})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	record, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.WakeDeadline.Equal(deadline) {
+		t.Fatalf("initial wake deadline=%s, want %s", record.WakeDeadline, deadline)
+	}
+}
+
 func TestSQLiteStateStoreFencesConcurrentControllers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lifecycle.db")
 	first, err := OpenSQLiteStateStore(path, StateRecord{State: StateHibernated, Generation: 1})

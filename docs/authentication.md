@@ -35,6 +35,10 @@ Supplying one credential from a pair is invalid. If any external authorization
 credential is supplied, the workspace, lookup user, public HTTPS URL, and
 32-byte state key are required. GitHub login also requires the GitHub email
 endpoint, which the server configures as `https://api.github.com/user/emails`.
+Microsoft Entra login also requires `-entra-tenant`; there is no implicit
+tenant default. The value may be a tenant identifier, verified domain, or an
+explicit Microsoft tenant selector such as `common`, `organizations`, or
+`consumers`.
 
 The server creates a short-lived signed state cookie and uses
 Proof Key for Code Exchange (PKCE). It links a returned external subject to an
@@ -57,7 +61,8 @@ POST /api/admin.auth.users.invite
 ```
 
 Provider secrets remain deployment configuration. Enablement is workspace state
-stored by the selected durable store. A disabled source returns a handled
+stored by the selected durable store. A configured source is disabled until an
+administrator explicitly enables it. A disabled source returns a handled
 not-found response from its login and callback routes; it does not fall back to
 another source.
 

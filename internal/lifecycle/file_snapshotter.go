@@ -18,7 +18,7 @@ type FileSnapshotter struct {
 }
 
 func NewFileSnapshotter(manager SnapshotManager, sourcePath, outputPath string, metadata Manifest) (FileSnapshotter, error) {
-	if !filepath.IsAbs(manager.Root) || len(manager.EncryptionKey) != 32 || len(manager.SigningKey) < 32 || strings.TrimSpace(manager.KeyID) == "" {
+	if !manager.configured() {
 		return FileSnapshotter{}, errors.New("snapshot manager is not configured")
 	}
 	if strings.TrimSpace(sourcePath) == "" || strings.TrimSpace(outputPath) == "" || !filepath.IsAbs(sourcePath) || !filepath.IsAbs(outputPath) {
@@ -30,26 +30,26 @@ func NewFileSnapshotter(manager SnapshotManager, sourcePath, outputPath string, 
 	return FileSnapshotter{Manager: manager, SourcePath: sourcePath, OutputPath: outputPath, BaseMetadata: metadata}, nil
 }
 
-func (s FileSnapshotter) Create(_ context.Context, generation uint64) (Manifest, error) {
+func (s FileSnapshotter) Create(ctx context.Context, generation uint64) (Manifest, error) {
 	metadata := s.BaseMetadata
 	metadata.Generation = generation
-	return s.Manager.Create(s.SourcePath, metadata)
+	return s.Manager.Create(ctx, s.SourcePath, metadata)
 }
 
-func (s FileSnapshotter) Current(_ context.Context, generation uint64) (Manifest, error) {
+func (s FileSnapshotter) Current(ctx context.Context, generation uint64) (Manifest, error) {
 	// A hibernation snapshot carries the hibernation fence. Wake advances the
 	// fence before restore, so the selected current snapshot may be older than
 	// the wake fence but must never be newer than it.
-	return s.Manager.Current(generation)
+	return s.Manager.Current(ctx, generation)
 }
 
-func (s FileSnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (Manifest, error) {
-	return s.Manager.LastVerified(maxGeneration)
+func (s FileSnapshotter) LastVerified(ctx context.Context, maxGeneration uint64) (Manifest, error) {
+	return s.Manager.LastVerified(ctx, maxGeneration)
 }
 
 func (s FileSnapshotter) Restore(ctx context.Context, manifest Manifest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	return s.Manager.Restore(manifest, s.OutputPath)
+	return s.Manager.Restore(ctx, manifest, s.OutputPath)
 }

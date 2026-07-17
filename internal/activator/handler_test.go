@@ -326,3 +326,33 @@ func TestDurableForwardingRejectsQueueOverflowWithRetryAfter(t *testing.T) {
 		t.Fatalf("status=%d retry-after=%q, want bounded overflow rejection", response.Code, response.Header().Get("Retry-After"))
 	}
 }
+
+func TestDurableForwardingRenewsLeaseDuringLongDelivery(t *testing.T) {
+	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	controller := lifecycle.New(lifecycle.StateHibernated)
+	h, err := NewDurableForwardingHandler(controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(250 * time.Millisecond)
+		w.WriteHeader(http.StatusCreated)
+	}), spool, "activator-a", 1024, 100*time.Millisecond, observability.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan int, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/message", strings.NewReader("long delivery")))
+		result <- response.Code
+	}()
+	time.Sleep(150 * time.Millisecond)
+	claimed, err := spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("long delivery was reclaimed: claims=%+v err=%v", claimed, err)
+	}
+	if code := <-result; code != http.StatusCreated {
+		t.Fatalf("delivery status=%d, want %d", code, http.StatusCreated)
+	}
+}

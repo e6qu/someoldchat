@@ -1,7 +1,12 @@
-.PHONY: all build build-static build-dqlite test test-race test-dqlite sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-dqlite ecs-qualification sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check doc-check ci-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
+
+PLAYWRIGHT_INSTALL_FLAGS :=
+ifeq ($(shell uname -s),Linux)
+PLAYWRIGHT_INSTALL_FLAGS := --with-deps
+endif
 
 proto-tools:
 	mkdir -p $(PROTO_BIN)
@@ -34,6 +39,9 @@ build-dqlite:
 test-dqlite:
 	GOCACHE=$(GOCACHE) go test -tags dqlite ./...
 
+ecs-qualification:
+	PYTHONDONTWRITEBYTECODE=1 python3 tests/ecs-scale-zero-qualification/qualification_test.py
+
 test:
 	GOCACHE=$(GOCACHE) go test ./...
 
@@ -59,6 +67,12 @@ fmt-check:
 contract-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck
 
+doc-check:
+	GOCACHE=$(GOCACHE) go run ./cmd/doccheck .
+
+ci-check:
+	GOCACHE=$(GOCACHE) go run ./cmd/cicheck .github/workflows/ci.yml
+
 compatibility-report:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -report
 
@@ -74,10 +88,10 @@ sdk-qualification:
 
 browser-qualification:
 	npm ci --prefix tests/browser
-	npx --prefix tests/browser playwright install --with-deps chromium
+	npx --prefix tests/browser playwright install $(PLAYWRIGHT_INSTALL_FLAGS) --only-shell chromium
 	npm test --prefix tests/browser
 
-check: fmt-check contract-check sdk-inventory-check proto-lint generated-check test
+check: fmt-check contract-check doc-check ci-check sdk-inventory-check proto-lint generated-check test
 
 clean:
 	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform

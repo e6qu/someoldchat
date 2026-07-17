@@ -105,6 +105,8 @@ API and webhook requests MUST follow bounded policy:
 - non-idempotent requests MUST have a stable spool/idempotency ID before replay;
 - the activator MUST cap body bytes, total queued bytes, request count, and wait
   duration; and
+- a replica MUST renew each durable spool lease while it forwards the claimed
+  request, and MUST stop forwarding when it loses lease ownership;
 - overflow MUST return 503 with `Retry-After` rather than accept data it might
   lose.
 

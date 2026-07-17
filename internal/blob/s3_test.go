@@ -53,7 +53,7 @@ func (f *fakeS3Client) ListObjectsV2(_ context.Context, input *s3.ListObjectsV2I
 	return &s3.ListObjectsV2Output{Contents: contents}, nil
 }
 
-func TestS3StoresBoundedObjectsAndListsByPrefix(t *testing.T) {
+func TestS3StoresBoundedObjectsAndWalksByPrefix(t *testing.T) {
 	client := &fakeS3Client{objects: make(map[string][]byte)}
 	store, err := newS3(client, "bucket", "snapshots", 1<<20)
 	if err != nil {
@@ -73,9 +73,13 @@ func TestS3StoresBoundedObjectsAndListsByPrefix(t *testing.T) {
 	if err != nil || closeErr != nil || gotObject.Size != int64(len(want)) || !bytes.Equal(got, want) {
 		t.Fatalf("got=%q object=%+v err=%v close=%v", got, gotObject, err, closeErr)
 	}
-	objects, err := store.List(context.Background(), "artifacts")
-	if err != nil || len(objects) != 1 || objects[0].Key != "artifacts/1" {
-		t.Fatalf("objects=%+v err=%v", objects, err)
+	var walked []Object
+	err = store.Walk(context.Background(), "artifacts", func(value Object) error {
+		walked = append(walked, value)
+		return nil
+	})
+	if err != nil || len(walked) != 1 || walked[0].Key != "artifacts/1" {
+		t.Fatalf("walked=%+v err=%v", walked, err)
 	}
 	if err := store.Delete(context.Background(), "artifacts/1"); err != nil {
 		t.Fatal(err)

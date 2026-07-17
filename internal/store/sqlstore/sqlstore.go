@@ -224,18 +224,20 @@ func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
 	values := make([]domain.AccessLog, 0, limit+1)
 	for rows.Next() {
 		var value domain.AccessLog
 		var created int64
 		if err := rows.Scan(&value.WorkspaceID, &value.UserID, &value.Username, &created, &value.IP, &value.UserAgent); err != nil {
-			return nil, false, err
+			return nil, false, errors.Join(err, rows.Close())
 		}
 		value.CreatedAt = time.Unix(created, 0).UTC()
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, false, errors.Join(err, rows.Close())
+	}
+	if err := rows.Close(); err != nil {
 		return nil, false, err
 	}
 	hasMore := len(values) > limit
@@ -252,8 +254,7 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	}
 	s, err := FromDB(ctx, db)
 	if err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return s, nil
 }
@@ -339,7 +340,7 @@ func (s *Store) SeedWorkspace(ctx context.Context, value domain.Workspace) error
 	return err
 }
 
-func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
+func (s *Store) SeedUser(ctx context.Context, value domain.User) (returnErr error) {
 	deleted := 0
 	if value.Deleted {
 		deleted = 1
@@ -348,7 +349,12 @@ func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	presence := value.Presence
 	if presence == "" {
 		presence = domain.PresenceAuto
@@ -405,19 +411,22 @@ func (s *Store) SeedConversationMember(ctx context.Context, conversation domain.
 	return err
 }
 
-func (s *Store) Migrate(ctx context.Context) error {
+func (s *Store) Migrate(ctx context.Context) (returnErr error) {
 	connection, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire sqlite migration connection: %w", err)
 	}
-	defer connection.Close()
+	defer func() {
+		returnErr = errors.Join(returnErr, connection.Close())
+	}()
 	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("acquire sqlite migration lock: %w", err)
 	}
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
+			_, rollbackErr := connection.ExecContext(context.Background(), "ROLLBACK")
+			returnErr = errors.Join(returnErr, rollbackErr)
 		}
 	}()
 	if err := s.migrateOn(ctx, connection); err != nil {
@@ -996,7 +1005,6 @@ func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	columns := make(map[string]bool)
 	for rows.Next() {
 		var index int
@@ -1004,11 +1012,11 @@ func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string
 		var notNull, primaryKey int
 		var defaultValue any
 		if err := rows.Scan(&index, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		columns[name] = true
 	}
-	return columns, rows.Err()
+	return columns, errors.Join(rows.Err(), rows.Close())
 }
 
 func (s *Store) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (domain.Workspace, error) {
@@ -1020,7 +1028,7 @@ func (s *Store) GetWorkspace(ctx context.Context, id domain.WorkspaceID) (domain
 	return s.withDefaultChannels(ctx, s.db, value)
 }
 
-func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, event events.Event) error {
+func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, event events.Event) (returnErr error) {
 	if value.ID == "" || strings.TrimSpace(value.Domain) == "" || strings.TrimSpace(value.Name) == "" || !value.Discoverability.Valid() {
 		return errors.New("invalid workspace")
 	}
@@ -1028,7 +1036,12 @@ func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, eve
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspaces(id, domain, name, description, discoverability, icon_url) VALUES (?, ?, ?, ?, ?, ?)`, value.ID, value.Domain, value.Name, value.Description, value.Discoverability, value.IconURL); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -1046,27 +1059,31 @@ func (s *Store) withDefaultChannels(ctx context.Context, db queryExecutor, value
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	defer rows.Close()
 	value.DefaultChannelIDs = make([]domain.ConversationID, 0)
 	for rows.Next() {
 		var channel domain.ConversationID
 		if err := rows.Scan(&channel); err != nil {
-			return domain.Workspace{}, err
+			return domain.Workspace{}, errors.Join(err, rows.Close())
 		}
 		value.DefaultChannelIDs = append(value.DefaultChannelIDs, channel)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.Workspace{}, err
 	}
 	return value, nil
 }
 
-func (s *Store) SetWorkspaceName(ctx context.Context, id domain.WorkspaceID, name string, event events.Event) (domain.Workspace, error) {
+func (s *Store) SetWorkspaceName(ctx context.Context, id domain.WorkspaceID, name string, event events.Event) (workspace domain.Workspace, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
 	if err != nil {
 		return domain.Workspace{}, err
@@ -1091,12 +1108,17 @@ func (s *Store) SetWorkspaceName(ctx context.Context, id domain.WorkspaceID, nam
 	return s.withDefaultChannels(ctx, s.db, value)
 }
 
-func (s *Store) SetWorkspaceDescription(ctx context.Context, id domain.WorkspaceID, description string, event events.Event) (domain.Workspace, error) {
+func (s *Store) SetWorkspaceDescription(ctx context.Context, id domain.WorkspaceID, description string, event events.Event) (workspace domain.Workspace, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET description = ? WHERE id = ?`, description, id)
 	if err != nil {
 		return domain.Workspace{}, err
@@ -1121,12 +1143,17 @@ func (s *Store) SetWorkspaceDescription(ctx context.Context, id domain.Workspace
 	return s.withDefaultChannels(ctx, s.db, value)
 }
 
-func (s *Store) SetWorkspaceDiscoverability(ctx context.Context, id domain.WorkspaceID, discoverability domain.WorkspaceDiscoverability, event events.Event) (domain.Workspace, error) {
+func (s *Store) SetWorkspaceDiscoverability(ctx context.Context, id domain.WorkspaceID, discoverability domain.WorkspaceDiscoverability, event events.Event) (workspace domain.Workspace, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET discoverability = ? WHERE id = ?`, discoverability, id)
 	if err != nil {
 		return domain.Workspace{}, err
@@ -1151,12 +1178,17 @@ func (s *Store) SetWorkspaceDiscoverability(ctx context.Context, id domain.Works
 	return s.withDefaultChannels(ctx, s.db, value)
 }
 
-func (s *Store) SetWorkspaceIcon(ctx context.Context, id domain.WorkspaceID, iconURL string, event events.Event) (domain.Workspace, error) {
+func (s *Store) SetWorkspaceIcon(ctx context.Context, id domain.WorkspaceID, iconURL string, event events.Event) (workspace domain.Workspace, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET icon_url = ? WHERE id = ?`, iconURL, id)
 	if err != nil {
 		return domain.Workspace{}, err
@@ -1181,12 +1213,17 @@ func (s *Store) SetWorkspaceIcon(ctx context.Context, id domain.WorkspaceID, ico
 	return s.withDefaultChannels(ctx, s.db, value)
 }
 
-func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.WorkspaceID, channels []domain.ConversationID, event events.Event) (domain.Workspace, error) {
+func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.WorkspaceID, channels []domain.ConversationID, event events.Event) (workspace domain.Workspace, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, id).Scan(&exists); err != nil {
 		return domain.Workspace{}, translateNotFound(err)
@@ -1241,12 +1278,17 @@ func (s *Store) FindUserByEmail(ctx context.Context, workspace domain.WorkspaceI
 	return value, translateNotFound(err)
 }
 
-func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, event events.Event) (domain.User, error) {
+func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, event events.Event) (returnUser domain.User, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.User{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, status_text = ?, status_emoji = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, profile.StatusText, profile.StatusEmoji, profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, userID, workspaceID, workspaceID, userID)
 	if err != nil {
 		return domain.User{}, err
@@ -1273,7 +1315,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 	return user, nil
 }
 
-func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence, event events.Event) (domain.User, error) {
+func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence, event events.Event) (returnUser domain.User, returnErr error) {
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return domain.User{}, errors.New("invalid user presence")
 	}
@@ -1281,7 +1323,12 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 	if err != nil {
 		return domain.User{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE users SET presence = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, presence, userID, workspaceID, workspaceID, userID)
 	if err != nil {
 		return domain.User{}, err
@@ -1308,12 +1355,17 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 	return user, nil
 }
 
-func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expiration time.Time, event events.Event) error {
+func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expiration time.Time, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0`, userID, workspaceID).Scan(&exists); err != nil {
 		return translateNotFound(err)
@@ -1331,12 +1383,17 @@ func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.Worksp
 	return tx.Commit()
 }
 
-func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, deleted bool, event events.Event) error {
+func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, deleted bool, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE users SET deleted = ? WHERE id = ? AND workspace_id = ?`, boolInt(deleted), userID, workspaceID)
 	if err != nil {
 		return err
@@ -1357,12 +1414,17 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 	return tx.Commit()
 }
 
-func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channels []domain.ConversationID, event events.Event) error {
+func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channels []domain.ConversationID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE users SET deleted = 0 WHERE id = ? AND workspace_id = ?`, userID, workspaceID)
 	if err != nil {
 		return err
@@ -1400,7 +1462,7 @@ func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return tx.Commit()
 }
 
-func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, role domain.WorkspaceRole, event events.Event) error {
+func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, role domain.WorkspaceRole, event events.Event) (returnErr error) {
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
 		return errors.New("invalid workspace role")
 	}
@@ -1408,7 +1470,12 @@ func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.Workspa
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role = ?, active = 1 WHERE workspace_id = ? AND user_id = ?`, role, workspaceID, userID)
 	if err != nil {
 		return err
@@ -1448,12 +1515,17 @@ func (s *Store) GetDoNotDisturb(ctx context.Context, workspaceID domain.Workspac
 	return value, nil
 }
 
-func (s *Store) SetDoNotDisturb(ctx context.Context, value domain.DoNotDisturb, event events.Event) error {
+func (s *Store) SetDoNotDisturb(ctx context.Context, value domain.DoNotDisturb, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE workspace_id = ? AND id = ? AND deleted = 0`, value.WorkspaceID, value.UserID).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1529,18 +1601,17 @@ func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, req
 	if err != nil {
 		return domain.UserPage{}, err
 	}
-	defer rows.Close()
 	users := make([]domain.User, 0, request.Limit)
 	for rows.Next() {
 		var user domain.User
 		var deleted int
 		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
-			return domain.UserPage{}, err
+			return domain.UserPage{}, errors.Join(err, rows.Close())
 		}
 		user.Deleted = deleted != 0
 		users = append(users, user)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.UserPage{}, err
 	}
 	hasMore := len(users) > request.Limit
@@ -1574,18 +1645,17 @@ func (s *Store) ListUsersByRole(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return domain.UserPage{}, err
 	}
-	defer rows.Close()
 	users := make([]domain.User, 0, request.Limit+1)
 	for rows.Next() {
 		var user domain.User
 		var deleted int
 		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
-			return domain.UserPage{}, err
+			return domain.UserPage{}, errors.Join(err, rows.Close())
 		}
 		user.Deleted = deleted != 0
 		users = append(users, user)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.UserPage{}, err
 	}
 	page := domain.UserPage{HasMore: len(users) > request.Limit}
@@ -1625,18 +1695,17 @@ func (s *Store) ListConversationMembers(ctx context.Context, conversation domain
 	if err != nil {
 		return domain.UserPage{}, err
 	}
-	defer rows.Close()
 	users := make([]domain.User, 0, request.Limit)
 	for rows.Next() {
 		var user domain.User
 		var deleted int
 		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
-			return domain.UserPage{}, err
+			return domain.UserPage{}, errors.Join(err, rows.Close())
 		}
 		user.Deleted = deleted != 0
 		users = append(users, user)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.UserPage{}, err
 	}
 	hasMore := len(users) > request.Limit
@@ -1727,7 +1796,7 @@ func (s *Store) GetAuthMethod(ctx context.Context, workspace domain.WorkspaceID,
 	err := s.db.QueryRowContext(ctx, `SELECT enabled FROM auth_methods WHERE workspace_id = ? AND provider = ?`, workspace, provider).Scan(&enabled)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: true}, nil
+			return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: false}, nil
 		}
 		return domain.AuthMethod{}, err
 	}
@@ -1777,12 +1846,17 @@ func (s *Store) RevokeSession(ctx context.Context, token string) error {
 	return nil
 }
 
-func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, event events.Event) error {
+func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID)
 	if err != nil {
 		return err
@@ -1834,7 +1908,7 @@ func (s *Store) FindDirectConversation(ctx context.Context, workspaceID domain.W
 	return value, translateNotFound(err)
 }
 
-func (s *Store) CreateDirectConversation(ctx context.Context, conversation domain.Conversation, members []domain.UserID, event events.Event) error {
+func (s *Store) CreateDirectConversation(ctx context.Context, conversation domain.Conversation, members []domain.UserID, event events.Event) (returnErr error) {
 	if !conversation.IsPrivate || (!conversation.IsDirect && !conversation.IsGroupDirect) || len(members) < 2 {
 		return errors.New("invalid direct conversation")
 	}
@@ -1842,7 +1916,12 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	direct, groupDirect := 0, 0
 	if conversation.IsDirect {
 		direct = 1
@@ -1887,12 +1966,17 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	return tx.Commit()
 }
 
-func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conversation, creator domain.UserID, event events.Event) error {
+func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conversation, creator domain.UserID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	private := 0
 	if conversation.IsPrivate {
 		private = 1
@@ -1914,12 +1998,17 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	return tx.Commit()
 }
 
-func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event) (domain.Conversation, error) {
+func (s *Store) RenameConversation(ctx context.Context, conversation domain.ConversationID, name string, event events.Event) (returnValue domain.Conversation, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE conversations SET name = ? WHERE id = ?`, name, conversation)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -1946,12 +2035,17 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	return value, nil
 }
 
-func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.ConversationID, topic string, event events.Event) (returnValue domain.Conversation, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE conversations SET topic = ? WHERE id = ?`, topic, conversation)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -1978,12 +2072,17 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	return value, nil
 }
 
-func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.ConversationID, purpose string, event events.Event) (returnValue domain.Conversation, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE conversations SET purpose = ? WHERE id = ?`, purpose, conversation)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -2010,12 +2109,17 @@ func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.
 	return value, nil
 }
 
-func (s *Store) SetConversationArchived(ctx context.Context, conversation domain.ConversationID, archived bool, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationArchived(ctx context.Context, conversation domain.ConversationID, archived bool, event events.Event) (returnValue domain.Conversation, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	valueArchived := 0
 	if archived {
 		valueArchived = 1
@@ -2046,12 +2150,17 @@ func (s *Store) SetConversationArchived(ctx context.Context, conversation domain
 	return value, nil
 }
 
-func (s *Store) DeleteConversation(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, event events.Event) error {
+func (s *Store) DeleteConversation(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var private, direct, groupDirect int
 	if err := tx.QueryRowContext(ctx, `SELECT is_private, is_direct, is_group_direct FROM conversations WHERE id = ? AND workspace_id = ?`, conversation, workspace).Scan(&private, &direct, &groupDirect); err != nil {
 		return translateNotFound(err)
@@ -2096,12 +2205,17 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 	return tx.Commit()
 }
 
-func (s *Store) SetConversationAccessGroups(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, groups []domain.UserGroupID, event events.Event) error {
+func (s *Store) SetConversationAccessGroups(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, groups []domain.UserGroupID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ? AND workspace_id = ?`, conversation, workspace).Scan(&exists); err != nil {
 		return translateNotFound(err)
@@ -2134,19 +2248,18 @@ func (s *Store) ListConversationAccessGroups(ctx context.Context, workspace doma
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	groups := make([]domain.UserGroupID, 0)
 	for rows.Next() {
 		var groupID domain.UserGroupID
 		if err := rows.Scan(&groupID); err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		groups = append(groups, groupID)
 	}
-	return groups, rows.Err()
+	return groups, errors.Join(rows.Err(), rows.Close())
 }
 
-func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequest, event events.Event) error {
+func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequest, event events.Event) (returnErr error) {
 	channelIDs, err := json.Marshal(value.ChannelIDs)
 	if err != nil {
 		return fmt.Errorf("encode invite request channels: %w", err)
@@ -2155,7 +2268,12 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if value.Status != domain.InviteRequestPending {
 		return store.ErrAlreadyExists
 	}
@@ -2194,7 +2312,7 @@ func (s *Store) GetInviteRequest(ctx context.Context, workspace domain.Workspace
 	return value, nil
 }
 
-func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
+func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) (returnErr error) {
 	if status != domain.InviteRequestApproved && status != domain.InviteRequestDenied {
 		return store.ErrInvalidInviteRequest
 	}
@@ -2202,7 +2320,12 @@ func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.Wor
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE invite_requests SET status = ?, reviewed_at = ? WHERE id = ? AND workspace_id = ? AND status = ?`, status, reviewedAt.UTC().Unix(), id, workspace, domain.InviteRequestPending)
 	if err != nil {
 		return err
@@ -2232,7 +2355,6 @@ func (s *Store) ListInviteRequests(ctx context.Context, workspace domain.Workspa
 	if err != nil {
 		return domain.InviteRequestPage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.InviteRequest, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.InviteRequest
@@ -2240,10 +2362,10 @@ func (s *Store) ListInviteRequests(ctx context.Context, workspace domain.Workspa
 		var channelIDs string
 		var resend, restricted, ultraRestricted int
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.RequestedBy, &channelIDs, &value.CustomMessage, &value.RealName, &resend, &restricted, &ultraRestricted, &expiration, &value.Status, &created, &reviewed); err != nil {
-			return domain.InviteRequestPage{}, err
+			return domain.InviteRequestPage{}, errors.Join(err, rows.Close())
 		}
 		if err := json.Unmarshal([]byte(channelIDs), &value.ChannelIDs); err != nil {
-			return domain.InviteRequestPage{}, fmt.Errorf("decode invite request channels: %w", err)
+			return domain.InviteRequestPage{}, errors.Join(fmt.Errorf("decode invite request channels: %w", err), rows.Close())
 		}
 		value.Resend, value.Restricted, value.UltraRestricted = resend != 0, restricted != 0, ultraRestricted != 0
 		if expiration != 0 {
@@ -2255,7 +2377,7 @@ func (s *Store) ListInviteRequests(ctx context.Context, workspace domain.Workspa
 		}
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.InviteRequestPage{}, err
 	}
 	page := domain.InviteRequestPage{HasMore: len(values) > request.Limit}
@@ -2274,7 +2396,7 @@ func validAppApprovalStatusSQL(status domain.AppApprovalStatus) bool {
 	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted
 }
 
-func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID, appID domain.AppID, requestID domain.AppRequestID, approvalStatus domain.AppApprovalStatus, updatedAt time.Time, event events.Event) error {
+func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID, appID domain.AppID, requestID domain.AppRequestID, approvalStatus domain.AppApprovalStatus, updatedAt time.Time, event events.Event) (returnErr error) {
 	if strings.TrimSpace(string(workspace)) == "" || strings.TrimSpace(string(appID)) == "" || !validAppApprovalStatusSQL(approvalStatus) {
 		return store.ErrInvalidAppApproval
 	}
@@ -2282,7 +2404,12 @@ func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	created := updatedAt.UTC().Unix()
 	result, err := tx.ExecContext(ctx, `INSERT INTO app_approvals(app_id, request_id, workspace_id, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(app_id) DO UPDATE SET request_id = excluded.request_id, status = excluded.status, updated_at = excluded.updated_at WHERE app_approvals.workspace_id = excluded.workspace_id`, appID, requestID, workspace, approvalStatus, created, created)
 	if err != nil {
@@ -2313,19 +2440,18 @@ func (s *Store) ListAppApprovals(ctx context.Context, workspace domain.Workspace
 	if err != nil {
 		return domain.AppApprovalPage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.AppApproval, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.AppApproval
 		var created, updated int64
 		if err := rows.Scan(&value.ID, &value.RequestID, &value.WorkspaceID, &value.Status, &created, &updated); err != nil {
-			return domain.AppApprovalPage{}, err
+			return domain.AppApprovalPage{}, errors.Join(err, rows.Close())
 		}
 		value.CreatedAt = time.Unix(created, 0).UTC()
 		value.UpdatedAt = time.Unix(updated, 0).UTC()
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.AppApprovalPage{}, err
 	}
 	page := domain.AppApprovalPage{HasMore: len(values) > request.Limit}
@@ -2340,7 +2466,7 @@ func (s *Store) ListAppApprovals(ctx context.Context, workspace domain.Workspace
 	return page, nil
 }
 
-func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.AppPermissionRequest, event events.Event) error {
+func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.AppPermissionRequest, event events.Event) (returnErr error) {
 	if value.ID == "" || value.WorkspaceID == "" || value.RequesterID == "" || value.TargetUserID == "" || value.TriggerID == "" || len(value.Scopes) == 0 {
 		return errors.New("invalid app permission request")
 	}
@@ -2352,7 +2478,12 @@ func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.App
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO app_permission_requests(id, workspace_id, requester_id, target_user_id, scopes, trigger_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.RequesterID, value.TargetUserID, string(scopes), value.TriggerID, value.CreatedAt.UTC().Unix()); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -2365,7 +2496,7 @@ func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.App
 	return tx.Commit()
 }
 
-func (s *Store) CreateView(ctx context.Context, value domain.View, event events.Event) error {
+func (s *Store) CreateView(ctx context.Context, value domain.View, event events.Event) (returnErr error) {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
 		return errors.New("invalid view")
 	}
@@ -2373,7 +2504,12 @@ func (s *Store) CreateView(ctx context.Context, value domain.View, event events.
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO views(id, workspace_id, user_id, type, external_id, payload, hash, root_view_id, previous_view_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.Type, value.ExternalID, value.Payload, value.Hash, value.RootViewID, value.PreviousViewID, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano()); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -2419,7 +2555,7 @@ func (s *Store) GetLatestView(ctx context.Context, workspace domain.WorkspaceID,
 	return value, translateNotFound(err)
 }
 
-func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash string, event events.Event) (domain.View, error) {
+func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash string, event events.Event) (returnValue domain.View, returnErr error) {
 	if value.ID == "" || value.WorkspaceID == "" || value.Payload == "" || value.Hash == "" {
 		return domain.View{}, errors.New("invalid view")
 	}
@@ -2427,7 +2563,12 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 	if err != nil {
 		return domain.View{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	query := `UPDATE views SET type = ?, external_id = ?, payload = ?, hash = ?, root_view_id = ?, previous_view_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?`
 	args := []any{value.Type, value.ExternalID, value.Payload, value.Hash, value.RootViewID, value.PreviousViewID, value.UpdatedAt.UTC().UnixNano(), value.WorkspaceID, value.ID}
 	if expectedHash != "" {
@@ -2484,7 +2625,7 @@ func scanWorkflowStep(row interface{ Scan(...any) error }) (domain.WorkflowStep,
 
 const workflowStepColumns = `id, workspace_id, user_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at`
 
-func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, event events.Event) error {
+func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, event events.Event) (returnErr error) {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Status == "" || value.UpdatedAt.IsZero() {
 		return errors.New("invalid workflow step")
 	}
@@ -2492,7 +2633,12 @@ func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var currentWorkspace string
 	var created int64
 	lookupErr := tx.QueryRowContext(ctx, `SELECT workspace_id, created_at FROM workflow_steps WHERE id = ?`, value.ID).Scan(&currentWorkspace, &created)
@@ -2521,7 +2667,7 @@ func (s *Store) GetWorkflowStep(ctx context.Context, workspace domain.WorkspaceI
 	return value, translateNotFound(err)
 }
 
-func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event events.Event) error {
+func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event events.Event) (returnErr error) {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Payload == "" || value.CreatedAt.IsZero() {
 		return errors.New("invalid dialog")
 	}
@@ -2529,7 +2675,12 @@ func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event eve
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO dialogs(id, workspace_id, user_id, payload, created_at) VALUES (?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.Payload, value.CreatedAt.UTC().UnixNano()); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -2579,7 +2730,7 @@ func (s *Store) GetBot(ctx context.Context, workspace domain.WorkspaceID, id dom
 	return value, nil
 }
 
-func (s *Store) CreateUserMigration(ctx context.Context, value domain.UserMigration, event events.Event) error {
+func (s *Store) CreateUserMigration(ctx context.Context, value domain.UserMigration, event events.Event) (returnErr error) {
 	if value.WorkspaceID == "" || value.OldID == "" || value.GlobalID == "" {
 		return errors.New("invalid user migration")
 	}
@@ -2587,7 +2738,12 @@ func (s *Store) CreateUserMigration(ctx context.Context, value domain.UserMigrat
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_migrations(workspace_id, old_id, global_id) VALUES (?, ?, ?)`, value.WorkspaceID, value.OldID, value.GlobalID); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -2609,12 +2765,17 @@ func (s *Store) FindUserMigration(ctx context.Context, workspace domain.Workspac
 	return value, nil
 }
 
-func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) error {
+func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var owner domain.WorkspaceID
 	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, conversation).Scan(&owner); err != nil {
 		return translateNotFound(err)
@@ -2663,27 +2824,31 @@ func (s *Store) ListConversationTeams(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return nil, false, err
 	}
-	defer rows.Close()
 	teams := make([]domain.WorkspaceID, 0)
 	org := false
 	for rows.Next() {
 		var team string
 		var isOrg int
 		if err := rows.Scan(&team, &isOrg); err != nil {
-			return nil, false, err
+			return nil, false, errors.Join(err, rows.Close())
 		}
 		teams = append(teams, domain.WorkspaceID(team))
 		org = org || isOrg != 0
 	}
-	return teams, org, rows.Err()
+	return teams, org, errors.Join(rows.Err(), rows.Close())
 }
 
-func (s *Store) DisconnectConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, leaving []domain.WorkspaceID, event events.Event) error {
+func (s *Store) DisconnectConversationTeams(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, leaving []domain.WorkspaceID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var owner domain.WorkspaceID
 	if err := tx.QueryRowContext(ctx, `SELECT workspace_id FROM conversations WHERE id = ?`, conversation).Scan(&owner); err != nil {
 		return translateNotFound(err)
@@ -2728,12 +2893,11 @@ func (s *Store) ListConnectedChannelInfo(ctx context.Context, workspace domain.W
 	if err != nil {
 		return nil, false, "", err
 	}
-	defer rows.Close()
 	grouped := make(map[domain.ConversationID][]domain.WorkspaceID)
 	for rows.Next() {
 		var channel, team string
 		if err := rows.Scan(&channel, &team); err != nil {
-			return nil, false, "", err
+			return nil, false, "", errors.Join(err, rows.Close())
 		}
 		cid := domain.ConversationID(channel)
 		tid := domain.WorkspaceID(team)
@@ -2749,7 +2913,7 @@ func (s *Store) ListConnectedChannelInfo(ctx context.Context, workspace domain.W
 		}
 		grouped[cid] = append(grouped[cid], tid)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, false, "", err
 	}
 	values := make([]domain.ConnectedChannelInfo, 0, len(grouped))
@@ -2807,12 +2971,17 @@ func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) err
 	return err
 }
 
-func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, redirect, accessToken string, token domain.OAuthToken) (domain.OAuthToken, error) {
+func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, redirect, accessToken string, token domain.OAuthToken) (returnToken domain.OAuthToken, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var appID domain.AppID
 	if err := tx.QueryRowContext(ctx, `SELECT app_id FROM oauth_clients WHERE id = ? AND secret_hash = ?`, clientID, domain.HashToken(secret)).Scan(&appID); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
@@ -2862,12 +3031,17 @@ func (s *Store) CreateRTMConnection(ctx context.Context, value domain.RTMConnect
 	return err
 }
 
-func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTMConnection, error) {
+func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (returnValue domain.RTMConnection, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.RTMConnection{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var value domain.RTMConnection
 	var expiresAt int64
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, user_id, expires_at FROM rtm_connections WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.UserID, &expiresAt); err != nil {
@@ -2896,12 +3070,17 @@ func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTM
 	return value, nil
 }
 
-func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
+func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.ConversationID, event events.Event) (returnValue domain.Conversation, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE conversations SET is_private = 1 WHERE id = ? AND is_private = 0 AND is_direct = 0 AND is_group_direct = 0`, conversation)
 	if err != nil {
 		return domain.Conversation{}, err
@@ -2959,7 +3138,7 @@ func (s *Store) GetConversationPrefs(ctx context.Context, conversation domain.Co
 	return domain.ConversationPrefs{ConversationID: conversation, CanThread: domain.ConversationPreferenceList{Types: canTypes, Users: canUsers}, WhoCanPost: domain.ConversationPreferenceList{Types: postTypes, Users: postUsers}}, nil
 }
 
-func (s *Store) SetConversationPrefs(ctx context.Context, conversation domain.ConversationID, value domain.ConversationPrefs, event events.Event) (domain.ConversationPrefs, error) {
+func (s *Store) SetConversationPrefs(ctx context.Context, conversation domain.ConversationID, value domain.ConversationPrefs, event events.Event) (returnValue domain.ConversationPrefs, returnErr error) {
 	if _, err := s.GetConversation(ctx, conversation); err != nil {
 		return domain.ConversationPrefs{}, err
 	}
@@ -2983,7 +3162,12 @@ func (s *Store) SetConversationPrefs(ctx context.Context, conversation domain.Co
 	if err != nil {
 		return domain.ConversationPrefs{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_prefs(conversation_id, can_thread_types, can_thread_users, who_can_post_types, who_can_post_users) VALUES (?, ?, ?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET can_thread_types = excluded.can_thread_types, can_thread_users = excluded.can_thread_users, who_can_post_types = excluded.who_can_post_types, who_can_post_users = excluded.who_can_post_users`, conversation, canTypes, canUsers, postTypes, postUsers); err != nil {
 		return domain.ConversationPrefs{}, err
 	}
@@ -3040,12 +3224,17 @@ func userIDStrings(values []domain.UserID) []string {
 	return result
 }
 
-func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event events.Event) error {
+func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji(workspace_id, name, url, alias_for) VALUES (?, ?, ?, ?)`, value.WorkspaceID, value.Name, value.URL, value.AliasFor); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "constraint") {
 			return store.ErrAlreadyExists
@@ -3063,27 +3252,31 @@ func (s *Store) ListEmojis(ctx context.Context, workspace domain.WorkspaceID) ([
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	result := make([]domain.CustomEmoji, 0)
 	for rows.Next() {
 		var value domain.CustomEmoji
 		if err := rows.Scan(&value.WorkspaceID, &value.Name, &value.URL, &value.AliasFor); err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		result = append(result, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, err
 	}
 	return result, nil
 }
 
-func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, event events.Event) error {
+func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, name string, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM custom_emoji WHERE workspace_id = ? AND name = ?`, workspace, name)
 	if err != nil {
 		return err
@@ -3101,12 +3294,17 @@ func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, n
 	return tx.Commit()
 }
 
-func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) error {
+func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, oldName, newName string, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE custom_emoji SET name = ? WHERE workspace_id = ? AND name = ? AND NOT EXISTS (SELECT 1 FROM custom_emoji WHERE workspace_id = ? AND name = ?)`, newName, workspace, oldName, workspace, newName)
 	if err != nil {
 		return err
@@ -3128,7 +3326,7 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 	return tx.Commit()
 }
 
-func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) (returnErr error) {
 	var private int
 	if err := s.db.QueryRowContext(ctx, `SELECT is_private FROM conversations WHERE id = ?`, conversation).Scan(&private); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
@@ -3141,7 +3339,12 @@ func (s *Store) AddConversationMember(ctx context.Context, conversation domain.C
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation, user)
 	if err != nil {
 		return err
@@ -3159,7 +3362,7 @@ func (s *Store) AddConversationMember(ctx context.Context, conversation domain.C
 	return tx.Commit()
 }
 
-func (s *Store) InviteConversationMembers(ctx context.Context, conversation domain.ConversationID, users []domain.UserID, event events.Event) error {
+func (s *Store) InviteConversationMembers(ctx context.Context, conversation domain.ConversationID, users []domain.UserID, event events.Event) (returnErr error) {
 	if len(users) == 0 {
 		return errors.New("conversation invite requires at least one user")
 	}
@@ -3167,7 +3370,12 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var workspace domain.WorkspaceID
 	var private int
 	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_private FROM conversations WHERE id = ?`, conversation).Scan(&workspace, &private); errors.Is(err, sql.ErrNoRows) {
@@ -3195,12 +3403,17 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	return tx.Commit()
 }
 
-func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+func (s *Store) RemoveConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?`, conversation, user)
 	if err != nil {
 		return err
@@ -3232,12 +3445,17 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 	return cursor, err
 }
 
-func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, event events.Event) error {
+func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, cursor.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
@@ -3292,13 +3510,12 @@ func (s *Store) ListConversations(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return domain.ConversationPage{}, err
 	}
-	defer rows.Close()
 	conversations := make([]domain.Conversation, 0, request.Limit)
 	for rows.Next() {
 		var conversation domain.Conversation
 		var private, direct, groupDirect, archived int
 		if err := rows.Scan(&conversation.ID, &conversation.WorkspaceID, &conversation.Name, &conversation.Topic, &conversation.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
-			return domain.ConversationPage{}, err
+			return domain.ConversationPage{}, errors.Join(err, rows.Close())
 		}
 		conversation.Archived = archived != 0
 		conversation.IsPrivate = private != 0
@@ -3306,11 +3523,11 @@ func (s *Store) ListConversations(ctx context.Context, workspace domain.Workspac
 		conversation.IsGroupDirect = groupDirect != 0
 		conversation.UnreadCount, err = s.unreadCount(ctx, workspace, user, conversation.ID)
 		if err != nil {
-			return domain.ConversationPage{}, err
+			return domain.ConversationPage{}, errors.Join(err, rows.Close())
 		}
 		conversations = append(conversations, conversation)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.ConversationPage{}, err
 	}
 	hasMore := len(conversations) > request.Limit
@@ -3349,18 +3566,17 @@ func (s *Store) SearchConversations(ctx context.Context, workspace domain.Worksp
 	if err != nil {
 		return domain.ConversationPage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.Conversation, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.Conversation
 		var archived, private, direct, groupDirect int
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
-			return domain.ConversationPage{}, err
+			return domain.ConversationPage{}, errors.Join(err, rows.Close())
 		}
 		value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.ConversationPage{}, err
 	}
 	page := domain.ConversationPage{HasMore: len(values) > request.Limit}
@@ -3403,7 +3619,7 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 	return exists == 1, err
 }
 
-func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) (returnErr error) {
 	unfurls, err := encodeUnfurls(message.Unfurls)
 	if err != nil {
 		return err
@@ -3412,7 +3628,12 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if idempotencyKey != "" {
 		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`, message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, time.Now().UTC().Format(time.RFC3339Nano))
 		if err != nil {
@@ -3427,11 +3648,9 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 		}
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, message.ThreadTimestamp, message.CreatedAt.UTC().Format(time.RFC3339Nano), unfurls); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
@@ -3461,7 +3680,7 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	return message, nil
 }
 
-func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event) error {
+func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event events.Event) (returnErr error) {
 	unfurls, err := encodeUnfurls(message.Unfurls)
 	if err != nil {
 		return err
@@ -3470,7 +3689,12 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	deleted := 0
 	if message.Deleted {
 		deleted = 1
@@ -3492,12 +3716,17 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	return tx.Commit()
 }
 
-func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event events.Event) error {
+func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `INSERT INTO reactions(message_id, name, user_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id, name, user_id) DO NOTHING`, reaction.Message, reaction.Name, reaction.UserID, reaction.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
@@ -3515,12 +3744,17 @@ func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event
 	return tx.Commit()
 }
 
-func (s *Store) RemoveReaction(ctx context.Context, reaction domain.Reaction, event events.Event) error {
+func (s *Store) RemoveReaction(ctx context.Context, reaction domain.Reaction, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM reactions WHERE message_id = ? AND name = ? AND user_id = ?`, reaction.Message, reaction.Name, reaction.UserID)
 	if err != nil {
 		return err
@@ -3563,21 +3797,20 @@ func (s *Store) ListReactions(ctx context.Context, message domain.MessageID, req
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer rows.Close()
 	values := make([]domain.Reaction, 0, request.Limit+1)
 	for rows.Next() {
 		var reaction domain.Reaction
 		var created string
 		if err := rows.Scan(&reaction.Message, &reaction.Name, &reaction.UserID, &created); err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		reaction.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		values = append(values, reaction)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, "", false, err
 	}
 	hasMore := len(values) > request.Limit
@@ -3618,28 +3851,27 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return domain.UserReactionPage{}, err
 	}
-	defer rows.Close()
 	items := make([]domain.UserReaction, 0, request.Limit)
 	for rows.Next() {
 		var item domain.UserReaction
 		var deleted int
 		var messageCreated, reactionCreated string
 		if err := rows.Scan(&item.Conversation, &item.Message.ID, &item.Message.WorkspaceID, &item.Message.AuthorID, &item.Message.Text, &item.Message.ThreadTimestamp, &messageCreated, &deleted, &item.Reaction.Name, &item.Reaction.UserID, &reactionCreated); err != nil {
-			return domain.UserReactionPage{}, err
+			return domain.UserReactionPage{}, errors.Join(err, rows.Close())
 		}
 		item.Message.Deleted = deleted != 0
 		item.Message.CreatedAt, err = time.Parse(time.RFC3339Nano, messageCreated)
 		if err != nil {
-			return domain.UserReactionPage{}, err
+			return domain.UserReactionPage{}, errors.Join(err, rows.Close())
 		}
 		item.Reaction.Message = item.Message.ID
 		item.Reaction.CreatedAt, err = time.Parse(time.RFC3339Nano, reactionCreated)
 		if err != nil {
-			return domain.UserReactionPage{}, err
+			return domain.UserReactionPage{}, errors.Join(err, rows.Close())
 		}
 		items = append(items, item)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.UserReactionPage{}, err
 	}
 	hasMore := len(items) > request.Limit
@@ -3657,12 +3889,17 @@ func userReactionCursorKey(value domain.UserReaction) string {
 	return value.Message.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
 }
 
-func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) error {
+func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `INSERT INTO pins(message_id, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT(message_id, user_id) DO NOTHING`, pin.Message, pin.UserID, pin.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
@@ -3680,12 +3917,17 @@ func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) 
 	return tx.Commit()
 }
 
-func (s *Store) RemovePin(ctx context.Context, pin domain.Pin, event events.Event) error {
+func (s *Store) RemovePin(ctx context.Context, pin domain.Pin, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM pins WHERE message_id = ? AND user_id = ?`, pin.Message, pin.UserID)
 	if err != nil {
 		return err
@@ -3728,21 +3970,20 @@ func (s *Store) ListPins(ctx context.Context, conversation domain.ConversationID
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer rows.Close()
 	values := make([]domain.Pin, 0, request.Limit+1)
 	for rows.Next() {
 		var pin domain.Pin
 		var created string
 		if err := rows.Scan(&pin.Message, &pin.UserID, &created); err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		pin.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		values = append(values, pin)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, "", false, err
 	}
 	hasMore := len(values) > request.Limit
@@ -3760,12 +4001,17 @@ func (s *Store) ListPins(ctx context.Context, conversation domain.ConversationID
 	return values, next, hasMore, nil
 }
 
-func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Event) error {
+func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, star.CreatedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
@@ -3783,12 +4029,17 @@ func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Even
 	return tx.Commit()
 }
 
-func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.Event) error {
+func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM stars WHERE user_id = ? AND message_id = ?`, star.UserID, star.Message.ID)
 	if err != nil {
 		return err
@@ -3831,29 +4082,28 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer rows.Close()
 	values := make([]domain.Star, 0, request.Limit+1)
 	for rows.Next() {
 		var star domain.Star
 		var starCreated, messageCreated string
 		var deleted int
 		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.Text, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		star.UserID = user
 		star.Conversation = star.Message.Conversation
 		star.Message.Deleted = deleted != 0
 		star.CreatedAt, err = time.Parse(time.RFC3339Nano, starCreated)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		star.Message.CreatedAt, err = time.Parse(time.RFC3339Nano, messageCreated)
 		if err != nil {
-			return nil, "", false, err
+			return nil, "", false, errors.Join(err, rows.Close())
 		}
 		values = append(values, star)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return nil, "", false, err
 	}
 	hasMore := len(values) > request.Limit
@@ -3870,12 +4120,17 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	return values, next, hasMore, nil
 }
 
-func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, event events.Event) error {
+func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring)); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -3918,13 +4173,12 @@ func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID,
 	if err != nil {
 		return domain.ReminderPage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.Reminder, 0, request.Limit+1)
 	for rows.Next() {
 		var reminder domain.Reminder
 		var due, complete, recurring int64
 		if err := rows.Scan(&reminder.ID, &reminder.WorkspaceID, &reminder.Creator, &reminder.User, &reminder.Text, &due, &complete, &recurring); err != nil {
-			return domain.ReminderPage{}, err
+			return domain.ReminderPage{}, errors.Join(err, rows.Close())
 		}
 		reminder.Time = time.Unix(due, 0).UTC()
 		if complete != 0 {
@@ -3933,7 +4187,7 @@ func (s *Store) ListReminders(ctx context.Context, workspace domain.WorkspaceID,
 		reminder.Recurring = recurring != 0
 		values = append(values, reminder)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.ReminderPage{}, err
 	}
 	page := domain.ReminderPage{HasMore: len(values) > request.Limit}
@@ -3952,12 +4206,17 @@ func (s *Store) CompleteReminder(ctx context.Context, workspace domain.Workspace
 	return s.updateReminderCompletion(ctx, workspace, user, id, completed, event)
 }
 
-func (s *Store) updateReminderCompletion(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID, completed time.Time, event events.Event) error {
+func (s *Store) updateReminderCompletion(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID, completed time.Time, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE reminders SET complete_at = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`, unixSeconds(completed), id, workspace, user)
 	if err != nil {
 		return err
@@ -3975,12 +4234,17 @@ func (s *Store) updateReminderCompletion(ctx context.Context, workspace domain.W
 	return tx.Commit()
 }
 
-func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID, event events.Event) error {
+func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ReminderID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM reminders WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspace, user)
 	if err != nil {
 		return err
@@ -3998,12 +4262,17 @@ func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID
 	return tx.Commit()
 }
 
-func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.ScheduledMessage, event events.Event) error {
+func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.ScheduledMessage, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
@@ -4040,19 +4309,18 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
-	defer rows.Close()
 	items := make([]domain.ScheduledMessage, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.ScheduledMessage
 		var postAt, createdAt int64
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &postAt, &createdAt); err != nil {
-			return domain.ScheduledMessagePage{}, err
+			return domain.ScheduledMessagePage{}, errors.Join(err, rows.Close())
 		}
 		value.PostAt = time.Unix(postAt, 0).UTC()
 		value.CreatedAt = time.Unix(createdAt, 0).UTC()
 		items = append(items, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
 	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > request.Limit}
@@ -4074,12 +4342,17 @@ func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.W
 	return time.Unix(postAt.Int64, 0).UTC(), nil
 }
 
-func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
+func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, user, channel, time.Now().UTC().Unix())
 	if err != nil {
 		return err
@@ -4097,7 +4370,7 @@ func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.Wor
 	return tx.Commit()
 }
 
-func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]domain.ScheduledMessage, error) {
+func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) (returnValues []domain.ScheduledMessage, returnErr error) {
 	if owner == "" || limit <= 0 || lease <= 0 {
 		return nil, errors.New("scheduled claim requires owner, positive limit, and lease")
 	}
@@ -4105,26 +4378,30 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	now := time.Now().UTC()
 	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, channel_id, author_id, text, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY id LIMIT ?`, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	values := make([]domain.ScheduledMessage, 0, limit)
 	for rows.Next() {
 		var value domain.ScheduledMessage
 		var postAt, createdAt int64
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &postAt, &createdAt); err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		value.PostAt = time.Unix(postAt, 0).UTC()
 		value.CreatedAt = time.Unix(createdAt, 0).UTC()
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, errors.Join(err, rows.Close())
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -4194,12 +4471,17 @@ func (s *Store) ReleaseScheduledMessage(ctx context.Context, owner string, id do
 	return nil
 }
 
-func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) error {
+func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	_, err = tx.ExecContext(ctx, `INSERT INTO user_groups(id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, value.ID, value.WorkspaceID, value.Name, value.Handle, value.Description, value.Creator, value.UpdatedBy, value.CreatedAt.Unix(), value.UpdatedAt.Unix(), boolInt(value.Enabled))
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -4234,30 +4516,28 @@ func (s *Store) GetUserGroup(ctx context.Context, workspace domain.WorkspaceID, 
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var userID domain.UserID
 		if err := rows.Scan(&userID); err != nil {
-			return domain.UserGroup{}, err
+			return domain.UserGroup{}, errors.Join(err, rows.Close())
 		}
 		value.Users = append(value.Users, userID)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.UserGroup{}, err
 	}
 	channelRows, err := s.db.QueryContext(ctx, `SELECT c.id FROM user_group_channels g JOIN conversations c ON c.id = g.conversation_id WHERE g.group_id = ? ORDER BY c.id`, id)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	defer channelRows.Close()
 	for channelRows.Next() {
 		var channel domain.ConversationID
 		if err := channelRows.Scan(&channel); err != nil {
-			return domain.UserGroup{}, err
+			return domain.UserGroup{}, errors.Join(err, channelRows.Close())
 		}
 		value.Channels = append(value.Channels, channel)
 	}
-	if err := channelRows.Err(); err != nil {
+	if err := errors.Join(channelRows.Err(), channelRows.Close()); err != nil {
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -4282,14 +4562,13 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return domain.UserGroupPage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.UserGroup, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.UserGroup
 		var created, updated, deleted int64
 		var enabled int
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Handle, &value.Description, &value.Creator, &value.UpdatedBy, &created, &updated, &deleted, &enabled); err != nil {
-			return domain.UserGroupPage{}, err
+			return domain.UserGroupPage{}, errors.Join(err, rows.Close())
 		}
 		value.CreatedAt = time.Unix(created, 0).UTC()
 		value.UpdatedAt = time.Unix(updated, 0).UTC()
@@ -4299,7 +4578,7 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 		value.Enabled = enabled != 0
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.UserGroupPage{}, err
 	}
 	page := domain.UserGroupPage{HasMore: len(values) > request.Limit}
@@ -4324,12 +4603,17 @@ func (s *Store) ListUserGroups(ctx context.Context, workspace domain.WorkspaceID
 	return page, nil
 }
 
-func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, channels []domain.ConversationID, actor domain.UserID, event events.Event) error {
+func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, channels []domain.ConversationID, actor domain.UserID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM user_groups WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&exists); err != nil {
 		return translateNotFound(err)
@@ -4356,12 +4640,17 @@ func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.Works
 	return tx.Commit()
 }
 
-func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) error {
+func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE user_groups SET name = ?, handle = ?, description = ?, updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.Handle, value.Description, value.UpdatedBy, value.UpdatedAt.Unix(), value.ID, value.WorkspaceID)
 	if err != nil {
 		return err
@@ -4379,7 +4668,7 @@ func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, eve
 	return tx.Commit()
 }
 
-func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, enabled bool, actor domain.UserID, event events.Event) error {
+func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, enabled bool, actor domain.UserID, event events.Event) (returnErr error) {
 	now := time.Now().UTC()
 	deleted := int64(0)
 	if !enabled {
@@ -4389,7 +4678,12 @@ func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.Worksp
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE user_groups SET enabled = ?, deleted_at = ?, updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, boolInt(enabled), deleted, actor, now.Unix(), id, workspace)
 	if err != nil {
 		return err
@@ -4407,12 +4701,17 @@ func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.Worksp
 	return tx.Commit()
 }
 
-func (s *Store) SetUserGroupUsers(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, users []domain.UserID, actor domain.UserID, event events.Event) error {
+func (s *Store) SetUserGroupUsers(ctx context.Context, workspace domain.WorkspaceID, id domain.UserGroupID, users []domain.UserID, actor domain.UserID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM user_groups WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -4437,12 +4736,17 @@ func (s *Store) SetUserGroupUsers(ctx context.Context, workspace domain.Workspac
 	return tx.Commit()
 }
 
-func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.Event) error {
+func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	_, err = tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.ExternalUniqueID, value.ExternalDisplayID, value.JoinURL, value.DesktopAppJoinURL, value.Title, value.CreatedBy, value.StartedAt.Unix())
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -4479,26 +4783,30 @@ func (s *Store) GetCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	if err != nil {
 		return domain.Call{}, err
 	}
-	defer rows.Close()
 	for rows.Next() {
 		var userID domain.UserID
 		if err := rows.Scan(&userID); err != nil {
-			return domain.Call{}, err
+			return domain.Call{}, errors.Join(err, rows.Close())
 		}
 		value.Participants = append(value.Participants, userID)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.Call{}, err
 	}
 	return value, nil
 }
 
-func (s *Store) UpdateCall(ctx context.Context, value domain.Call, event events.Event) error {
+func (s *Store) UpdateCall(ctx context.Context, value domain.Call, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE calls SET external_display_id = CASE WHEN ? = '' THEN external_display_id ELSE ? END, join_url = CASE WHEN ? = '' THEN join_url ELSE ? END, desktop_app_join_url = CASE WHEN ? = '' THEN desktop_app_join_url ELSE ? END, title = CASE WHEN ? = '' THEN title ELSE ? END WHERE workspace_id = ? AND id = ?`, value.ExternalDisplayID, value.ExternalDisplayID, value.JoinURL, value.JoinURL, value.DesktopAppJoinURL, value.DesktopAppJoinURL, value.Title, value.Title, value.WorkspaceID, value.ID)
 	if err != nil {
 		return err
@@ -4516,12 +4824,17 @@ func (s *Store) UpdateCall(ctx context.Context, value domain.Call, event events.
 	return tx.Commit()
 }
 
-func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, duration int64, event events.Event) error {
+func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, duration int64, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	now := time.Now().UTC().Unix()
 	result, err := tx.ExecContext(ctx, `UPDATE calls SET ended_at = ?, duration_seconds = ? WHERE workspace_id = ? AND id = ? AND ended_at = 0`, now, duration, workspace, id)
 	if err != nil {
@@ -4540,12 +4853,17 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	return tx.Commit()
 }
 
-func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) error {
+func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.WorkspaceID, id domain.CallID, users []domain.UserID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&exists); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -4567,12 +4885,17 @@ func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.Worksp
 	return tx.Commit()
 }
 
-func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.Event) error {
+func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}
@@ -4587,12 +4910,17 @@ func (s *Store) SeedFileComment(ctx context.Context, value domain.FileComment) e
 	return err
 }
 
-func (s *Store) DeleteFileComment(ctx context.Context, workspace domain.WorkspaceID, fileID domain.FileID, commentID domain.FileCommentID, event events.Event) error {
+func (s *Store) DeleteFileComment(ctx context.Context, workspace domain.WorkspaceID, fileID domain.FileID, commentID domain.FileCommentID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE file_comments SET deleted = 1 WHERE id = ? AND file_id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM files WHERE id = ? AND workspace_id = ? AND deleted = 0)`, commentID, fileID, workspace, fileID, workspace)
 	if err != nil {
 		return err
@@ -4626,12 +4954,17 @@ func (s *Store) GetFile(ctx context.Context, id domain.FileID) (domain.File, err
 	return file, err
 }
 
-func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.Event) error {
+func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE files SET deleted = 1 WHERE id = ? AND deleted = 0`, id)
 	if err != nil {
 		return err
@@ -4649,12 +4982,17 @@ func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.E
 	return tx.Commit()
 }
 
-func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, token string, event events.Event) error {
+func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, token string, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE files SET public_token = ? WHERE id = ? AND workspace_id = ? AND deleted = 0`, token, id, workspace)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
@@ -4675,12 +5013,17 @@ func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceI
 	return tx.Commit()
 }
 
-func (s *Store) RevokeFilePublic(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, event events.Event) error {
+func (s *Store) RevokeFilePublic(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE files SET public_token = '' WHERE id = ? AND workspace_id = ? AND deleted = 0`, id, workspace)
 	if err != nil {
 		return err
@@ -4734,23 +5077,22 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 	if err != nil {
 		return domain.FilePage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.File, 0, request.Limit+1)
 	for rows.Next() {
 		var file domain.File
 		var created string
 		var deleted int
 		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken); err != nil {
-			return domain.FilePage{}, err
+			return domain.FilePage{}, errors.Join(err, rows.Close())
 		}
 		file.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
-			return domain.FilePage{}, err
+			return domain.FilePage{}, errors.Join(err, rows.Close())
 		}
 		file.Deleted = deleted != 0
 		values = append(values, file)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.FilePage{}, err
 	}
 	hasMore := len(values) > request.Limit
@@ -4767,12 +5109,17 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 	return page, nil
 }
 
-func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, event events.Event) error {
+func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	_, err = tx.ExecContext(ctx, `INSERT INTO remote_files(id, workspace_id, external_id, title, file_type, external_url, preview_image, indexable_contents, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, value.ID, value.WorkspaceID, value.ExternalID, value.Title, value.FileType, value.ExternalURL, value.PreviewImage, value.IndexableContents, value.CreatedAt.UTC().Unix())
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "constraint") {
@@ -4817,16 +5164,15 @@ func (s *Store) remoteFileShares(ctx context.Context, db queryExecutor, id domai
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	values := make([]domain.ConversationID, 0)
 	for rows.Next() {
 		var channel domain.ConversationID
 		if err := rows.Scan(&channel); err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		values = append(values, channel)
 	}
-	return values, rows.Err()
+	return values, errors.Join(rows.Err(), rows.Close())
 }
 
 func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.RemoteFilePage, error) {
@@ -4849,24 +5195,23 @@ func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return domain.RemoteFilePage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.RemoteFile, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.RemoteFile
 		var created int64
 		var deleted int
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.ExternalID, &value.Title, &value.FileType, &value.ExternalURL, &value.PreviewImage, &value.IndexableContents, &created, &deleted); err != nil {
-			return domain.RemoteFilePage{}, err
+			return domain.RemoteFilePage{}, errors.Join(err, rows.Close())
 		}
 		value.CreatedAt = time.Unix(created, 0).UTC()
 		value.Deleted = deleted != 0
 		value.SharedChannels, err = s.remoteFileShares(ctx, s.db, value.ID)
 		if err != nil {
-			return domain.RemoteFilePage{}, err
+			return domain.RemoteFilePage{}, errors.Join(err, rows.Close())
 		}
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.RemoteFilePage{}, err
 	}
 	hasMore := len(values) > request.Limit
@@ -4883,12 +5228,17 @@ func (s *Store) ListRemoteFiles(ctx context.Context, workspace domain.WorkspaceI
 	return page, nil
 }
 
-func (s *Store) RemoveRemoteFile(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup, event events.Event) error {
+func (s *Store) RemoveRemoteFile(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup, event events.Event) (returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	query := `UPDATE remote_files SET deleted = 1 WHERE workspace_id = ? AND id = ? AND deleted = 0`
 	args := []any{workspace, lookup.ID}
 	if lookup.ID == "" {
@@ -4912,12 +5262,17 @@ func (s *Store) RemoveRemoteFile(ctx context.Context, workspace domain.Workspace
 	return tx.Commit()
 }
 
-func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup, channels []domain.ConversationID, event events.Event) (domain.RemoteFile, error) {
+func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup, channels []domain.ConversationID, event events.Event) (returnValue domain.RemoteFile, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	query := `SELECT id FROM remote_files WHERE workspace_id = ? AND id = ? AND deleted = 0`
 	args := []any{workspace, lookup.ID}
 	if lookup.ID == "" {
@@ -4951,12 +5306,17 @@ func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.Worksp
 	return s.GetRemoteFile(ctx, workspace, domain.RemoteFileLookup{ID: id})
 }
 
-func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.WorkspaceID, value domain.RemoteFile, event events.Event) (domain.RemoteFile, error) {
+func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.WorkspaceID, value domain.RemoteFile, event events.Event) (returnValue domain.RemoteFile, returnErr error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	result, err := tx.ExecContext(ctx, `UPDATE remote_files SET title = ?, file_type = ?, external_url = ?, preview_image = ?, indexable_contents = ? WHERE id = ? AND workspace_id = ? AND deleted = 0`, value.Title, value.FileType, value.ExternalURL, value.PreviewImage, value.IndexableContents, value.ID, workspace)
 	if err != nil {
 		return domain.RemoteFile{}, err
@@ -5024,7 +5384,7 @@ func (s *Store) ClaimEventsForTopic(ctx context.Context, workspace domain.Worksp
 	return s.claimEvents(ctx, workspace, topic, owner, limit, lease)
 }
 
-func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, topic, owner string, limit int, lease time.Duration) ([]events.Record, error) {
+func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, topic, owner string, limit int, lease time.Duration) (returnValues []events.Record, returnErr error) {
 	if workspace == "" || owner == "" || limit <= 0 || lease <= 0 {
 		return nil, errors.New("workspace, owner, positive limit, and positive lease are required")
 	}
@@ -5032,7 +5392,12 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	now := time.Now().UTC()
 	nowText := now.Format(time.RFC3339Nano)
 	expiresText := now.Add(lease).Format(time.RFC3339Nano)
@@ -5060,16 +5425,16 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	for rows.Next() {
 		var item candidate
 		if err := rows.Scan(&item.sequence, &item.event.ID, &item.event.WorkspaceID, &item.event.Topic, &item.event.Payload, &item.created); err != nil {
-			rows.Close()
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		candidates = append(candidates, item)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		return nil, errors.Join(err, rows.Close())
+	}
+	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	rows.Close()
 	result := make([]events.Record, 0, len(candidates))
 	for _, item := range candidates {
 		updated, err := tx.ExecContext(ctx, `UPDATE outbox SET lease_owner = ?, lease_until = ? WHERE sequence = ? AND delivered = 0 AND (lease_until = '' OR lease_until <= ?) AND (next_attempt_at = '' OR next_attempt_at <= ?)`, owner, expiresText, item.sequence, nowText, nowText)
@@ -5077,7 +5442,10 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 			return nil, err
 		}
 		count, err := updated.RowsAffected()
-		if err != nil || count != 1 {
+		if err != nil {
+			return nil, err
+		}
+		if count != 1 {
 			return nil, store.ErrLeaseConflict
 		}
 		item.event.CreatedAt, err = time.Parse(time.RFC3339Nano, item.created)
@@ -5092,7 +5460,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	return result, nil
 }
 
-func (s *Store) AckEvents(ctx context.Context, owner string, sequences []uint64) error {
+func (s *Store) AckEvents(ctx context.Context, owner string, sequences []uint64) (returnErr error) {
 	if owner == "" || len(sequences) == 0 {
 		return errors.New("owner and event sequences are required")
 	}
@@ -5100,7 +5468,12 @@ func (s *Store) AckEvents(ctx context.Context, owner string, sequences []uint64)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	nowText := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, sequence := range sequences {
 		updated, err := tx.ExecContext(ctx, `UPDATE outbox SET delivered = 1, lease_owner = '', lease_until = '', next_attempt_at = '' WHERE sequence = ? AND delivered = 0 AND lease_owner = ? AND lease_until > ?`, sequence, owner, nowText)
@@ -5108,14 +5481,17 @@ func (s *Store) AckEvents(ctx context.Context, owner string, sequences []uint64)
 			return err
 		}
 		count, err := updated.RowsAffected()
-		if err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		if count != 1 {
 			return store.ErrLeaseConflict
 		}
 	}
 	return tx.Commit()
 }
 
-func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint64, lease time.Duration) error {
+func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint64, lease time.Duration) (returnErr error) {
 	if owner == "" || len(sequences) == 0 || lease <= 0 {
 		return errors.New("owner, event sequences, and positive lease are required")
 	}
@@ -5123,7 +5499,12 @@ func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint6
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	now := time.Now().UTC()
 	nowText := now.Format(time.RFC3339Nano)
 	expiresText := now.Add(lease).Format(time.RFC3339Nano)
@@ -5133,14 +5514,17 @@ func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint6
 			return err
 		}
 		count, err := updated.RowsAffected()
-		if err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		if count != 1 {
 			return store.ErrLeaseConflict
 		}
 	}
 	return tx.Commit()
 }
 
-func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uint64, retryAt time.Time) error {
+func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uint64, retryAt time.Time) (returnErr error) {
 	if owner == "" || len(sequences) == 0 || !retryAt.After(time.Now().UTC()) {
 		return errors.New("owner, event sequences, and a future retry time are required")
 	}
@@ -5148,7 +5532,12 @@ func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uin
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() {
+		rollbackErr := tx.Rollback()
+		if !errors.Is(rollbackErr, sql.ErrTxDone) {
+			returnErr = errors.Join(returnErr, rollbackErr)
+		}
+	}()
 	nowText := time.Now().UTC().Format(time.RFC3339Nano)
 	retryText := retryAt.UTC().Format(time.RFC3339Nano)
 	for _, sequence := range sequences {
@@ -5157,7 +5546,10 @@ func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uin
 			return err
 		}
 		count, err := updated.RowsAffected()
-		if err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		if count != 1 {
 			return store.ErrLeaseConflict
 		}
 	}
@@ -5172,22 +5564,21 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	result := make([]events.Record, 0, limit)
 	for rows.Next() {
 		var sequence uint64
 		var event events.Event
 		var created string
 		if err := rows.Scan(&sequence, &event.ID, &event.WorkspaceID, &event.ActorID, &event.Topic, &event.Payload, &created); err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		event.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, rows.Close())
 		}
 		result = append(result, events.Record{Sequence: sequence, Event: event})
 	}
-	return result, rows.Err()
+	return result, errors.Join(rows.Err(), rows.Close())
 }
 
 func (s *Store) ListMessages(ctx context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
@@ -5211,27 +5602,26 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	defer rows.Close()
 	var values []domain.Message
 	for rows.Next() {
 		var value domain.Message
 		var created, unfurls string
 		var deleted int
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		value.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		value.Deleted = deleted != 0
 		value.Unfurls, err = decodeUnfurls(unfurls)
 		if err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.MessagePage{}, err
 	}
 	hasMore := len(values) > request.Limit
@@ -5278,27 +5668,26 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.Message, 0, request.Limit+1)
 	for rows.Next() {
 		var message domain.Message
 		var created, unfurls string
 		var deleted int
 		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		message.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		message.Deleted = deleted != 0
 		message.Unfurls, err = decodeUnfurls(unfurls)
 		if err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		values = append(values, message)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.MessagePage{}, err
 	}
 	hasMore := len(values) > request.Limit
@@ -5351,7 +5740,6 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	defer rows.Close()
 	values := make([]domain.Message, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.Message
@@ -5359,20 +5747,20 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 		var deleted int
 		var unfurls string
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		value.CreatedAt, err = time.Parse(time.RFC3339Nano, stored)
 		if err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		value.Deleted = deleted != 0
 		value.Unfurls, err = decodeUnfurls(unfurls)
 		if err != nil {
-			return domain.MessagePage{}, err
+			return domain.MessagePage{}, errors.Join(err, rows.Close())
 		}
 		values = append(values, value)
 	}
-	if err := rows.Err(); err != nil {
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return domain.MessagePage{}, err
 	}
 	hasMore := len(values) > request.Limit

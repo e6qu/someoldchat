@@ -5,11 +5,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -55,7 +57,7 @@ func main() {
 	githubClientSecret := flag.String("github-client-secret", "", "GitHub OAuth client secret")
 	entraClientID := flag.String("entra-client-id", "", "Microsoft Entra application client ID")
 	entraClientSecret := flag.String("entra-client-secret", "", "Microsoft Entra application client secret")
-	entraTenant := flag.String("entra-tenant", "common", "Microsoft Entra tenant identifier")
+	entraTenant := flag.String("entra-tenant", "", "Microsoft Entra tenant identifier (required with Entra credentials)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -202,12 +204,13 @@ func main() {
 		if *githubClientID != "" {
 			providers = append(providers, web.ProviderConfig{Name: "github", ClientID: *githubClientID, ClientSecret: *githubClientSecret, AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", UserInfoURL: "https://api.github.com/user", EmailURL: "https://api.github.com/user/emails", Scopes: []string{"read:user", "user:email"}})
 		}
-		if (*entraClientID == "") != (*entraClientSecret == "") || *entraTenant == "" {
+		tenant := strings.TrimSpace(*entraTenant)
+		if (*entraClientID == "") != (*entraClientSecret == "") || (*entraClientID != "" && (tenant == "" || strings.ContainsAny(tenant, "/\\?#"))) {
 			logger.Error("Microsoft Entra client ID, secret, and tenant must be configured together")
 			os.Exit(2)
 		}
 		if *entraClientID != "" {
-			providers = append(providers, web.ProviderConfig{Name: "entra", ClientID: *entraClientID, ClientSecret: *entraClientSecret, AuthorizeURL: "https://login.microsoftonline.com/" + *entraTenant + "/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/" + *entraTenant + "/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "profile", "email", "offline_access"}})
+			providers = append(providers, web.ProviderConfig{Name: "entra", ClientID: *entraClientID, ClientSecret: *entraClientSecret, AuthorizeURL: "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/" + tenant + "/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "profile", "email", "offline_access"}})
 		}
 		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(*authWorkspace), domain.UserID(*authLookupUser), *authPublicURL, stateKey, providers)
 		if loginErr != nil {
@@ -234,10 +237,7 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("GET /readyz", readinessHandler(chatService))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<!doctype html><title>SameOldChat</title><h1>SameOldChat</h1>"))
-	})
+	mux.HandleFunc("GET /{$}", rootHandler(webAuthenticator, webHandler.Login != nil))
 
 	server := &http.Server{Addr: *addr, Handler: mux}
 	logger.Info("server listening", "addr", *addr)
@@ -260,6 +260,22 @@ func main() {
 			logger.Error("server drain failed", "error", err)
 			os.Exit(1)
 		}
+	}
+}
+
+func rootHandler(authenticator auth.Authenticator, loginEnabled bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if _, err := authenticator.Authenticate(r); err != nil {
+			if errors.Is(err, auth.ErrNotAuthenticated) && loginEnabled {
+				http.Redirect(w, r, "/login", http.StatusFound)
+				return
+			}
+			if !errors.Is(err, auth.ErrNotAuthenticated) {
+				http.Error(w, "authentication service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		http.Redirect(w, r, "/app", http.StatusFound)
 	}
 }
 

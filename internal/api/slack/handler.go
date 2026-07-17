@@ -1364,7 +1364,11 @@ func (h Handler) adminUsersInvite(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
+	channels, parseErr := parseConversationIDs(fields["channel_ids"])
+	if parseErr != nil || len(channels) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
 	resend, restricted, ultraRestricted, err := parseOptionalBooleans(fields, "resend", "is_restricted", "is_ultra_restricted")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
@@ -1403,7 +1407,11 @@ func (h Handler) adminUsersAssign(w http.ResponseWriter, r *http.Request) {
 	}
 	channels := []domain.ConversationID{}
 	if strings.TrimSpace(fields["channel_ids"]) != "" {
-		channels = parseConversationIDs(fields["channel_ids"])
+		channels, err = parseConversationIDs(fields["channel_ids"])
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			return
+		}
 	}
 	if err := h.Messages.AdminAssignUser(r.Context(), principal.WorkspaceID, principal.UserID, targetID, channels); err != nil {
 		code, reason := mapServiceError(err, "user_not_found")
@@ -1787,7 +1795,11 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	users := parseCallUsers(usersField)
+	users, parseErr := parseCallUsers(usersField)
+	if parseErr != nil || len(users) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
 	conversation, err := h.Messages.AdminInviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
@@ -1895,11 +1907,14 @@ func (h Handler) adminConversationSetTeams(w http.ResponseWriter, r *http.Reques
 	if strings.TrimSpace(rawTeams) == "" {
 		rawTeams = fields["team_id"]
 	}
-	teams := make([]domain.WorkspaceID, 0)
-	for _, raw := range strings.Split(rawTeams, ",") {
-		if strings.TrimSpace(raw) != "" {
-			teams = append(teams, domain.WorkspaceID(strings.TrimSpace(raw)))
-		}
+	teamValues, parseErr := parseNormalizedStringList(rawTeams)
+	if parseErr != nil || len(teamValues) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	teams := make([]domain.WorkspaceID, 0, len(teamValues))
+	for _, value := range teamValues {
+		teams = append(teams, domain.WorkspaceID(value))
 	}
 	if err := h.Messages.AdminSetConversationTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel_id"])), teams, orgChannel); err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
@@ -1920,11 +1935,14 @@ func (h Handler) adminConversationDisconnectShared(w http.ResponseWriter, r *htt
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	teams := make([]domain.WorkspaceID, 0)
-	for _, raw := range strings.Split(fields["leaving_team_ids"], ",") {
-		if value := strings.TrimSpace(raw); value != "" {
-			teams = append(teams, domain.WorkspaceID(value))
-		}
+	teamValues, parseErr := parseNormalizedStringList(fields["leaving_team_ids"])
+	if parseErr != nil || len(teamValues) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	teams := make([]domain.WorkspaceID, 0, len(teamValues))
+	for _, value := range teamValues {
+		teams = append(teams, domain.WorkspaceID(value))
 	}
 	if err := h.Messages.AdminDisconnectSharedConversation(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel_id"])), teams); err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
@@ -1949,17 +1967,23 @@ func (h Handler) adminConnectedChannelInfo(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	channels := make([]domain.ConversationID, 0)
-	for _, raw := range strings.Split(fields["channel_ids"], ",") {
-		if value := strings.TrimSpace(raw); value != "" {
-			channels = append(channels, domain.ConversationID(value))
-		}
+	channelValues, parseErr := parseNormalizedStringList(fields["channel_ids"])
+	if parseErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
 	}
-	teams := make([]domain.WorkspaceID, 0)
-	for _, raw := range strings.Split(fields["team_ids"], ",") {
-		if value := strings.TrimSpace(raw); value != "" {
-			teams = append(teams, domain.WorkspaceID(value))
-		}
+	channels := make([]domain.ConversationID, 0, len(channelValues))
+	for _, value := range channelValues {
+		channels = append(channels, domain.ConversationID(value))
+	}
+	teamValues, parseErr := parseNormalizedStringList(fields["team_ids"])
+	if parseErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	teams := make([]domain.WorkspaceID, 0, len(teamValues))
+	for _, value := range teamValues {
+		teams = append(teams, domain.WorkspaceID(value))
 	}
 	values, more, next, err := h.Messages.AdminConnectedChannelInfo(r.Context(), principal.WorkspaceID, principal.UserID, channels, teams, request)
 	if err != nil {
@@ -2290,7 +2314,11 @@ func decodeConversationListFields(fields map[string]string) (domain.Conversation
 	}
 	types := []string{}
 	if raw := strings.TrimSpace(fields["types"]); raw != "" {
-		types = strings.Split(raw, ",")
+		var parseErr error
+		types, parseErr = parseNormalizedStringList(raw)
+		if parseErr != nil {
+			return domain.ConversationListRequest{}, parseErr
+		}
 	}
 	conversationTypes, err := domain.NormalizeConversationTypes(types)
 	if err != nil {
@@ -2469,19 +2497,12 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	requested := make([]domain.UserID, 0)
-	seen := make(map[domain.UserID]struct{})
 	if raw := strings.TrimSpace(fields["users"]); raw != "" {
-		for _, item := range strings.Split(raw, ",") {
-			item = strings.TrimSpace(item)
-			if item == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-				return
-			}
-			userID := domain.UserID(item)
-			if _, exists := seen[userID]; !exists {
-				seen[userID] = struct{}{}
-				requested = append(requested, userID)
-			}
+		var parseErr error
+		requested, parseErr = parseCallUsers(raw)
+		if parseErr != nil || len(requested) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			return
 		}
 	} else {
 		page, listErr := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 1000})
@@ -2490,11 +2511,14 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 			return
 		}
+		requested = make([]domain.UserID, 0, len(page.Users))
+		seen := make(map[domain.UserID]struct{}, len(page.Users))
 		for _, user := range page.Users {
-			if _, exists := seen[user.ID]; !exists {
-				seen[user.ID] = struct{}{}
-				requested = append(requested, user.ID)
+			if _, exists := seen[user.ID]; exists {
+				continue
 			}
+			seen[user.ID] = struct{}{}
+			requested = append(requested, user.ID)
 		}
 	}
 	sort.Slice(requested, func(left, right int) bool { return requested[left] < requested[right] })
@@ -2784,19 +2808,10 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	users := make([]domain.UserID, 0)
-	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
-		user := domain.UserID(strings.TrimSpace(raw))
-		if user == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
-		if _, exists := seen[user]; exists {
-			continue
-		}
-		seen[user] = struct{}{}
-		users = append(users, user)
+	users, parseErr := parseCallUsers(fields["users"])
+	if parseErr != nil || len(users) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
 	}
 	conversation, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
@@ -2990,19 +3005,10 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	users := make([]domain.UserID, 0)
-	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
-		user := domain.UserID(strings.TrimSpace(raw))
-		if user == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
-		if _, exists := seen[user]; exists {
-			continue
-		}
-		seen[user] = struct{}{}
-		users = append(users, user)
+	users, parseErr := parseCallUsers(fields["users"])
+	if parseErr != nil || len(users) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
 	}
 	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
 	if err != nil {
@@ -3616,8 +3622,8 @@ func (h Handler) remoteFileShare(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	lookup, lookupErr := remoteFileLookup(fields)
-	channels := parseConversationIDs(fields["channels"])
-	if err != nil || lookupErr != nil || len(channels) == 0 {
+	channels, parseErr := parseConversationIDs(fields["channels"])
+	if err != nil || lookupErr != nil || parseErr != nil || len(channels) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
@@ -3938,9 +3944,12 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]s
 		return nil, nil, "", "", err
 	}
 	cleanup := func(uploadErr error) (*os.File, map[string]string, string, string, error) {
-		_ = temporary.Close()
-		_ = os.Remove(temporary.Name())
-		return nil, nil, "", "", uploadErr
+		closeErr := temporary.Close()
+		removeErr := os.Remove(temporary.Name())
+		return nil, nil, "", "", errors.Join(uploadErr, closeErr, removeErr)
+	}
+	closePart := func(part io.Closer, partErr error) error {
+		return errors.Join(partErr, part.Close())
 	}
 	fields := make(map[string]string)
 	filename := ""
@@ -3962,18 +3971,15 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]s
 			}
 			name := part.FormName()
 			if name == "" {
-				part.Close()
-				return cleanup(errors.New("multipart field name is required"))
+				return cleanup(closePart(part, errors.New("multipart field name is required")))
 			}
 			if _, exists := seen[name]; exists {
-				part.Close()
-				return cleanup(errors.New("duplicate multipart field"))
+				return cleanup(closePart(part, errors.New("duplicate multipart field")))
 			}
 			seen[name] = struct{}{}
 			if name == "file" || name == "image" {
 				if part.FileName() == "" {
-					part.Close()
-					return cleanup(errors.New("file filename is required"))
+					return cleanup(closePart(part, errors.New("file filename is required")))
 				}
 				filename = filepath.Base(part.FileName())
 				mimeType = strings.TrimSpace(part.Header.Get("Content-Type"))
@@ -3981,16 +3987,20 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]s
 					mimeType = ""
 				}
 				if err := copyUploadPart(temporary, part); err != nil {
-					part.Close()
+					return cleanup(closePart(part, err))
+				}
+				if err := part.Close(); err != nil {
 					return cleanup(err)
 				}
-				part.Close()
 				continue
 			}
 			value, err := readUploadField(part)
-			part.Close()
+			closeErr := part.Close()
 			if err != nil {
-				return cleanup(err)
+				return cleanup(errors.Join(err, closeErr))
+			}
+			if closeErr != nil {
+				return cleanup(closeErr)
 			}
 			fields[name] = value
 		}
@@ -4520,12 +4530,14 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
 		return
 	}
-	raw := strings.Split(fields["users"], ",")
-	users := make([]domain.UserID, 0, len(raw))
-	for _, value := range raw {
-		if strings.TrimSpace(value) != "" {
-			users = append(users, domain.UserID(strings.TrimSpace(value)))
-		}
+	userValues, parseErr := parseNormalizedStringList(fields["users"])
+	if parseErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	users := make([]domain.UserID, 0, len(userValues))
+	for _, value := range userValues {
+		users = append(users, domain.UserID(value))
 	}
 	value, err := h.Messages.SetUserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(strings.TrimSpace(fields["usergroup"])), users)
 	if err != nil {
@@ -4536,28 +4548,16 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "usergroup": userGroupResponse(value, true)})
 }
 
-func parseConversationIDs(raw string) []domain.ConversationID {
-	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
-		var values []string
-		if err := json.Unmarshal([]byte(raw), &values); err != nil {
-			return nil
-		}
-		result := make([]domain.ConversationID, 0, len(values))
-		for _, value := range values {
-			if value = strings.TrimSpace(value); value != "" {
-				result = append(result, domain.ConversationID(value))
-			}
-		}
-		return result
+func parseConversationIDs(raw string) ([]domain.ConversationID, error) {
+	values, err := parseNormalizedStringList(raw)
+	if err != nil {
+		return make([]domain.ConversationID, 0), err
 	}
-	parts := strings.Split(raw, ",")
-	result := make([]domain.ConversationID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.ConversationID(value))
-		}
+	result := make([]domain.ConversationID, 0, len(values))
+	for _, value := range values {
+		result = append(result, domain.ConversationID(value))
 	}
-	return result
+	return result, nil
 }
 
 func (h Handler) adminUserGroupAddChannels(w http.ResponseWriter, r *http.Request) {
@@ -4571,12 +4571,12 @@ func (h Handler) adminUserGroupAddChannels(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
+	channels, parseErr := parseConversationIDs(fields["channel_ids"])
 	groupID := strings.TrimSpace(fields["usergroup"])
 	if groupID == "" {
 		groupID = strings.TrimSpace(fields["usergroup_id"])
 	}
-	if len(channels) == 0 || groupID == "" {
+	if parseErr != nil || len(channels) == 0 || groupID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
@@ -4603,12 +4603,14 @@ func (h Handler) adminUserGroupAddTeams(w http.ResponseWriter, r *http.Request) 
 	if groupID == "" {
 		groupID = strings.TrimSpace(fields["usergroup"])
 	}
-	parts := strings.Split(fields["team_ids"], ",")
-	teams := make([]domain.WorkspaceID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			teams = append(teams, domain.WorkspaceID(value))
-		}
+	teamValues, parseErr := parseNormalizedStringList(fields["team_ids"])
+	if parseErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	teams := make([]domain.WorkspaceID, 0, len(teamValues))
+	for _, value := range teamValues {
+		teams = append(teams, domain.WorkspaceID(value))
 	}
 	if groupID == "" || len(teams) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
@@ -4633,12 +4635,12 @@ func (h Handler) adminUserGroupRemoveChannels(w http.ResponseWriter, r *http.Req
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
+	channels, parseErr := parseConversationIDs(fields["channel_ids"])
 	groupID := strings.TrimSpace(fields["usergroup"])
 	if groupID == "" {
 		groupID = strings.TrimSpace(fields["usergroup_id"])
 	}
-	if len(channels) == 0 || groupID == "" {
+	if parseErr != nil || len(channels) == 0 || groupID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
@@ -4789,8 +4791,8 @@ func (h Handler) adminTeamSettingsSetDefaultChannels(w http.ResponseWriter, r *h
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
-	if len(channels) == 0 {
+	channels, parseErr := parseConversationIDs(fields["channel_ids"])
+	if parseErr != nil || len(channels) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
@@ -4890,35 +4892,83 @@ func (h Handler) adminTeamsRoleList(w http.ResponseWriter, r *http.Request, role
 	writeJSON(w, http.StatusOK, response)
 }
 
-func parseCallUsers(raw string) []domain.UserID {
-	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+func parseCallUsers(raw string) ([]domain.UserID, error) {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "[") {
 		var participants []struct {
 			SlackID    string `json:"slack_id"`
 			ExternalID string `json:"external_id"`
 		}
-		if err := json.Unmarshal([]byte(raw), &participants); err != nil {
-			return nil
+		if err := json.Unmarshal([]byte(trimmed), &participants); err != nil || participants == nil {
+			if err == nil {
+				err = errors.New("user list must be a JSON array")
+			}
+			return make([]domain.UserID, 0), err
 		}
 		result := make([]domain.UserID, 0, len(participants))
+		seen := make(map[domain.UserID]struct{}, len(participants))
 		for _, participant := range participants {
 			id := strings.TrimSpace(participant.SlackID)
 			if id == "" {
 				id = strings.TrimSpace(participant.ExternalID)
 			}
 			if id != "" {
-				result = append(result, domain.UserID(id))
+				value := domain.UserID(id)
+				if _, exists := seen[value]; exists {
+					continue
+				}
+				seen[value] = struct{}{}
+				result = append(result, value)
 			}
 		}
-		return result
+		return result, nil
 	}
-	parts := strings.Split(raw, ",")
-	result := make([]domain.UserID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.UserID(value))
+	if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, `"`) || trimmed == "null" {
+		return make([]domain.UserID, 0), errors.New("user list must be comma-delimited or a JSON array")
+	}
+	values, err := parseNormalizedStringList(raw)
+	if err != nil {
+		return make([]domain.UserID, 0), err
+	}
+	result := make([]domain.UserID, 0, len(values))
+	for _, value := range values {
+		result = append(result, domain.UserID(value))
+	}
+	return result, nil
+}
+
+func parseNormalizedStringList(raw string) ([]string, error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return make([]string, 0), nil
+	}
+	values := make([]string, 0)
+	if strings.HasPrefix(trimmed, "[") {
+		if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
+			return make([]string, 0), err
 		}
+		if values == nil {
+			return make([]string, 0), errors.New("string list must be a JSON array")
+		}
+	} else if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, `"`) || trimmed == "null" {
+		return make([]string, 0), errors.New("string list must be comma-delimited or a JSON array")
+	} else {
+		values = strings.Split(trimmed, ",")
 	}
-	return result
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
 }
 
 func callResponse(value domain.Call) map[string]any {
@@ -4954,7 +5004,12 @@ func (h Handler) addCall(w http.ResponseWriter, r *http.Request) {
 		}
 		started = time.Unix(seconds, 0).UTC()
 	}
-	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, parseCallUsers(fields["users"]))
+	users, parseErr := parseCallUsers(fields["users"])
+	if parseErr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, users)
 	if err != nil {
 		code, reason := mapServiceError(err, "invalid_arguments")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
@@ -5044,7 +5099,11 @@ func (h Handler) changeCallParticipantsHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id := domain.CallID(strings.TrimSpace(fields["id"]))
-	users := parseCallUsers(fields["users"])
+	users, parseErr := parseCallUsers(fields["users"])
+	if parseErr != nil || len(users) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
 	if add {
 		err = h.Messages.AddCallParticipants(r.Context(), principal.WorkspaceID, principal.UserID, id, users)
 	} else {
@@ -5340,7 +5399,10 @@ func normalizeListFieldValue(name string, value string) (string, error) {
 		return value, nil
 	}
 	trimmed := strings.TrimSpace(value)
-	if trimmed == "" || (trimmed[0] != '[' && trimmed[0] != '"') {
+	if trimmed == "" {
+		return value, nil
+	}
+	if trimmed[0] != '[' && trimmed[0] != '"' && trimmed[0] != '{' && trimmed != "null" {
 		return value, nil
 	}
 	return normalizeJSONListField(json.RawMessage(trimmed))
@@ -5392,6 +5454,10 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, auth.ErrMissingScope) {
 		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "missing_scope"})
+		return
+	}
+	if !errors.Is(err, auth.ErrNotAuthenticated) {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "authentication_unavailable"})
 		return
 	}
 	writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authed"})

@@ -6,7 +6,7 @@ request-triggered restoration for deployments that support scale-to-zero.
 
 ## Documents
 
-- [Project status and planned work](PLAN.md)
+- [Implementation status](docs/implementation.md)
 - [Architecture and operational documentation](docs/README.md)
 - [Separable module architecture](docs/modules.md)
 - [Authentication](docs/authentication.md)

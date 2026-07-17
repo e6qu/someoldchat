@@ -14,9 +14,10 @@ how the application is structured, built, operated, and deployed.
   deployment profiles.
 - [Authentication](authentication.md) describes browser authorization sources
   and internal administration.
+- [Implementation status](implementation.md) records implemented operations and
+  qualification boundaries.
 - [Terminology](terminology.md) defines the Slack terms used by this project.
 
 Normative, testable requirements and pinned upstream contract sources live in
-[`../specs/`](../specs/README.md). Current status and planned work are in
-[`../PLAN.md`](../PLAN.md). The [SDK qualification inventory](../specs/sdk-compatibility.yaml)
+[`../specs/`](../specs/README.md). The [SDK qualification inventory](../specs/sdk-compatibility.yaml)
 records the official SDK sources used by the compatibility checks.

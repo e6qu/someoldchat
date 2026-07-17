@@ -5,8 +5,9 @@
 The current official SDK inventory is maintained in
 [`sdk-compatibility.yaml`](sdk-compatibility.yaml). It records immutable
 artifacts, provenance, and executable suite results. `make sdk-inventory-check`
-validates its structure; a release qualification additionally runs
-`go run ./cmd/sdkcheck -require-qualified`.
+validates its structure, including the existence of each recorded passed suite;
+a release qualification additionally runs `go run ./cmd/sdkcheck
+-require-qualified`.
 
 The repository MUST pin and retain exact revisions of:
 

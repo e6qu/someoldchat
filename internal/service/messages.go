@@ -59,6 +59,16 @@ type Messages struct {
 	Blob  blob.Store
 }
 
+func workspaceLookupError(err error, actual, expected domain.WorkspaceID) error {
+	if err != nil {
+		return err
+	}
+	if actual != expected {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 var _ chatapi.Service = Messages{}
 
 func (m Messages) LookupToken(ctx context.Context, token string) (domain.TokenRecord, error) {
@@ -84,7 +94,10 @@ func (m Messages) ResetUserSessions(ctx context.Context, workspaceID domain.Work
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if target.Deleted {
 		return store.ErrNotFound
 	}
 	eventID, err := domain.NewEventID()
@@ -175,8 +188,8 @@ func (m Messages) FileInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 		return domain.File{}, err
 	}
 	file, err := m.Store.GetFile(ctx, fileID)
-	if err != nil || file.WorkspaceID != workspaceID {
-		return domain.File{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, file.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.File{}, lookupErr
 	}
 	return file, nil
 }
@@ -189,8 +202,8 @@ func (m Messages) OpenFile(ctx context.Context, workspaceID domain.WorkspaceID, 
 		return domain.File{}, nil, ErrBlobUnavailable
 	}
 	file, err := m.Store.GetFile(ctx, fileID)
-	if err != nil || file.WorkspaceID != workspaceID {
-		return domain.File{}, nil, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, file.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.File{}, nil, lookupErr
 	}
 	object, reader, err := m.Blob.Open(ctx, file.BlobKey)
 	if err != nil {
@@ -211,8 +224,8 @@ func (m Messages) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	file, err := m.Store.GetFile(ctx, fileID)
-	if err != nil || file.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, file.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	eventID, err := domain.NewEventID()
 	if err != nil {
@@ -244,8 +257,8 @@ func (m Messages) ShareFilePublic(ctx context.Context, workspaceID domain.Worksp
 		return domain.File{}, err
 	}
 	file, err := m.Store.GetFile(ctx, fileID)
-	if err != nil || file.WorkspaceID != workspaceID {
-		return domain.File{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, file.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.File{}, lookupErr
 	}
 	if file.PublicToken == "" {
 		token, err := domain.PublicID("pub_")
@@ -270,7 +283,7 @@ func (m Messages) RevokeFilePublic(ctx context.Context, workspaceID domain.Works
 	}
 	file, err := m.Store.GetFile(ctx, fileID)
 	if err != nil || file.WorkspaceID != workspaceID {
-		return domain.File{}, store.ErrNotFound
+		return domain.File{}, workspaceLookupError(err, file.WorkspaceID, workspaceID)
 	}
 	if file.PublicToken != "" {
 		eventID, err := domain.NewEventID()
@@ -613,7 +626,10 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 		return domain.User{}, err
 	}
 	user, err := m.Store.GetUser(ctx, requestedID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.User{}, lookupErr
+	}
+	if user.Deleted {
 		return domain.User{}, store.ErrNotFound
 	}
 	return user, nil
@@ -624,8 +640,8 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	eventID, err := domain.NewEventID()
 	if err != nil {
@@ -642,8 +658,8 @@ func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceI
 		return errors.New("invalid workspace role")
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	eventID, err := domain.NewEventID()
 	if err != nil {
@@ -660,7 +676,10 @@ func (m Messages) SetUserExpiration(ctx context.Context, workspaceID domain.Work
 		return ErrInvalidWorkspace
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if target.Deleted {
 		return store.ErrNotFound
 	}
 	eventID, err := domain.NewEventID()
@@ -675,8 +694,8 @@ func (m Messages) AdminRenameConversation(ctx context.Context, workspaceID domai
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return domain.Conversation{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Conversation{}, lookupErr
 	}
 	eventID, err := domain.NewEventID()
 	if err != nil {
@@ -690,8 +709,8 @@ func (m Messages) AdminSetConversationArchived(ctx context.Context, workspaceID 
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return domain.Conversation{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Conversation{}, lookupErr
 	}
 	eventID, err := domain.NewEventID()
 	if err != nil {
@@ -705,8 +724,8 @@ func (m Messages) AdminDeleteConversation(ctx context.Context, workspaceID domai
 		return err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	if conversation.IsDirect || conversation.IsGroupDirect {
 		return ErrInvalidConversation
@@ -732,7 +751,7 @@ func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
 	if err != nil || conversation.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+		return workspaceLookupError(err, conversation.WorkspaceID, workspaceID)
 	}
 	if !conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect || groupID == "" {
 		return ErrInvalidConversation
@@ -780,8 +799,8 @@ func (m Messages) AdminListConversationAccessGroups(ctx context.Context, workspa
 		return nil, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return nil, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return nil, lookupErr
 	}
 	if !conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
 		return nil, ErrInvalidConversation
@@ -854,7 +873,10 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 			continue
 		}
 		conversation, err := m.Store.GetConversation(ctx, channelID)
-		if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirect {
+		if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+			return lookupErr
+		}
+		if conversation.IsDirect {
 			return ErrInvalidInviteRequest
 		}
 		seen[channelID] = struct{}{}
@@ -885,8 +907,8 @@ func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	seen := make(map[domain.ConversationID]struct{}, len(channels))
 	normalized := make([]domain.ConversationID, 0, len(channels))
@@ -955,7 +977,10 @@ func (m Messages) RequestAppPermissions(ctx context.Context, workspaceID domain.
 		target = actor
 	}
 	user, err := m.Store.GetUser(ctx, target)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if user.Deleted {
 		return store.ErrNotFound
 	}
 	scopes = domain.NormalizeScopes(scopes)
@@ -1015,7 +1040,10 @@ func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.View{}, err
 	}
 	user, err := m.Store.GetUser(ctx, target)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.View{}, lookupErr
+	}
+	if user.Deleted {
 		return domain.View{}, store.ErrNotFound
 	}
 	viewType, _, err := viewPayload(payload)
@@ -1418,7 +1446,10 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 		return domain.User{}, ErrInvalidProfile
 	}
 	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.User{}, lookupErr
+	}
+	if user.Deleted {
 		return domain.User{}, store.ErrNotFound
 	}
 	token, err := domain.PublicID("photo_")
@@ -1437,12 +1468,18 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 	user.Profile.Image24, user.Profile.Image32, user.Profile.Image48, user.Profile.Image72, user.Profile.Image192, user.Profile.Image512, user.Profile.Image1024 = photoURL, photoURL, photoURL, photoURL, photoURL, photoURL, photoURL
 	eventID, err := domain.NewEventID()
 	if err != nil {
-		_ = m.Blob.Delete(context.Background(), key)
+		cleanupErr := m.Blob.Delete(context.Background(), key)
+		if cleanupErr != nil {
+			return domain.User{}, errors.Join(err, fmt.Errorf("remove uploaded user photo: %w", cleanupErr))
+		}
 		return domain.User{}, err
 	}
 	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.profile_changed", Payload: string(userID), CreatedAt: time.Now().UTC()})
 	if err != nil {
-		_ = m.Blob.Delete(context.Background(), key)
+		cleanupErr := m.Blob.Delete(context.Background(), key)
+		if cleanupErr != nil {
+			return domain.User{}, errors.Join(err, fmt.Errorf("remove uploaded user photo: %w", cleanupErr))
+		}
 		return domain.User{}, err
 	}
 	if oldToken != "" {
@@ -1467,7 +1504,10 @@ func (m Messages) OpenUserPhoto(ctx context.Context, workspaceID domain.Workspac
 		return domain.User{}, nil, store.ErrNotFound
 	}
 	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted || currentUserPhotoToken(workspaceID, user) != token {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.User{}, nil, lookupErr
+	}
+	if user.Deleted || currentUserPhotoToken(workspaceID, user) != token {
 		return domain.User{}, nil, store.ErrNotFound
 	}
 	key := string(workspaceID) + "/users/" + string(userID) + "/" + token
@@ -1483,7 +1523,10 @@ func (m Messages) DeleteUserPhoto(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if user.Deleted {
 		return store.ErrNotFound
 	}
 	oldToken := currentUserPhotoToken(workspaceID, user)
@@ -1529,11 +1572,14 @@ func (m Messages) DoNotDisturbInfo(ctx context.Context, workspaceID domain.Works
 		requestedID = userID
 	}
 	requested, err := m.Store.GetUser(ctx, requestedID)
-	if err != nil || requested.WorkspaceID != workspaceID || requested.Deleted {
+	if lookupErr := workspaceLookupError(err, requested.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.DoNotDisturb{}, lookupErr
+	}
+	if requested.Deleted {
 		return domain.DoNotDisturb{}, store.ErrNotFound
 	}
 	if _, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, requestedID); err != nil {
-		return domain.DoNotDisturb{}, store.ErrNotFound
+		return domain.DoNotDisturb{}, err
 	}
 	return m.Store.GetDoNotDisturb(ctx, workspaceID, requestedID)
 }
@@ -1656,8 +1702,8 @@ func (m Messages) TeamBillableInfo(ctx context.Context, workspaceID domain.Works
 	}
 	if targetID != "" {
 		user, err := m.Store.GetUser(ctx, targetID)
-		if err != nil || user.WorkspaceID != workspaceID {
-			return domain.BillableInfo{}, store.ErrNotFound
+		if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+			return domain.BillableInfo{}, lookupErr
 		}
 		membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
 		if err != nil {
@@ -1695,8 +1741,8 @@ func (m Messages) Conversations(ctx context.Context, workspaceID domain.Workspac
 	}
 	if request.MemberUserID != "" {
 		member, err := m.Store.GetUser(ctx, request.MemberUserID)
-		if err != nil || member.WorkspaceID != workspaceID {
-			return domain.ConversationPage{}, store.ErrNotFound
+		if lookupErr := workspaceLookupError(err, member.WorkspaceID, workspaceID); lookupErr != nil {
+			return domain.ConversationPage{}, lookupErr
 		}
 	}
 	return m.Store.ListConversations(ctx, workspaceID, userID, request)
@@ -1717,11 +1763,14 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 	members := make([]domain.UserID, 0, len(seen))
 	for candidate := range seen {
 		member, err := m.Store.GetUser(ctx, candidate)
-		if err != nil || member.WorkspaceID != workspaceID || member.Deleted {
+		if lookupErr := workspaceLookupError(err, member.WorkspaceID, workspaceID); lookupErr != nil {
+			return domain.Conversation{}, lookupErr
+		}
+		if member.Deleted {
 			return domain.Conversation{}, store.ErrNotFound
 		}
 		if _, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, candidate); err != nil {
-			return domain.Conversation{}, store.ErrNotFound
+			return domain.Conversation{}, err
 		}
 		members = append(members, candidate)
 	}
@@ -1840,8 +1889,8 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return domain.Conversation{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Conversation{}, lookupErr
 	}
 	event, err := conversationEvent(workspaceID, "conversation.member_added", conversationID)
 	if err != nil {
@@ -1866,8 +1915,8 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return domain.Conversation{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Conversation{}, lookupErr
 	}
 	if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
 		return domain.Conversation{}, ErrInvalidConversation
@@ -1884,7 +1933,10 @@ func (m Messages) AdminGetConversationPrefs(ctx context.Context, workspaceID dom
 		return domain.ConversationPrefs{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirect || conversation.IsGroupDirect {
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.ConversationPrefs{}, lookupErr
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
 		return domain.ConversationPrefs{}, store.ErrNotFound
 	}
 	return m.Store.GetConversationPrefs(ctx, conversationID)
@@ -1895,7 +1947,10 @@ func (m Messages) AdminSetConversationPrefs(ctx context.Context, workspaceID dom
 		return domain.ConversationPrefs{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID || conversation.IsDirect || conversation.IsGroupDirect {
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.ConversationPrefs{}, lookupErr
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
 		return domain.ConversationPrefs{}, store.ErrNotFound
 	}
 	value, err = normalizeConversationPrefs(value)
@@ -1985,8 +2040,8 @@ func (m Messages) AdminConversationTeams(ctx context.Context, workspaceID domain
 		return nil, false, "", err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return nil, false, "", store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return nil, false, "", lookupErr
 	}
 	teams, _, err := m.Store.ListConversationTeams(ctx, workspaceID, conversationID)
 	if err != nil {
@@ -2020,8 +2075,8 @@ func (m Messages) AdminSetConversationTeams(ctx context.Context, workspaceID dom
 		return err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	seen := make(map[domain.WorkspaceID]struct{}, len(teams))
 	for _, teamID := range teams {
@@ -2408,8 +2463,8 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return domain.Conversation{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Conversation{}, lookupErr
 	}
 	seen := make(map[domain.UserID]struct{}, len(users))
 	normalized := make([]domain.UserID, 0, len(users))
@@ -2448,8 +2503,8 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 
 func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
@@ -2467,7 +2522,10 @@ func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if target.Deleted {
 		return store.ErrNotFound
 	}
 	event, err := conversationEvent(workspaceID, "conversation.member_kicked", conversationID)
@@ -2628,11 +2686,14 @@ func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceI
 		targetID = userID
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
-	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
+	if lookupErr := workspaceLookupError(err, target.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Reminder{}, lookupErr
+	}
+	if target.Deleted {
 		return domain.Reminder{}, store.ErrNotFound
 	}
 	if _, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID); err != nil {
-		return domain.Reminder{}, store.ErrNotFound
+		return domain.Reminder{}, err
 	}
 	text = strings.TrimSpace(text)
 	if text == "" || len(text) > 3000 || due.IsZero() {
@@ -2872,7 +2933,7 @@ func (m Messages) SetUserGroupUsers(ctx context.Context, workspaceID domain.Work
 			return domain.UserGroup{}, store.ErrNotFound
 		}
 		if _, getErr = m.Store.GetWorkspaceMembership(ctx, workspaceID, userID); getErr != nil {
-			return domain.UserGroup{}, store.ErrNotFound
+			return domain.UserGroup{}, getErr
 		}
 	}
 	eventID, err := domain.NewEventID()
@@ -2906,11 +2967,17 @@ func normalizeCallUsers(values []domain.UserID) ([]domain.UserID, error) {
 func (m Messages) validateCallUsers(ctx context.Context, workspaceID domain.WorkspaceID, users []domain.UserID) error {
 	for _, userID := range users {
 		user, err := m.Store.GetUser(ctx, userID)
-		if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+		if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+			return lookupErr
+		}
+		if user.Deleted {
 			return store.ErrNotFound
 		}
 		membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, userID)
-		if err != nil || !membership.Active {
+		if err != nil {
+			return err
+		}
+		if !membership.Active {
 			return store.ErrNotFound
 		}
 	}
@@ -3075,8 +3142,8 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 		return "", ErrInvalidTimestamp
 	}
 	message, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
-	if err != nil || message.WorkspaceID != workspaceID {
-		return "", store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, message.WorkspaceID, workspaceID); lookupErr != nil {
+		return "", lookupErr
 	}
 	canonical := domain.NewMessageTimestamp(message.CreatedAt)
 	return "https://sameoldchat.local/archives/" + url.PathEscape(string(conversation)) + "/p" + strings.ReplaceAll(string(canonical), ".", ""), nil
@@ -3091,11 +3158,17 @@ func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.Workspac
 		return domain.EphemeralMessage{}, ErrInvalidEphemeral
 	}
 	recipient, err := m.Store.GetUser(ctx, recipientID)
-	if err != nil || recipient.WorkspaceID != workspaceID || recipient.Deleted {
+	if lookupErr := workspaceLookupError(err, recipient.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.EphemeralMessage{}, lookupErr
+	}
+	if recipient.Deleted {
 		return domain.EphemeralMessage{}, store.ErrNotFound
 	}
 	isMember, err := m.Store.IsConversationMember(ctx, conversation, recipientID)
-	if err != nil || !isMember {
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	if !isMember {
 		return domain.EphemeralMessage{}, store.ErrNotFound
 	}
 	now := time.Now().UTC()
@@ -3119,7 +3192,10 @@ func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.Workspace
 		return err
 	}
 	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if user.Deleted {
 		return store.ErrNotFound
 	}
 	ip, userAgent = strings.TrimSpace(ip), strings.TrimSpace(userAgent)
@@ -3162,8 +3238,8 @@ func (m Messages) Post(ctx context.Context, workspaceID domain.WorkspaceID, auth
 			return domain.Message{}, ErrInvalidTimestamp
 		}
 		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
-		if err != nil || parent.WorkspaceID != workspaceID {
-			return domain.Message{}, store.ErrNotFound
+		if lookupErr := workspaceLookupError(err, parent.WorkspaceID, workspaceID); lookupErr != nil {
+			return domain.Message{}, lookupErr
 		}
 		threadTimestampValue = threadTimestamp
 	}
@@ -3262,8 +3338,8 @@ func (m Messages) messageForMutation(ctx context.Context, workspaceID domain.Wor
 		return domain.Message{}, err
 	}
 	message, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
-	if err != nil || message.WorkspaceID != workspaceID {
-		return domain.Message{}, store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, message.WorkspaceID, workspaceID); lookupErr != nil {
+		return domain.Message{}, lookupErr
 	}
 	if message.AuthorID != userID {
 		return domain.Message{}, ErrMessageNotOwned
@@ -3291,16 +3367,22 @@ func conversationEvent(workspaceID domain.WorkspaceID, topic string, conversatio
 
 func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return store.ErrNotFound
+	if lookupErr := workspaceLookupError(err, conversation.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
 	}
 	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if user.Deleted {
 		return store.ErrNotFound
 	}
 	if conversation.IsPrivate {
 		member, err := m.Store.IsConversationMember(ctx, conversationID, userID)
-		if err != nil || !member {
+		if err != nil {
+			return err
+		}
+		if !member {
 			return store.ErrNotFound
 		}
 	}
@@ -3312,11 +3394,17 @@ func (m Messages) authorizeWorkspace(ctx context.Context, workspaceID domain.Wor
 		return err
 	}
 	user, err := m.Store.GetUser(ctx, userID)
-	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+	if lookupErr := workspaceLookupError(err, user.WorkspaceID, workspaceID); lookupErr != nil {
+		return lookupErr
+	}
+	if user.Deleted {
 		return store.ErrNotFound
 	}
 	membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, userID)
-	if err != nil || !membership.Active {
+	if err != nil {
+		return err
+	}
+	if !membership.Active {
 		return store.ErrNotFound
 	}
 	return nil

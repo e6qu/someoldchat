@@ -46,16 +46,13 @@ func (s Filesystem) Put(ctx context.Context, key string, size int64, source io.R
 	defer os.Remove(temporaryPath)
 	written, err := io.CopyN(temporary, io.LimitReader(readerContext{ctx, source}, size+1), size+1)
 	if err != nil && !errors.Is(err, io.EOF) {
-		_ = temporary.Close()
-		return Object{}, err
+		return Object{}, errors.Join(err, temporary.Close())
 	}
 	if written != size {
-		_ = temporary.Close()
-		return Object{}, fmt.Errorf("blob size mismatch: wrote %d, expected %d", written, size)
+		return Object{}, errors.Join(fmt.Errorf("blob size mismatch: wrote %d, expected %d", written, size), temporary.Close())
 	}
 	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return Object{}, err
+		return Object{}, errors.Join(err, temporary.Close())
 	}
 	if err := temporary.Close(); err != nil {
 		return Object{}, err
@@ -67,8 +64,10 @@ func (s Filesystem) Put(ctx context.Context, key string, size int64, source io.R
 	if err != nil {
 		return Object{}, err
 	}
-	defer directory.Close()
 	if err := directory.Sync(); err != nil {
+		return Object{}, errors.Join(err, directory.Close())
+	}
+	if err := directory.Close(); err != nil {
 		return Object{}, err
 	}
 	return Object{Key: key, Size: size}, nil
@@ -88,12 +87,10 @@ func (s Filesystem) Open(_ context.Context, key string) (Object, io.ReadCloser, 
 	}
 	info, err := file.Stat()
 	if err != nil {
-		_ = file.Close()
-		return Object{}, nil, err
+		return Object{}, nil, errors.Join(err, file.Close())
 	}
 	if info.Size() < 0 || info.Size() > s.maxSize {
-		_ = file.Close()
-		return Object{}, nil, errors.New("stored blob exceeds size limit")
+		return Object{}, nil, errors.Join(errors.New("stored blob exceeds size limit"), file.Close())
 	}
 	return Object{Key: key, Size: info.Size()}, file, nil
 }
@@ -112,8 +109,8 @@ func (s Filesystem) Delete(_ context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
-	return directory.Sync()
+	syncErr := directory.Sync()
+	return errors.Join(syncErr, directory.Close())
 }
 
 func (s Filesystem) safePath(key string) (string, error) {

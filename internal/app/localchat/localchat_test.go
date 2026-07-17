@@ -2,6 +2,7 @@ package localchat
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,7 +13,38 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
+type failingCloser struct {
+	err    error
+	closed bool
+}
+
+func (c *failingCloser) Close() error {
+	c.closed = true
+	return c.err
+}
+
+func TestCloseAfterOpenPreservesInitializationAndCleanupErrors(t *testing.T) {
+	initializationErr := errors.New("initialization failed")
+	cleanupErr := errors.New("cleanup failed")
+	closer := &failingCloser{err: cleanupErr}
+
+	err := closeAfterOpen(closer, initializationErr)
+	if !closer.closed {
+		t.Fatal("startup resource was not closed")
+	}
+	if !errors.Is(err, initializationErr) {
+		t.Fatalf("error=%v does not preserve initialization error", err)
+	}
+	if !errors.Is(err, cleanupErr) {
+		t.Fatalf("error=%v does not preserve cleanup error", err)
+	}
+}
+
 func TestParseClusterNormalizesAndRejectsDuplicateAddresses(t *testing.T) {
+	empty, err := ParseCluster("")
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty cluster=%v err=%v, want explicit empty slice", empty, err)
+	}
 	cluster, err := ParseCluster(" node-a:1, node-b:2 ")
 	if err != nil || len(cluster) != 2 || cluster[0] != "node-a:1" || cluster[1] != "node-b:2" {
 		t.Fatalf("cluster=%v err=%v", cluster, err)

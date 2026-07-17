@@ -1,4 +1,10 @@
-variable "name" { type = string }
+variable "name" {
+  type = string
+  validation {
+    condition     = trimspace(var.name) == var.name && trimspace(var.name) != "" && can(regex("^[A-Za-z0-9_-]+$", var.name)) && length("${var.name}-scale-zero") <= 128
+    error_message = "name must contain only letters, numbers, hyphens, or underscores, and the derived ECS startedBy value must be at most 128 characters"
+  }
+}
 variable "region" { type = string }
 variable "vpc_id" { type = string }
 variable "private_subnet_ids" {
@@ -11,8 +17,8 @@ variable "private_subnet_ids" {
 variable "application_image" {
   type = string
   validation {
-    condition     = trimspace(var.application_image) != ""
-    error_message = "application_image must be an immutable image reference"
+    condition     = trimspace(var.application_image) == var.application_image && can(regex("^[^[:space:]]+@sha256:[0-9a-fA-F]{64}$", var.application_image))
+    error_message = "application_image must be an immutable image reference ending in a 64-character SHA-256 digest"
   }
 }
 variable "application_task_role_arn" {
@@ -104,8 +110,8 @@ variable "alarm_topic_arn" {
 variable "websocket_application_image" {
   type = string
   validation {
-    condition     = trimspace(var.websocket_application_image) != ""
-    error_message = "websocket_application_image must be an immutable image reference"
+    condition     = trimspace(var.websocket_application_image) == var.websocket_application_image && can(regex("^[^[:space:]]+@sha256:[0-9a-fA-F]{64}$", var.websocket_application_image))
+    error_message = "websocket_application_image must be an immutable image reference ending in a 64-character SHA-256 digest"
   }
 }
 variable "websocket_application_task_role_arn" {
@@ -146,8 +152,8 @@ variable "websocket_application_replicas" {
 variable "websocket_edge_image" {
   type = string
   validation {
-    condition     = trimspace(var.websocket_edge_image) != ""
-    error_message = "websocket_edge_image must be an immutable image reference"
+    condition     = trimspace(var.websocket_edge_image) == var.websocket_edge_image && can(regex("^[^[:space:]]+@sha256:[0-9a-fA-F]{64}$", var.websocket_edge_image))
+    error_message = "websocket_edge_image must be an immutable image reference ending in a 64-character SHA-256 digest"
   }
 }
 variable "websocket_edge_task_role_arn" {

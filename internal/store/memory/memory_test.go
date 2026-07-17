@@ -24,6 +24,13 @@ func TestFindUserByEmailIsCaseInsensitiveAndWorkspaceScoped(t *testing.T) {
 	}
 }
 
+func TestListConnectedChannelInfoRejectsInvalidCursor(t *testing.T) {
+	_, _, _, err := New().ListConnectedChannelInfo(context.Background(), "T1", nil, nil, domain.PageRequest{Limit: 1, Cursor: "not-a-cursor"})
+	if err == nil {
+		t.Fatal("invalid connected-channel cursor was accepted")
+	}
+}
+
 func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	ctx := context.Background()
 	s := New()

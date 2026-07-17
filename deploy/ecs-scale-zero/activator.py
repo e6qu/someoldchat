@@ -4,6 +4,7 @@ import json
 import os
 import time
 import uuid
+from typing import NamedTuple
 
 import boto3
 import urllib3
@@ -17,9 +18,63 @@ http = urllib3.PoolManager(cert_reqs="CERT_REQUIRED")
 class ActivationError(RuntimeError):
     pass
 
+
+class GatewayRequest(NamedTuple):
+    request_id: str
+    method: str
+    raw_path: str
+    raw_query_string: str
+    headers: dict[str, str]
+    body: str
+    is_base64_encoded: bool
+
+
+def parse_gateway_request(event):
+    if not isinstance(event, dict):
+        raise ActivationError("API Gateway event must be an object")
+    request_context = event.get("requestContext")
+    if not isinstance(request_context, dict):
+        raise ActivationError("API Gateway event is missing requestContext")
+    request_id = request_context.get("requestId")
+    http_context = request_context.get("http")
+    if not isinstance(request_id, str) or not request_id.strip():
+        raise ActivationError("API Gateway event is missing requestContext.requestId")
+    if not isinstance(http_context, dict):
+        raise ActivationError("API Gateway event is missing requestContext.http")
+    method = http_context.get("method")
+    raw_path = event.get("rawPath")
+    if not isinstance(method, str) or not method.strip():
+        raise ActivationError("API Gateway event is missing requestContext.http.method")
+    if not isinstance(raw_path, str) or not raw_path.startswith("/"):
+        raise ActivationError("API Gateway event is missing an absolute rawPath")
+    if "rawQueryString" not in event:
+        raise ActivationError("API Gateway event is missing rawQueryString")
+    raw_query_string = event["rawQueryString"]
+    if not isinstance(raw_query_string, str):
+        raise ActivationError("API Gateway event rawQueryString must be a string")
+    if "headers" not in event:
+        raise ActivationError("API Gateway event is missing headers")
+    headers = event["headers"]
+    if not isinstance(headers, dict) or any(not isinstance(key, str) or not isinstance(value, str) for key, value in headers.items()):
+        raise ActivationError("API Gateway event headers must be a string map")
+    if "body" not in event:
+        raise ActivationError("API Gateway event is missing body")
+    body = event["body"]
+    if body is None:
+        body = ""
+    if not isinstance(body, str):
+        raise ActivationError("API Gateway event body must be a string or null")
+    if "isBase64Encoded" not in event:
+        raise ActivationError("API Gateway event is missing isBase64Encoded")
+    is_base64_encoded = event["isBase64Encoded"]
+    if not isinstance(is_base64_encoded, bool):
+        raise ActivationError("API Gateway event isBase64Encoded must be boolean")
+    return GatewayRequest(request_id, method, raw_path, raw_query_string, headers, body, is_base64_encoded)
+
+
 CLUSTER = os.environ["CLUSTER"]
 TASK_DEFINITION = os.environ["TASK_DEFINITION"]
-TASK_FAMILY = TASK_DEFINITION.rsplit("/", 1)[-1].split(":", 1)[0]
+STARTED_BY = os.environ["STARTED_BY"]
 SUBNETS = os.environ["SUBNETS"].split(",")
 SECURITY_GROUPS = os.environ["SECURITY_GROUPS"].split(",")
 PORT = int(os.environ["PORT"])
@@ -39,11 +94,25 @@ def response(status, body, retry_after=None):
 
 
 def running_tasks():
-    pages = ecs.get_paginator("list_tasks").paginate(cluster=CLUSTER, desiredStatus="RUNNING", family=TASK_FAMILY)
-    arns = [arn for page in pages for arn in page.get("taskArns", [])]
-    if not arns:
-        return []
-    return ecs.describe_tasks(cluster=CLUSTER, tasks=arns).get("tasks", [])
+    pages = ecs.get_paginator("list_tasks").paginate(cluster=CLUSTER, startedBy=STARTED_BY)
+    tasks = []
+    for batch in task_arn_batches(pages, 100):
+        tasks.extend(ecs.describe_tasks(cluster=CLUSTER, tasks=batch).get("tasks", []))
+    return tasks
+
+
+def task_arn_batches(pages, size):
+    if size <= 0:
+        raise ValueError("batch size must be positive")
+    batch = []
+    for page in pages:
+        for arn in page.get("taskArns", []):
+            batch.append(arn)
+            if len(batch) == size:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
 
 
 def task_ip(task):
@@ -100,7 +169,7 @@ def release_wake_lock(owner):
 
 
 def start_tasks():
-    result = ecs.run_task(cluster=CLUSTER, taskDefinition=TASK_DEFINITION, count=REPLICAS, launchType="FARGATE", platformVersion="1.4.0", networkConfiguration={"awsvpcConfiguration": {"subnets": SUBNETS, "securityGroups": SECURITY_GROUPS, "assignPublicIp": "DISABLED"}}, enableECSManagedTags=True, tags=[{"key": "sameoldchat-scale-zero", "value": "true"}])
+    result = ecs.run_task(cluster=CLUSTER, taskDefinition=TASK_DEFINITION, count=REPLICAS, startedBy=STARTED_BY, launchType="FARGATE", platformVersion="1.4.0", networkConfiguration={"awsvpcConfiguration": {"subnets": SUBNETS, "securityGroups": SECURITY_GROUPS, "assignPublicIp": "DISABLED"}}, enableECSManagedTags=True, tags=[{"key": "sameoldchat-scale-zero", "value": "true"}])
     failures = result.get("failures", [])
     if failures:
         raise ActivationError("ECS RunTask failed: " + json.dumps(failures, separators=(",", ":")))
@@ -136,6 +205,18 @@ def release(name):
     STATE.delete_item(Key={"id": name})
 
 
+def has_active_lease():
+    scan = {"ConsistentRead": True, "FilterExpression": "begins_with(id, :prefix) AND expires > :now", "ExpressionAttributeValues": {":prefix": "lease:", ":now": int(time.time())}}
+    while True:
+        page = STATE.scan(**scan)
+        if page.get("Items"):
+            return True
+        last_key = page.get("LastEvaluatedKey")
+        if not last_key:
+            return False
+        scan["ExclusiveStartKey"] = last_key
+
+
 def stop_if_idle():
     now = int(time.time())
     lock_owner = "scale-down:" + str(uuid.uuid4())
@@ -150,16 +231,7 @@ def stop_if_idle():
             return
         raise ActivationError("unable to acquire scale-down lock") from error
     try:
-        leases = []
-        scan = {"ConsistentRead": True, "FilterExpression": "begins_with(id, :prefix) AND expires > :now", "ExpressionAttributeValues": {":prefix": "lease:", ":now": int(time.time())}}
-        while True:
-            page = STATE.scan(**scan)
-            leases.extend(page.get("Items", []))
-            last_key = page.get("LastEvaluatedKey")
-            if not last_key:
-                break
-            scan["ExclusiveStartKey"] = last_key
-        if leases:
+        if has_active_lease():
             return
         for task in running_tasks():
             ecs.stop_task(cluster=CLUSTER, task=task["taskArn"], reason="scale-to-zero request complete")
@@ -168,6 +240,7 @@ def stop_if_idle():
 
 
 def handler(event, _context):
+    request = parse_gateway_request(event)
     lease_id = "lease:" + str(uuid.uuid4())
     wake_owner = lease_id
     request_deadline = time.time() + REQUEST_TIMEOUT
@@ -188,22 +261,18 @@ def handler(event, _context):
                 tasks = ready_tasks(min(request_deadline, time.time() + STARTUP_TIMEOUT), wait_for_tasks=True)
         if not tasks:
             return response(503, "application did not become ready\n", retry_after=1)
-        request_id = event.get("requestContext", {}).get("requestId", str(uuid.uuid4()))
-        index = int(hashlib.sha256(request_id.encode()).hexdigest(), 16) % len(tasks)
+        index = int(hashlib.sha256(request.request_id.encode()).hexdigest(), 16) % len(tasks)
         _, ip = tasks[index]
-        raw_path = event.get("rawPath", "/")
-        query = event.get("rawQueryString", "")
-        target = f"http://{ip}:{PORT}{raw_path}" + (f"?{query}" if query else "")
-        headers = {k: v for k, v in (event.get("headers") or {}).items() if k.lower() not in {"host", "content-length", "connection", "transfer-encoding"}}
-        body = event.get("body") or ""
-        if event.get("isBase64Encoded"):
-            body = base64.b64decode(body)
+        target = f"http://{ip}:{PORT}{request.raw_path}" + (f"?{request.raw_query_string}" if request.raw_query_string else "")
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length", "connection", "transfer-encoding"}}
+        if request.is_base64_encoded:
+            body = base64.b64decode(request.body)
         else:
-            body = body.encode()
+            body = request.body.encode()
         remaining = request_deadline - time.time()
         if remaining <= 1:
             return response(503, "application startup consumed the request deadline\n", retry_after=1)
-        result = http.request(event.get("requestContext", {}).get("http", {}).get("method", "GET"), target, body=body, headers=headers, timeout=urllib3.Timeout(connect=min(2.0, remaining), read=remaining), retries=False, preload_content=True)
+        result = http.request(request.method, target, body=body, headers=headers, timeout=urllib3.Timeout(connect=min(2.0, remaining), read=remaining), retries=False, preload_content=True)
         response_body = base64.b64encode(result.data).decode()
         response_headers = {k: v for k, v in dict(result.headers).items() if k.lower() not in {"connection", "content-length", "transfer-encoding"}}
         return {"statusCode": result.status, "headers": response_headers, "body": response_body, "isBase64Encoded": True}

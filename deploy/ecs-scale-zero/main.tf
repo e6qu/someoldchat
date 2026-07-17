@@ -1,8 +1,8 @@
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = "= 1.15.8"
   required_providers {
-    aws     = { source = "hashicorp/aws", version = ">= 5.0, < 6.0" }
-    archive = { source = "hashicorp/archive", version = ">= 2.4, < 2.8" }
+    aws     = { source = "hashicorp/aws", version = "= 6.55.0" }
+    archive = { source = "hashicorp/archive", version = "= 2.8.0" }
   }
 }
 
@@ -117,7 +117,7 @@ resource "aws_lambda_function" "activator" {
     subnet_ids         = var.lambda_subnet_ids
     security_group_ids = var.lambda_security_group_ids
   }
-  environment { variables = { CLUSTER = aws_ecs_cluster.this.name, TASK_DEFINITION = aws_ecs_task_definition.application.arn, SUBNETS = join(",", var.private_subnet_ids), SECURITY_GROUPS = join(",", concat([aws_security_group.application.id], var.application_security_group_ids)), PORT = tostring(var.application_port), REPLICAS = tostring(var.application_replicas), STARTUP_TIMEOUT = tostring(var.startup_timeout_seconds), REQUEST_TIMEOUT = tostring(var.request_timeout_seconds), STATE_TABLE = aws_dynamodb_table.state.name } }
+  environment { variables = { CLUSTER = aws_ecs_cluster.this.name, TASK_DEFINITION = aws_ecs_task_definition.application.arn, STARTED_BY = "${var.name}-scale-zero", SUBNETS = join(",", var.private_subnet_ids), SECURITY_GROUPS = join(",", concat([aws_security_group.application.id], var.application_security_group_ids)), PORT = tostring(var.application_port), REPLICAS = tostring(var.application_replicas), STARTUP_TIMEOUT = tostring(var.startup_timeout_seconds), REQUEST_TIMEOUT = tostring(var.request_timeout_seconds), STATE_TABLE = aws_dynamodb_table.state.name } }
 }
 
 resource "aws_apigatewayv2_api" "edge" {
