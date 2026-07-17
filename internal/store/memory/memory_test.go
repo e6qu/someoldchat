@@ -100,8 +100,8 @@ func TestConversationListFiltersBeforePagination(t *testing.T) {
 
 func TestAuthSeedingDoesNotOverwriteDurableState(t *testing.T) {
 	s := New()
-	s.SeedToken("token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write"}})
-	s.SeedToken("token", domain.TokenRecord{WorkspaceID: "T2", UserID: "U2", Revoked: true})
+	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write"}})
+	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T2", UserID: "U2", Revoked: true})
 	token, err := s.LookupToken(context.Background(), "token")
 	if err != nil || token.WorkspaceID != "T1" || token.Revoked {
 		t.Fatalf("token=%+v err=%v", token, err)

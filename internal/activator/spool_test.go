@@ -87,7 +87,7 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := spool.Claim(context.Background(), "crashed-owner", 1, 5*time.Millisecond)
+	claimed, err := spool.Claim(context.Background(), "crashed-owner", 1, 100*time.Millisecond)
 	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
 		t.Fatalf("initial claim=%+v err=%v", claimed, err)
 	}
@@ -95,7 +95,7 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("unexpired lease was not exclusive: %+v err=%v", claimed, err)
 	}
-	time.Sleep(15 * time.Millisecond)
+	time.Sleep(150 * time.Millisecond)
 	claimed, err = spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
 	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
 		t.Fatalf("expired lease was not reclaimable: %+v err=%v", claimed, err)

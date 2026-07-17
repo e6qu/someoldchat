@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -49,6 +51,8 @@ type Config struct {
 	DqliteCluster   []string
 	DqliteDatabase  string
 	BlobDirectory   string
+	BlobS3Bucket    string
+	BlobS3Prefix    string
 	BlobMaxBytes    int64
 }
 
@@ -101,16 +105,9 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	}
 	var chatStore store.Store
 	var closer io.Closer
-	var blobStore blob.Store = blob.Disabled{}
-	if config.BlobDirectory != "" {
-		if config.BlobMaxBytes <= 0 {
-			return Runtime{}, errors.New("blob storage requires a positive size limit")
-		}
-		selected, err := blob.NewFilesystem(config.BlobDirectory, config.BlobMaxBytes)
-		if err != nil {
-			return Runtime{}, err
-		}
-		blobStore = selected
+	blobStore, err := openBlobStore(ctx, config)
+	if err != nil {
+		return Runtime{}, err
 	}
 	switch config.Backend {
 	case BackendMemory:
@@ -184,6 +181,26 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 		return Runtime{}, errors.New("selected store does not support scheduled message execution")
 	}
 	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore), Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, BlobStore: blobStore}, nil
+}
+
+func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {
+	if config.BlobDirectory != "" && config.BlobS3Bucket != "" {
+		return nil, errors.New("blob storage must select filesystem or Amazon Simple Storage Service, not both")
+	}
+	if config.BlobDirectory == "" && config.BlobS3Bucket == "" {
+		return blob.Disabled{}, nil
+	}
+	if config.BlobMaxBytes <= 0 {
+		return nil, errors.New("blob storage requires a positive size limit")
+	}
+	if config.BlobDirectory != "" {
+		return blob.NewFilesystem(config.BlobDirectory, config.BlobMaxBytes)
+	}
+	awsConfig, err := awsconfig.LoadDefaultConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load Amazon Simple Storage Service configuration: %w", err)
+	}
+	return blob.NewS3(s3.NewFromConfig(awsConfig), config.BlobS3Bucket, config.BlobS3Prefix, config.BlobMaxBytes)
 }
 
 func bootstrap(ctx context.Context, selected bootstrapStore) error {

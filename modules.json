@@ -37,7 +37,7 @@
       "mode": "separate",
       "storage": "dqlite",
       "processes": {"http": [], "chat": ["chat"]},
-      "replicas": {"http": 3, "chat": 2}
+      "replicas": {"http": 4, "chat": 3}
     }
   ]
 }

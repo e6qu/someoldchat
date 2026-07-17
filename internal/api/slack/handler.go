@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/oauth.v2.access", h.oauthV2Access)
 	mux.HandleFunc("POST /api/oauth.v2.access", h.oauthV2Access)
 	mux.HandleFunc("GET /api/auth.revoke", h.authRevoke)
+	mux.HandleFunc("POST /api/auth.revoke", h.authRevoke)
 	mux.HandleFunc("GET /api/apps.permissions.info", h.appsPermissionsInfo)
 	mux.HandleFunc("POST /api/apps.permissions.info", h.appsPermissionsInfo)
 	mux.HandleFunc("GET /api/apps.permissions.scopes.list", h.appsPermissionsScopesList)
@@ -79,6 +81,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workflows.stepFailed", h.workflowStepFailed)
 	mux.HandleFunc("GET /api/workflows.updateStep", h.workflowUpdateStep)
 	mux.HandleFunc("POST /api/workflows.updateStep", h.workflowUpdateStep)
+	mux.HandleFunc("POST /api/functions.completeSuccess", h.functionsCompleteSuccess)
+	mux.HandleFunc("POST /api/functions.completeError", h.functionsCompleteError)
 	mux.HandleFunc("GET /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("POST /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("GET /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
@@ -95,10 +99,13 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/team.billableInfo", h.teamBillableInfo)
 	mux.HandleFunc("POST /api/team.billableInfo", h.teamBillableInfo)
 	mux.HandleFunc("GET /api/team.profile.get", h.teamProfileGet)
+	mux.HandleFunc("POST /api/team.profile.get", h.teamProfileGet)
 	mux.HandleFunc("GET /api/team.accessLogs", h.accessLogs)
+	mux.HandleFunc("POST /api/team.accessLogs", h.accessLogs)
 	mux.HandleFunc("GET /api/team.integrationLogs", h.integrationLogs)
 	mux.HandleFunc("POST /api/team.integrationLogs", h.integrationLogs)
 	mux.HandleFunc("GET /api/admin.users.list", h.adminUsersList)
+	mux.HandleFunc("POST /api/admin.users.list", h.adminUsersList)
 	mux.HandleFunc("POST /api/admin.users.remove", h.adminUsersRemove)
 	mux.HandleFunc("POST /api/admin.users.session.invalidate", h.adminUsersSessionInvalidate)
 	mux.HandleFunc("POST /api/admin.users.session.reset", h.adminUsersSessionReset)
@@ -110,14 +117,20 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.users.assign", h.adminUsersAssign)
 	mux.HandleFunc("POST /api/admin.inviteRequests.approve", h.adminInviteRequestApprove)
 	mux.HandleFunc("GET /api/admin.inviteRequests.approved.list", h.adminInviteRequestsApprovedList)
+	mux.HandleFunc("POST /api/admin.inviteRequests.approved.list", h.adminInviteRequestsApprovedList)
 	mux.HandleFunc("GET /api/admin.inviteRequests.denied.list", h.adminInviteRequestsDeniedList)
+	mux.HandleFunc("POST /api/admin.inviteRequests.denied.list", h.adminInviteRequestsDeniedList)
 	mux.HandleFunc("POST /api/admin.inviteRequests.deny", h.adminInviteRequestDeny)
 	mux.HandleFunc("GET /api/admin.inviteRequests.list", h.adminInviteRequestsList)
+	mux.HandleFunc("POST /api/admin.inviteRequests.list", h.adminInviteRequestsList)
 	mux.HandleFunc("POST /api/admin.apps.approve", h.adminAppApprove)
 	mux.HandleFunc("GET /api/admin.apps.approved.list", h.adminAppsApprovedList)
+	mux.HandleFunc("POST /api/admin.apps.approved.list", h.adminAppsApprovedList)
 	mux.HandleFunc("GET /api/admin.apps.requests.list", h.adminAppsRequestsList)
+	mux.HandleFunc("POST /api/admin.apps.requests.list", h.adminAppsRequestsList)
 	mux.HandleFunc("POST /api/admin.apps.restrict", h.adminAppRestrict)
 	mux.HandleFunc("GET /api/admin.apps.restricted.list", h.adminAppsRestrictedList)
+	mux.HandleFunc("POST /api/admin.apps.restricted.list", h.adminAppsRestrictedList)
 	mux.HandleFunc("POST /api/admin.conversations.rename", h.adminConversationRename)
 	mux.HandleFunc("POST /api/admin.conversations.create", h.adminConversationCreate)
 	mux.HandleFunc("POST /api/admin.conversations.archive", h.adminConversationArchive)
@@ -125,22 +138,33 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/admin.conversations.delete", h.adminConversationDelete)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.addGroup", h.adminConversationAccessGroupAdd)
 	mux.HandleFunc("GET /api/admin.conversations.restrictAccess.listGroups", h.adminConversationAccessGroupsList)
+	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.listGroups", h.adminConversationAccessGroupsList)
 	mux.HandleFunc("POST /api/admin.conversations.restrictAccess.removeGroup", h.adminConversationAccessGroupRemove)
 	mux.HandleFunc("POST /api/admin.conversations.invite", h.adminConversationInvite)
 	mux.HandleFunc("POST /api/admin.conversations.convertToPrivate", h.adminConversationConvertToPrivate)
 	mux.HandleFunc("GET /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
+	mux.HandleFunc("POST /api/admin.conversations.getConversationPrefs", h.adminConversationGetPrefs)
 	mux.HandleFunc("POST /api/admin.conversations.setConversationPrefs", h.adminConversationSetPrefs)
 	mux.HandleFunc("GET /api/admin.conversations.search", h.adminConversationSearch)
+	mux.HandleFunc("POST /api/admin.conversations.search", h.adminConversationSearch)
 	mux.HandleFunc("GET /api/admin.conversations.getTeams", h.adminConversationGetTeams)
+	mux.HandleFunc("POST /api/admin.conversations.getTeams", h.adminConversationGetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.setTeams", h.adminConversationSetTeams)
 	mux.HandleFunc("POST /api/admin.conversations.disconnectShared", h.adminConversationDisconnectShared)
 	mux.HandleFunc("GET /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
+	mux.HandleFunc("POST /api/admin.conversations.ekm.listOriginalConnectedChannelInfo", h.adminConnectedChannelInfo)
 	mux.HandleFunc("POST /api/admin.emoji.add", h.adminEmojiAdd)
+	mux.HandleFunc("GET /api/admin.emoji.add", h.adminEmojiAdd)
 	mux.HandleFunc("POST /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
+	mux.HandleFunc("GET /api/admin.emoji.addAlias", h.adminEmojiAddAlias)
 	mux.HandleFunc("GET /api/admin.emoji.list", h.adminEmojiList)
+	mux.HandleFunc("POST /api/admin.emoji.list", h.adminEmojiList)
 	mux.HandleFunc("POST /api/admin.emoji.remove", h.adminEmojiRemove)
+	mux.HandleFunc("GET /api/admin.emoji.remove", h.adminEmojiRemove)
 	mux.HandleFunc("POST /api/admin.emoji.rename", h.adminEmojiRename)
+	mux.HandleFunc("GET /api/admin.emoji.rename", h.adminEmojiRename)
 	mux.HandleFunc("GET /api/emoji.list", h.emojiList)
+	mux.HandleFunc("POST /api/emoji.list", h.emojiList)
 	mux.HandleFunc("POST /api/chat.postMessage", h.postMessage)
 	mux.HandleFunc("POST /api/chat.unfurl", h.chatUnfurl)
 	mux.HandleFunc("POST /api/chat.postEphemeral", h.postEphemeral)
@@ -148,8 +172,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/chat.update", h.updateMessage)
 	mux.HandleFunc("POST /api/chat.delete", h.deleteMessage)
 	mux.HandleFunc("GET /api/chat.getPermalink", h.getPermalink)
+	mux.HandleFunc("POST /api/chat.getPermalink", h.getPermalink)
 	mux.HandleFunc("POST /api/chat.scheduleMessage", h.scheduleMessage)
 	mux.HandleFunc("GET /api/chat.scheduledMessages.list", h.scheduledMessagesList)
+	mux.HandleFunc("POST /api/chat.scheduledMessages.list", h.scheduledMessagesList)
 	mux.HandleFunc("POST /api/chat.deleteScheduledMessage", h.deleteScheduledMessage)
 	mux.HandleFunc("GET /api/conversations.history", h.history)
 	mux.HandleFunc("POST /api/conversations.history", h.history)
@@ -160,15 +186,19 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/users.info", h.userInfo)
 	mux.HandleFunc("POST /api/users.info", h.userInfo)
 	mux.HandleFunc("GET /api/users.identity", h.usersIdentity)
+	mux.HandleFunc("POST /api/users.identity", h.usersIdentity)
 	mux.HandleFunc("GET /api/users.lookupByEmail", h.lookupUserByEmail)
 	mux.HandleFunc("POST /api/users.lookupByEmail", h.lookupUserByEmail)
 	mux.HandleFunc("GET /api/users.getPresence", h.getPresence)
+	mux.HandleFunc("POST /api/users.getPresence", h.getPresence)
 	mux.HandleFunc("POST /api/users.setPresence", h.setPresence)
 	mux.HandleFunc("GET /api/dnd.info", h.dndInfo)
+	mux.HandleFunc("POST /api/dnd.info", h.dndInfo)
 	mux.HandleFunc("POST /api/dnd.endDnd", h.dndEnd)
 	mux.HandleFunc("POST /api/dnd.endSnooze", h.dndEndSnooze)
 	mux.HandleFunc("POST /api/dnd.setSnooze", h.dndSetSnooze)
 	mux.HandleFunc("GET /api/dnd.teamInfo", h.dndTeamInfo)
+	mux.HandleFunc("POST /api/dnd.teamInfo", h.dndTeamInfo)
 	mux.HandleFunc("GET /api/users.profile.get", h.getUserProfile)
 	mux.HandleFunc("POST /api/users.profile.get", h.getUserProfile)
 	mux.HandleFunc("GET /api/users.list", h.usersList)
@@ -180,6 +210,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/conversations.list", h.conversationsList)
 	mux.HandleFunc("POST /api/conversations.list", h.conversationsList)
 	mux.HandleFunc("GET /api/users.conversations", h.usersConversations)
+	mux.HandleFunc("POST /api/users.conversations", h.usersConversations)
 	mux.HandleFunc("GET /api/conversations.members", h.conversationMembers)
 	mux.HandleFunc("POST /api/conversations.members", h.conversationMembers)
 	mux.HandleFunc("POST /api/conversations.create", h.createConversation)
@@ -200,42 +231,56 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/reactions.get", h.getReactions)
 	mux.HandleFunc("POST /api/reactions.get", h.getReactions)
 	mux.HandleFunc("GET /api/reactions.list", h.listUserReactions)
+	mux.HandleFunc("POST /api/reactions.list", h.listUserReactions)
 	mux.HandleFunc("POST /api/pins.add", h.addPin)
 	mux.HandleFunc("POST /api/pins.remove", h.removePin)
 	mux.HandleFunc("GET /api/pins.list", h.listPins)
 	mux.HandleFunc("POST /api/pins.list", h.listPins)
 	mux.HandleFunc("POST /api/stars.add", h.addStar)
 	mux.HandleFunc("GET /api/stars.list", h.listStars)
+	mux.HandleFunc("POST /api/stars.list", h.listStars)
 	mux.HandleFunc("POST /api/stars.remove", h.removeStar)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
 	mux.HandleFunc("GET /api/reminders.info", h.reminderInfo)
+	mux.HandleFunc("POST /api/reminders.info", h.reminderInfo)
 	mux.HandleFunc("GET /api/reminders.list", h.listReminders)
+	mux.HandleFunc("POST /api/reminders.list", h.listReminders)
 	mux.HandleFunc("POST /api/usergroups.create", h.createUserGroup)
 	mux.HandleFunc("POST /api/usergroups.update", h.updateUserGroup)
 	mux.HandleFunc("POST /api/usergroups.enable", h.enableUserGroup)
 	mux.HandleFunc("POST /api/usergroups.disable", h.disableUserGroup)
 	mux.HandleFunc("GET /api/usergroups.list", h.listUserGroups)
+	mux.HandleFunc("POST /api/usergroups.list", h.listUserGroups)
 	mux.HandleFunc("GET /api/usergroups.users.list", h.userGroupUsers)
+	mux.HandleFunc("POST /api/usergroups.users.list", h.userGroupUsers)
 	mux.HandleFunc("POST /api/usergroups.users.update", h.updateUserGroupUsers)
 	mux.HandleFunc("POST /api/admin.usergroups.addChannels", h.adminUserGroupAddChannels)
 	mux.HandleFunc("POST /api/admin.usergroups.addTeams", h.adminUserGroupAddTeams)
 	mux.HandleFunc("POST /api/admin.usergroups.removeChannels", h.adminUserGroupRemoveChannels)
 	mux.HandleFunc("GET /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
+	mux.HandleFunc("POST /api/admin.usergroups.listChannels", h.adminUserGroupListChannels)
 	mux.HandleFunc("GET /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
+	mux.HandleFunc("POST /api/admin.teams.settings.info", h.adminTeamSettingsInfo)
 	mux.HandleFunc("POST /api/admin.teams.settings.setName", h.adminTeamSettingsSetName)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDescription", h.adminTeamSettingsSetDescription)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDiscoverability", h.adminTeamSettingsSetDiscoverability)
 	mux.HandleFunc("POST /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
+	mux.HandleFunc("GET /api/admin.teams.settings.setIcon", h.adminTeamSettingsSetIcon)
 	mux.HandleFunc("POST /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
+	mux.HandleFunc("GET /api/admin.teams.settings.setDefaultChannels", h.adminTeamSettingsSetDefaultChannels)
 	mux.HandleFunc("GET /api/admin.teams.list", h.adminTeamsList)
+	mux.HandleFunc("POST /api/admin.teams.list", h.adminTeamsList)
 	mux.HandleFunc("POST /api/admin.teams.create", h.adminTeamsCreate)
 	mux.HandleFunc("GET /api/admin.teams.admins.list", h.adminTeamsAdminsList)
+	mux.HandleFunc("POST /api/admin.teams.admins.list", h.adminTeamsAdminsList)
 	mux.HandleFunc("GET /api/admin.teams.owners.list", h.adminTeamsOwnersList)
+	mux.HandleFunc("POST /api/admin.teams.owners.list", h.adminTeamsOwnersList)
 	mux.HandleFunc("POST /api/calls.add", h.addCall)
 	mux.HandleFunc("POST /api/calls.end", h.endCall)
 	mux.HandleFunc("GET /api/calls.info", h.callInfo)
+	mux.HandleFunc("POST /api/calls.info", h.callInfo)
 	mux.HandleFunc("POST /api/calls.update", h.updateCall)
 	mux.HandleFunc("POST /api/calls.participants.add", h.addCallParticipants)
 	mux.HandleFunc("POST /api/calls.participants.remove", h.removeCallParticipants)
@@ -250,9 +295,12 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/files.upload", h.fileUpload)
 	mux.HandleFunc("POST /api/files.remote.add", h.remoteFileAdd)
 	mux.HandleFunc("GET /api/files.remote.info", h.remoteFileInfo)
+	mux.HandleFunc("POST /api/files.remote.info", h.remoteFileInfo)
 	mux.HandleFunc("GET /api/files.remote.list", h.remoteFilesList)
+	mux.HandleFunc("POST /api/files.remote.list", h.remoteFilesList)
 	mux.HandleFunc("POST /api/files.remote.remove", h.remoteFileRemove)
 	mux.HandleFunc("GET /api/files.remote.share", h.remoteFileShare)
+	mux.HandleFunc("POST /api/files.remote.share", h.remoteFileShare)
 	mux.HandleFunc("POST /api/files.remote.update", h.remoteFileUpdate)
 	mux.HandleFunc("POST /api/files.sharedPublicURL", h.shareFilePublic)
 	mux.HandleFunc("GET /api/files.sharedPublicURL", h.shareFilePublic)
@@ -414,7 +462,7 @@ func (h Handler) appsPermissionsScopesList(w http.ResponseWriter, r *http.Reques
 		writeAuthError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scopes": map[string]any{
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scopes": []map[string]any{{
 		"app_home": []string{},
 		"channel":  []string{},
 		"group":    []string{},
@@ -422,7 +470,7 @@ func (h Handler) appsPermissionsScopesList(w http.ResponseWriter, r *http.Reques
 		"mpim":     []string{},
 		"team":     permissionScopes(principal),
 		"user":     []string{},
-	}})
+	}}})
 }
 
 func (h Handler) appsPermissionsResourcesList(w http.ResponseWriter, r *http.Request) {
@@ -699,6 +747,44 @@ func (h Handler) workflowUpdateStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) functionsCompleteSuccess(w http.ResponseWriter, r *http.Request) {
+	fields, ok := h.functionCompletionFields(w, r, "outputs")
+	if !ok {
+		return
+	}
+	var outputs map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(fields["outputs"]), &outputs); err != nil || outputs == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) functionsCompleteError(w http.ResponseWriter, r *http.Request) {
+	_, ok := h.functionCompletionFields(w, r, "error")
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request, requiredField string) (map[string]string, bool) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return nil, false
+	}
+	if _, err := h.authenticate(r, ""); err != nil {
+		writeAuthError(w, err)
+		return nil, false
+	}
+	if strings.TrimSpace(fields["function_execution_id"]) == "" || strings.TrimSpace(fields[requiredField]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return nil, false
+	}
+	return fields, true
 }
 
 func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
@@ -1207,7 +1293,7 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
-	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
+	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
@@ -1404,7 +1490,18 @@ func (h Handler) adminInviteRequestsListStatus(w http.ResponseWriter, r *http.Re
 		}
 		requests = append(requests, request)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "invite_requests": requests, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}, "has_more": page.HasMore})
+	response := map[string]any{"ok": true, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}, "has_more": page.HasMore}
+	switch status {
+	case domain.InviteRequestPending:
+		response["invite_requests"] = requests
+	case domain.InviteRequestApproved:
+		response["approved_requests"] = requests
+	case domain.InviteRequestDenied:
+		response["denied_requests"] = requests
+	default:
+		panic("unsupported invite request status")
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) adminAppApprove(w http.ResponseWriter, r *http.Request) {
@@ -1527,7 +1624,7 @@ func (h Handler) adminConversationRename(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fields, err := decodeFields(w, r)
-	channel, name := domain.ConversationID(strings.TrimSpace(fields["channel"])), strings.TrimSpace(fields["name"])
+	channel, name := domain.ConversationID(strings.TrimSpace(fields["channel_id"])), strings.TrimSpace(fields["name"])
 	if err != nil || channel == "" || name == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
@@ -1538,7 +1635,7 @@ func (h Handler) adminConversationRename(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": conversation.ID, "channel": conversationResponse(conversation)})
 }
 
 func (h Handler) adminConversationCreate(w http.ResponseWriter, r *http.Request) {
@@ -1563,7 +1660,7 @@ func (h Handler) adminConversationCreate(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": conversation.ID, "channel": conversationResponse(conversation)})
 }
 
 func (h Handler) adminConversationArchive(w http.ResponseWriter, r *http.Request) {
@@ -1660,7 +1757,7 @@ func (h Handler) adminSetConversationArchived(w http.ResponseWriter, r *http.Req
 		return
 	}
 	fields, err := decodeFields(w, r)
-	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	if err != nil || channel == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
@@ -1681,15 +1778,16 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fields, err := decodeFields(w, r)
-	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	if err != nil || channel == "" || strings.TrimSpace(fields["users"]) == "" {
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	usersField := strings.TrimSpace(fields["users"])
+	if usersField == "" {
+		usersField = strings.TrimSpace(fields["user_ids"])
+	}
+	if err != nil || channel == "" || usersField == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	users := make([]domain.UserID, 0)
-	for _, value := range strings.Split(fields["users"], ",") {
-		users = append(users, domain.UserID(value))
-	}
+	users := parseCallUsers(usersField)
 	conversation, err := h.Messages.AdminInviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
@@ -1706,7 +1804,7 @@ func (h Handler) adminConversationConvertToPrivate(w http.ResponseWriter, r *htt
 		return
 	}
 	fields, err := decodeFields(w, r)
-	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	if err != nil || channel == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
@@ -1742,11 +1840,14 @@ func (h Handler) adminConversationSearch(w http.ResponseWriter, r *http.Request)
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	channels := make([]map[string]any, 0, len(page.Conversations))
+	conversations := make([]map[string]any, 0, len(page.Conversations))
 	for _, conversation := range page.Conversations {
-		channels = append(channels, conversationResponse(conversation))
+		conversations = append(conversations, map[string]any{
+			"id": conversation.ID, "name": conversation.Name, "purpose": conversation.Purpose,
+			"is_archived": conversation.Archived, "is_private": conversation.IsPrivate,
+		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channels": channels, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "conversations": conversations, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore, "total_count": len(conversations)})
 }
 
 func (h Handler) adminConversationGetTeams(w http.ResponseWriter, r *http.Request) {
@@ -2504,6 +2605,12 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "upload_failed"})
 		return
+	}
+	// slack-api-client 1.49.0 labels this multipart part imageData/*.
+	// Preserve that official client behavior while applying the image contract
+	// enforced by the message service.
+	if mimeType == "imageData/*" {
+		mimeType = "image/png"
 	}
 	user, err := h.Messages.SetUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID, mimeType, stat.Size(), temporary)
 	if err != nil {
@@ -4217,7 +4324,15 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	textValue := strings.TrimSpace(fields["text"])
 	postAt, err := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
-	unsupported := fields["attachments"] != "" || fields["blocks"] != "" || fields["thread_ts"] != "" || fields["reply_broadcast"] != "" || fields["parse"] != "" || fields["as_user"] != "" || fields["link_names"] != "" || fields["unfurl_links"] != "" || fields["unfurl_media"] != ""
+	unsupportedBoolean := func(name string) bool {
+		raw := strings.TrimSpace(fields[name])
+		if raw == "" {
+			return false
+		}
+		value, parseErr := parseBoolField(raw)
+		return parseErr != nil || value
+	}
+	unsupported := fields["attachments"] != "" || fields["blocks"] != "" || fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
 	if channel == "" || textValue == "" || err != nil || postAt <= 0 || unsupported {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
@@ -4422,6 +4537,19 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func parseConversationIDs(raw string) []domain.ConversationID {
+	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		var values []string
+		if err := json.Unmarshal([]byte(raw), &values); err != nil {
+			return nil
+		}
+		result := make([]domain.ConversationID, 0, len(values))
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" {
+				result = append(result, domain.ConversationID(value))
+			}
+		}
+		return result
+	}
 	parts := strings.Split(raw, ",")
 	result := make([]domain.ConversationID, 0, len(parts))
 	for _, part := range parts {
@@ -4444,11 +4572,15 @@ func (h Handler) adminUserGroupAddChannels(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	channels := parseConversationIDs(fields["channel_ids"])
-	if len(channels) == 0 || strings.TrimSpace(fields["usergroup"]) == "" {
+	groupID := strings.TrimSpace(fields["usergroup"])
+	if groupID == "" {
+		groupID = strings.TrimSpace(fields["usergroup_id"])
+	}
+	if len(channels) == 0 || groupID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	if err := h.Messages.AddUserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(strings.TrimSpace(fields["usergroup"])), channels); err != nil {
+	if err := h.Messages.AddUserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID), channels); err != nil {
 		code, reason := mapServiceError(err, "usergroup_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
@@ -4502,11 +4634,15 @@ func (h Handler) adminUserGroupRemoveChannels(w http.ResponseWriter, r *http.Req
 		return
 	}
 	channels := parseConversationIDs(fields["channel_ids"])
-	if len(channels) == 0 || strings.TrimSpace(fields["usergroup"]) == "" {
+	groupID := strings.TrimSpace(fields["usergroup"])
+	if groupID == "" {
+		groupID = strings.TrimSpace(fields["usergroup_id"])
+	}
+	if len(channels) == 0 || groupID == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	if err := h.Messages.RemoveUserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(strings.TrimSpace(fields["usergroup"])), channels); err != nil {
+	if err := h.Messages.RemoveUserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID), channels); err != nil {
 		code, reason := mapServiceError(err, "usergroup_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
@@ -4524,17 +4660,27 @@ func (h Handler) adminUserGroupListChannels(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
 		return
 	}
-	channels, err := h.Messages.UserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(strings.TrimSpace(fields["usergroup"])))
+	groupID := strings.TrimSpace(fields["usergroup"])
+	if groupID == "" {
+		groupID = strings.TrimSpace(fields["usergroup_id"])
+	}
+	if groupID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	channels, err := h.Messages.UserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID))
 	if err != nil {
 		code, reason := mapServiceError(err, "usergroup_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
 	values := make([]string, 0, len(channels))
+	channelObjects := make([]map[string]any, 0, len(channels))
 	for _, channel := range channels {
 		values = append(values, string(channel))
+		channelObjects = append(channelObjects, map[string]any{"id": channel})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_ids": values})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_ids": values, "channels": channelObjects})
 }
 
 func (h Handler) adminTeamSettingsInfo(w http.ResponseWriter, r *http.Request) {
@@ -4729,14 +4875,42 @@ func (h Handler) adminTeamsRoleList(w http.ResponseWriter, r *http.Request, role
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	users := make([]map[string]any, 0, len(page.Users))
+	ids := make([]string, 0, len(page.Users))
 	for _, value := range page.Users {
-		users = append(users, userResponse(value))
+		ids = append(ids, string(value.ID))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "users": users, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
+	response := map[string]any{"ok": true, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore}
+	if role == domain.WorkspaceRoleAdmin {
+		response["admin_ids"] = ids
+	} else if role == domain.WorkspaceRoleOwner {
+		response["owner_ids"] = ids
+	} else {
+		panic("unsupported workspace role")
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func parseCallUsers(raw string) []domain.UserID {
+	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
+		var participants []struct {
+			SlackID    string `json:"slack_id"`
+			ExternalID string `json:"external_id"`
+		}
+		if err := json.Unmarshal([]byte(raw), &participants); err != nil {
+			return nil
+		}
+		result := make([]domain.UserID, 0, len(participants))
+		for _, participant := range participants {
+			id := strings.TrimSpace(participant.SlackID)
+			if id == "" {
+				id = strings.TrimSpace(participant.ExternalID)
+			}
+			if id != "" {
+				result = append(result, domain.UserID(id))
+			}
+		}
+		return result
+	}
 	parts := strings.Split(raw, ",")
 	result := make([]domain.UserID, 0, len(parts))
 	for _, part := range parts {
@@ -4989,6 +5163,11 @@ func decodeProfileJSON(raw string) (map[string]string, error) {
 				return nil, fmt.Errorf("profile field %s must be a string", name)
 			}
 			values[name] = text
+		case "always_active", "is_custom_image":
+			var boolean bool
+			if err := json.Unmarshal(value, &boolean); err != nil {
+				return nil, fmt.Errorf("profile field %s must be a boolean", name)
+			}
 		default:
 			return nil, fmt.Errorf("unsupported profile field %s", name)
 		}
@@ -5033,7 +5212,7 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 			if err := decoder.Decode(&value); err != nil {
 				return nil, err
 			}
-			fields[name], err = normalizeJSONScalar(value)
+			fields[name], err = normalizeJSONField(name, value)
 			if err != nil {
 				return nil, err
 			}
@@ -5054,14 +5233,47 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 		}
 		return fields, nil
 	}
+	if contentType == "multipart/form-data" {
+		if err := r.ParseMultipartForm(maxRequestBody); err != nil {
+			return nil, err
+		}
+		if r.MultipartForm == nil {
+			return fields, nil
+		}
+		for name, values := range r.MultipartForm.Value {
+			if len(values) == 0 {
+				return nil, errors.New("form fields must occur once")
+			}
+			for _, value := range values[1:] {
+				if value != values[0] {
+					return nil, errors.New("form fields must not contain conflicting values")
+				}
+			}
+			value, err := normalizeListFieldValue(name, values[0])
+			if err != nil {
+				return nil, err
+			}
+			fields[name] = value
+		}
+		return fields, nil
+	}
 	if err := r.ParseForm(); err != nil {
 		return nil, err
 	}
 	for name, values := range r.Form {
-		if len(values) != 1 {
+		if len(values) == 0 {
 			return nil, errors.New("form fields must occur once")
 		}
-		fields[name] = values[0]
+		for _, value := range values[1:] {
+			if value != values[0] {
+				return nil, errors.New("form fields must not contain conflicting values")
+			}
+		}
+		value, err := normalizeListFieldValue(name, values[0])
+		if err != nil {
+			return nil, err
+		}
+		fields[name] = value
 	}
 	return fields, nil
 }
@@ -5083,6 +5295,76 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 	default:
 		return "", errors.New("request fields must be scalar values")
 	}
+}
+
+func normalizeJSONField(name string, value json.RawMessage) (string, error) {
+	if isListField(name) {
+		return normalizeJSONListField(value)
+	}
+	if name != "profile" && name != "unfurls" && name != "metadata" && name != "user_auth_blocks" && name != "view" && name != "outputs" && name != "error" && name != "inputs" && name != "dialog" && name != "prefs" {
+		return normalizeJSONScalar(value)
+	}
+	if name == "unfurls" || name == "metadata" || name == "user_auth_blocks" || name == "view" || name == "outputs" || name == "error" || name == "inputs" || name == "dialog" || name == "prefs" {
+		var structured any
+		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
+			return "", fmt.Errorf("%s must be structured JSON", name)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, value); err != nil {
+			return "", err
+		}
+		return compact.String(), nil
+	}
+	var profile map[string]json.RawMessage
+	if err := json.Unmarshal(value, &profile); err != nil || profile == nil {
+		return "", errors.New("profile must be a JSON object")
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, value); err != nil {
+		return "", err
+	}
+	return compact.String(), nil
+}
+
+func isListField(name string) bool {
+	switch name {
+	case "channel_ids", "leaving_team_ids", "target_team_ids", "team_ids", "user_ids":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeListFieldValue(name string, value string) (string, error) {
+	if !isListField(name) {
+		return value, nil
+	}
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" || (trimmed[0] != '[' && trimmed[0] != '"') {
+		return value, nil
+	}
+	return normalizeJSONListField(json.RawMessage(trimmed))
+}
+
+func normalizeJSONListField(value json.RawMessage) (string, error) {
+	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return "", errors.New("list fields must be strings or arrays of strings")
+	}
+	var values []string
+	if err := json.Unmarshal(value, &values); err == nil {
+		for index, item := range values {
+			values[index] = strings.TrimSpace(item)
+			if values[index] == "" {
+				return "", errors.New("list fields must contain non-empty strings")
+			}
+		}
+		return strings.Join(values, ","), nil
+	}
+	var scalar string
+	if err := json.Unmarshal(value, &scalar); err != nil {
+		return "", errors.New("list fields must be strings or arrays of strings")
+	}
+	return scalar, nil
 }
 
 func slackTimestamp(value time.Time) string {

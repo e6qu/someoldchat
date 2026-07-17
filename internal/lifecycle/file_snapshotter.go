@@ -47,6 +47,9 @@ func (s FileSnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (
 	return s.Manager.LastVerified(maxGeneration)
 }
 
-func (s FileSnapshotter) Restore(_ context.Context, manifest Manifest) error {
+func (s FileSnapshotter) Restore(ctx context.Context, manifest Manifest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	return s.Manager.Restore(manifest, s.OutputPath)
 }

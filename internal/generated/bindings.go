@@ -36,8 +36,8 @@ var TargetProfiles = map[string]TargetProfile{
 		"http": {Modules: []string{}, Replicas: 1},
 	}},
 	"separate-chat-replicated": {Name: "separate-chat-replicated", Mode: "separate", Storage: "dqlite", Processes: map[string]ProcessProfile{
-		"chat": {Modules: []string{"chat"}, Replicas: 2},
-		"http": {Modules: []string{}, Replicas: 3},
+		"chat": {Modules: []string{"chat"}, Replicas: 3},
+		"http": {Modules: []string{}, Replicas: 4},
 	}},
 }
 

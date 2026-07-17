@@ -35,7 +35,8 @@ Both targets can run multiple replicas. Monolith replicas contain the direct
 call composition and share the qualified state store. Separate module
 processes have independent replica counts and share the state store owned by
 that module. In-memory storage is restricted to one development replica;
-replicated targets must select a qualified durable backend.
+dqlite-owning processes require at least three replicas for the configured
+three-voter quorum.
 
 The runtime shapes are explicit:
 

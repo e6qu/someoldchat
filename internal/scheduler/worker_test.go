@@ -7,6 +7,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
@@ -41,5 +42,44 @@ func TestWorkerPostsDueMessageExactlyOnceAcrossClaimReplay(t *testing.T) {
 	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "due" {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
+	}
+}
+
+func TestPublishWakeDeadlineUsesEarliestPendingMessage(t *testing.T) {
+	ctx := context.Background()
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1"})
+	store.SeedConversationMember("C1", "U1")
+	first := time.Now().UTC().Add(-2 * time.Second).Truncate(time.Second)
+	second := first.Add(time.Second)
+	for _, value := range []domain.ScheduledMessage{
+		{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "first", PostAt: first, CreatedAt: first},
+		{WorkspaceID: "T1", ID: "Q2", Channel: "C1", Author: "U1", Text: "second", PostAt: second, CreatedAt: second},
+	} {
+		if err := store.CreateScheduledMessage(ctx, value, events.Event{ID: domain.EventID("event-" + string(value.ID)), WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(value.ID), CreatedAt: value.CreatedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	controller := lifecycle.New(lifecycle.StateActive)
+	if err := PublishWakeDeadline(ctx, store, controller, "T1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Metadata().WakeDeadline; !got.Equal(first) {
+		t.Fatalf("wake deadline=%s, want %s", got, first)
+	}
+	worker, err := NewWorker(store, service.Messages{Store: store}, "worker-1", 10, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := worker.RunOnce(ctx, "T1"); err != nil || count != 2 {
+		t.Fatalf("scheduled execution count=%d err=%v, want two", count, err)
+	}
+	if err := PublishWakeDeadline(ctx, store, controller, "T1", 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Metadata().WakeDeadline; !got.IsZero() {
+		t.Fatalf("wake deadline=%s after delivery, want zero", got)
 	}
 }

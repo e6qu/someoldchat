@@ -45,6 +45,8 @@ type endpoint struct {
 	arn     string
 }
 
+const scaleDownLock = "scale-down"
+
 func main() {
 	listen := flag.String("listen", "", "HTTP listen address behind the TLS-terminating NLB (required)")
 	cluster := flag.String("cluster", "", "ECS cluster (required)")
@@ -232,11 +234,24 @@ func (a *activator) runningEndpoints(ctx context.Context) ([]endpoint, error) {
 }
 
 func (a *activator) scaleDownIfIdle(ctx context.Context) error {
-	output, err := a.dynamo.Scan(ctx, &dynamodb.ScanInput{TableName: aws.String(a.table), ConsistentRead: aws.Bool(true), FilterExpression: aws.String("begins_with(id, :prefix) AND expires > :now"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":prefix": &dynamodbtypes.AttributeValueMemberS{Value: "ws:"}, ":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Unix())}}})
+	owner := "scale-down:" + randomID(nil)
+	acquired, err := a.acquireScaleDownLock(ctx, owner)
 	if err != nil {
 		return err
 	}
-	if len(output.Items) > 0 {
+	if !acquired {
+		return nil
+	}
+	defer func() {
+		if _, releaseErr := a.dynamo.DeleteItem(context.Background(), &dynamodb.DeleteItemInput{TableName: aws.String(a.table), Key: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}}, ConditionExpression: aws.String("owner = :owner"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":owner": &dynamodbtypes.AttributeValueMemberS{Value: owner}}}); releaseErr != nil {
+			a.logger.Error("release websocket scale-down lock failed", "error", releaseErr)
+		}
+	}()
+	active, err := a.activeLeases(ctx)
+	if err != nil {
+		return err
+	}
+	if active {
 		return nil
 	}
 	_, err = a.ecs.UpdateService(ctx, &ecs.UpdateServiceInput{Cluster: aws.String(a.cluster), Service: aws.String(a.service), DesiredCount: aws.Int32(0)})
@@ -244,8 +259,41 @@ func (a *activator) scaleDownIfIdle(ctx context.Context) error {
 }
 
 func (a *activator) acquireLease(ctx context.Context, lease string) error {
-	_, err := a.dynamo.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String(a.table), Item: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: lease}, "expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(a.startWait + time.Hour).Unix())}}, ConditionExpression: aws.String("attribute_not_exists(id)")})
+	now := time.Now().Unix()
+	_, err := a.dynamo.TransactWriteItems(ctx, &dynamodb.TransactWriteItemsInput{TransactItems: []dynamodbtypes.TransactWriteItem{
+		{ConditionCheck: &dynamodbtypes.ConditionCheck{TableName: aws.String(a.table), Key: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}}, ConditionExpression: aws.String("attribute_not_exists(id) OR expires < :now"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(now)}}}},
+		{Put: &dynamodbtypes.Put{TableName: aws.String(a.table), Item: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: lease}, "expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(a.startWait + time.Hour).Unix())}}, ConditionExpression: aws.String("attribute_not_exists(id)")}},
+	}})
 	return err
+}
+
+func (a *activator) acquireScaleDownLock(ctx context.Context, owner string) (bool, error) {
+	_, err := a.dynamo.PutItem(ctx, &dynamodb.PutItemInput{TableName: aws.String(a.table), Item: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}, "owner": &dynamodbtypes.AttributeValueMemberS{Value: owner}, "expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(a.startWait + time.Hour).Unix())}}, ConditionExpression: aws.String("attribute_not_exists(id) OR expires < :now"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Unix())}}})
+	if err != nil {
+		var conditional *dynamodbtypes.ConditionalCheckFailedException
+		if errors.As(err, &conditional) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (a *activator) activeLeases(ctx context.Context) (bool, error) {
+	input := &dynamodb.ScanInput{TableName: aws.String(a.table), ConsistentRead: aws.Bool(true), FilterExpression: aws.String("begins_with(id, :prefix) AND expires > :now"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":prefix": &dynamodbtypes.AttributeValueMemberS{Value: "ws:"}, ":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Unix())}}}
+	for {
+		output, err := a.dynamo.Scan(ctx, input)
+		if err != nil {
+			return false, err
+		}
+		if len(output.Items) > 0 {
+			return true, nil
+		}
+		if len(output.LastEvaluatedKey) == 0 {
+			return false, nil
+		}
+		input.ExclusiveStartKey = output.LastEvaluatedKey
+	}
 }
 
 func (a *activator) releaseLease(ctx context.Context, lease string) error {
@@ -255,6 +303,7 @@ func (a *activator) releaseLease(ctx context.Context, lease string) error {
 
 func (a *activator) fail(w http.ResponseWriter, err error) {
 	a.logger.Error("websocket activation failed", "error", err)
+	w.Header().Set("Retry-After", "1")
 	http.Error(w, "websocket activation unavailable", http.StatusServiceUnavailable)
 }
 
@@ -282,7 +331,11 @@ func cloneHeaders(source http.Header) http.Header {
 
 func randomID(r *http.Request) string {
 	hash := fnv.New64a()
-	_, _ = hash.Write([]byte(r.RemoteAddr + time.Now().UTC().String()))
+	remoteAddress := ""
+	if r != nil {
+		remoteAddress = r.RemoteAddr
+	}
+	_, _ = hash.Write([]byte(remoteAddress + time.Now().UTC().String()))
 	return fmt.Sprintf("%x", hash.Sum64())
 }
 

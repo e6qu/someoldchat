@@ -121,7 +121,8 @@ CREATE TABLE IF NOT EXISTS access_logs (
 );
 CREATE INDEX IF NOT EXISTS access_logs_workspace_created ON access_logs(workspace_id, created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS lifecycle_state (
- id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL
+ id INTEGER PRIMARY KEY CHECK(id = 1), state TEXT NOT NULL, generation INTEGER NOT NULL,
+ wake_deadline TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS idempotency (
  workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, idempotency_key TEXT NOT NULL,
@@ -184,7 +185,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 56
+const schemaVersion = 57
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -258,12 +259,24 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 }
 
 func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
+	return fromDB(ctx, db, true)
+}
+
+// FromDqliteDB initializes the repository against a dqlite-managed database.
+// dqlite owns connection configuration and rejects SQLite-only PRAGMA statements.
+func FromDqliteDB(ctx context.Context, db *sql.DB) (*Store, error) {
+	return fromDB(ctx, db, false)
+}
+
+func fromDB(ctx context.Context, db *sql.DB, configureSQLite bool) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("SQLite store requires a database handle")
 	}
 	s := &Store{db: db}
-	if err := s.configure(ctx); err != nil {
-		return nil, err
+	if configureSQLite {
+		if err := s.configure(ctx); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.Migrate(ctx); err != nil {
 		return nil, err
@@ -893,6 +906,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate RTM connections: %w", err)
 		}
 	}
+	if version < 57 {
+		columns, err := s.tableColumns(ctx, db, "lifecycle_state")
+		if err != nil {
+			return err
+		}
+		if !columns["wake_deadline"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE lifecycle_state ADD COLUMN wake_deadline TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate lifecycle wake deadline: %w", err)
+			}
+		}
+	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record sqlite schema version: %w", err)
 	}
@@ -908,14 +932,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 func (s *Store) Load() (lifecycle.StateRecord, error) {
 	var state string
 	var generation uint64
-	if err := s.db.QueryRow(`SELECT state, generation FROM lifecycle_state WHERE id = 1`).Scan(&state, &generation); err != nil {
+	var wakeDeadline string
+	if err := s.db.QueryRow(`SELECT state, generation, wake_deadline FROM lifecycle_state WHERE id = 1`).Scan(&state, &generation, &wakeDeadline); err != nil {
 		return lifecycle.StateRecord{}, err
 	}
-	return lifecycle.StateRecord{State: lifecycle.State(state), Generation: generation}, nil
+	deadline, err := parseLifecycleWakeDeadline(wakeDeadline)
+	if err != nil {
+		return lifecycle.StateRecord{}, err
+	}
+	return lifecycle.StateRecord{State: lifecycle.State(state), Generation: generation, WakeDeadline: deadline}, nil
 }
 
 func (s *Store) CompareAndSwap(expected, next lifecycle.StateRecord) error {
-	result, err := s.db.Exec(`UPDATE lifecycle_state SET state = ?, generation = ? WHERE id = 1 AND state = ? AND generation = ?`, next.State, next.Generation, expected.State, expected.Generation)
+	result, err := s.db.Exec(`UPDATE lifecycle_state SET state = ?, generation = ?, wake_deadline = ? WHERE id = 1 AND state = ? AND generation = ? AND wake_deadline = ?`, next.State, next.Generation, formatLifecycleWakeDeadline(next.WakeDeadline), expected.State, expected.Generation, formatLifecycleWakeDeadline(expected.WakeDeadline))
 	if err != nil {
 		return err
 	}
@@ -927,6 +956,24 @@ func (s *Store) CompareAndSwap(expected, next lifecycle.StateRecord) error {
 		return lifecycle.ErrStateConflict
 	}
 	return nil
+}
+
+func formatLifecycleWakeDeadline(deadline time.Time) string {
+	if deadline.IsZero() {
+		return ""
+	}
+	return deadline.UTC().Format(time.RFC3339Nano)
+}
+
+func parseLifecycleWakeDeadline(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	deadline, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("decode lifecycle wake deadline: %w", err)
+	}
+	return deadline.UTC(), nil
 }
 
 func (s *Store) outboxColumns(ctx context.Context, db queryExecutor) (map[string]bool, error) {
@@ -942,7 +989,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -4014,6 +4061,17 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 		page.NextCursor, err = domain.NewListCursor(string(page.Items[len(page.Items)-1].ID))
 	}
 	return page, err
+}
+
+func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var postAt sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MIN(CASE WHEN next_attempt_at > post_at THEN next_attempt_at ELSE post_at END) FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0`, workspace).Scan(&postAt); err != nil {
+		return time.Time{}, err
+	}
+	if !postAt.Valid || postAt.Int64 == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(postAt.Int64, 0).UTC(), nil
 }
 
 func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {

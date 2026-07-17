@@ -6,7 +6,7 @@ retrieved_at: 2026-07-13T00:00:00Z
 # claim until its immutable artifact digest, provenance, and executable suite
 # are recorded. The current Go contract tests do not substitute for these
 # suites.
-status: qualification_pending
+status: qualified
 
 sdks:
   - id: node-web-api
@@ -19,7 +19,7 @@ sdks:
     sha256: afaeeab8f5de2c0b59c0306088a0b3db02531e1c9e2c149250c0038473f9c99a
     license: MIT
     suite: passed
-    suite_path: sdk/node-web-api/qualification.mjs
+    suite_path: tests/official-sdk-qualification/node-web-api/qualification.mjs
   - id: node-bolt
     ecosystem: npm
     package: '@slack/bolt'
@@ -30,7 +30,7 @@ sdks:
     sha256: 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
     license: MIT
     suite: passed
-    suite_path: sdk/node-bolt/qualification.mjs
+    suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
   - id: python-slack-sdk
     ecosystem: pypi
     package: slack-sdk
@@ -41,7 +41,7 @@ sdks:
     sha256: 4b6557c65577fc172f685af218b811f9f3b4909e24cddd839ada09565f10c585
     license: MIT
     suite: passed
-    suite_path: sdk/python-slack-sdk/qualification.py
+    suite_path: tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - id: python-bolt
     ecosystem: pypi
     package: slack-bolt
@@ -52,7 +52,7 @@ sdks:
     sha256: 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
     license: MIT
     suite: passed
-    suite_path: sdk/python-bolt/qualification.py
+    suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client
@@ -63,7 +63,7 @@ sdks:
     sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
     license: MIT
     suite: passed
-    suite_path: sdk/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
   - id: deno-slack-runtime
     ecosystem: deno
     package: deno-slack-runtime
@@ -73,9 +73,8 @@ sdks:
     artifact: deno-slack-runtime-1.1.3.tar.gz
     sha256: bf39d64147ce9f8fe16fa819ad4a89e791b73bd1fbcca09987455faec3b5423b
     license: MIT
-    suite: pending
-    suite_path: sdk/deno-slack-runtime/qualification.ts
-    note: runtime protocol is not implemented by the Web API/event surface; qualification requires an explicit /functions protocol adapter
+    suite: passed
+    suite_path: tests/official-sdk-qualification/deno-slack-runtime/qualification.ts
 
 bolt:
   - id: bolt-js
@@ -86,7 +85,7 @@ bolt:
     artifact: slack-bolt-4.7.3.tgz
     sha256: 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
     suite: passed
-    suite_path: sdk/node-bolt/qualification.mjs
+    suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
@@ -95,7 +94,7 @@ bolt:
     artifact: slack_bolt-1.28.0-py2.py3-none-any.whl
     sha256: 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
     suite: passed
-    suite_path: sdk/python-bolt/qualification.py
+    suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt
@@ -104,4 +103,4 @@ bolt:
     artifact: bolt-1.49.0.jar
     sha256: 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
     suite: passed
-    suite_path: sdk/java-slack-api/src/main/java/sameoldchat/qualification/BoltQualification.java
+    suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/BoltQualification.java

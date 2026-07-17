@@ -11,6 +11,7 @@ import (
 
 type Source interface {
 	ClaimScheduledMessages(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]domain.ScheduledMessage, error)
+	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
 	RenewScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Duration) error
 	MarkScheduledMessageDelivered(context.Context, string, domain.ScheduledMessageID) error
 	ReleaseScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Time) error
@@ -50,6 +51,10 @@ func (w Worker) RunOnce(ctx context.Context, workspace domain.WorkspaceID) (int,
 		completed++
 	}
 	return completed, nil
+}
+
+func (w Worker) PublishWakeDeadline(ctx context.Context, publisher DeadlinePublisher, workspace domain.WorkspaceID, fence uint64) error {
+	return PublishWakeDeadline(ctx, w.Source, publisher, workspace, fence)
 }
 
 func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage) error {

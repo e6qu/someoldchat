@@ -4,6 +4,9 @@ This guide separates current infrastructure from deployment profiles that still
 need qualification. The current provider-specific implementation is the AWS
 Elastic Container Service module in
 [deploy/ecs-scale-zero](../deploy/ecs-scale-zero/README.md).
+That module provides request-triggered task activation and scale-down. The
+provider-neutral Go lifecycle activator remains a separate deployment unit for
+hibernation, snapshot publication, and restore.
 
 ## Deployment philosophy
 
@@ -66,8 +69,12 @@ The first supported installation SHOULD be a Linux VM with:
   additional database VMs.
 
 The provider-neutral `sameoldchat-activator` requires a durable SQLite control
-DSN, absolute snapshot configuration, a forward URL, an authenticated control
-token, and every lifecycle command at startup. Commands receive the fencing
+DSN, an explicit snapshot store (`filesystem` with `-snapshot-root` or `s3`
+with `-snapshot-s3-bucket` and optional `-snapshot-s3-prefix`), a forward URL,
+an authenticated control token, an explicit snapshot mode (`file` for one
+database file or `directory` for a stopped dqlite state directory), and every
+lifecycle command at startup.
+Commands receive the fencing
 generation through `SAMEOLDCHAT_LIFECYCLE_GENERATION`; persistence startup also
 receives the selected backend, snapshot artifact, and schema version. Missing
 commands, keys, or endpoints fail startup. The activator owns lifecycle
@@ -77,7 +84,10 @@ cold requests until replay succeeds; replay supplies a stable spool-derived
 idempotency key when the caller did not provide one.
 
 Local profiles select file storage explicitly with `-blob-dir` and
-`-blob-max-bytes`; file bytes are never placed in the chat database. The
+`-blob-max-bytes`, or select Amazon Simple Storage Service with
+`-blob-s3-bucket`, `-blob-s3-prefix`, and `-blob-max-bytes`. These choices are
+mutually exclusive; the application does not fall back from one to the other.
+File bytes are never placed in the chat database. The
 activator additionally requires a stable replica spool owner plus explicit
 maximum queued bytes and request count; overflow is rejected before durable
 acceptance. A

@@ -14,8 +14,12 @@ import (
 	"strings"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/sameoldchat/sameoldchat/internal/activator"
+	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
+	"github.com/sameoldchat/sameoldchat/internal/observability"
 )
 
 func main() {
@@ -23,7 +27,11 @@ func main() {
 	stateDB := flag.String("state-db", "", "durable lifecycle control SQLite DSN (required)")
 	forwardURL := flag.String("forward-url", "", "active stack HTTP URL (required)")
 	controlToken := flag.String("control-token", "", "control-plane bearer token for /activate (required)")
-	snapshotRoot := flag.String("snapshot-root", "", "absolute snapshot root (required)")
+	snapshotRoot := flag.String("snapshot-root", "", "absolute filesystem snapshot root (required for -snapshot-store=filesystem)")
+	snapshotStore := flag.String("snapshot-store", "", "snapshot store: filesystem or s3 (required)")
+	snapshotS3Bucket := flag.String("snapshot-s3-bucket", "", "Amazon Simple Storage Service bucket for snapshots")
+	snapshotS3Prefix := flag.String("snapshot-s3-prefix", "", "Amazon Simple Storage Service key prefix for snapshots")
+	snapshotMode := flag.String("snapshot-mode", "", "snapshot mode: file or directory (required)")
 	snapshotSource := flag.String("snapshot-source", "", "database path used to create snapshots (required)")
 	snapshotOutput := flag.String("snapshot-output", "", "database restore path (required)")
 	backend := flag.String("backend", "", "snapshot backend identifier (required)")
@@ -41,7 +49,7 @@ func main() {
 	commands.bind(flag.CommandLine)
 	flag.Parse()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if *listen == "" || *stateDB == "" || *forwardURL == "" || *controlToken == "" || *snapshotRoot == "" || *snapshotSource == "" || *snapshotOutput == "" || *backend == "" || *schemaVersion < 1 || *applicationVersion == "" || *keyID == "" || *encryptionKey == "" || *signingKey == "" || *spoolKey == "" || *spoolOwner == "" || *spoolMaxBytes <= 0 || *spoolMaxRequests <= 0 || *maxSnapshotBytes <= 0 {
+	if *listen == "" || *stateDB == "" || *forwardURL == "" || *controlToken == "" || *snapshotStore == "" || *snapshotMode == "" || *snapshotSource == "" || *snapshotOutput == "" || *backend == "" || *schemaVersion < 1 || *applicationVersion == "" || *keyID == "" || *encryptionKey == "" || *signingKey == "" || *spoolKey == "" || *spoolOwner == "" || *spoolMaxBytes <= 0 || *spoolMaxRequests <= 0 || *maxSnapshotBytes <= 0 {
 		logger.Error("activator requires explicit listen, control, snapshot, and version settings")
 		os.Exit(2)
 	}
@@ -76,14 +84,57 @@ func main() {
 		logger.Error("load lifecycle state", "error", err)
 		os.Exit(1)
 	}
-	manager, err := lifecycle.NewSnapshotManager(*snapshotRoot, encryption, signing, *keyID, *maxSnapshotBytes)
+	var manager lifecycle.SnapshotManager
+	switch *snapshotStore {
+	case "filesystem":
+		if *snapshotRoot == "" || *snapshotS3Bucket != "" || *snapshotS3Prefix != "" {
+			logger.Error("filesystem snapshot store requires snapshot root and rejects Amazon Simple Storage Service settings")
+			os.Exit(2)
+		}
+		manager, err = lifecycle.NewSnapshotManager(*snapshotRoot, encryption, signing, *keyID, *maxSnapshotBytes)
+	case "s3":
+		if *snapshotRoot != "" || *snapshotS3Bucket == "" {
+			logger.Error("Amazon Simple Storage Service snapshot store requires a bucket and rejects snapshot root")
+			os.Exit(2)
+		}
+		awsConfig, configErr := awsconfig.LoadDefaultConfig(context.Background())
+		if configErr != nil {
+			logger.Error("load Amazon Simple Storage Service configuration", "error", configErr)
+			os.Exit(1)
+		}
+		objectStore, storeErr := blob.NewS3(s3.NewFromConfig(awsConfig), *snapshotS3Bucket, *snapshotS3Prefix, *maxSnapshotBytes+48)
+		if storeErr != nil {
+			logger.Error("configure Amazon Simple Storage Service snapshot store", "error", storeErr)
+			os.Exit(2)
+		}
+		manager, err = lifecycle.NewObjectSnapshotManager(objectStore, encryption, signing, *keyID, *maxSnapshotBytes)
+	default:
+		logger.Error("snapshot store must be filesystem or s3", "snapshot_store", *snapshotStore)
+		os.Exit(2)
+	}
 	if err != nil {
 		logger.Error("configure snapshot manager", "error", err)
 		os.Exit(2)
 	}
-	snapshots, err := lifecycle.NewFileSnapshotter(manager, *snapshotSource, *snapshotOutput, lifecycle.Manifest{Backend: *backend, SchemaVersion: *schemaVersion, ApplicationVersion: *applicationVersion, MinRestorerVersion: *applicationVersion, MaxRestorerVersion: *applicationVersion})
-	if err != nil {
-		logger.Error("configure snapshotter", "error", err)
+	metadata := lifecycle.Manifest{Backend: *backend, SchemaVersion: *schemaVersion, ApplicationVersion: *applicationVersion, MinRestorerVersion: *applicationVersion, MaxRestorerVersion: *applicationVersion}
+	var snapshots lifecycle.Snapshotter
+	switch *snapshotMode {
+	case "file":
+		selected, err := lifecycle.NewFileSnapshotter(manager, *snapshotSource, *snapshotOutput, metadata)
+		if err != nil {
+			logger.Error("configure file snapshotter", "error", err)
+			os.Exit(2)
+		}
+		snapshots = selected
+	case "directory":
+		selected, err := lifecycle.NewDirectorySnapshotter(manager, *snapshotSource, *snapshotOutput, metadata, lifecycle.DirectorySnapshotSourceStopped)
+		if err != nil {
+			logger.Error("configure directory snapshotter", "error", err)
+			os.Exit(2)
+		}
+		snapshots = selected
+	default:
+		logger.Error("snapshot mode must be file or directory", "snapshot_mode", *snapshotMode)
 		os.Exit(2)
 	}
 	driver, err := lifecycle.NewCommandDriver(lifecycle.OSCommandRunner{}, commands.set())
@@ -91,7 +142,8 @@ func main() {
 		logger.Error("configure lifecycle commands", "error", err)
 		os.Exit(2)
 	}
-	coordinator, err := lifecycle.NewCoordinator(controller, driver, snapshots)
+	metrics := observability.NewRegistry()
+	coordinator, err := lifecycle.NewCoordinator(controller, driver, snapshots, metrics)
 	if err != nil {
 		logger.Error("configure lifecycle coordinator", "error", err)
 		os.Exit(2)
@@ -109,13 +161,14 @@ func main() {
 		os.Exit(2)
 	}
 	defer spool.Close()
-	handler, err := activator.NewDurableForwardingHandler(controller, coordinator.WakeAt, proxy, spool, *spoolOwner, 4<<20, 2*time.Minute)
+	handler, err := activator.NewDurableForwardingHandler(controller, coordinator.WakeAt, proxy, spool, *spoolOwner, 4<<20, 2*time.Minute, metrics)
 	if err != nil {
 		logger.Error("configure forwarding activator", "error", err)
 		os.Exit(2)
 	}
 	mux := http.NewServeMux()
 	handler.RegisterForwarding(mux)
+	mux.Handle("GET /metrics", metrics.Handler())
 	mux.HandleFunc("POST /hibernate", func(w http.ResponseWriter, r *http.Request) {
 		state, fence := controller.Snapshot()
 		if state != lifecycle.StateActive {

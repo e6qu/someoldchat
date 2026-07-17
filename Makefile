@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-dqlite sdk-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-dqlite sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -67,15 +67,20 @@ contract-ratchet:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -ratchet-base "$(BASE_REF)"
 
 sdk-inventory-check:
-	GOCACHE=$(GOCACHE) go run ./cmd/sdkcheck
+	GOCACHE=$(GOCACHE) go run ./cmd/sdkcheck -require-qualified
 
 sdk-qualification:
-	./sdk/qualify.sh
+	./tests/official-sdk-qualification/qualify.sh
+
+browser-qualification:
+	npm ci --prefix tests/browser
+	npx --prefix tests/browser playwright install --with-deps chromium
+	npm test --prefix tests/browser
 
 check: fmt-check contract-check sdk-inventory-check proto-lint generated-check test
 
 clean:
-	rm -rf bin .cache coverage.out dist
+	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform
 
 run:
 	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -api-token xoxb-dev -session-token dev-session

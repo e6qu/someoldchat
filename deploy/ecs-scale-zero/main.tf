@@ -6,7 +6,13 @@ terraform {
   }
 }
 
-resource "aws_ecs_cluster" "this" { name = var.name }
+resource "aws_ecs_cluster" "this" {
+  name = var.name
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
+}
 
 resource "aws_cloudwatch_log_group" "application" {
   name              = "/ecs/${var.name}/application"
@@ -71,8 +77,9 @@ resource "aws_iam_role_policy" "activator" {
   role = aws_iam_role.activator.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], Resource = "*" },
-    { Effect = "Allow", Action = ["ecs:RunTask", "ecs:DescribeTasks", "ecs:ListTasks", "ecs:StopTask", "ecs:UpdateService"], Resource = "*" },
-    { Effect = "Allow", Action = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Scan"], Resource = aws_dynamodb_table.state.arn },
+    { Effect = "Allow", Action = ["ecs:RunTask"], Resource = aws_ecs_task_definition.application.arn, Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } } },
+    { Effect = "Allow", Action = ["ecs:DescribeTasks", "ecs:ListTasks", "ecs:StopTask"], Resource = "*", Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } } },
+    { Effect = "Allow", Action = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Scan", "dynamodb:TransactWriteItems"], Resource = aws_dynamodb_table.state.arn },
     { Effect = "Allow", Action = ["iam:PassRole"], Resource = [aws_iam_role.execution.arn, var.application_task_role_arn] }
   ] })
 }
@@ -150,6 +157,81 @@ resource "aws_cloudwatch_log_group" "websocket_application" {
 resource "aws_cloudwatch_log_group" "websocket_edge" {
   name              = "/ecs/${var.name}/websocket-edge"
   retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_log_group" "activator" {
+  name              = "/aws/lambda/${var.name}"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_metric_alarm" "activator_errors" {
+  alarm_name          = "${var.name}-activator-errors"
+  alarm_description   = "The scale-to-zero HTTP activator returned or recorded Lambda errors"
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  dimensions          = { FunctionName = aws_lambda_function.activator.function_name }
+  statistic           = "Sum"
+  period              = 60
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [var.alarm_topic_arn]
+}
+
+resource "aws_cloudwatch_metric_alarm" "websocket_edge_unhealthy" {
+  alarm_name          = "${var.name}-websocket-edge-unhealthy"
+  alarm_description   = "The WebSocket edge has no healthy NLB targets"
+  namespace           = "AWS/NetworkELB"
+  metric_name         = "HealthyHostCount"
+  dimensions          = { LoadBalancer = aws_lb.websocket.arn_suffix, TargetGroup = aws_lb_target_group.websocket_edge.arn_suffix }
+  statistic           = "Minimum"
+  period              = 60
+  evaluation_periods  = 2
+  threshold           = 1
+  comparison_operator = "LessThanThreshold"
+  treat_missing_data  = "breaching"
+  alarm_actions       = [var.alarm_topic_arn]
+}
+
+resource "aws_cloudwatch_dashboard" "scale_zero" {
+  dashboard_name = "${var.name}-scale-zero"
+  dashboard_body = jsonencode({
+    widgets = [
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        properties = {
+          title  = "HTTP activator"
+          region = var.region
+          stat   = "Sum"
+          period = 60
+          metrics = [
+            ["AWS/Lambda", "Invocations", "FunctionName", aws_lambda_function.activator.function_name],
+            [".", "Errors", ".", "."],
+            [".", "Throttles", ".", "."],
+          ]
+        }
+      },
+      {
+        type   = "metric"
+        width  = 12
+        height = 6
+        properties = {
+          title  = "WebSocket edge and application tasks"
+          region = var.region
+          stat   = "Average"
+          period = 60
+          metrics = [
+            ["ECS/ContainerInsights", "RunningTaskCount", "ServiceName", aws_ecs_service.websocket_edge.name, "ClusterName", aws_ecs_cluster.this.name],
+            [".", "RunningTaskCount", ".", aws_ecs_service.websocket_application.name, ".", "."],
+            ["AWS/NetworkELB", "HealthyHostCount", "LoadBalancer", aws_lb.websocket.arn_suffix, "TargetGroup", aws_lb_target_group.websocket_edge.arn_suffix],
+          ]
+        }
+      },
+    ]
+  })
 }
 
 resource "aws_security_group" "websocket_nlb" {

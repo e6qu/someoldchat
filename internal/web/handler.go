@@ -49,6 +49,10 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 var membersTemplate = template.Must(template.New("members").Parse(`<!doctype html>
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Members · SameOldChat</title><style>:root{--bg:#fff;--panel:#f8f8fa;--text:#1d1c1d;--muted:#696969;--line:#dedede;--accent:#611f69;--green:#007a5a}html[data-theme=dark]{--bg:#1a1d21;--panel:#222529;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{height:52px;background:var(--accent);color:#fff;display:flex;align-items:center;padding:0 22px;gap:18px}.bar a{color:#fff;text-decoration:none;font-weight:700}.bar button{margin-left:auto;border:1px solid #fff6;background:transparent;color:#fff;border-radius:5px;padding:6px 10px}.layout{max-width:1100px;margin:0 auto;padding:32px 24px}.heading{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:24px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px}.card h2{margin-top:0}.field{display:grid;gap:5px;margin:14px 0}.field input{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--text);padding:9px}.save{background:var(--green);color:#fff;border:0;border-radius:5px;padding:9px 14px;font-weight:700}.members{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}.person{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:15px}.person h2{font-size:16px;margin:0}.person p{margin:5px 0;color:var(--muted)}@media(max-width:720px){.grid{grid-template-columns:1fr}.layout{padding:22px 14px}}</style></head><body><header class="bar"><a href="/app">← Back to chat</a><span>Members</span><button id="theme-toggle" type="button">☾ Theme</button></header><main class="layout"><div class="heading"><h1>Workspace members</h1><div class="muted">Manage your profile and see who is here.</div></div><div class="grid"><section class="card" aria-label="Your profile"><h2>Edit profile</h2><form method="post" action="/app/profile"><label class="field" for="display_name">Display name<input id="display_name" name="display_name" value="{{.Current.Profile.DisplayName}}" required></label><label class="field" for="status_text">Status<input id="status_text" name="status_text" value="{{.Current.Profile.StatusText}}"></label><label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" value="{{.Current.Profile.StatusEmoji}}"></label><label class="field" for="image_24">Image 24 URL<input id="image_24" name="image_24" value="{{.Current.Profile.Image24}}"></label><label class="field" for="image_32">Image 32 URL<input id="image_32" name="image_32" value="{{.Current.Profile.Image32}}"></label><label class="field" for="image_48">Image 48 URL<input id="image_48" name="image_48" value="{{.Current.Profile.Image48}}"></label><label class="field" for="image_72">Image 72 URL<input id="image_72" name="image_72" value="{{.Current.Profile.Image72}}"></label><label class="field" for="image_192">Image 192 URL<input id="image_192" name="image_192" value="{{.Current.Profile.Image192}}"></label><label class="field" for="image_512">Image 512 URL<input id="image_512" name="image_512" value="{{.Current.Profile.Image512}}"></label><label class="field" for="image_1024">Image 1024 URL<input id="image_1024" name="image_1024" value="{{.Current.Profile.Image1024}}"></label><button class="save" type="submit">Save profile</button></form></section><section class="card" aria-label="Workspace members"><h2>People</h2><div class="members">{{range .Members}}<article class="person"><h2>{{.Name}}</h2><p>{{.RealName}}</p>{{if .Profile.DisplayName}}<p>{{.Profile.DisplayName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{end}}</article>{{else}}<p class="muted">No members available.</p>{{end}}</div></section></div></main><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')})})();</script></body></html>`))
 
+var searchTemplate = template.Must(template.New("search").Parse(`<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Search · SameOldChat</title><style>:root{--bg:#fff;--panel:#f8f8fa;--text:#1d1c1d;--muted:#696969;--line:#dedede;--accent:#611f69}html[data-theme=dark]{--bg:#1a1d21;--panel:#222529;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{height:52px;background:var(--accent);color:#fff;display:flex;align-items:center;padding:0 22px;gap:18px}.bar a{color:#fff;text-decoration:none;font-weight:700}.bar form{display:flex;flex:1;max-width:600px;margin:auto;gap:8px}.bar input{width:100%;border:1px solid #fff6;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:#fff}.bar input::placeholder{color:#fff}.bar button{border:1px solid #fff6;background:transparent;color:#fff;border-radius:5px;padding:6px 10px}.layout{max-width:900px;margin:0 auto;padding:32px 24px}.heading{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}.results{display:grid;gap:8px}.result{display:block;padding:16px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:inherit;text-decoration:none}.result:hover{border-color:var(--accent)}.author{font-weight:700}.time{color:var(--muted);font-size:12px;margin-left:8px}.text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.empty{color:var(--muted);padding:24px;text-align:center}@media(max-width:720px){.layout{padding:22px 14px}.bar{padding:0 12px}.bar>a{font-size:13px}}
+</style></head><body><header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" aria-label="Search the workspace"><input name="q" value="{{.Query}}" placeholder="Search messages" aria-label="Search messages" required><button type="submit">Search</button></form><button id="theme-toggle" type="button">☾ Theme</button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Query}}<div class="muted">Messages matching “{{.Query}}”</div>{{else}}<div class="muted">Enter a search term to find messages.</div>{{end}}</div><section class="results" aria-live="polite">{{range .Messages}}<a class="result" href="/app?channel={{.Channel}}&thread={{.Timestamp}}"><span class="author">{{.AuthorID}}</span><time class="time" datetime="{{.CreatedAt}}">{{.CreatedAt}}</time><p class="text">{{.Text}}</p></a>{{else}}<p class="empty">No matching messages.</p>{{end}}</section></main><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')})})();</script></body></html>`))
+
 type pageData struct {
 	Messages        []messageView
 	Conversations   []conversationView
@@ -60,7 +64,7 @@ type membersData struct {
 	Members []memberView
 	Current memberView
 }
-type messageView struct{ ID, AuthorID, Text, CreatedAt, Timestamp string }
+type messageView struct{ ID, AuthorID, Text, CreatedAt, Timestamp, Channel string }
 type memberView struct {
 	Name     string
 	RealName string
@@ -73,7 +77,13 @@ type conversationView struct {
 	UnreadCount int
 }
 
-const progressiveEnhancementScript = `<script>(function(){document.querySelectorAll('form[hx-post]').forEach(function(form){form.addEventListener('submit',function(event){event.preventDefault();form.classList.remove('is-error');fetch(form.getAttribute('hx-post'),{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'}}).then(function(response){if(!response.ok)throw new Error('request failed');return response.text()}).then(function(html){const target=document.querySelector(form.getAttribute('hx-target'));if(!target)throw new Error('update target missing');if(form.getAttribute('hx-swap')==='outerHTML')target.outerHTML=html;else target.insertAdjacentHTML('beforeend',html)}).catch(function(){form.classList.add('is-error')})})})})();</script>`
+type searchData struct {
+	Query    string
+	Channel  string
+	Messages []messageView
+}
+
+const progressiveEnhancementScript = `<script>(function(){var suppressRefresh=false;var events=null;document.querySelectorAll('form:not([hx-post])').forEach(function(form){form.addEventListener('submit',function(){suppressRefresh=true;if(events)events.close()})});document.querySelectorAll('form[hx-post]').forEach(function(form){form.addEventListener('submit',function(event){event.preventDefault();suppressRefresh=true;if(events)events.close();form.classList.remove('is-error');fetch(form.getAttribute('hx-post'),{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'}}).then(function(response){if(!response.ok)throw new Error('request failed');return response.text()}).then(function(html){var target=document.querySelector(form.getAttribute('hx-target'));if(!target)throw new Error('update target missing');if(form.getAttribute('hx-swap')==='outerHTML')target.outerHTML=html;else target.insertAdjacentHTML('beforeend',html)}).catch(function(){form.classList.add('is-error')}).finally(function(){suppressRefresh=false})})});if(window.EventSource){var cursor=sessionStorage.getItem('sameoldchat-last-event')||'';events=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));var refresh=function(event){if(event.lastEventId)sessionStorage.setItem('sameoldchat-last-event',event.lastEventId);if(suppressRefresh||(document.activeElement&&document.activeElement.form))return;events.close();window.location.reload()};['message.created','message.updated','message.deleted'].forEach(function(type){events.addEventListener(type,refresh)})}})();</script>`
 
 type messagePage struct {
 	Messages []messageView
@@ -89,6 +99,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/admin.auth.users.invite", h.authUserInvite)
 	}
 	mux.HandleFunc("GET /app", h.index)
+	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/members", h.members)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/message", h.postMessage)
@@ -96,6 +107,30 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
 	mux.HandleFunc("POST /app/pin", h.addPin)
 	mux.HandleFunc("POST /app/session/revoke", h.revokeSession)
+}
+
+func (h Handler) search(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	results := domain.MessagePage{}
+	if query != "" {
+		results, err = h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: 100})
+		if err != nil {
+			http.Error(w, "search unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	var output bytes.Buffer
+	if err := searchTemplate.Execute(&output, searchData{Query: query, Channel: string(h.Channel), Messages: toViews(results.Messages)}); err != nil {
+		http.Error(w, "search rendering unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(output.Bytes())
 }
 
 func (h Handler) members(w http.ResponseWriter, r *http.Request) {
@@ -224,9 +259,50 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	rendered, err = normalizeSearchControl(rendered)
+	if err != nil {
+		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	rendered, err = removeLegacyEventStream(rendered)
+	if err != nil {
+		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	rendered = strings.Replace(rendered, "</body>", progressiveEnhancementScript+"</body>", 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(rendered))
+}
+
+func normalizeSearchControl(rendered string) (string, error) {
+	const start = `<label class="search" aria-label="Search">`
+	const end = `</label>`
+	if strings.Count(rendered, start) != 1 {
+		return "", errors.New("page search control is missing or duplicated")
+	}
+	startIndex := strings.Index(rendered, start)
+	endOffset := strings.Index(rendered[startIndex+len(start):], end)
+	if endOffset < 0 {
+		return "", errors.New("page search control is not closed")
+	}
+	endIndex := startIndex + len(start) + endOffset
+	content := rendered[startIndex+len(start) : endIndex]
+	const input = `<input placeholder="Search the workspace" aria-label="Search the workspace">`
+	if strings.Count(content, input) != 1 {
+		return "", errors.New("page search input is missing or duplicated")
+	}
+	content = strings.Replace(content, input, `<input name="q" placeholder="Search the workspace" aria-label="Search the workspace">`, 1)
+	control := `<form class="search" method="get" action="/app/search" aria-label="Search the workspace">` + content + `<button type="submit" hidden>Search</button></form>`
+	return rendered[:startIndex] + control + rendered[endIndex+len(end):], nil
+}
+
+const legacyEventStream = `if(window.EventSource){const events=new EventSource('/events');const refresh=()=>window.location.reload();['message.created','message.updated','message.deleted'].forEach(type=>events.addEventListener(type,refresh))}`
+
+func removeLegacyEventStream(rendered string) (string, error) {
+	if strings.Count(rendered, legacyEventStream) != 1 {
+		return "", errors.New("page event stream is missing or duplicated")
+	}
+	return strings.Replace(rendered, legacyEventStream, "", 1), nil
 }
 
 func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
@@ -249,7 +325,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, store.ErrNotFound) {
 			status = http.StatusNotFound
 		}
-		http.Error(w, "unable to post message", status)
+		http.Error(w, "unable to post message: "+err.Error(), status)
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
@@ -412,7 +488,7 @@ func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
 func toViews(values []domain.Message) []messageView {
 	result := make([]messageView, 0, len(values))
 	for _, value := range values {
-		result = append(result, messageView{ID: string(value.ID), AuthorID: string(value.AuthorID), Text: value.Text, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Timestamp: string(domain.NewMessageTimestamp(value.CreatedAt))})
+		result = append(result, messageView{ID: string(value.ID), AuthorID: string(value.AuthorID), Text: value.Text, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Timestamp: string(domain.NewMessageTimestamp(value.CreatedAt)), Channel: string(value.Conversation)})
 	}
 	return result
 }
@@ -421,8 +497,14 @@ const maxFormBody = 4 << 20
 
 func decodeFormFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
-	if err := r.ParseForm(); err != nil {
-		return nil, err
+	var parseErr error
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		parseErr = r.ParseMultipartForm(maxFormBody)
+	} else {
+		parseErr = r.ParseForm()
+	}
+	if parseErr != nil {
+		return nil, parseErr
 	}
 	fields := make(map[string]string, len(r.Form))
 	for name, values := range r.Form {

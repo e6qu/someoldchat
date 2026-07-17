@@ -3,11 +3,10 @@
 ## Compatibility sources
 
 The current official SDK inventory is maintained in
-[`sdk-compatibility.yaml`](sdk-compatibility.yaml). Its
-`qualification_pending` status is intentional: the repository must not claim
-SDK compatibility until immutable artifacts, provenance, and executable suites
-are recorded. `make sdk-inventory-check` validates its structure; a release
-qualification additionally runs `go run ./cmd/sdkcheck -require-qualified`.
+[`sdk-compatibility.yaml`](sdk-compatibility.yaml). It records immutable
+artifacts, provenance, and executable suite results. `make sdk-inventory-check`
+validates its structure; a release qualification additionally runs
+`go run ./cmd/sdkcheck -require-qualified`.
 
 The repository MUST pin and retain exact revisions of:
 
@@ -33,7 +32,9 @@ The repository must not remove an operation or lower its status. Pull-request
 CI runs `make contract-ratchet` against the pull request base branch and fails
 if either change occurs. New operations may enter the ledger at
 `unimplemented`, which makes unfinished work visible without weakening the
-existing claim.
+existing claim. A current official method that is absent from the pinned
+OpenAPI snapshot may enter the ledger with `provenance: slack-reference` only
+when its official method reference and an executable qualification are recorded.
 
 Run `make compatibility-report` to print the current operation count and the
 number implemented at each evidence level. The implementation target is

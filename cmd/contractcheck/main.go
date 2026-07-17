@@ -30,8 +30,9 @@ type compatibilityLedger struct {
 }
 
 type operation struct {
-	Method string `yaml:"method"`
-	Status string `yaml:"status"`
+	Method     string `yaml:"method"`
+	Status     string `yaml:"status"`
+	Provenance string `yaml:"provenance"`
 }
 
 var statusRank = map[string]int{
@@ -130,7 +131,7 @@ func verify() error {
 		if operation.Status != "unimplemented" {
 			implementedMethods[operation.Method] = struct{}{}
 		}
-		if _, ok := openapi.Paths["/"+operation.Method]; !ok {
+		if _, ok := openapi.Paths["/"+operation.Method]; !ok && operation.Provenance != "slack-reference" {
 			return fmt.Errorf("compatibility ledger operation %q is absent from pinned OpenAPI", operation.Method)
 		}
 	}

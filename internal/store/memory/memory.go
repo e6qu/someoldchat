@@ -230,15 +230,16 @@ func (s *Store) SeedConversationMember(conversation domain.ConversationID, user 
 	s.memberships[conversation][user] = struct{}{}
 }
 
-func (s *Store) SeedToken(token string, record domain.TokenRecord) {
+func (s *Store) SeedToken(_ context.Context, token string, record domain.TokenRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := domain.HashToken(token)
 	if _, exists := s.tokens[key]; exists {
-		return
+		return nil
 	}
 	record.Scopes = domain.NormalizeScopes(record.Scopes)
 	s.tokens[key] = record
+	return nil
 }
 func (s *Store) LookupToken(_ context.Context, token string) (domain.TokenRecord, error) {
 	s.mu.RLock()
@@ -2345,6 +2346,25 @@ func (s *Store) ListScheduledMessages(_ context.Context, workspace domain.Worksp
 		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
 	}
 	return page, err
+}
+
+func (s *Store) EarliestScheduledMessage(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var earliest time.Time
+	for id, value := range s.scheduled {
+		if value.WorkspaceID != workspace || s.scheduledDelivered[id] {
+			continue
+		}
+		deadline := value.PostAt.UTC()
+		if next := s.scheduledNextAttempt[id]; next.After(deadline) {
+			deadline = next
+		}
+		if earliest.IsZero() || deadline.Before(earliest) {
+			earliest = deadline
+		}
+	}
+	return earliest, nil
 }
 
 func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {

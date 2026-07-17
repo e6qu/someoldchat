@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"errors"
 	"testing"
+	"time"
 )
 
 type testStateStore struct{ record StateRecord }
@@ -14,6 +15,29 @@ func (s *testStateStore) CompareAndSwap(expected, next StateRecord) error {
 	}
 	s.record = next
 	return nil
+}
+
+func TestScheduledWakeDeadlineIsFencedAndSurvivesControllerRestart(t *testing.T) {
+	deadline := time.Date(2026, time.July, 17, 5, 0, 0, 123, time.UTC)
+	backend := &testStateStore{record: StateRecord{State: StateActive, Generation: 4}}
+	controller, err := NewPersistent(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.SetWakeDeadline(4, deadline); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.SetWakeDeadline(3, deadline); !errors.Is(err, ErrStaleFence) {
+		t.Fatalf("stale deadline update error=%v", err)
+	}
+	restarted, err := NewPersistent(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := restarted.Metadata()
+	if !metadata.WakeDeadline.Equal(deadline) {
+		t.Fatalf("wake deadline=%s, want %s", metadata.WakeDeadline, deadline)
+	}
 }
 
 func TestHibernateAndWakeTransitions(t *testing.T) {
