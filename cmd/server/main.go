@@ -43,12 +43,13 @@ func main() {
 	chatServerName := flag.String("chat-server-name", "", "TLS server name for distributed chat gRPC")
 	chatClientCert := flag.String("chat-client-cert", "", "client certificate for distributed chat gRPC")
 	chatClientKey := flag.String("chat-client-key", "", "client private key for distributed chat gRPC")
-	apiToken := flag.String("api-token", "", "API bearer token (required)")
-	sessionToken := flag.String("session-token", "", "browser session token (required)")
+	apiToken := flag.String("api-token", os.Getenv("SAMEOLDCHAT_API_TOKEN"), "API bearer token (required)")
+	sessionToken := flag.String("session-token", os.Getenv("SAMEOLDCHAT_SESSION_TOKEN"), "browser session token (required)")
 	authWorkspace := flag.String("auth-workspace", "", "workspace for external authorization (required when enabled)")
 	authLookupUser := flag.String("auth-lookup-user", "", "existing user used to authorize external identity lookup (required when enabled)")
 	authPublicURL := flag.String("auth-public-url", "", "public HTTPS URL used for authorization callbacks")
-	authStateKeyHex := flag.String("auth-state-key-hex", "", "HMAC key for authorization state, at least 32 bytes of hex")
+	authStateKeyHex := flag.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
+	bootstrapAdminEmail := flag.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
 	googleClientID := flag.String("google-client-id", "", "Google OAuth client ID")
 	googleClientSecret := flag.String("google-client-secret", "", "Google OAuth client secret")
 	githubClientID := flag.String("github-client-id", "", "GitHub OAuth client ID")
@@ -56,6 +57,9 @@ func main() {
 	entraClientID := flag.String("entra-client-id", "", "Microsoft Entra application client ID")
 	entraClientSecret := flag.String("entra-client-secret", "", "Microsoft Entra application client secret")
 	entraTenant := flag.String("entra-tenant", "common", "Microsoft Entra tenant identifier")
+	oidcIssuer := flag.String("oidc-issuer", os.Getenv("SAMEOLDCHAT_OIDC_ISSUER"), "OpenID Connect issuer URL")
+	oidcClientID := flag.String("oidc-client-id", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_ID"), "OpenID Connect client ID")
+	oidcClientSecret := flag.String("oidc-client-secret", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_SECRET"), "OpenID Connect client secret")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -83,7 +87,7 @@ func main() {
 			logger.Error("parse dqlite cluster", "error", err)
 			os.Exit(2)
 		}
-		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes})
+		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail})
 		if err != nil {
 			logger.Error("open local chat", "error", err)
 			os.Exit(1)
@@ -176,7 +180,7 @@ func main() {
 		logger.Error("configure web", "error", err)
 		os.Exit(1)
 	}
-	providerCredentials := *googleClientID != "" || *googleClientSecret != "" || *githubClientID != "" || *githubClientSecret != "" || *entraClientID != "" || *entraClientSecret != ""
+	providerCredentials := *googleClientID != "" || *googleClientSecret != "" || *githubClientID != "" || *githubClientSecret != "" || *entraClientID != "" || *entraClientSecret != "" || *oidcIssuer != "" || *oidcClientID != "" || *oidcClientSecret != ""
 	if providerCredentials {
 		if *authWorkspace == "" || *authLookupUser == "" || *authPublicURL == "" || *authStateKeyHex == "" {
 			logger.Error("external authorization requires workspace, lookup user, public URL, and state key")
@@ -187,7 +191,7 @@ func main() {
 			logger.Error("authorization state key must contain at least 32 bytes of hex", "error", decodeErr)
 			os.Exit(2)
 		}
-		providers := make([]web.ProviderConfig, 0, 3)
+		providers := make([]web.ProviderConfig, 0, 4)
 		if (*googleClientID == "") != (*googleClientSecret == "") {
 			logger.Error("Google client ID and secret must be supplied together")
 			os.Exit(2)
@@ -208,6 +212,18 @@ func main() {
 		}
 		if *entraClientID != "" {
 			providers = append(providers, web.ProviderConfig{Name: "entra", ClientID: *entraClientID, ClientSecret: *entraClientSecret, AuthorizeURL: "https://login.microsoftonline.com/" + *entraTenant + "/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/" + *entraTenant + "/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "profile", "email", "offline_access"}})
+		}
+		if (*oidcIssuer == "") != (*oidcClientID == "") || (*oidcIssuer == "") != (*oidcClientSecret == "") {
+			logger.Error("OpenID Connect issuer, client ID, and client secret must be supplied together")
+			os.Exit(2)
+		}
+		if *oidcIssuer != "" {
+			oidcProvider, discoveryErr := web.DiscoverOpenIDConnectProvider(context.Background(), http.DefaultClient, *oidcIssuer, *oidcClientID, *oidcClientSecret)
+			if discoveryErr != nil {
+				logger.Error("discover OpenID Connect provider", "error", discoveryErr)
+				os.Exit(1)
+			}
+			providers = append(providers, oidcProvider)
 		}
 		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(*authWorkspace), domain.UserID(*authLookupUser), *authPublicURL, stateKey, providers)
 		if loginErr != nil {

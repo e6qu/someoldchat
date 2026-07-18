@@ -33,6 +33,13 @@ type ProviderConfig struct {
 	Scopes       []string
 }
 
+type OpenIDConfiguration struct {
+	Issuer                string `json:"issuer"`
+	AuthorizationEndpoint string `json:"authorization_endpoint"`
+	TokenEndpoint         string `json:"token_endpoint"`
+	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+}
+
 type LoginHandler struct {
 	service    chatapi.Service
 	workspace  domain.WorkspaceID
@@ -47,6 +54,50 @@ var supportedAuthorizationProviders = map[string]struct{}{
 	"entra":  {},
 	"github": {},
 	"google": {},
+	"oidc":   {},
+}
+
+func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, issuer, clientID, clientSecret string) (ProviderConfig, error) {
+	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	parsed, err := url.Parse(issuer)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ProviderConfig{}, errors.New("OpenID Connect issuer must be an absolute HTTPS URL")
+	}
+	if clientID == "" || clientSecret == "" {
+		return ProviderConfig{}, errors.New("OpenID Connect client ID and secret are required")
+	}
+	if client == nil {
+		return ProviderConfig{}, errors.New("OpenID Connect discovery requires an HTTP client")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, issuer+"/.well-known/openid-configuration", nil)
+	if err != nil {
+		return ProviderConfig{}, err
+	}
+	request.Header.Set("Accept", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		return ProviderConfig{}, fmt.Errorf("discover OpenID Connect provider: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return ProviderConfig{}, fmt.Errorf("OpenID Connect discovery returned %s", response.Status)
+	}
+	var document OpenIDConfiguration
+	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
+		return ProviderConfig{}, fmt.Errorf("decode OpenID Connect discovery: %w", err)
+	}
+	if strings.TrimRight(document.Issuer, "/") != issuer {
+		return ProviderConfig{}, errors.New("OpenID Connect discovery issuer does not match configured issuer")
+	}
+	for label, endpoint := range map[string]string{"authorization": document.AuthorizationEndpoint, "token": document.TokenEndpoint, "userinfo": document.UserInfoEndpoint} {
+		parsedEndpoint, parseErr := url.Parse(strings.TrimSpace(endpoint))
+		if parseErr != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Host == "" {
+			return ProviderConfig{}, fmt.Errorf("OpenID Connect %s endpoint must be an absolute HTTPS URL", label)
+		}
+	}
+	return ProviderConfig{Name: "oidc", ClientID: clientID, ClientSecret: clientSecret, AuthorizeURL: document.AuthorizationEndpoint, TokenURL: document.TokenEndpoint, UserInfoURL: document.UserInfoEndpoint, Scopes: []string{"openid", "profile", "email"}}, nil
 }
 
 func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, lookupUser domain.UserID, publicURL string, stateKey []byte, providers []ProviderConfig) (LoginHandler, error) {
@@ -150,6 +201,8 @@ func providerLabel(name string) string {
 		return "GitHub"
 	case "entra":
 		return "Microsoft Entra ID"
+	case "oidc":
+		return "Single Sign-On"
 	default:
 		return name
 	}

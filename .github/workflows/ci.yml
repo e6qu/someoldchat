@@ -67,9 +67,15 @@ jobs:
   terraform:
     name: Terraform validation
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        directory:
+          - deploy/ecs-scale-zero
+          - terraform/ecs-runtime
     defaults:
       run:
-        working-directory: deploy/ecs-scale-zero
+        working-directory: ${{ matrix.directory }}
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

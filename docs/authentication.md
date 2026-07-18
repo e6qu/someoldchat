@@ -6,7 +6,9 @@ explicitly configured authorization sources:
 
 - Google;
 - GitHub; and
-- Microsoft Entra ID.
+- Microsoft Entra ID; and
+- any standards-compliant OpenID Connect issuer discovered from its issuer URL,
+  including Shauth.
 
 The server accepts a source only when its required configuration is complete.
 It rejects unknown source names, incomplete GitHub email configuration, empty
@@ -25,16 +27,29 @@ The server command accepts these credentials and settings:
 -entra-client-id
 -entra-client-secret
 -entra-tenant
+-oidc-issuer
+-oidc-client-id
+-oidc-client-secret
 -auth-workspace
 -auth-lookup-user
 -auth-public-url
 -auth-state-key-hex
 ```
 
-Supplying one credential from a pair is invalid. If any external authorization
+Supplying an incomplete provider configuration is invalid. OpenID Connect
+discovery requires an HTTPS issuer whose discovery document reports the same
+issuer and HTTPS authorization, token, and user-info endpoints. If any external authorization
 credential is supplied, the workspace, lookup user, public HTTPS URL, and
 32-byte state key are required. GitHub login also requires the GitHub email
 endpoint, which the server configures as `https://api.github.com/user/emails`.
+
+For container deployment, `SAMEOLDCHAT_API_TOKEN`,
+`SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
+`SAMEOLDCHAT_OIDC_ISSUER`, `SAMEOLDCHAT_OIDC_CLIENT_ID`, and
+`SAMEOLDCHAT_OIDC_CLIENT_SECRET` provide the corresponding flag defaults.
+`SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL` provides the email address of the initial
+workspace user. It must be the verified email the issuer returns: external
+identities are linked only to existing users and are never auto-provisioned.
 
 The server creates a short-lived signed state cookie and uses
 Proof Key for Code Exchange (PKCE). It links a returned external subject to an

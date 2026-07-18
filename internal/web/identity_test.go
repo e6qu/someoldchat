@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -21,15 +22,47 @@ func TestNewLoginHandlerAcceptsSupportedAuthorizationProviders(t *testing.T) {
 		{Name: "Google", ClientID: "google-id", ClientSecret: "google-secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://openidconnect.googleapis.com/v1/userinfo", Scopes: []string{"openid", "email"}},
 		{Name: "github", ClientID: "github-id", ClientSecret: "github-secret", AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", UserInfoURL: "https://api.github.com/user", EmailURL: "https://api.github.com/user/emails", Scopes: []string{"user:email"}},
 		{Name: "entra", ClientID: "entra-id", ClientSecret: "entra-secret", AuthorizeURL: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "email"}},
+		{Name: "oidc", ClientID: "oidc-id", ClientSecret: "oidc-secret", AuthorizeURL: "https://id.example.test/authorize", TokenURL: "https://id.example.test/token", UserInfoURL: "https://id.example.test/userinfo", Scopes: []string{"openid", "profile", "email"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(handler.providers) != 3 {
-		t.Fatalf("providers=%d, want 3", len(handler.providers))
+	if len(handler.providers) != 4 {
+		t.Fatalf("providers=%d, want 4", len(handler.providers))
 	}
 	if got := handler.providers["google"].Scopes; len(got) != 2 || got[0] != "openid" || got[1] != "email" {
 		t.Fatalf("normalized Google scopes=%v", got)
+	}
+}
+
+func TestDiscoverOpenIDConnectProvider(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/.well-known/openid-configuration" {
+			http.NotFound(response, request)
+			return
+		}
+		response.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(response).Encode(OpenIDConfiguration{
+			Issuer:                server.URL,
+			AuthorizationEndpoint: server.URL + "/authorize",
+			TokenEndpoint:         server.URL + "/token",
+			UserInfoEndpoint:      server.URL + "/userinfo",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}))
+	defer server.Close()
+
+	provider, err := DiscoverOpenIDConnectProvider(context.Background(), server.Client(), server.URL, "client", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.Name != "oidc" || provider.AuthorizeURL != server.URL+"/authorize" || provider.TokenURL != server.URL+"/token" || provider.UserInfoURL != server.URL+"/userinfo" {
+		t.Fatalf("provider=%+v", provider)
+	}
+	if got := strings.Join(provider.Scopes, " "); got != "openid profile email" {
+		t.Fatalf("scopes=%q", got)
 	}
 }
 
