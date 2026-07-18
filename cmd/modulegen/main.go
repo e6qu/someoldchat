@@ -160,8 +160,8 @@ func validate(value manifest) error {
 		if item.Mode != "monolith" && item.Mode != "separate" {
 			return fmt.Errorf("target %q must select monolith or separate mode", item.Name)
 		}
-		if item.Storage != "memory" && item.Storage != "sqlite" && item.Storage != "dqlite" {
-			return fmt.Errorf("target %q must select memory, sqlite, or dqlite storage", item.Name)
+		if item.Storage != "memory" && item.Storage != "sqlite" && item.Storage != "postgresql" && item.Storage != "dqlite" {
+			return fmt.Errorf("target %q must select memory, sqlite, postgresql, or dqlite storage", item.Name)
 		}
 		if item.Mode == "monolith" && len(item.Processes) != 1 {
 			return fmt.Errorf("monolith target %q must place every module in exactly one process", item.Name)

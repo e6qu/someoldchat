@@ -29,7 +29,8 @@ Every hosting profile MUST account for these logical units:
 - `server`: HTMX and Slack-compatible HTTP service, scaled `0..N`;
 - `worker`: asynchronous work, scaled `0..N`;
 - `lifecycle`: fenced restore, migration, snapshot, and verification job;
-- `database`: SQLite `0..1` or active dqlite `3..N`, hibernated at zero;
+- `database`: SQLite `0..1`, PostgreSQL `1..N` as an external durable service,
+  or active dqlite `3..N`, hibernated at zero;
 - object storage: immutable snapshots, files, and durable request spools; and
 - lifecycle metadata: small compare-and-swap state available while cold.
 

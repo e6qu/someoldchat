@@ -28,8 +28,8 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	chatMode := flag.String("chat-mode", "", "chat composition: local or grpc (required)")
-	storeName := flag.String("store", "", "local storage backend: memory, sqlite, or dqlite")
-	dsn := flag.String("db", "", "SQLite DSN; required for local sqlite storage")
+	storeName := flag.String("store", "", "local storage backend: memory, sqlite, postgresql, or dqlite")
+	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql storage")
 	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory; required for local dqlite storage")
 	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")

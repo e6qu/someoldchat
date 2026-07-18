@@ -1,4 +1,4 @@
-//go:build !dqlite
+//go:build !dqlite && !postgres
 
 package qualification
 

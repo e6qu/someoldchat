@@ -176,3 +176,35 @@ jobs:
 
       - name: Run dqlite tests
         run: make test-dqlite
+
+  postgres:
+    name: PostgreSQL qualification
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.1
+        env:
+          POSTGRES_USER: sameoldchat
+          POSTGRES_PASSWORD: sameoldchat
+          POSTGRES_DB: sameoldchat
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sameoldchat -d sameoldchat"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run PostgreSQL qualification
+        env:
+          SAMEOLDCHAT_POSTGRES_DSN: postgres://sameoldchat:sameoldchat@localhost:5432/sameoldchat?sslmode=disable
+        run: make test-postgres

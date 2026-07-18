@@ -18,6 +18,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/scheduler"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
+	"github.com/sameoldchat/sameoldchat/internal/store/postgres"
 	"github.com/sameoldchat/sameoldchat/internal/store/sqlstore"
 )
 
@@ -38,9 +39,10 @@ type Runtime struct {
 type Backend string
 
 const (
-	BackendMemory Backend = "memory"
-	BackendSQLite Backend = "sqlite"
-	BackendDqlite Backend = "dqlite"
+	BackendMemory     Backend = "memory"
+	BackendSQLite     Backend = "sqlite"
+	BackendPostgreSQL Backend = "postgresql"
+	BackendDqlite     Backend = "dqlite"
 )
 
 type Config struct {
@@ -92,7 +94,7 @@ type bootstrapStore interface {
 }
 
 func Open(ctx context.Context, config Config) (Runtime, error) {
-	if config.Backend != BackendMemory && config.Backend != BackendSQLite && config.Backend != BackendDqlite {
+	if config.Backend != BackendMemory && config.Backend != BackendSQLite && config.Backend != BackendPostgreSQL && config.Backend != BackendDqlite {
 		return Runtime{}, fmt.Errorf("unsupported local storage backend %q", config.Backend)
 	}
 	if config.Backend == BackendMemory && (config.DSN != "" || config.DqliteDirectory != "" || config.DqliteAddress != "" || len(config.DqliteCluster) != 0 || config.DqliteDatabase != "") {
@@ -100,6 +102,9 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	}
 	if config.Backend == BackendSQLite && (config.DSN == "" || config.DqliteDirectory != "" || config.DqliteAddress != "" || len(config.DqliteCluster) != 0 || config.DqliteDatabase != "") {
 		return Runtime{}, errors.New("SQLite storage requires only a DSN")
+	}
+	if config.Backend == BackendPostgreSQL && (config.DSN == "" || config.DqliteDirectory != "" || config.DqliteAddress != "" || len(config.DqliteCluster) != 0 || config.DqliteDatabase != "") {
+		return Runtime{}, errors.New("PostgreSQL storage requires only a DSN")
 	}
 	if config.Backend == BackendDqlite && (config.DSN != "" || config.DqliteDirectory == "" || config.DqliteAddress == "" || config.DqliteDatabase == "") {
 		return Runtime{}, errors.New("dqlite storage requires directory, address, and database; cluster seeds are optional for the bootstrap node")
@@ -123,6 +128,12 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 			return Runtime{}, err
 		}
 		chatStore, closer = sqlStore, sqlStore
+	case BackendPostgreSQL:
+		postgresStore, err := postgres.Open(ctx, config.DSN)
+		if err != nil {
+			return Runtime{}, err
+		}
+		chatStore, closer = postgresStore, postgresStore
 	case BackendDqlite:
 		var err error
 		chatStore, closer, err = openDqlite(ctx, config)
@@ -130,7 +141,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 			return Runtime{}, err
 		}
 	}
-	if config.Backend == BackendSQLite || config.Backend == BackendDqlite {
+	if config.Backend == BackendSQLite || config.Backend == BackendPostgreSQL || config.Backend == BackendDqlite {
 		selected, ok := chatStore.(bootstrapStore)
 		if !ok {
 			_ = closer.Close()

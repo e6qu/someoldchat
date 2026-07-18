@@ -3,8 +3,8 @@
 ## Portability boundary
 
 Domain and application packages MUST depend on a persistence port and MUST NOT
-import a SQLite or dqlite driver. Shared repositories SHOULD use `database/sql`
-and a deliberately portable SQLite dialect.
+import a SQLite, PostgreSQL, or dqlite driver. Shared repositories SHOULD use
+`database/sql` and a deliberately portable SQL dialect.
 
 The port MUST support transactional commands, consistent reads, migrations,
 health checks, and lifecycle closure. Backend lifecycle and cluster management
@@ -61,6 +61,25 @@ The SQLite adapter MUST:
 - reject unsafe multi-writer deployment configuration;
 - expose integrity checking and consistent snapshot creation; and
 - pass the shared repository and migration suite.
+
+## PostgreSQL adapter
+
+The PostgreSQL adapter MUST:
+
+- use the pinned official `github.com/jackc/pgx/v5` driver through
+  `database/sql`;
+- require an explicit PostgreSQL connection string and fail at startup when it
+  is absent or invalid;
+- preserve the shared repository transaction, constraint, migration, and
+  outbox semantics without changing domain code;
+- use PostgreSQL-native identity columns, conflict handling, metadata queries,
+  and transaction boundaries at the adapter seam; and
+- pass the shared repository and migration suite against a real PostgreSQL
+  server.
+
+PostgreSQL is a separately selectable storage profile. It is not a fallback for
+SQLite or dqlite, and the application never changes storage profiles after
+startup.
 
 ## dqlite adapter
 

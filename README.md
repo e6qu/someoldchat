@@ -1,7 +1,7 @@
 # SameOldChat
 
 SameOldChat is a self-hostable, Slack-compatible chat system with a Go
-backend, an HTMX interface, SQLite or dqlite persistence, and explicit
+backend, an HTMX interface, SQLite, PostgreSQL, or dqlite persistence, and explicit
 request-triggered restoration for deployments that support scale-to-zero.
 
 ## Documents
@@ -10,6 +10,7 @@ request-triggered restoration for deployments that support scale-to-zero.
 - [Architecture and operational documentation](docs/README.md)
 - [Separable module architecture](docs/modules.md)
 - [Authentication](docs/authentication.md)
+- [PostgreSQL storage](docs/postgresql.md)
 - [dqlite qualification](docs/dqlite.md)
 - [SDK qualification inventory](specs/sdk-compatibility.yaml)
 - [Browser qualification](tests/browser/README.md)
@@ -21,8 +22,9 @@ request-triggered restoration for deployments that support scale-to-zero.
 
 - Slack compatibility is derived from pinned published specifications, official
   open-source SDKs, current documentation, and recorded behavioral evidence.
-- SQLite is the simple explicit local profile; dqlite is the explicit replicated
-  production profile and requires the `dqlite` build tag plus native libraries.
+- SQLite and PostgreSQL are explicit SQL storage profiles; dqlite is the
+  explicit replicated SQLite-compatible profile and requires the `dqlite` build
+  tag plus native libraries.
 - All paid SameOldChat compute, including database processes, can hibernate at
   zero after a snapshot is independently verified.
 - A small logical activator endpoint remains reachable to restore the stack.

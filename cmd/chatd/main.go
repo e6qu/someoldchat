@@ -22,10 +22,10 @@ import (
 
 func main() {
 	listen := flag.String("listen", "", "gRPC listen address (required)")
-	backend := flag.String("store", "", "storage backend: memory, sqlite, or dqlite (required)")
+	backend := flag.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
 	blobS3Bucket := flag.String("blob-s3-bucket", "", "Amazon Simple Storage Service bucket for file storage")
 	blobS3Prefix := flag.String("blob-s3-prefix", "", "Amazon Simple Storage Service key prefix for file storage")
-	dsn := flag.String("db", "", "SQLite DSN; required for local sqlite storage")
+	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql storage")
 	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory; required for local dqlite storage")
 	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
