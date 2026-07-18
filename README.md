@@ -38,6 +38,11 @@ The documents distinguish implemented behavior from qualification work. The
 same module interfaces support direct Go calls in monolith mode and generated
 gRPC adapters in distributed mode.
 
+## License
+
+SameOldChat is licensed under the GNU Affero General Public License, version 3
+or any later version. See [LICENSE](LICENSE).
+
 ## Development commands
 
 ```sh
