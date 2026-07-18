@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message EventRecord {
+  uint64 sequence = 1;
+  string id = 2;
+  string workspace_id = 3;
+  string topic = 4;
+  string payload = 5;
+  int64 created_at_unix_nano = 6;
+}
+
+message EventsRequest {
+  string workspace_id = 1;
+  uint64 after = 2;
+  int32 limit = 3;
+}
+
+message EventsResponse {
+  repeated EventRecord records = 1;
+}
+
+service EventsService {
+  rpc ListEventsAfter(EventsRequest) returns (EventsResponse);
+}

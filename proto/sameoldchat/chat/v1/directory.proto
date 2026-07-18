@@ -1,0 +1,316 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/presence.proto";
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+import "sameoldchat/chat/v1/conversations.proto";
+
+message UserPage {
+  repeated User users = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message UsersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message ConversationMembersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message Workspace {
+	string id = 1;
+	string name = 2;
+	string description = 3;
+	string discoverability = 4;
+	string icon_url = 5;
+	repeated string default_channel_ids = 6;
+	string domain = 7;
+}
+
+message WorkspaceRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message AdminCreateWorkspaceRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string team_domain = 3;
+  string team_name = 4;
+  string team_description = 5;
+  string team_discoverability = 6;
+}
+
+message AppPermissionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  repeated string scopes = 4;
+  string trigger_id = 5;
+}
+
+message BillableInfoRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+}
+
+message BillableUser {
+  string user_id = 1;
+  bool billing_active = 2;
+}
+
+message BillableInfo {
+  repeated BillableUser users = 1;
+}
+
+message RemoveUserRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+}
+
+message SetUserRoleRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  string role = 4;
+}
+
+message SetUserExpirationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  int64 expiration_ts = 4;
+}
+
+message ResetUserSessionsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+}
+
+message Emoji {
+  string name = 1;
+  string url = 2;
+  string alias_for = 3;
+}
+
+message EmojiListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message EmojiMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string value = 4;
+}
+
+message EmojiListResponse {
+  repeated Emoji emojis = 1;
+}
+
+message SearchConversationsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message SetWorkspaceNameRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+}
+
+message SetWorkspaceDescriptionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string description = 3;
+}
+
+message SetWorkspaceDiscoverabilityRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string discoverability = 3;
+}
+
+message SetWorkspaceIconRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string image_url = 3;
+}
+
+message SetWorkspaceDefaultChannelsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string channel_ids = 3;
+}
+
+message ConversationPreferenceList {
+  repeated string types = 1;
+  repeated string users = 2;
+}
+
+message ConversationPrefs {
+  string conversation_id = 1;
+  ConversationPreferenceList can_thread = 2;
+  ConversationPreferenceList who_can_post = 3;
+}
+
+message ConversationPrefsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message SetConversationPrefsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  ConversationPrefs prefs = 3;
+}
+
+message AdminTeamUsersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string role = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message AdminInviteUserRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string email = 3;
+  repeated string channel_ids = 4;
+  string custom_message = 5;
+  string real_name = 6;
+  bool resend = 7;
+  bool restricted = 8;
+  bool ultra_restricted = 9;
+  int64 guest_expiration_at = 10;
+}
+
+message AdminAssignUserRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  repeated string channel_ids = 4;
+}
+
+message InviteRequest {
+  string id = 1;
+  string workspace_id = 2;
+  string email = 3;
+  string requested_by = 4;
+  string status = 5;
+  int64 created_at = 6;
+  int64 reviewed_at = 7;
+  repeated string channel_ids = 8;
+  string custom_message = 9;
+  string real_name = 10;
+  bool resend = 11;
+  bool restricted = 12;
+  bool ultra_restricted = 13;
+  int64 guest_expiration_at = 14;
+}
+
+message InviteRequestsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string status = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message InviteRequestMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string invite_request_id = 3;
+}
+
+message InviteRequestPage {
+  repeated InviteRequest requests = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message AppApproval {
+  string app_id = 1;
+  string request_id = 2;
+  string workspace_id = 3;
+  string status = 4;
+  int64 created_at = 5;
+  int64 updated_at = 6;
+}
+
+message AppApprovalsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string status = 3;
+  int32 limit = 4;
+  string cursor = 5;
+}
+
+message AppApprovalMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string request_id = 4;
+}
+
+message AppApprovalPage {
+  repeated AppApproval apps = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+service DirectoryService {
+  rpc Users(UsersRequest) returns (UserPage);
+  rpc ConversationMembers(ConversationMembersRequest) returns (UserPage);
+  rpc WorkspaceInfo(WorkspaceRequest) returns (Workspace);
+  rpc TeamBillableInfo(BillableInfoRequest) returns (BillableInfo);
+  rpc RemoveUser(RemoveUserRequest) returns (MutationResponse);
+  rpc SetUserRole(SetUserRoleRequest) returns (MutationResponse);
+  rpc SetUserExpiration(SetUserExpirationRequest) returns (MutationResponse);
+  rpc ResetUserSessions(ResetUserSessionsRequest) returns (MutationResponse);
+  rpc Emojis(EmojiListRequest) returns (EmojiListResponse);
+  rpc AddEmoji(EmojiMutationRequest) returns (MutationResponse);
+  rpc AddEmojiAlias(EmojiMutationRequest) returns (MutationResponse);
+  rpc RemoveEmoji(EmojiMutationRequest) returns (MutationResponse);
+  rpc RenameEmoji(EmojiMutationRequest) returns (MutationResponse);
+  rpc SearchConversations(SearchConversationsRequest) returns (ConversationPage);
+  rpc SetWorkspaceName(SetWorkspaceNameRequest) returns (Workspace);
+  rpc AdminCreateWorkspace(AdminCreateWorkspaceRequest) returns (Workspace);
+  rpc RequestAppPermissions(AppPermissionRequest) returns (MutationResponse);
+  rpc SetWorkspaceDescription(SetWorkspaceDescriptionRequest) returns (Workspace);
+  rpc SetWorkspaceDiscoverability(SetWorkspaceDiscoverabilityRequest) returns (Workspace);
+  rpc SetWorkspaceIcon(SetWorkspaceIconRequest) returns (Workspace);
+  rpc SetWorkspaceDefaultChannels(SetWorkspaceDefaultChannelsRequest) returns (Workspace);
+  rpc GetConversationPrefs(ConversationPrefsRequest) returns (ConversationPrefs);
+  rpc SetConversationPrefs(SetConversationPrefsRequest) returns (ConversationPrefs);
+  rpc AdminTeamUsers(AdminTeamUsersRequest) returns (UserPage);
+  rpc AdminInviteUser(AdminInviteUserRequest) returns (MutationResponse);
+  rpc AdminAssignUser(AdminAssignUserRequest) returns (MutationResponse);
+  rpc AdminApproveInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
+  rpc AdminDenyInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
+  rpc AdminListInviteRequests(InviteRequestsRequest) returns (InviteRequestPage);
+  rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);
+  rpc AdminRestrictApp(AppApprovalMutationRequest) returns (MutationResponse);
+  rpc AdminListApps(AppApprovalsRequest) returns (AppApprovalPage);
+}

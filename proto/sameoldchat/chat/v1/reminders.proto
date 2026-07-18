@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+message Reminder {
+  string workspace_id = 1;
+  string id = 2;
+  string creator_id = 3;
+  string user_id = 4;
+  string text = 5;
+  int64 time = 6;
+  int64 complete_ts = 7;
+  bool recurring = 8;
+}
+
+message AddReminderRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+  string text = 4;
+  int64 time = 5;
+}
+
+message ReminderRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string reminder_id = 3;
+}
+
+message RemindersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
+message ReminderPage {
+  repeated Reminder reminders = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+service RemindersService {
+  rpc AddReminder(AddReminderRequest) returns (Reminder);
+  rpc ReminderInfo(ReminderRequest) returns (Reminder);
+  rpc Reminders(RemindersRequest) returns (ReminderPage);
+  rpc CompleteReminder(ReminderRequest) returns (MutationResponse);
+  rpc DeleteReminder(ReminderRequest) returns (MutationResponse);
+}
