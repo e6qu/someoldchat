@@ -56,6 +56,8 @@ test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeScopes -fuzztime=1s
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeConversationTypes -fuzztime=1s
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONScalarNeverPanics -fuzztime=1s
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzDecodeFieldsNeverPanics -fuzztime=1s
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONListFieldNeverPanics -fuzztime=1s
 
 generate:
 	$(MAKE) proto-tools
