@@ -2,6 +2,8 @@
 
 These tests exercise bounded concurrency against the in-memory repository.
 They check ordering, pagination, and idempotency under concurrent writes.
+They also check that session creation has one winner and that revocation is
+visible through every replica using the shared store.
 They do not represent production capacity; use the benchmark to compare
 changes and use a deployment-level load tool for capacity measurements.
 
