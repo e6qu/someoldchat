@@ -17,6 +17,12 @@ and the application fails at startup when it is missing or invalid:
   -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
 
+For container deployments, set `SAMEOLDCHAT_DATABASE_URL` instead of placing a
+connection string in the command line. The environment value is the default for
+`-db`; an explicit `-db` flag takes precedence. This lets the runtime obtain
+the tenant-specific URL from its secret store without exposing it in task
+definitions or process arguments.
+
 PostgreSQL is a separate storage selection. SameOldChat does not switch to
 PostgreSQL when SQLite or dqlite configuration fails, and it does not change
 storage profiles after startup.
