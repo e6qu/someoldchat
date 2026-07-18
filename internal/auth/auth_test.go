@@ -77,3 +77,20 @@ func TestBrowserAuthenticatorUsesPersistedScopes(t *testing.T) {
 		t.Fatalf("principal = %+v", principal)
 	}
 }
+
+func TestSessionCookieDomainIsExplicitAndShared(t *testing.T) {
+	for _, domain := range []string{"example.com", "apps.example.com"} {
+		if err := ValidateSessionCookieDomain(domain); err != nil {
+			t.Fatalf("validate %q: %v", domain, err)
+		}
+		cookie := SessionCookie("session", 86400, domain)
+		if cookie.Domain != domain || cookie.Path != "/" || !cookie.Secure || !cookie.HttpOnly || cookie.SameSite != http.SameSiteLaxMode {
+			t.Fatalf("cookie = %+v", cookie)
+		}
+	}
+	for _, domain := range []string{".example.com", "https://example.com", "example.com:443", "127.0.0.1"} {
+		if err := ValidateSessionCookieDomain(domain); err == nil {
+			t.Fatalf("domain %q was accepted", domain)
+		}
+	}
+}

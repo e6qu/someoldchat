@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -109,6 +111,25 @@ type Stored struct{ store TokenStore }
 type Browser struct{ store SessionStore }
 
 const SessionCookieName = "sameoldchat_session"
+
+func ValidateSessionCookieDomain(domain string) error {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return nil
+	}
+	if strings.HasPrefix(domain, ".") || strings.ContainsAny(domain, "/: \t\r\n") {
+		return errors.New("session cookie domain must be a hostname without a leading dot, port, or path")
+	}
+	parsed, err := url.Parse("//" + domain)
+	if err != nil || parsed.Host != domain || parsed.Hostname() != domain || net.ParseIP(domain) != nil {
+		return errors.New("session cookie domain must be a DNS hostname")
+	}
+	return nil
+}
+
+func SessionCookie(value string, maxAge int, domain string) *http.Cookie {
+	return &http.Cookie{Name: SessionCookieName, Value: value, Domain: strings.TrimSpace(domain), Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+}
 
 func AllScopes() []string {
 	return []string{string(ScopeChatWrite), string(ScopeChannelsHistory), string(ScopeUsersRead), string(ScopeUsersReadEmail), string(ScopeUsersWrite), string(ScopeUsersProfileWrite), string(ScopeChannelsRead), string(ScopeChannelsManage), string(ScopeReactionsWrite), string(ScopeReactionsRead), string(ScopePinsWrite), string(ScopePinsRead), string(ScopeSearchRead), string(ScopeFilesWrite), string(ScopeFilesRead), string(ScopeRemoteFilesRead), string(ScopeRemoteFilesWrite), string(ScopeRemoteFilesShare), string(ScopeTeamRead), string(ScopeEmojiRead), string(ScopeIdentityBasic), string(ScopeRTMStream), string(ScopeDNDRead), string(ScopeDNDWrite), string(ScopeStarsRead), string(ScopeStarsWrite), string(ScopeRemindersRead), string(ScopeRemindersWrite), string(ScopeUserGroupsRead), string(ScopeUserGroupsWrite), string(ScopeCallsRead), string(ScopeCallsWrite), string(ScopeWorkflowStepsExecute), string(ScopeTokensBasic), string(ScopeAdmin), string(ScopeAdminUsersRead), string(ScopeAdminUsersWrite), string(ScopeAdminConversationsRead), string(ScopeAdminConversationsWrite), string(ScopeAdminEmojiWrite), string(ScopeAdminUserGroupsRead), string(ScopeAdminUserGroupsWrite), string(ScopeAdminTeamsRead), string(ScopeAdminTeamsWrite), string(ScopeAdminInvitesRead), string(ScopeAdminInvitesWrite), string(ScopeAdminAppsRead), string(ScopeAdminAppsWrite)}
