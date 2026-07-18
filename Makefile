@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -49,6 +49,9 @@ test-load:
 
 test-load-race:
 	GOCACHE=$(GOCACHE) go test -race ./tests/load -count=1
+
+test-transport-load:
+	GOCACHE=$(GOCACHE) go test ./internal/modules/chat/transport/grpc -run '^TestRemoteConcurrentPostsPreserveEveryCall$$' -count=1
 
 test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzListCursorRoundTrips -fuzztime=1s -parallel=1

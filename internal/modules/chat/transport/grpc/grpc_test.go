@@ -10,10 +10,13 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -463,6 +466,98 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	records, err := remote.ListEventsAfter(ctx, "T1", 0, 23)
 	if err != nil || len(records) != 23 || records[0].Sequence != 1 || records[0].Event.Payload != string(message.ID) {
 		t.Fatalf("events=%+v err=%v", records, err)
+	}
+}
+
+func TestRemoteConcurrentPostsPreserveEveryCall(t *testing.T) {
+	const (
+		workers      = 16
+		postsPerWork = 50
+		expected     = workers * postsPerWork
+	)
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T-load", Name: "load"})
+	store.SeedUser(domain.User{ID: "U-load", WorkspaceID: "T-load", Name: "load"})
+	store.SeedConversation(domain.Conversation{ID: "C-load", WorkspaceID: "T-load", Name: "load"})
+	store.SeedConversationMember("C-load", "U-load")
+	server := grpc.NewServer()
+	if err := chatgrpc.RegisterServer(server, service.Messages{Store: store}, store, store, store); err != nil {
+		t.Fatal(err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	ctx := context.Background()
+	connection, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	remote, err := chatgrpc.NewRemote(connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	errorsCh := make(chan error, expected)
+	var group sync.WaitGroup
+	var accepted atomic.Int32
+	group.Add(workers)
+	for worker := 0; worker < workers; worker++ {
+		go func(worker int) {
+			defer group.Done()
+			for offset := 0; offset < postsPerWork; offset++ {
+				key := fmt.Sprintf("load-%d-%d", worker, offset)
+				message, err := remote.Post(ctx, "T-load", "U-load", "C-load", key, "", key)
+				if err != nil {
+					errorsCh <- err
+					continue
+				}
+				if message.ID == "" || message.Text != key {
+					errorsCh <- fmt.Errorf("invalid remote message for %s: %+v", key, message)
+					continue
+				}
+				accepted.Add(1)
+			}
+		}(worker)
+	}
+	group.Wait()
+	close(errorsCh)
+	for err := range errorsCh {
+		t.Error(err)
+	}
+	if accepted.Load() != expected {
+		t.Fatalf("accepted %d messages, want %d", accepted.Load(), expected)
+	}
+
+	seen := make(map[domain.MessageID]struct{}, expected)
+	var cursor domain.Cursor
+	for len(seen) < expected {
+		page, err := remote.History(ctx, "T-load", "U-load", "C-load", domain.PageRequest{Limit: 100, Cursor: cursor})
+		if err != nil {
+			t.Fatalf("history: %v", err)
+		}
+		if len(page.Messages) == 0 {
+			t.Fatalf("history ended after %d messages, want %d", len(seen), expected)
+		}
+		for _, message := range page.Messages {
+			if _, exists := seen[message.ID]; exists {
+				t.Fatalf("message %s appeared twice", message.ID)
+			}
+			seen[message.ID] = struct{}{}
+		}
+		if !page.HasMore {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	if len(seen) != expected {
+		t.Fatalf("history returned %d messages, want %d", len(seen), expected)
+	}
+
+	canceled, cancel := context.WithCancel(ctx)
+	cancel()
+	if _, err := remote.Post(canceled, "T-load", "U-load", "C-load", "canceled", "", "canceled"); err == nil {
+		t.Fatal("canceled remote call unexpectedly succeeded")
 	}
 }
 
