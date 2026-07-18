@@ -18,7 +18,7 @@ import (
 
 func TestNewLoginHandlerAcceptsSupportedAuthorizationProviders(t *testing.T) {
 	service := service.Messages{Store: memory.New()}
-	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{
+	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{
 		{Name: "Google", ClientID: "google-id", ClientSecret: "google-secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://openidconnect.googleapis.com/v1/userinfo", Scopes: []string{"openid", "email"}},
 		{Name: "github", ClientID: "github-id", ClientSecret: "github-secret", AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", UserInfoURL: "https://api.github.com/user", EmailURL: "https://api.github.com/user/emails", Scopes: []string{"user:email"}},
 		{Name: "entra", ClientID: "entra-id", ClientSecret: "entra-secret", AuthorizeURL: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "email"}},
@@ -69,7 +69,7 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 func TestNewLoginHandlerRejectsUnsupportedOrIncompleteProviders(t *testing.T) {
 	service := service.Messages{Store: memory.New()}
 	base := func(provider ProviderConfig) error {
-		_, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{provider})
+		_, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{provider})
 		return err
 	}
 
@@ -109,7 +109,7 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 		}
 	})}
 
-	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
 		Name: "google", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
 	}})
 	if err != nil {
@@ -151,6 +151,9 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 	}
 	if sessionCookie == nil || sessionCookie.Value == "" {
 		t.Fatal("callback did not create a browser session cookie")
+	}
+	if sessionCookie.Domain != "example.test" {
+		t.Fatalf("session cookie domain = %q", sessionCookie.Domain)
 	}
 	session, err := store.LookupSession(context.Background(), sessionCookie.Value)
 	if err != nil || session.UserID != "U1" || session.WorkspaceID != "T1" {

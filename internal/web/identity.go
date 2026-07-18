@@ -41,13 +41,14 @@ type OpenIDConfiguration struct {
 }
 
 type LoginHandler struct {
-	service    chatapi.Service
-	workspace  domain.WorkspaceID
-	lookupUser domain.UserID
-	publicURL  string
-	stateKey   []byte
-	providers  map[string]ProviderConfig
-	client     *http.Client
+	service      chatapi.Service
+	workspace    domain.WorkspaceID
+	lookupUser   domain.UserID
+	publicURL    string
+	cookieDomain string
+	stateKey     []byte
+	providers    map[string]ProviderConfig
+	client       *http.Client
 }
 
 var supportedAuthorizationProviders = map[string]struct{}{
@@ -100,13 +101,20 @@ func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, iss
 	return ProviderConfig{Name: "oidc", ClientID: clientID, ClientSecret: clientSecret, AuthorizeURL: document.AuthorizationEndpoint, TokenURL: document.TokenEndpoint, UserInfoURL: document.UserInfoEndpoint, Scopes: []string{"openid", "profile", "email"}}, nil
 }
 
-func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, lookupUser domain.UserID, publicURL string, stateKey []byte, providers []ProviderConfig) (LoginHandler, error) {
+func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, lookupUser domain.UserID, publicURL, cookieDomain string, stateKey []byte, providers []ProviderConfig) (LoginHandler, error) {
 	if service == nil || workspace == "" || lookupUser == "" || strings.TrimSpace(publicURL) == "" || len(stateKey) < 32 {
 		return LoginHandler{}, errors.New("login requires service, workspace, lookup user, public URL, and a 32-byte state key")
 	}
 	base, err := url.Parse(strings.TrimRight(publicURL, "/"))
 	if err != nil || base.Scheme != "https" || base.Host == "" {
 		return LoginHandler{}, errors.New("login public URL must be an absolute HTTPS URL")
+	}
+	cookieDomain = strings.TrimSpace(cookieDomain)
+	if err := auth.ValidateSessionCookieDomain(cookieDomain); err != nil {
+		return LoginHandler{}, err
+	}
+	if cookieDomain != "" && base.Hostname() != cookieDomain && !strings.HasSuffix(base.Hostname(), "."+cookieDomain) {
+		return LoginHandler{}, errors.New("session cookie domain must contain the authorization callback host")
 	}
 	configured := make(map[string]ProviderConfig, len(providers))
 	for _, provider := range providers {
@@ -139,7 +147,7 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 	if len(configured) == 0 {
 		return LoginHandler{}, errors.New("at least one authorization provider is required")
 	}
-	return LoginHandler{service: service, workspace: workspace, lookupUser: lookupUser, publicURL: strings.TrimRight(publicURL, "/"), stateKey: append([]byte(nil), stateKey...), providers: configured, client: &http.Client{Timeout: 10 * time.Second}}, nil
+	return LoginHandler{service: service, workspace: workspace, lookupUser: lookupUser, publicURL: strings.TrimRight(publicURL, "/"), cookieDomain: cookieDomain, stateKey: append([]byte(nil), stateKey...), providers: configured, client: &http.Client{Timeout: 10 * time.Second}}, nil
 }
 
 func normalizeScopes(values []string) ([]string, error) {
@@ -306,7 +314,7 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: sessionToken, Path: "/", MaxAge: 86400, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, auth.SessionCookie(sessionToken, 86400, h.cookieDomain))
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: "", Path: "/auth/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }

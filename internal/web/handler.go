@@ -21,10 +21,11 @@ type Handler struct {
 	Authenticator  auth.Authenticator
 	SessionRevoker auth.SessionRevoker
 	Channel        domain.ConversationID
+	CookieDomain   string
 	Login          *LoginHandler
 }
 
-func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, sessionRevoker auth.SessionRevoker, channel domain.ConversationID) (Handler, error) {
+func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, sessionRevoker auth.SessionRevoker, channel, cookieDomain string) (Handler, error) {
 	if messages == nil {
 		return Handler{}, errors.New("web requires a chat service")
 	}
@@ -37,7 +38,10 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, sess
 	if channel == "" {
 		return Handler{}, errors.New("web requires a channel")
 	}
-	return Handler{Messages: messages, Authenticator: authenticator, SessionRevoker: sessionRevoker, Channel: channel}, nil
+	if err := auth.ValidateSessionCookieDomain(cookieDomain); err != nil {
+		return Handler{}, err
+	}
+	return Handler{Messages: messages, Authenticator: authenticator, SessionRevoker: sessionRevoker, Channel: domain.ConversationID(channel), CookieDomain: strings.TrimSpace(cookieDomain)}, nil
 }
 
 var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
@@ -107,6 +111,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
 	mux.HandleFunc("POST /app/pin", h.addPin)
 	mux.HandleFunc("POST /app/session/revoke", h.revokeSession)
+	mux.HandleFunc("POST /logout", h.revokeSession)
 }
 
 func (h Handler) search(w http.ResponseWriter, r *http.Request) {
@@ -190,12 +195,12 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, err)
 		return
 	}
-	cookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
-	if err := h.SessionRevoker.RevokeSession(r.Context(), cookie.Value); err != nil {
+	if err := h.SessionRevoker.RevokeSession(r.Context(), sessionCookie.Value); err != nil {
 		status := http.StatusServiceUnavailable
 		if errors.Is(err, store.ErrNotFound) {
 			status = http.StatusNotFound
@@ -203,7 +208,9 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session revocation unavailable", status)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: auth.SessionCookieName, Value: "", Path: "/", MaxAge: -1, Expires: time.Unix(1, 0).UTC(), HttpOnly: true, SameSite: http.SameSiteLaxMode})
+	cookie := auth.SessionCookie("", -1, h.CookieDomain)
+	cookie.Expires = time.Unix(1, 0).UTC()
+	http.SetCookie(w, cookie)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

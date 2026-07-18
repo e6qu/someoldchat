@@ -48,6 +48,7 @@ func main() {
 	authWorkspace := flag.String("auth-workspace", "", "workspace for external authorization (required when enabled)")
 	authLookupUser := flag.String("auth-lookup-user", "", "existing user used to authorize external identity lookup (required when enabled)")
 	authPublicURL := flag.String("auth-public-url", "", "public HTTPS URL used for authorization callbacks")
+	authCookieDomain := flag.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "shared parent DNS domain for browser single sign-on across applications")
 	authStateKeyHex := flag.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
 	bootstrapAdminEmail := flag.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
 	googleClientID := flag.String("google-client-id", "", "Google OAuth client ID")
@@ -175,7 +176,7 @@ func main() {
 		os.Exit(1)
 	}
 	slackHandler.Register(mux)
-	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, "Cdev")
+	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, "Cdev", *authCookieDomain)
 	if err != nil {
 		logger.Error("configure web", "error", err)
 		os.Exit(1)
@@ -225,7 +226,7 @@ func main() {
 			}
 			providers = append(providers, oidcProvider)
 		}
-		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(*authWorkspace), domain.UserID(*authLookupUser), *authPublicURL, stateKey, providers)
+		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(*authWorkspace), domain.UserID(*authLookupUser), *authPublicURL, *authCookieDomain, stateKey, providers)
 		if loginErr != nil {
 			logger.Error("configure external authorization", "error", loginErr)
 			os.Exit(1)

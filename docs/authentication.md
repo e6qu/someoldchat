@@ -33,6 +33,7 @@ The server command accepts these credentials and settings:
 -auth-workspace
 -auth-lookup-user
 -auth-public-url
+-auth-cookie-domain
 -auth-state-key-hex
 ```
 
@@ -47,9 +48,27 @@ For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
 `SAMEOLDCHAT_OIDC_ISSUER`, `SAMEOLDCHAT_OIDC_CLIENT_ID`, and
 `SAMEOLDCHAT_OIDC_CLIENT_SECRET` provide the corresponding flag defaults.
-`SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL` provides the email address of the initial
+`SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` sets the shared parent DNS hostname for
+cross-application browser single sign-on. `SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL`
+provides the email address of the initial
 workspace user. It must be the verified email the issuer returns: external
 identities are linked only to existing users and are never auto-provisioned.
+
+## Single sign-on and logout
+
+All browser applications that should share one sign-in must use the same
+durable session store and the same `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` value. The
+value is a parent DNS hostname such as `example.com`, and the application URLs
+must be subdomains of it. The server then issues one secure, HTTP-only session
+cookie for that domain. An empty value deliberately scopes the cookie to the
+single host and does not provide cross-application single sign-on.
+
+Each application validates the shared session against the durable session
+store. `POST /logout` and the existing application sign-out control revoke that
+session in the store and expire the shared cookie, so logout from any
+application signs the user out of all applications using that session. The
+application must use the same session store in monolith and separate modes;
+the gRPC session adapter is the authoritative path for separate mode.
 
 The server creates a short-lived signed state cookie and uses
 Proof Key for Code Exchange (PKCE). It links a returned external subject to an

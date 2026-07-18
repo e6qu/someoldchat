@@ -30,7 +30,7 @@ func TestHTMXPostMessage(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,11 +89,11 @@ func TestApplicationRedirectsUnauthenticatedBrowserToConfiguredOIDC(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: store}, authenticator, store, "C1")
+	handler, err := NewHandler(service.Messages{Store: store}, authenticator, store, "C1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "oidc", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/oauth2/userinfo", Scopes: []string{"openid", "profile", "email"}}})
+	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "oidc", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/oauth2/userinfo", Scopes: []string{"openid", "profile", "email"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestWebFormRejectsRepeatedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,13 +188,13 @@ func TestWebSessionRevocationClearsCookieAndDurablyInvalidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	req := httptest.NewRequest(http.MethodPost, "/app/session/revoke", nil)
+	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
@@ -203,6 +203,9 @@ func TestWebSessionRevocationClearsCookieAndDurablyInvalidates(t *testing.T) {
 	}
 	if !strings.Contains(res.Header().Get("Set-Cookie"), "Max-Age=0") {
 		t.Fatalf("session cookie was not cleared: %q", res.Header().Get("Set-Cookie"))
+	}
+	if !strings.Contains(res.Header().Get("Set-Cookie"), "Domain=example.com") {
+		t.Fatalf("shared session cookie domain was not cleared: %q", res.Header().Get("Set-Cookie"))
 	}
 	record, err := s.LookupSession(context.Background(), "session")
 	if err != nil || !record.Revoked {
@@ -221,7 +224,7 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +269,7 @@ func TestHTMXReactionAndPinMutationsUseExplicitMessageTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +317,7 @@ func TestWebOpensNormalizedDirectConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1")
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "C1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
