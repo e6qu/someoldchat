@@ -58,6 +58,9 @@ jobs:
       - name: Run bounded load tests
         run: make test-load
 
+      - name: Run distributed transport load test
+        run: make test-transport-load
+
       - name: Run fuzz smoke tests
         run: make test-fuzz
 
