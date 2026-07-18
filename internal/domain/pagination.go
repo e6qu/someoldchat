@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Cursor string
@@ -101,7 +102,7 @@ var ErrInvalidCursor = errors.New("invalid cursor")
 type listCursor struct{ ID string }
 
 func NewListCursor(id string) (Cursor, error) {
-	if id == "" {
+	if id == "" || !utf8.ValidString(id) {
 		return "", ErrInvalidCursor
 	}
 	body, err := json.Marshal(listCursor{ID: id})
@@ -127,6 +128,9 @@ func DecodeListCursor(cursor Cursor) (string, error) {
 }
 
 func NewMessageCursor(message Message) (Cursor, error) {
+	if message.ID == "" || !utf8.ValidString(string(message.ID)) {
+		return "", ErrInvalidCursor
+	}
 	body, err := json.Marshal(messageCursor{CreatedAt: message.CreatedAt.UTC(), ID: message.ID, Root: message.ThreadTimestamp == ""})
 	if err != nil {
 		return "", err
