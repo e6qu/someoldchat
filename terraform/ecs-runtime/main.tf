@@ -1,9 +1,15 @@
 locals {
   tags = merge(var.tags, { Name = var.name })
+
+  # Application names may be hierarchical (for example, "sameoldchat/dev")
+  # for secret and tag namespaces. Amazon Simple Storage Service (Amazon S3)
+  # bucket prefixes cannot contain slashes, so map that separator to the
+  # equivalent bucket-safe delimiter.
+  blob_bucket_prefix = "${replace(var.name, "/", "-")}-blobs-"
 }
 
 resource "aws_s3_bucket" "blobs" {
-  bucket_prefix = "${var.name}-blobs-"
+  bucket_prefix = local.blob_bucket_prefix
   force_destroy = false
   tags          = local.tags
 }

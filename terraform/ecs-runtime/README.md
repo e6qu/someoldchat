@@ -4,7 +4,9 @@ This module owns the durable, application-specific resources for a SameOldChat
 Amazon Elastic Container Service deployment:
 
 - a private Amazon Simple Storage Service bucket for uploads, with versioning
-  explicitly suspended and incomplete multipart uploads removed after one day;
+  explicitly suspended and incomplete multipart uploads removed after one day.
+  Hierarchical application names are normalized to an Amazon S3-safe bucket
+  prefix while remaining unchanged for secrets and tags;
 - distinct AWS Secrets Manager values for the API token, browser session token,
   and OpenID Connect authorization-state key; and
 - the least-privilege task-role policy needed to access the bucket.
