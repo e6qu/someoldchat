@@ -55,6 +55,12 @@ jobs:
       - name: Run tests
         run: make test
 
+      - name: Run bounded load tests
+        run: make test-load
+
+      - name: Run fuzz smoke tests
+        run: make test-fuzz
+
       - name: Run race tests
         run: make test-race
 

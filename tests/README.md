@@ -13,6 +13,8 @@ against browser behavior, official Slack SDKs, and native dqlite behavior.
   real PostgreSQL server when `SAMEOLDCHAT_POSTGRES_DSN` is set.
 - [Persistence qualification](persistence-qualification/README.md) runs the
   same repository contract against SQLite, PostgreSQL, and dqlite.
+- [Load tests](load/README.md) exercise bounded concurrent writes and
+  pagination invariants against the in-memory repository.
 
 Application unit and integration tests remain next to the Go packages they
 test. This directory is reserved for qualification suites with external

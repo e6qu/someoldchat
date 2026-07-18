@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -43,6 +43,19 @@ test:
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race ./...
+
+test-load:
+	GOCACHE=$(GOCACHE) go test ./tests/load -count=1
+
+test-load-race:
+	GOCACHE=$(GOCACHE) go test -race ./tests/load -count=1
+
+test-fuzz:
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzListCursorRoundTrips -fuzztime=1s
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzMessageCursorRoundTrips -fuzztime=1s
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeScopes -fuzztime=1s
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeConversationTypes -fuzztime=1s
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONScalarNeverPanics -fuzztime=1s
 
 generate:
 	$(MAKE) proto-tools
