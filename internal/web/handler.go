@@ -210,6 +210,10 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
+		if errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
+			http.Redirect(w, r, "/auth/oidc", http.StatusSeeOther)
+			return
+		}
 		h.writeAuthError(w, err)
 		return
 	}

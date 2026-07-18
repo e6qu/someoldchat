@@ -250,10 +250,7 @@ func main() {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	mux.HandleFunc("GET /readyz", readinessHandler(chatService))
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = w.Write([]byte("<!doctype html><title>SameOldChat</title><h1>SameOldChat</h1>"))
-	})
+	mux.HandleFunc("GET /{$}", applicationRootHandler)
 
 	server := &http.Server{Addr: *addr, Handler: mux}
 	logger.Info("server listening", "addr", *addr)
@@ -281,6 +278,10 @@ func main() {
 
 func databaseDSNDefault() string {
 	return os.Getenv("SAMEOLDCHAT_DATABASE_URL")
+}
+
+func applicationRootHandler(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
 func readinessHandler(chatService chatapi.Service) http.HandlerFunc {

@@ -80,6 +80,33 @@ func TestHTMXPostMessage(t *testing.T) {
 	}
 }
 
+func TestApplicationRedirectsUnauthenticatedBrowserToConfiguredOIDC(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	authenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store}, authenticator, store, "C1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "oidc", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/oauth2/userinfo", Scopes: []string{"openid", "profile", "email"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app", nil))
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/auth/oidc" {
+		t.Fatalf("unauthenticated application response = %d location=%q", response.Code, response.Header().Get("Location"))
+	}
+}
+
 func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()

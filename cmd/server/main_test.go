@@ -30,6 +30,15 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestApplicationRootRedirectsToTheAuthenticatedApplication(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+	applicationRootHandler(response, request)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/app" {
+		t.Fatalf("root response = %d location=%q", response.Code, response.Header().Get("Location"))
+	}
+}
+
 func TestReadinessChecksTheSelectedService(t *testing.T) {
 	selected := memory.New()
 	selected.SeedWorkspace(domain.Workspace{ID: "Tdev"})
