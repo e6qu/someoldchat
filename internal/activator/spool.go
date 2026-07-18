@@ -64,6 +64,8 @@ func OpenSQLiteSpool(dsn string, key []byte, limits SpoolLimits) (*SQLiteSpool, 
 	if err != nil {
 		return nil, fmt.Errorf("open SQLite request spool: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	spool := &SQLiteSpool{db: db, cipher: sealed, limits: limits}
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS activator_request_spool (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, payload BLOB NOT NULL, body_bytes INTEGER NOT NULL DEFAULT 0, lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '')`); err != nil {
 		_ = db.Close()

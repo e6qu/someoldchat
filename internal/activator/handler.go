@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
@@ -22,6 +23,9 @@ type Handler struct {
 	forward    http.Handler
 	spool      Spool
 	spoolOwner string
+	processMu  *sync.Mutex
+	queueMu    *sync.Mutex
+	waiters    map[uint64]chan spoolResult
 	maxBody    int64
 	wakeWait   time.Duration
 	metrics    *observability.Registry
@@ -37,7 +41,7 @@ func NewHandler(controller *lifecycle.Controller, wake WakeFunc, metrics *observ
 	if metrics == nil {
 		return Handler{}, errors.New("activator requires metrics")
 	}
-	handler := Handler{controller: controller, wake: wake, metrics: metrics}
+	handler := Handler{controller: controller, wake: wake, metrics: metrics, processMu: &sync.Mutex{}, queueMu: &sync.Mutex{}, waiters: make(map[uint64]chan spoolResult)}
 	handler.recordLifecycleState()
 	return handler, nil
 }
@@ -120,8 +124,10 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
+	h.queueMu.Lock()
 	id, err := h.spool.Enqueue(context.Background(), r, body)
 	if err != nil {
+		h.queueMu.Unlock()
 		h.recordRejected(int64(len(body)))
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "request spool unavailable", http.StatusServiceUnavailable)
@@ -130,9 +136,14 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	h.metrics.AddCounter("sameoldchat_activator_buffered_requests_total", 1)
 	h.metrics.AddCounter("sameoldchat_activator_buffered_bytes_total", uint64(len(body)))
 	result := make(chan spoolResult, 1)
+	h.waiters[id] = result
+	h.queueMu.Unlock()
+	defer h.removeSpoolWaiter(id, result)
 	go func() {
-		response, err := h.processSpool(context.Background(), id)
-		result <- spoolResult{response: response, err: err}
+		err := h.processSpool(context.Background())
+		if err != nil {
+			h.completeSpoolRequest(id, spoolResult{err: err})
+		}
 	}()
 	select {
 	case value := <-result:
@@ -147,18 +158,25 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (h Handler) processSpool(ctx context.Context, currentID uint64) (capturedResponse, error) {
-	if err := h.ensureActive(ctx); err != nil {
-		return capturedResponse{}, err
+func (h Handler) processSpool(ctx context.Context) error {
+	if h.processMu == nil {
+		return errors.New("activator spool processor is not initialized")
 	}
+	h.processMu.Lock()
+	defer h.processMu.Unlock()
+	if err := h.ensureActive(ctx); err != nil {
+		return err
+	}
+	h.queueMu.Lock()
 	requests, err := h.spool.Claim(ctx, h.spoolOwner, 64, h.wakeWait)
+	h.queueMu.Unlock()
 	if err != nil {
-		return capturedResponse{}, err
+		return err
 	}
 	for _, request := range requests {
 		replay, err := http.NewRequestWithContext(ctx, request.Method, request.URL, bytes.NewReader(request.Body))
 		if err != nil {
-			return capturedResponse{}, err
+			return err
 		}
 		replay.Header = request.Header.Clone()
 		removeHopByHopHeaders(replay.Header)
@@ -169,22 +187,50 @@ func (h Handler) processSpool(ctx context.Context, currentID uint64) (capturedRe
 		capture := newCapturedResponse(h.maxBody)
 		h.forward.ServeHTTP(capture, replay)
 		if capture.err != nil {
-			return capturedResponse{}, capture.err
+			h.completeSpoolRequest(request.ID, spoolResult{err: capture.err})
+			return capture.err
 		}
 		if capture.status < http.StatusInternalServerError {
 			if err := h.spool.Delete(ctx, h.spoolOwner, request.ID); err != nil {
-				return capturedResponse{}, err
+				h.completeSpoolRequest(request.ID, spoolResult{err: err})
+				return err
 			}
-		} else if request.ID == currentID {
-			return capture.response(), nil
-		} else {
-			return capturedResponse{}, errors.New("spooled request delivery returned a server error")
+			h.completeSpoolRequest(request.ID, spoolResult{response: capture.response()})
+			continue
 		}
-		if request.ID == currentID {
-			return capture.response(), nil
-		}
+		h.completeSpoolRequest(request.ID, spoolResult{response: capture.response()})
+		return errors.New("spooled request delivery returned a server error")
 	}
-	return capturedResponse{}, errors.New("spooled request was not delivered")
+	return nil
+}
+
+func (h Handler) completeSpoolRequest(id uint64, result spoolResult) {
+	if h.processMu == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	h.completeSpoolRequestLocked(id, result)
+}
+
+func (h Handler) completeSpoolRequestLocked(id uint64, result spoolResult) {
+	waiter, ok := h.waiters[id]
+	if !ok {
+		return
+	}
+	delete(h.waiters, id)
+	waiter <- result
+}
+
+func (h Handler) removeSpoolWaiter(id uint64, waiter chan spoolResult) {
+	if h.processMu == nil {
+		return
+	}
+	h.queueMu.Lock()
+	defer h.queueMu.Unlock()
+	if current, ok := h.waiters[id]; ok && current == waiter {
+		delete(h.waiters, id)
+	}
 }
 
 // removeHopByHopHeaders keeps replayed requests semantically identical while
