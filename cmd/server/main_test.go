@@ -68,3 +68,10 @@ func TestParseClusterRejectsEmptyAddress(t *testing.T) {
 		t.Fatal("empty cluster address was accepted")
 	}
 }
+
+func TestDatabaseDSNDefaultUsesRuntimeEnvironment(t *testing.T) {
+	t.Setenv("SAMEOLDCHAT_DATABASE_URL", "postgres://sameoldchat:secret@postgres.example:5432/sameoldchat?sslmode=require")
+	if got, want := databaseDSNDefault(), "postgres://sameoldchat:secret@postgres.example:5432/sameoldchat?sslmode=require"; got != want {
+		t.Fatalf("database DSN default = %q, want %q", got, want)
+	}
+}
