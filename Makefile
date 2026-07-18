@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-dqlite sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check contract-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -33,6 +33,10 @@ build-dqlite:
 
 test-dqlite:
 	GOCACHE=$(GOCACHE) go test -tags dqlite ./...
+
+test-postgres:
+	test -n "$(SAMEOLDCHAT_POSTGRES_DSN)"
+	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...

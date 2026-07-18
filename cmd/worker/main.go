@@ -22,8 +22,8 @@ import (
 )
 
 func main() {
-	backend := flag.String("store", "", "storage backend: memory, sqlite, or dqlite (required)")
-	dsn := flag.String("db", "", "SQLite DSN; required for sqlite")
+	backend := flag.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
+	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
 	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory")
 	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address")
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")

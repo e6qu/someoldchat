@@ -3,6 +3,7 @@ package qualification
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -26,9 +27,10 @@ func TestCoreRepositoryContract(t *testing.T) {
 	repository, closeRepository := openStore(t, ctx)
 	defer closeRepository()
 
-	workspace := domain.Workspace{ID: "T-qualification", Name: "Qualification"}
-	user := domain.User{ID: "U-qualification", WorkspaceID: workspace.ID, Email: "Alice@example.com", Name: "alice"}
-	conversation := domain.Conversation{ID: "C-qualification", WorkspaceID: workspace.ID, Name: "general"}
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspace := domain.Workspace{ID: domain.WorkspaceID("T-qualification-" + suffix), Name: "Qualification"}
+	user := domain.User{ID: domain.UserID("U-qualification-" + suffix), WorkspaceID: workspace.ID, Email: "Alice@example.com", Name: "alice"}
+	conversation := domain.Conversation{ID: domain.ConversationID("C-qualification-" + suffix), WorkspaceID: workspace.ID, Name: "general"}
 	if err := repository.SeedWorkspace(ctx, workspace); err != nil {
 		t.Fatal(err)
 	}
@@ -51,18 +53,19 @@ func TestCoreRepositoryContract(t *testing.T) {
 	}
 
 	createdAt := time.Unix(1700000000, 0).UTC()
-	message := domain.Message{ID: "M-qualification", WorkspaceID: workspace.ID, Conversation: conversation.ID, AuthorID: user.ID, Text: "committed", CreatedAt: createdAt}
-	event := events.Event{ID: "E-qualification", WorkspaceID: workspace.ID, Topic: "message.created", Payload: string(message.ID), CreatedAt: createdAt}
-	if err := repository.CreateMessage(ctx, message, event, "idempotency-qualification"); err != nil {
+	message := domain.Message{ID: domain.MessageID("M-qualification-" + suffix), WorkspaceID: workspace.ID, Conversation: conversation.ID, AuthorID: user.ID, Text: "committed", CreatedAt: createdAt}
+	event := events.Event{ID: domain.EventID("E-qualification-" + suffix), WorkspaceID: workspace.ID, Topic: "message.created", Payload: string(message.ID), CreatedAt: createdAt}
+	idempotencyKey := "idempotency-qualification-" + suffix
+	if err := repository.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
 		t.Fatal(err)
 	}
 	duplicate := message
-	duplicate.ID = "M-qualification-duplicate"
+	duplicate.ID = domain.MessageID("M-qualification-duplicate-" + suffix)
 	duplicate.Text = "different"
 	duplicateEvent := event
-	duplicateEvent.ID = "E-qualification-duplicate"
+	duplicateEvent.ID = domain.EventID("E-qualification-duplicate-" + suffix)
 	duplicateEvent.Payload = string(duplicate.ID)
-	if err := repository.CreateMessage(ctx, duplicate, duplicateEvent, "idempotency-qualification"); !errors.Is(err, store.ErrIdempotencyConflict) {
+	if err := repository.CreateMessage(ctx, duplicate, duplicateEvent, idempotencyKey); !errors.Is(err, store.ErrIdempotencyConflict) {
 		t.Fatalf("duplicate idempotency error=%v, want ErrIdempotencyConflict", err)
 	}
 
@@ -80,7 +83,7 @@ func TestCoreRepositoryContract(t *testing.T) {
 	if len(page.Messages) != 1 || page.Messages[0].ID != message.ID || page.HasMore {
 		t.Fatalf("message page=%+v, want one bounded item", page)
 	}
-	if _, err := repository.GetIdempotentMessage(ctx, workspace.ID, user.ID, "idempotency-qualification"); err != nil {
+	if _, err := repository.GetIdempotentMessage(ctx, workspace.ID, user.ID, idempotencyKey); err != nil {
 		t.Fatal(err)
 	}
 }

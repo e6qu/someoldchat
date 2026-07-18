@@ -69,6 +69,15 @@ func TestValidateAllowsMultipleStatelessReplicasWithMemoryStorage(t *testing.T) 
 	}
 }
 
+func TestValidateAllowsMultiplePostgreSQLOwners(t *testing.T) {
+	value := validManifest()
+	value.Targets[0].Storage = "postgresql"
+	value.Targets[0].Replicas["app"] = 2
+	if err := validate(value); err != nil {
+		t.Fatalf("validate() rejected PostgreSQL replicas: %v", err)
+	}
+}
+
 func TestValidateRejectsSQLiteOwnerWithMultipleReplicas(t *testing.T) {
 	value := validManifest()
 	value.Targets[0].Storage = "sqlite"

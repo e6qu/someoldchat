@@ -88,6 +88,12 @@ func TestOpenMemoryProvidesAuthSeeders(t *testing.T) {
 	}
 }
 
+func TestOpenPostgreSQLRequiresExplicitDSN(t *testing.T) {
+	if _, err := Open(context.Background(), Config{Backend: BackendPostgreSQL}); err == nil || !strings.Contains(err.Error(), "DSN") {
+		t.Fatalf("PostgreSQL without DSN error=%v, want explicit DSN error", err)
+	}
+}
+
 func TestOpenBlobStoreRequiresOneExplicitProvider(t *testing.T) {
 	if _, err := openBlobStore(context.Background(), Config{BlobDirectory: filepath.Join(t.TempDir(), "objects"), BlobS3Bucket: "bucket", BlobMaxBytes: 1024}); err == nil {
 		t.Fatal("filesystem and Amazon Simple Storage Service blob stores were accepted together")

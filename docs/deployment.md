@@ -17,12 +17,12 @@ hibernation, wake, fencing, and recovery tests.
 
 ## Capability matrix
 
-| Profile | Stateless tiers | SQLite | dqlite | Cold database |
-|---|---|---|---|---|
-| Linux VM | Native | Recommended for one VM | Supported on 3+ VMs | Snapshot, then stop units/VMs |
-| AWS ECS/Fargate | Native | Conditional single-owner | Targeted via stable ECS services | S3 snapshot, desired count 0 |
-| Google Cloud Run | Native | Not authoritative on local disk | Companion compute required | Cloud Storage snapshot, compute 0 |
-| Azure Container Apps | Native | Conditional single-owner | Conditional raw-TCP profile; VM profile is a separate qualified option | Blob snapshot, replicas/VMs 0 |
+| Profile | Stateless tiers | SQLite | PostgreSQL | dqlite | Cold database |
+|---|---|---|---|---|---|
+| Linux VM | Native | Recommended for one VM | Supported with a durable PostgreSQL service | Supported on 3+ VMs | Snapshot, then stop units/VMs |
+| AWS ECS/Fargate | Native | Conditional single-owner | Supported when PostgreSQL is external to ECS | Targeted via stable ECS services | S3 snapshot, desired count 0 |
+| Google Cloud Run | Native | Not authoritative on local disk | Use an external PostgreSQL service | Companion compute required | Cloud Storage snapshot, compute 0 |
+| Azure Container Apps | Native | Conditional single-owner | Use an external PostgreSQL service | Conditional raw-TCP profile; VM profile is a separate qualified option | Blob snapshot, replicas/VMs 0 |
 
 “Conditional” means the profile must pass the version-pinned qualification
 suite before production use.
@@ -36,7 +36,7 @@ name: sameoldchat
 region: provider-region
 
 storage:
-  driver: sqlite # or dqlite
+  driver: sqlite # or postgresql or dqlite
   database: sameoldchat
 
 hibernation:
