@@ -10,6 +10,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store/sqlstore"
 )
 
 func TestParseClusterNormalizesAndRejectsDuplicateAddresses(t *testing.T) {
@@ -19,6 +20,24 @@ func TestParseClusterNormalizesAndRejectsDuplicateAddresses(t *testing.T) {
 	}
 	if _, err := ParseCluster("node-a:1,node-a:1"); err == nil || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("duplicate cluster error=%v", err)
+	}
+}
+
+func TestBootstrapSeedsOIDCResolvableAdministrator(t *testing.T) {
+	store, err := sqlstore.Open(context.Background(), filepath.Join(t.TempDir(), "chat.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := bootstrap(context.Background(), store, " admin@example.com "); err != nil {
+		t.Fatal(err)
+	}
+	user, err := store.FindUserByEmail(context.Background(), "Tdev", "ADMIN@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.ID != "Udev" || user.Email != "admin@example.com" {
+		t.Fatalf("user=%+v", user)
 	}
 }
 

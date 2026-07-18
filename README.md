@@ -33,6 +33,9 @@ request-triggered restoration for deployments that support scale-to-zero.
   The AWS Elastic Container Service scale-to-zero module is the current
   provider-specific infrastructure implementation; the other profiles require
   their stated qualification work.
+- The production container uses standard OpenID Connect discovery, so Shauth
+  and other conforming identity providers are configured by issuer URL rather
+  than by cloud-specific integration.
 
 The documents distinguish implemented behavior from qualification work. The
 same module interfaces support direct Go calls in monolith mode and generated

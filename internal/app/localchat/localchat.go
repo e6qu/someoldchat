@@ -44,16 +44,17 @@ const (
 )
 
 type Config struct {
-	Backend         Backend
-	DSN             string
-	DqliteDirectory string
-	DqliteAddress   string
-	DqliteCluster   []string
-	DqliteDatabase  string
-	BlobDirectory   string
-	BlobS3Bucket    string
-	BlobS3Prefix    string
-	BlobMaxBytes    int64
+	Backend             Backend
+	DSN                 string
+	DqliteDirectory     string
+	DqliteAddress       string
+	DqliteCluster       []string
+	DqliteDatabase      string
+	BlobDirectory       string
+	BlobS3Bucket        string
+	BlobS3Prefix        string
+	BlobMaxBytes        int64
+	BootstrapAdminEmail string
 }
 
 func ParseCluster(value string) ([]string, error) {
@@ -113,7 +114,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	case BackendMemory:
 		memoryStore := memory.New()
 		memoryStore.SeedWorkspace(domain.Workspace{ID: "Tdev", Name: "SameOldChat"})
-		memoryStore.SeedUser(domain.User{ID: "Udev", WorkspaceID: "Tdev", Name: "sameoldchat", RealName: "SameOldChat"})
+		memoryStore.SeedUser(domain.User{ID: "Udev", WorkspaceID: "Tdev", Email: strings.TrimSpace(config.BootstrapAdminEmail), Name: "sameoldchat", RealName: "SameOldChat"})
 		memoryStore.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})
 		chatStore, closer = memoryStore, memoryCloser{}
 	case BackendSQLite:
@@ -135,7 +136,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 			_ = closer.Close()
 			return Runtime{}, errors.New("selected SQL store does not support bootstrap")
 		}
-		if err := bootstrap(ctx, selected); err != nil {
+		if err := bootstrap(ctx, selected, config.BootstrapAdminEmail); err != nil {
 			_ = closer.Close()
 			return Runtime{}, err
 		}
@@ -203,11 +204,11 @@ func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {
 	return blob.NewS3(s3.NewFromConfig(awsConfig), config.BlobS3Bucket, config.BlobS3Prefix, config.BlobMaxBytes)
 }
 
-func bootstrap(ctx context.Context, selected bootstrapStore) error {
+func bootstrap(ctx context.Context, selected bootstrapStore, adminEmail string) error {
 	if err := selected.SeedWorkspace(ctx, domain.Workspace{ID: "Tdev", Name: "SameOldChat"}); err != nil {
 		return err
 	}
-	if err := selected.SeedUser(ctx, domain.User{ID: "Udev", WorkspaceID: "Tdev", Name: "sameoldchat", RealName: "SameOldChat"}); err != nil {
+	if err := selected.SeedUser(ctx, domain.User{ID: "Udev", WorkspaceID: "Tdev", Email: strings.TrimSpace(adminEmail), Name: "sameoldchat", RealName: "SameOldChat"}); err != nil {
 		return err
 	}
 	return selected.SeedConversation(ctx, domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})

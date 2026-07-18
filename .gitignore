@@ -1,5 +1,6 @@
 /bin/
 /.cache/
+**/.terraform/
 /coverage.out
 /dist/
 
