@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+message DisconnectSharedConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string leaving_team_ids = 4;
+}
+
+message ConnectedChannelInfo {
+  string channel_id = 1;
+  repeated string internal_team_ids = 2;
+  string original_connected_channel_id = 3;
+  string original_connected_host_id = 4;
+}
+
+message ConnectedChannelInfoRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string channel_ids = 3;
+  repeated string team_ids = 4;
+  int32 limit = 5;
+  string cursor = 6;
+}
+
+message ConnectedChannelInfoResponse {
+  repeated ConnectedChannelInfo channels = 1;
+  bool has_more = 2;
+  string next_cursor = 3;
+}
+
+service EnterpriseConversationsService {
+  rpc DisconnectShared(DisconnectSharedConversationRequest) returns (MutationResponse);
+  rpc ListOriginalConnectedChannelInfo(ConnectedChannelInfoRequest) returns (ConnectedChannelInfoResponse);
+}

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message RTMConnectionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message RTMConnectionIDRequest {
+  string id = 1;
+}
+
+message RTMConnection {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  int64 expires_at_unix_nano = 4;
+}
+
+service RTMService {
+  rpc CreateConnection(RTMConnectionRequest) returns (RTMConnection);
+  rpc ConsumeConnection(RTMConnectionIDRequest) returns (RTMConnection);
+}

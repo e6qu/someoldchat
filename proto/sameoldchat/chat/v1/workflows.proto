@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message WorkflowStepRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_step_execute_id = 3;
+  string outputs = 4;
+  string error = 5;
+}
+
+message WorkflowStepUpdateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_step_edit_id = 3;
+  string inputs = 4;
+  string outputs = 5;
+  string step_name = 6;
+  string step_image_url = 7;
+}
+
+message WorkflowStepMutationResponse {
+  bool ok = 1;
+}
+
+service WorkflowsService {
+  rpc StepCompleted(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
+  rpc StepFailed(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
+  rpc UpdateStep(WorkflowStepUpdateRequest) returns (WorkflowStepMutationResponse);
+}

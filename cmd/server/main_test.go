@@ -1,0 +1,70 @@
+package main
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"testing"
+
+	"github.com/sameoldchat/sameoldchat/internal/app/localchat"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/store/memory"
+)
+
+func TestHealthz(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("ok\n"))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusOK)
+	}
+	if got := res.Body.String(); got != "ok\n" {
+		t.Fatalf("body = %q, want %q", got, "ok\\n")
+	}
+}
+
+func TestReadinessChecksTheSelectedService(t *testing.T) {
+	selected := memory.New()
+	selected.SeedWorkspace(domain.Workspace{ID: "Tdev"})
+	selected.SeedUser(domain.User{ID: "Udev", WorkspaceID: "Tdev"})
+	selected.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /readyz", readinessHandler(service.Messages{Store: selected}))
+	request := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	result := httptest.NewRecorder()
+	mux.ServeHTTP(result, request)
+	if result.Code != http.StatusOK || result.Body.String() != "ready\n" {
+		t.Fatalf("ready status=%d body=%q", result.Code, result.Body.String())
+	}
+	mux = http.NewServeMux()
+	mux.HandleFunc("GET /readyz", readinessHandler(service.Messages{Store: memory.New()}))
+	result = httptest.NewRecorder()
+	mux.ServeHTTP(result, request)
+	if result.Code != http.StatusServiceUnavailable || result.Body.String() != "not ready\n" {
+		t.Fatalf("not-ready status=%d body=%q", result.Code, result.Body.String())
+	}
+}
+
+func TestParseClusterNormalizesAddresses(t *testing.T) {
+	got, err := localchat.ParseCluster(" node-a:19001, node-b:19001 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"node-a:19001", "node-b:19001"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cluster = %#v, want %#v", got, want)
+	}
+}
+
+func TestParseClusterRejectsEmptyAddress(t *testing.T) {
+	if _, err := localchat.ParseCluster("node-a:19001,,node-b:19001"); err == nil {
+		t.Fatal("empty cluster address was accepted")
+	}
+}

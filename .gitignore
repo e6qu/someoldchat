@@ -1,0 +1,9 @@
+/bin/
+/.cache/
+/coverage.out
+/dist/
+
+# Generated catalogs and local evidence are not source contracts.
+/specs/generated/*
+/specs/evidence/*
+*.local.yaml

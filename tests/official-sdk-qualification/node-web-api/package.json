@@ -1,0 +1,8 @@
+{
+  "name": "sameoldchat-node-web-api-qualification",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@slack/web-api": "7.19.0"
+  }
+}
