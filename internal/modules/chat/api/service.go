@@ -14,6 +14,11 @@ import (
 type Service interface {
 	RevokeToken(context.Context, string) error
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
+	CreateAppInstallation(context.Context, domain.AppInstallation) error
+	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
+	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
+	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	RevokeSession(context.Context, string) error
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	GetAuthMethod(context.Context, domain.WorkspaceID, string) (domain.AuthMethod, error)

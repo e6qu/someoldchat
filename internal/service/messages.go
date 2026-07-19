@@ -69,6 +69,26 @@ func (m Messages) LookupAppToken(ctx context.Context, token string) (domain.AppT
 	return m.Store.LookupAppToken(ctx, token)
 }
 
+func (m Messages) CreateAppInstallation(ctx context.Context, value domain.AppInstallation) error {
+	return m.Store.CreateAppInstallation(ctx, value)
+}
+
+func (m Messages) ListAppInstallations(ctx context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
+	return m.Store.ListAppInstallations(ctx, appID)
+}
+
+func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
+	return m.Store.ListAppEventsAfter(ctx, appID, after, limit)
+}
+
+func (m Messages) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
+	return m.Store.GetSocketModeCursor(ctx, appID)
+}
+
+func (m Messages) SetSocketModeCursor(ctx context.Context, appID domain.AppID, cursor uint64) error {
+	return m.Store.SetSocketModeCursor(ctx, appID, cursor)
+}
+
 func (m Messages) CreateSocketModeConnection(ctx context.Context, value domain.SocketModeConnection) error {
 	return m.Store.CreateSocketModeConnection(ctx, value)
 }
@@ -1376,6 +1396,9 @@ func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, cod
 	}
 	token.AppID = client.AppID
 	token.TokenType = "user"
+	if err := m.Store.CreateAppInstallation(ctx, domain.AppInstallation{AppID: client.AppID, WorkspaceID: token.WorkspaceID, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		return domain.OAuthToken{}, err
+	}
 	return token, nil
 }
 

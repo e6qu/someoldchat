@@ -127,10 +127,16 @@ Socket Mode uses an app-level token with the `connections:write` scope. The
 lease and returns a WebSocket URL. The WebSocket consumes that lease, sends a
 `hello` message, and acknowledges each valid received envelope by returning
 its `envelope_id`. A missing envelope identifier closes the connection with a
-protocol error. The lease is stored through the same repository boundary as
-the rest of the application, so separate HTTP replicas do not depend on local
-process memory. Event delivery and response payload routing remain tracked
-work in the compatibility ledger.
+protocol error. Approved app installations identify the workspaces whose
+durable outbox events can be delivered. The last acknowledged event sequence
+is stored per app, so a replacement process resumes after the last confirmed
+event instead of depending on process memory. The implementation exposes one
+active connection per app and uses a bounded one-event-at-a-time delivery loop;
+the client must acknowledge an event before the next event is sent.
+
+Response payloads are accepted only for known event envelopes and must be
+valid JSON. Their application-specific routing remains tracked in the
+compatibility ledger.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).

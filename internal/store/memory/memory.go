@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type Store struct {
 	conversationOrg      map[domain.ConversationID]bool
 	inviteRequests       map[domain.InviteRequestID]domain.InviteRequest
 	appApprovals         map[domain.AppID]domain.AppApproval
+	appInstallations     map[string]domain.AppInstallation
 	permissionRequests   map[domain.AppRequestID]domain.AppPermissionRequest
 	views                map[domain.ViewID]domain.View
 	workflowSteps        map[domain.WorkflowStepID]domain.WorkflowStep
@@ -37,6 +39,7 @@ type Store struct {
 	oauthCodes           map[string]domain.OAuthCode
 	rtmConnections       map[string]domain.RTMConnection
 	socketConnections    map[string]domain.SocketModeConnection
+	socketCursors        map[domain.AppID]uint64
 	memberships          map[domain.ConversationID]map[domain.UserID]struct{}
 	tokens               map[string]domain.TokenRecord
 	appTokens            map[string]domain.AppTokenRecord
@@ -126,7 +129,7 @@ type memoryLease struct {
 }
 
 func New() *Store {
-	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
+	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), appInstallations: make(map[string]domain.AppInstallation), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -1268,6 +1271,47 @@ func validAppApprovalStatus(status domain.AppApprovalStatus) bool {
 	return status == domain.AppApprovalRequested || status == domain.AppApprovalApproved || status == domain.AppApprovalRestricted
 }
 
+func appInstallationKey(appID domain.AppID, workspaceID domain.WorkspaceID) string {
+	return string(appID) + "\x00" + string(workspaceID)
+}
+
+func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstallation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if value.AppID == "" || value.WorkspaceID == "" || value.CreatedAt.IsZero() {
+		return store.ErrInvalidAppApproval
+	}
+	key := appInstallationKey(value.AppID, value.WorkspaceID)
+	if existing, ok := s.appInstallations[key]; ok {
+		if existing.Enabled == value.Enabled {
+			return nil
+		}
+		existing.Enabled = value.Enabled
+		s.appInstallations[key] = existing
+		return nil
+	}
+	s.appInstallations[key] = value
+	return nil
+}
+
+func (s *Store) ListAppInstallations(_ context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
+	if appID == "" {
+		return nil, store.ErrInvalidAppApproval
+	}
+	s.mu.RLock()
+	values := make([]domain.AppInstallation, 0)
+	for _, value := range s.appInstallations {
+		if value.AppID == appID && value.Enabled {
+			values = append(values, value)
+		}
+	}
+	s.mu.RUnlock()
+	slices.SortFunc(values, func(left, right domain.AppInstallation) int {
+		return strings.Compare(string(left.WorkspaceID), string(right.WorkspaceID))
+	})
+	return values, nil
+}
+
 func (s *Store) SetAppApproval(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus, updatedAt time.Time, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1793,6 +1837,29 @@ func (s *Store) ConsumeSocketModeConnection(_ context.Context, id string) (domai
 	}
 	delete(s.socketConnections, id)
 	return value, nil
+}
+
+func (s *Store) GetSocketModeCursor(_ context.Context, appID domain.AppID) (uint64, error) {
+	if appID == "" {
+		return 0, store.ErrInvalidAppApproval
+	}
+	s.mu.RLock()
+	cursor := s.socketCursors[appID]
+	s.mu.RUnlock()
+	return cursor, nil
+}
+
+func (s *Store) SetSocketModeCursor(_ context.Context, appID domain.AppID, cursor uint64) error {
+	if appID == "" {
+		return store.ErrInvalidAppApproval
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cursor < s.socketCursors[appID] {
+		return store.ErrConflict
+	}
+	s.socketCursors[appID] = cursor
+	return nil
 }
 
 func (s *Store) SetConversationPrivate(_ context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
@@ -3150,6 +3217,35 @@ func (s *Store) ListEventsAfter(_ context.Context, workspace domain.WorkspaceID,
 			break
 		}
 	}
+	return result, nil
+}
+
+func (s *Store) ListAppEventsAfter(_ context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
+	if appID == "" || limit <= 0 {
+		return nil, errors.New("app ID and positive event limit are required")
+	}
+	s.mu.RLock()
+	workspaces := make(map[domain.WorkspaceID]struct{})
+	for _, installation := range s.appInstallations {
+		if installation.AppID == appID && installation.Enabled {
+			workspaces[installation.WorkspaceID] = struct{}{}
+		}
+	}
+	result := make([]events.Record, 0, limit)
+	for sequence, event := range s.outbox {
+		current := uint64(sequence + 1)
+		if current <= after || event.Topic == events.FileBlobDeleteTopic {
+			continue
+		}
+		if _, ok := workspaces[event.WorkspaceID]; !ok {
+			continue
+		}
+		result = append(result, events.Record{Sequence: current, Event: event})
+		if len(result) == limit {
+			break
+		}
+	}
+	s.mu.RUnlock()
 	return result, nil
 }
 

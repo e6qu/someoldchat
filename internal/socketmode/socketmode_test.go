@@ -8,11 +8,38 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
+
+type testEventSource struct {
+	record events.Record
+}
+
+type testResponseSink struct {
+	appID      domain.AppID
+	envelopeID string
+	payload    []byte
+}
+
+func (s *testResponseSink) HandleSocketModeResponse(_ context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
+	s.appID = appID
+	s.envelopeID = envelopeID
+	s.payload = append([]byte(nil), payload...)
+	return nil
+}
+
+func (s testEventSource) ListAppEventsAfter(_ context.Context, _ domain.AppID, after uint64, _ int) ([]events.Record, error) {
+	if s.record.Sequence <= after {
+		return nil, nil
+	}
+	return []events.Record{s.record}, nil
+}
 
 func TestOpenRequiresExplicitAppAndHost(t *testing.T) {
 	service := Service{Store: memory.New(), Host: "example.test"}
@@ -119,6 +146,65 @@ func TestHandlerRejectsEnvelopeWithoutID(t *testing.T) {
 	_, _, err = client.ReadMessage()
 	if err == nil {
 		t.Fatal("malformed envelope did not close the connection")
+	}
+}
+
+func TestHandlerDeliversEventAndAdvancesOnlyAfterAcknowledgement(t *testing.T) {
+	connections := memory.New()
+	service := Service{Store: connections, Host: "example.test"}
+	result, err := service.Open(context.Background(), "A123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(result.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	responses := new(testResponseSink)
+	server := httptest.NewServer(Handler{Store: connections, Events: testEventSource{record: events.Record{Sequence: 4, Event: events.Event{ID: "event-4", Topic: "message.created", Payload: `{"text":"hello"}`}}}, Cursors: connections, Responses: responses})
+	defer server.Close()
+	parsed.Scheme = "ws"
+	parsed.Host = strings.TrimPrefix(server.URL, "http://")
+	client, _, err := websocket.DefaultDialer.Dial(parsed.String(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	var hello map[string]any
+	if err := client.ReadJSON(&hello); err != nil {
+		t.Fatal(err)
+	}
+	var envelope struct {
+		EnvelopeID string `json:"envelope_id"`
+		Payload    struct {
+			Text string `json:"text"`
+		} `json:"payload"`
+	}
+	if err := client.ReadJSON(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.EnvelopeID != "event-4" || envelope.Payload.Text != "hello" {
+		t.Fatalf("event envelope=%+v", envelope)
+	}
+	if err := client.WriteJSON(map[string]any{"envelope_id": envelope.EnvelopeID, "payload": map[string]string{"ok": "true"}}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		cursor, cursorErr := connections.GetSocketModeCursor(context.Background(), "A123")
+		if cursorErr != nil {
+			t.Fatal(cursorErr)
+		}
+		if cursor == 4 && responses.appID == "A123" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cursor=%d, want 4", cursor)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if responses.envelopeID != "event-4" || string(responses.payload) != `{"ok":"true"}` {
+		t.Fatalf("response=%+v", responses)
 	}
 }
 

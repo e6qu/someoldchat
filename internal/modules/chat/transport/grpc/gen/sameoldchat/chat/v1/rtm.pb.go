@@ -305,6 +305,110 @@ func (x *SocketModeConnection) GetExpiresAtUnixNano() int64 {
 	return 0
 }
 
+type SocketModeCursorRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SocketModeCursorRequest) Reset() {
+	*x = SocketModeCursorRequest{}
+	mi := &file_sameoldchat_chat_v1_rtm_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SocketModeCursorRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SocketModeCursorRequest) ProtoMessage() {}
+
+func (x *SocketModeCursorRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_rtm_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SocketModeCursorRequest.ProtoReflect.Descriptor instead.
+func (*SocketModeCursorRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_rtm_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SocketModeCursorRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *SocketModeCursorRequest) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+type SocketModeCursor struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Sequence      uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SocketModeCursor) Reset() {
+	*x = SocketModeCursor{}
+	mi := &file_sameoldchat_chat_v1_rtm_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SocketModeCursor) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SocketModeCursor) ProtoMessage() {}
+
+func (x *SocketModeCursor) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_rtm_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SocketModeCursor.ProtoReflect.Descriptor instead.
+func (*SocketModeCursor) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_rtm_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SocketModeCursor) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *SocketModeCursor) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
 var File_sameoldchat_chat_v1_rtm_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_rtm_proto_rawDesc = "" +
@@ -327,13 +431,21 @@ const file_sameoldchat_chat_v1_rtm_proto_rawDesc = "" +
 	"\x14SocketModeConnection\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12/\n" +
-	"\x14expires_at_unix_nano\x18\x03 \x01(\x03R\x11expiresAtUnixNano2\xc7\x03\n" +
+	"\x14expires_at_unix_nano\x18\x03 \x01(\x03R\x11expiresAtUnixNano\"L\n" +
+	"\x17SocketModeCursorRequest\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence\"E\n" +
+	"\x10SocketModeCursor\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x1a\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence2\x9f\x05\n" +
 	"\n" +
 	"RTMService\x12a\n" +
 	"\x10CreateConnection\x12).sameoldchat.chat.v1.RTMConnectionRequest\x1a\".sameoldchat.chat.v1.RTMConnection\x12d\n" +
 	"\x11ConsumeConnection\x12+.sameoldchat.chat.v1.RTMConnectionIDRequest\x1a\".sameoldchat.chat.v1.RTMConnection\x12y\n" +
 	"\x1aCreateSocketModeConnection\x120.sameoldchat.chat.v1.SocketModeConnectionRequest\x1a).sameoldchat.chat.v1.SocketModeConnection\x12u\n" +
-	"\x1bConsumeSocketModeConnection\x12+.sameoldchat.chat.v1.RTMConnectionIDRequest\x1a).sameoldchat.chat.v1.SocketModeConnectionBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x1bConsumeSocketModeConnection\x12+.sameoldchat.chat.v1.RTMConnectionIDRequest\x1a).sameoldchat.chat.v1.SocketModeConnection\x12j\n" +
+	"\x13GetSocketModeCursor\x12,.sameoldchat.chat.v1.SocketModeCursorRequest\x1a%.sameoldchat.chat.v1.SocketModeCursor\x12j\n" +
+	"\x13SetSocketModeCursor\x12,.sameoldchat.chat.v1.SocketModeCursorRequest\x1a%.sameoldchat.chat.v1.SocketModeCursorBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_rtm_proto_rawDescOnce sync.Once
@@ -347,25 +459,31 @@ func file_sameoldchat_chat_v1_rtm_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_rtm_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_rtm_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_sameoldchat_chat_v1_rtm_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_sameoldchat_chat_v1_rtm_proto_goTypes = []any{
 	(*RTMConnectionRequest)(nil),        // 0: sameoldchat.chat.v1.RTMConnectionRequest
 	(*RTMConnectionIDRequest)(nil),      // 1: sameoldchat.chat.v1.RTMConnectionIDRequest
 	(*RTMConnection)(nil),               // 2: sameoldchat.chat.v1.RTMConnection
 	(*SocketModeConnectionRequest)(nil), // 3: sameoldchat.chat.v1.SocketModeConnectionRequest
 	(*SocketModeConnection)(nil),        // 4: sameoldchat.chat.v1.SocketModeConnection
+	(*SocketModeCursorRequest)(nil),     // 5: sameoldchat.chat.v1.SocketModeCursorRequest
+	(*SocketModeCursor)(nil),            // 6: sameoldchat.chat.v1.SocketModeCursor
 }
 var file_sameoldchat_chat_v1_rtm_proto_depIdxs = []int32{
 	0, // 0: sameoldchat.chat.v1.RTMService.CreateConnection:input_type -> sameoldchat.chat.v1.RTMConnectionRequest
 	1, // 1: sameoldchat.chat.v1.RTMService.ConsumeConnection:input_type -> sameoldchat.chat.v1.RTMConnectionIDRequest
 	3, // 2: sameoldchat.chat.v1.RTMService.CreateSocketModeConnection:input_type -> sameoldchat.chat.v1.SocketModeConnectionRequest
 	1, // 3: sameoldchat.chat.v1.RTMService.ConsumeSocketModeConnection:input_type -> sameoldchat.chat.v1.RTMConnectionIDRequest
-	2, // 4: sameoldchat.chat.v1.RTMService.CreateConnection:output_type -> sameoldchat.chat.v1.RTMConnection
-	2, // 5: sameoldchat.chat.v1.RTMService.ConsumeConnection:output_type -> sameoldchat.chat.v1.RTMConnection
-	4, // 6: sameoldchat.chat.v1.RTMService.CreateSocketModeConnection:output_type -> sameoldchat.chat.v1.SocketModeConnection
-	4, // 7: sameoldchat.chat.v1.RTMService.ConsumeSocketModeConnection:output_type -> sameoldchat.chat.v1.SocketModeConnection
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	5, // 4: sameoldchat.chat.v1.RTMService.GetSocketModeCursor:input_type -> sameoldchat.chat.v1.SocketModeCursorRequest
+	5, // 5: sameoldchat.chat.v1.RTMService.SetSocketModeCursor:input_type -> sameoldchat.chat.v1.SocketModeCursorRequest
+	2, // 6: sameoldchat.chat.v1.RTMService.CreateConnection:output_type -> sameoldchat.chat.v1.RTMConnection
+	2, // 7: sameoldchat.chat.v1.RTMService.ConsumeConnection:output_type -> sameoldchat.chat.v1.RTMConnection
+	4, // 8: sameoldchat.chat.v1.RTMService.CreateSocketModeConnection:output_type -> sameoldchat.chat.v1.SocketModeConnection
+	4, // 9: sameoldchat.chat.v1.RTMService.ConsumeSocketModeConnection:output_type -> sameoldchat.chat.v1.SocketModeConnection
+	6, // 10: sameoldchat.chat.v1.RTMService.GetSocketModeCursor:output_type -> sameoldchat.chat.v1.SocketModeCursor
+	6, // 11: sameoldchat.chat.v1.RTMService.SetSocketModeCursor:output_type -> sameoldchat.chat.v1.SocketModeCursor
+	6, // [6:12] is the sub-list for method output_type
+	0, // [0:6] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -382,7 +500,7 @@ func file_sameoldchat_chat_v1_rtm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_rtm_proto_rawDesc), len(file_sameoldchat_chat_v1_rtm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

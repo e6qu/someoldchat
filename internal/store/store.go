@@ -72,6 +72,8 @@ type Store interface {
 	ListInviteRequests(context.Context, domain.WorkspaceID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
 	SetAppApproval(context.Context, domain.WorkspaceID, domain.AppID, domain.AppRequestID, domain.AppApprovalStatus, time.Time, events.Event) error
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
+	CreateAppInstallation(context.Context, domain.AppInstallation) error
+	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
 	CreateAppPermissionRequest(context.Context, domain.AppPermissionRequest, events.Event) error
 	CreateView(context.Context, domain.View, events.Event) error
 	GetView(context.Context, domain.WorkspaceID, domain.ViewID) (domain.View, error)
@@ -99,6 +101,8 @@ type Store interface {
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
 	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
+	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
+	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
 	GetConversationPrefs(context.Context, domain.ConversationID) (domain.ConversationPrefs, error)
 	SetConversationPrefs(context.Context, domain.ConversationID, domain.ConversationPrefs, events.Event) (domain.ConversationPrefs, error)
@@ -119,6 +123,7 @@ type Store interface {
 	SearchConversations(context.Context, domain.WorkspaceID, string, domain.PageRequest) (domain.ConversationPage, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
 	ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error)
+	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 	ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error)
 	ClaimEventsForTopic(context.Context, domain.WorkspaceID, string, string, int, time.Duration) ([]events.Record, error)
 	RenewEvents(context.Context, string, []uint64, time.Duration) error

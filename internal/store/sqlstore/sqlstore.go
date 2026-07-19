@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NO
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS conversation_prefs (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
@@ -62,6 +63,7 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
 );
 CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
@@ -187,7 +189,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 59
+const schemaVersion = 61
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -948,6 +950,16 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`); err != nil {
 			return fmt.Errorf("migrate Socket Mode connections: %w", err)
+		}
+	}
+	if version < 60 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id))`); err != nil {
+			return fmt.Errorf("migrate app installations: %w", err)
+		}
+	}
+	if version < 61 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			return fmt.Errorf("migrate Socket Mode cursors: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -2519,6 +2531,38 @@ func (s *Store) ListAppApprovals(ctx context.Context, workspace domain.Workspace
 	return page, nil
 }
 
+func (s *Store) CreateAppInstallation(ctx context.Context, value domain.AppInstallation) error {
+	if value.AppID == "" || value.WorkspaceID == "" || value.CreatedAt.IsZero() {
+		return store.ErrInvalidAppApproval
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET enabled = excluded.enabled`, value.AppID, value.WorkspaceID, boolInt(value.Enabled), value.CreatedAt.UTC().UnixNano())
+	return err
+}
+
+func (s *Store) ListAppInstallations(ctx context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
+	if appID == "" {
+		return nil, store.ErrInvalidAppApproval
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT app_id, workspace_id, enabled, created_at FROM app_installations WHERE app_id = ? AND enabled = 1 ORDER BY workspace_id`, appID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.AppInstallation, 0)
+	for rows.Next() {
+		var value domain.AppInstallation
+		var enabled int
+		var created int64
+		if err := rows.Scan(&value.AppID, &value.WorkspaceID, &enabled, &created); err != nil {
+			return nil, err
+		}
+		value.Enabled = enabled != 0
+		value.CreatedAt = time.Unix(0, created).UTC()
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.AppPermissionRequest, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.RequesterID == "" || value.TargetUserID == "" || value.TriggerID == "" || len(value.Scopes) == 0 {
 		return errors.New("invalid app permission request")
@@ -3118,6 +3162,33 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 		return domain.SocketModeConnection{}, err
 	}
 	return value, nil
+}
+
+func (s *Store) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
+	if appID == "" {
+		return 0, store.ErrInvalidAppApproval
+	}
+	var cursor uint64
+	err := s.db.QueryRowContext(ctx, `SELECT sequence FROM socket_mode_cursors WHERE app_id = ?`, appID).Scan(&cursor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return cursor, err
+}
+
+func (s *Store) SetSocketModeCursor(ctx context.Context, appID domain.AppID, cursor uint64) error {
+	if appID == "" {
+		return store.ErrInvalidAppApproval
+	}
+	current, err := s.GetSocketModeCursor(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if cursor < current {
+		return store.ErrConflict
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO socket_mode_cursors(app_id, sequence) VALUES (?, ?) ON CONFLICT(app_id) DO UPDATE SET sequence = excluded.sequence WHERE socket_mode_cursors.sequence <= excluded.sequence`, appID, cursor)
+	return err
 }
 
 func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.ConversationID, event events.Event) (domain.Conversation, error) {
@@ -5460,6 +5531,31 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 			return nil, err
 		}
 		result = append(result, events.Record{Sequence: sequence, Event: event})
+	}
+	return result, rows.Err()
+}
+
+func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
+	if appID == "" || limit <= 0 {
+		return nil, errors.New("app ID and positive event limit are required")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ? AND o.topic <> ? ORDER BY o.sequence LIMIT ?`, appID, after, events.FileBlobDeleteTopic, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]events.Record, 0, limit)
+	for rows.Next() {
+		var record events.Record
+		var created string
+		if err := rows.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &created); err != nil {
+			return nil, err
+		}
+		record.Event.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, record)
 	}
 	return result, rows.Err()
 }

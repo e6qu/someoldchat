@@ -122,6 +122,10 @@ func main() {
 				logger.Error("seed Socket Mode app token", "error", err)
 				os.Exit(1)
 			}
+			if err := runtime.Store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: domain.AppID(*appID), WorkspaceID: "Tdev", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+				logger.Error("seed Socket Mode app installation", "error", err)
+				os.Exit(1)
+			}
 		}
 		appTokenStore, ok := runtime.TokenStore.(auth.AppTokenStore)
 		if !ok {
@@ -230,7 +234,7 @@ func main() {
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
 		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: *socketHost, TLS: *socketTLS}, socketModeAuth)
-		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore})
+		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Events: chatService, Cursors: chatService})
 	}
 	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, "Cdev", *authCookieDomain)
 	if err != nil {
