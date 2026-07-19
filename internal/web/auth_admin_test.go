@@ -84,10 +84,65 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "/api/admin.auth.users.invite") {
+	if !strings.Contains(body, "/api/admin.auth.users.create") {
 		t.Fatal("user administration section is missing")
 	}
 	if strings.Contains(body, "/api/admin.auth.methods.set") {
 		t.Fatal("authorization-method section was exposed without its scope")
+	}
+}
+
+func TestAuthAdminCreatesManualUserWithCSRFAndRole(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	body := "email=Alice%40Example.COM&real_name=Alice+Example&role=admin&_csrf=" + auth.CSRFToken("session")
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.create", strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: auth.CSRFToken("session")})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"ok":true`) || !strings.Contains(response.Body.String(), "alice@example.com") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAuthAdminReadScopeCanInspectProvidersWithoutMutationControl(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminAppsRead})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminPageRequest())
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "Google") || !strings.Contains(body, "enabled") || strings.Contains(body, "/api/admin.auth.methods.set") {
+		t.Fatalf("read-only provider page exposed the wrong controls: %s", body)
+	}
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/admin.auth.methods.list", nil)
+	listRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	listResponse := httptest.NewRecorder()
+	handler.ServeHTTP(listResponse, listRequest)
+	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"ok":true`) {
+		t.Fatalf("list status=%d body=%s", listResponse.Code, listResponse.Body.String())
+	}
+	setRequest := httptest.NewRequest(http.MethodPost, "/api/admin.auth.methods.set", strings.NewReader("provider=google&enabled=false"))
+	setRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	setRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	setResponse := httptest.NewRecorder()
+	handler.ServeHTTP(setResponse, setRequest)
+	if setResponse.Code != http.StatusForbidden {
+		t.Fatalf("read-only mutation status=%d body=%s", setResponse.Code, setResponse.Body.String())
+	}
+}
+
+func TestAuthAdminCreateUserRejectsMissingCSRF(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.create", strings.NewReader("email=a%40example.com&real_name=Alice&role=member"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

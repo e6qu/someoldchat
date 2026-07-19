@@ -875,7 +875,13 @@ func TestAdminTeamsCreatePersistsNewWorkspace(t *testing.T) {
 }
 
 func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
-	handler := testHandler()
+	handler, store := testHandlerWithStore()
+	if err := store.SeedToken(context.Background(), "user-two-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedSession(context.Background(), "user-two-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	request := httptest.NewRequest(http.MethodPost, "/api/admin.users.remove", strings.NewReader("team_id=T1&user_id=U2"))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
@@ -890,6 +896,14 @@ func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
 	handler.ServeHTTP(after, info)
 	if after.Code != http.StatusNotFound {
 		t.Fatalf("removed user status=%d body=%s", after.Code, after.Body)
+	}
+	token, err := store.LookupToken(context.Background(), "user-two-token")
+	if err != nil || !token.Revoked {
+		t.Fatalf("removed user token=%+v err=%v", token, err)
+	}
+	session, err := store.LookupSession(context.Background(), "user-two-session")
+	if err != nil || !session.Revoked {
+		t.Fatalf("removed user session=%+v err=%v", session, err)
 	}
 }
 

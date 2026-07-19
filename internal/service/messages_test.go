@@ -110,6 +110,31 @@ func TestAuthMethodEnablementIsDurable(t *testing.T) {
 	}
 }
 
+func TestAdminCreateUserNormalizesAndPersistsMembership(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "owner"})
+	ctx := context.Background()
+	user, err := (Messages{Store: s}).AdminCreateUser(ctx, "T1", "U1", " Alice@Example.COM ", "Alice Example", domain.WorkspaceRoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.ID == "" || user.Email != "alice@example.com" || user.RealName != "Alice Example" || user.Presence != domain.PresenceAuto {
+		t.Fatalf("created user=%+v", user)
+	}
+	loaded, err := s.GetUser(ctx, user.ID)
+	if err != nil || loaded.Email != user.Email {
+		t.Fatalf("loaded user=%+v err=%v", loaded, err)
+	}
+	membership, err := s.GetWorkspaceMembership(ctx, "T1", user.ID)
+	if err != nil || membership.Role != domain.WorkspaceRoleAdmin || !membership.Active {
+		t.Fatalf("membership=%+v err=%v", membership, err)
+	}
+	if _, err := (Messages{Store: s}).AdminCreateUser(ctx, "T1", "U1", "alice@example.com", "Duplicate", domain.WorkspaceRoleMember); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate error=%v", err)
+	}
+}
+
 func TestExternalIdentityLinkIsUniqueAndDurable(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

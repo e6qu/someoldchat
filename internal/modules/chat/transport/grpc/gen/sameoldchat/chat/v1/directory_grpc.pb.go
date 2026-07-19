@@ -44,6 +44,7 @@ const (
 	DirectoryService_SetConversationPrefs_FullMethodName        = "/sameoldchat.chat.v1.DirectoryService/SetConversationPrefs"
 	DirectoryService_AdminTeamUsers_FullMethodName              = "/sameoldchat.chat.v1.DirectoryService/AdminTeamUsers"
 	DirectoryService_AdminInviteUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminInviteUser"
+	DirectoryService_AdminCreateUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminCreateUser"
 	DirectoryService_AdminAssignUser_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminAssignUser"
 	DirectoryService_AdminApproveInviteRequest_FullMethodName   = "/sameoldchat.chat.v1.DirectoryService/AdminApproveInviteRequest"
 	DirectoryService_AdminDenyInviteRequest_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/AdminDenyInviteRequest"
@@ -82,6 +83,7 @@ type DirectoryServiceClient interface {
 	SetConversationPrefs(ctx context.Context, in *SetConversationPrefsRequest, opts ...grpc.CallOption) (*ConversationPrefs, error)
 	AdminTeamUsers(ctx context.Context, in *AdminTeamUsersRequest, opts ...grpc.CallOption) (*UserPage, error)
 	AdminInviteUser(ctx context.Context, in *AdminInviteUserRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	AdminCreateUser(ctx context.Context, in *AdminCreateUserRequest, opts ...grpc.CallOption) (*User, error)
 	AdminAssignUser(ctx context.Context, in *AdminAssignUserRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminApproveInviteRequest(ctx context.Context, in *InviteRequestMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminDenyInviteRequest(ctx context.Context, in *InviteRequestMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -349,6 +351,16 @@ func (c *directoryServiceClient) AdminInviteUser(ctx context.Context, in *AdminI
 	return out, nil
 }
 
+func (c *directoryServiceClient) AdminCreateUser(ctx context.Context, in *AdminCreateUserRequest, opts ...grpc.CallOption) (*User, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(User)
+	err := c.cc.Invoke(ctx, DirectoryService_AdminCreateUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *directoryServiceClient) AdminAssignUser(ctx context.Context, in *AdminAssignUserRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -448,6 +460,7 @@ type DirectoryServiceServer interface {
 	SetConversationPrefs(context.Context, *SetConversationPrefsRequest) (*ConversationPrefs, error)
 	AdminTeamUsers(context.Context, *AdminTeamUsersRequest) (*UserPage, error)
 	AdminInviteUser(context.Context, *AdminInviteUserRequest) (*MutationResponse, error)
+	AdminCreateUser(context.Context, *AdminCreateUserRequest) (*User, error)
 	AdminAssignUser(context.Context, *AdminAssignUserRequest) (*MutationResponse, error)
 	AdminApproveInviteRequest(context.Context, *InviteRequestMutationRequest) (*MutationResponse, error)
 	AdminDenyInviteRequest(context.Context, *InviteRequestMutationRequest) (*MutationResponse, error)
@@ -539,6 +552,9 @@ func (UnimplementedDirectoryServiceServer) AdminTeamUsers(context.Context, *Admi
 }
 func (UnimplementedDirectoryServiceServer) AdminInviteUser(context.Context, *AdminInviteUserRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminInviteUser not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AdminCreateUser(context.Context, *AdminCreateUserRequest) (*User, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdminCreateUser not implemented")
 }
 func (UnimplementedDirectoryServiceServer) AdminAssignUser(context.Context, *AdminAssignUserRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAssignUser not implemented")
@@ -1032,6 +1048,24 @@ func _DirectoryService_AdminInviteUser_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_AdminCreateUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdminCreateUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AdminCreateUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AdminCreateUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AdminCreateUser(ctx, req.(*AdminCreateUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DirectoryService_AdminAssignUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AdminAssignUserRequest)
 	if err := dec(in); err != nil {
@@ -1264,6 +1298,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminInviteUser",
 			Handler:    _DirectoryService_AdminInviteUser_Handler,
+		},
+		{
+			MethodName: "AdminCreateUser",
+			Handler:    _DirectoryService_AdminCreateUser_Handler,
 		},
 		{
 			MethodName: "AdminAssignUser",

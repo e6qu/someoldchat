@@ -1126,6 +1126,14 @@ func (r Remote) AdminInviteUser(ctx context.Context, workspaceID domain.Workspac
 	return nil
 }
 
+func (r Remote) AdminCreateUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, email, realName string, role domain.WorkspaceRole) (domain.User, error) {
+	out, err := r.directory.AdminCreateUser(ctx, &chatv1.AdminCreateUserRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Email: email, RealName: realName, Role: string(role)})
+	if err != nil {
+		return domain.User{}, err
+	}
+	return decodeProtoUser(out)
+}
+
 func (r Remote) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID, targetID domain.UserID, channels []domain.ConversationID) error {
 	channelIDs := make([]string, 0, len(channels))
 	for _, channel := range channels {
@@ -2423,6 +2431,14 @@ func (s *Server) AdminInviteUser(ctx context.Context, input *chatv1.AdminInviteU
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) AdminCreateUser(ctx context.Context, input *chatv1.AdminCreateUserRequest) (*chatv1.User, error) {
+	value, err := s.implementation.AdminCreateUser(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmail(), input.GetRealName(), domain.WorkspaceRole(input.GetRole()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoUser(value), nil
 }
 
 func (s *Server) AdminAssignUser(ctx context.Context, input *chatv1.AdminAssignUserRequest) (*chatv1.MutationResponse, error) {

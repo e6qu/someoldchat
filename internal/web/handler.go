@@ -103,6 +103,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /api/admin.auth.methods.list", h.authMethodsList)
 		mux.HandleFunc("POST /api/admin.auth.methods.set", h.authMethodSet)
 		mux.HandleFunc("POST /api/admin.auth.users.invite", h.authUserInvite)
+		mux.HandleFunc("POST /api/admin.auth.users.create", h.authUserCreate)
 	}
 	mux.HandleFunc("GET /app", h.index)
 	mux.HandleFunc("GET /app/search", h.search)

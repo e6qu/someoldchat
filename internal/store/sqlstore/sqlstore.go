@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS users (
  status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '',
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
-	deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto'
+ deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto'
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS workspace_members (
@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 57
+const schemaVersion = 58
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -924,6 +924,22 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 58 {
+		var workspaceID, email string
+		err := db.QueryRowContext(ctx, `SELECT workspace_id, MIN(email) FROM users WHERE email <> '' GROUP BY workspace_id, lower(email) HAVING COUNT(*) > 1 LIMIT 1`).Scan(&workspaceID, &email)
+		if err == nil {
+			return fmt.Errorf("migrate user email uniqueness: duplicate email %q in workspace %q", email, workspaceID)
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("check user email uniqueness: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS users_workspace_email`); err != nil {
+			return fmt.Errorf("replace user email index: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX users_workspace_email ON users(workspace_id, lower(email)) WHERE email <> ''`); err != nil {
+			return fmt.Errorf("index user emails: %w", err)
+		}
+	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record sqlite schema version: %w", err)
 	}
@@ -1240,6 +1256,49 @@ func (s *Store) GetUser(ctx context.Context, id domain.UserID) (domain.User, err
 	return value, translateNotFound(err)
 }
 
+func (s *Store) CreateUser(ctx context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
+	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
+		return errors.New("user and active workspace membership are required")
+	}
+	if membership.Role != domain.WorkspaceRoleMember && membership.Role != domain.WorkspaceRoleAdmin {
+		return errors.New("user membership role must be member or admin")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var workspaceExists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, user.WorkspaceID).Scan(&workspaceExists); err != nil {
+		return translateNotFound(err)
+	}
+	var existing string
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE workspace_id = ? AND lower(email) = lower(?) AND deleted = 0`, user.WorkspaceID, user.Email).Scan(&existing); err == nil {
+		return store.ErrAlreadyExists
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if user.Presence == "" {
+		user.Presence = domain.PresenceAuto
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name, real_name, presence) VALUES (?, ?, ?, ?, ?, ?)`, user.ID, user.WorkspaceID, user.Email, user.Name, user.RealName, user.Presence); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrAlreadyExists
+		}
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active) VALUES (?, ?, ?, 1)`, membership.WorkspaceID, membership.UserID, membership.Role); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrAlreadyExists
+		}
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) FindUserByEmail(ctx context.Context, workspace domain.WorkspaceID, email string) (domain.User, error) {
 	var value domain.User
 	var deleted int
@@ -1357,6 +1416,14 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET active = ? WHERE workspace_id = ? AND user_id = ?`, boolInt(!deleted), workspaceID, userID); err != nil {
 		return err
+	}
+	if deleted {
+		if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err

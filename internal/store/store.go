@@ -43,6 +43,7 @@ type Store interface {
 	SetWorkspaceDefaultChannels(context.Context, domain.WorkspaceID, []domain.ConversationID, events.Event) (domain.Workspace, error)
 	GetWorkspaceMembership(context.Context, domain.WorkspaceID, domain.UserID) (domain.WorkspaceMembership, error)
 	GetUser(context.Context, domain.UserID) (domain.User, error)
+	CreateUser(context.Context, domain.User, domain.WorkspaceMembership, events.Event) error
 	FindUserByEmail(context.Context, domain.WorkspaceID, string) (domain.User, error)
 	UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, events.Event) (domain.User, error)
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence, events.Event) (domain.User, error)
