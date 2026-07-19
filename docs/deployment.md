@@ -148,3 +148,22 @@ Each provider implementation MUST ship:
 Related documents: [architecture](architecture.md), [operations](operations.md),
 [hosting specification](../specs/hosting.md), and
 [scale-to-zero specification](../specs/scale-to-zero.md).
+
+## Published container verification
+
+The main-branch release workflow publishes architecture images and a
+multi-architecture manifest under the full commit identifier. It attaches
+max-level BuildKit provenance and an SPDX software bill of materials to each
+architecture image, then publishes a signed registry attestation. Deploy an
+image by digest, not by a mutable tag. Verify the registry attestation with the
+GitHub Command Line Interface before deployment:
+
+```sh
+gh attestation verify \
+  oci://ghcr.io/e6qu/someoldchat@sha256:<manifest-digest> \
+  --repo e6qu/someoldchat
+```
+
+The manifest digest must be recorded with the deployment change. A missing or
+invalid attestation is a release failure; the deployment must not select a
+different image as an implicit substitute.
