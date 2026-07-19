@@ -191,13 +191,17 @@ func (h Handler) processSpool(ctx context.Context) error {
 	if err := h.ensureActive(ctx); err != nil {
 		return err
 	}
-	h.queueMu.Lock()
-	requests, err := h.spool.Claim(ctx, h.spoolOwner, 64, h.wakeWait)
-	h.queueMu.Unlock()
-	if err != nil {
-		return err
-	}
-	for _, request := range requests {
+	for {
+		h.queueMu.Lock()
+		requests, err := h.spool.Claim(ctx, h.spoolOwner, 1, h.wakeWait)
+		h.queueMu.Unlock()
+		if err != nil {
+			return err
+		}
+		if len(requests) == 0 {
+			return nil
+		}
+		request := requests[0]
 		replay, err := http.NewRequestWithContext(ctx, request.Method, request.URL, bytes.NewReader(request.Body))
 		if err != nil {
 			return err
@@ -209,7 +213,11 @@ func (h Handler) processSpool(ctx context.Context) error {
 			replay.Header.Set("Idempotency-Key", "sameoldchat-spool-"+strconv.FormatUint(request.ID, 10))
 		}
 		capture := newCapturedResponse(h.maxBody)
-		h.forward.ServeHTTP(capture, replay)
+		deliveryErr := h.forwardSpoolRequest(ctx, replay, request.ID, capture)
+		if deliveryErr != nil {
+			h.completeSpoolRequest(request.ID, spoolResult{err: deliveryErr})
+			return deliveryErr
+		}
 		if capture.err != nil {
 			h.completeSpoolRequest(request.ID, spoolResult{err: capture.err})
 			return capture.err
@@ -225,7 +233,48 @@ func (h Handler) processSpool(ctx context.Context) error {
 		h.completeSpoolRequest(request.ID, spoolResult{response: capture.response()})
 		return errors.New("spooled request delivery returned a server error")
 	}
-	return nil
+}
+
+func (h Handler) forwardSpoolRequest(ctx context.Context, request *http.Request, id uint64, capture *capturedWriter) error {
+	deliveryContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	renewErrors := make(chan error, 1)
+	done := make(chan struct{})
+	renewDone := make(chan struct{})
+	interval := h.wakeWait / 3
+	if interval < time.Millisecond {
+		interval = time.Millisecond
+	}
+	go func() {
+		defer close(renewDone)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := h.spool.Renew(deliveryContext, h.spoolOwner, []uint64{id}, h.wakeWait); err != nil {
+					cancel()
+					renewErrors <- err
+					return
+				}
+			}
+		}
+	}()
+	request = request.WithContext(deliveryContext)
+	h.forward.ServeHTTP(capture, request)
+	cancel()
+	close(done)
+	<-renewDone
+	select {
+	case err := <-renewErrors:
+		if !errors.Is(err, context.Canceled) && (capture.err == nil || errors.Is(capture.err, context.Canceled)) {
+			return err
+		}
+	default:
+	}
+	return capture.err
 }
 
 func (h Handler) completeSpoolRequest(id uint64, result spoolResult) {

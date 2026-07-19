@@ -154,6 +154,13 @@ processor does not guess application-specific response semantics or run an
 unbounded retry loop. See this section and the compatibility ledger for the
 supported wire contract.
 
+The scale-to-zero activator applies the same lease rule to buffered HTTP
+requests. It claims one request at a time and renews that request's lease while
+the selected application handler is running. A slow handler therefore does not
+look like a crashed replica, while a process crash leaves the request
+reclaimable after the last durable lease expires. The activator does not retain
+an unbounded in-memory batch.
+
 The `cmd/socketmode-worker` process supplies the explicit HTTP handler for
 deployments that forward Socket Mode responses to another application. Run one
 or more replicas with the same application identifier and different owner

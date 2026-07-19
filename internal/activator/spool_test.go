@@ -105,6 +105,53 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 	}
 }
 
+func TestSQLiteSpoolRenewKeepsLeaseWithSlowDelivery(t *testing.T) {
+	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/message", nil)
+	id, err := spool.Enqueue(context.Background(), request, []byte("renew me"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spool.Claim(context.Background(), "slow-owner", 1, 50*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(25 * time.Millisecond)
+	if err := spool.Renew(context.Background(), "slow-owner", []uint64{id}, 100*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	claimed, err := spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("renewed lease was reclaimed: %+v", claimed)
+	}
+}
+
+func TestSQLiteSpoolRenewRequiresOwnership(t *testing.T) {
+	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/message", nil)
+	id, err := spool.Enqueue(context.Background(), request, []byte("owned"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spool.Claim(context.Background(), "owner-a", 1, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := spool.Renew(context.Background(), "owner-b", []uint64{id}, time.Minute); !errors.Is(err, ErrSpoolLeaseLost) {
+		t.Fatalf("renewal error=%v, want ErrSpoolLeaseLost", err)
+	}
+}
+
 func TestSQLiteSpoolRejectsQueueOverflowBeforeAccepting(t *testing.T) {
 	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 8, MaxQueuedBytes: 8, MaxQueuedRequests: 1})
 	if err != nil {
