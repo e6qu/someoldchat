@@ -34,7 +34,7 @@ operations:
   - method: api.test
     status: behavior-compatible
   - method: apps.connections.open
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-reference
   - method: auth.revoke
     status: behavior-compatible

@@ -43,12 +43,14 @@ func TestResponseProcessorReleasesUnprocessedResponses(t *testing.T) {
 	}
 	processor := ResponseProcessor{Queue: queue, AppID: "A1", Owner: "worker-1", BatchSize: 10, Lease: time.Minute, RetryDelay: time.Minute}
 	wantErr := errors.New("handler failed")
-	if err := processor.ProcessOnce(ctx, now, func(_ context.Context, value domain.SocketModeResponse) error {
+	err := processor.ProcessOnce(ctx, now, func(_ context.Context, value domain.SocketModeResponse) error {
 		if value.EnvelopeID == "env-2" {
 			return wantErr
 		}
 		return nil
-	}); !errors.Is(err, wantErr) {
+	})
+	var deliveryErr ResponseDeliveryError
+	if !errors.As(err, &deliveryErr) || !errors.Is(err, wantErr) {
 		t.Fatalf("err=%v", err)
 	}
 	claimed, err := queue.ClaimSocketModeResponses(ctx, "A1", "worker-2", 10, time.Minute)

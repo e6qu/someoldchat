@@ -61,6 +61,13 @@ make run                    # explicitly selects local mode, memory, and dev cre
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
 
+The `sameoldchat-socketmode-worker` binary claims durable Socket Mode
+responses and delivers them to an explicitly configured HTTP destination. It
+requires `--store`, `--app-id`, `--owner`, and `--response-url`, together with
+the storage settings for the selected backend. A delivery failure releases
+the response at the configured retry time; a process crash leaves the lease
+for another replica to reclaim.
+
 Storage selection is mandatory. `memory` and `sqlite` are separate operating
 modes, not fallback behavior; unsupported or incomplete configuration fails at
 startup. The architecture also treats typed domain values, boundary

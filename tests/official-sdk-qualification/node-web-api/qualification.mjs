@@ -5,6 +5,11 @@ import { WebClient } from "@slack/web-api";
 const apiUrl = process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/";
 const token = process.env.SAMEOLDCHAT_API_TOKEN ?? "xoxb-test";
 const client = new WebClient(token, { slackApiUrl: apiUrl });
+const appClient = new WebClient(process.env.SAMEOLDCHAT_APP_TOKEN ?? "xapp-test", { slackApiUrl: apiUrl });
+
+const socketMode = await appClient.apiCall("apps.connections.open");
+assert.equal(socketMode.ok, true);
+assert.equal(socketMode.url.startsWith("ws://127.0.0.1:18080/socket-mode?connection_id="), true);
 
 const success = await client.api.test();
 assert.equal(success.ok, true);

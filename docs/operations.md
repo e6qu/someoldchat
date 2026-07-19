@@ -154,6 +154,16 @@ processor does not guess application-specific response semantics or run an
 unbounded retry loop. See this section and the compatibility ledger for the
 supported wire contract.
 
+The `cmd/socketmode-worker` process supplies the explicit HTTP handler for
+deployments that forward Socket Mode responses to another application. Run one
+or more replicas with the same application identifier and different owner
+identifiers against shared durable storage. Each replica claims a disjoint
+lease set, so a crash does not require a process-local queue or a coordinated
+shutdown.
+The worker continues after a handler delivery failure because it has released
+the records at an explicit retry time. It exits on claim, release, or
+acknowledgement failure so the deployment platform can restart it.
+
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).
 Socket Mode is available in both local composition and distributed composition:
