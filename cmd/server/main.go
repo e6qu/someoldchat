@@ -219,7 +219,9 @@ func main() {
 			os.Exit(2)
 		}
 		if *oidcIssuer != "" {
-			oidcProvider, discoveryErr := web.DiscoverOpenIDConnectProvider(context.Background(), http.DefaultClient, *oidcIssuer, *oidcClientID, *oidcClientSecret)
+			discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 10*time.Second)
+			oidcProvider, discoveryErr := web.DiscoverOpenIDConnectProvider(discoveryContext, &http.Client{Timeout: 10 * time.Second}, *oidcIssuer, *oidcClientID, *oidcClientSecret)
+			cancelDiscovery()
 			if discoveryErr != nil {
 				logger.Error("discover OpenID Connect provider", "error", discoveryErr)
 				os.Exit(1)
