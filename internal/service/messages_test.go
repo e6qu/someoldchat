@@ -792,6 +792,47 @@ func TestUserPhotoStagesBlobAndExposesOnlyCommittedToken(t *testing.T) {
 	}
 }
 
+type failingProfileStore struct {
+	store.Store
+	err error
+}
+
+func (s failingProfileStore) UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, events.Event) (domain.User, error) {
+	return domain.User{}, s.err
+}
+
+type failingPhotoCleanupBlob struct {
+	deleteErr error
+}
+
+func (failingPhotoCleanupBlob) Put(context.Context, string, int64, io.Reader) (blob.Object, error) {
+	return blob.Object{}, nil
+}
+
+func (failingPhotoCleanupBlob) Open(context.Context, string) (blob.Object, io.ReadCloser, error) {
+	return blob.Object{}, nil, blob.ErrNotFound
+}
+
+func (b failingPhotoCleanupBlob) Delete(context.Context, string) error {
+	return b.deleteErr
+}
+
+func TestUserPhotoReportsBlobCleanupFailureAfterProfileFailure(t *testing.T) {
+	base := memory.New()
+	base.SeedWorkspace(domain.Workspace{ID: "T1"})
+	base.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	profileErr := errors.New("profile update failed")
+	cleanupErr := errors.New("blob delete failed")
+	messages := Messages{
+		Store: failingProfileStore{Store: base, err: profileErr},
+		Blob:  failingPhotoCleanupBlob{deleteErr: cleanupErr},
+	}
+	_, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", 5, bytes.NewReader([]byte("photo")))
+	if !errors.Is(err, profileErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("error=%v, want profile and cleanup errors", err)
+	}
+}
+
 func TestEphemeralMessageIsDurableAndRecipientScoped(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
