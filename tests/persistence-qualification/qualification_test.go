@@ -38,6 +38,20 @@ func TestCoreRepositoryContract(t *testing.T) {
 	if err := repository.SeedUser(ctx, user); err != nil {
 		t.Fatal(err)
 	}
+	session := domain.SessionRecord{
+		WorkspaceID: workspace.ID, UserID: user.ID, Scopes: []string{"openid", "users:read"}, ExpiresAt: time.Now().UTC().Add(time.Hour),
+		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session",
+	}
+	if err := repository.CreateSession(ctx, "session-"+suffix, session); err != nil {
+		t.Fatal(err)
+	}
+	loadedSession, err := repository.LookupSession(ctx, "session-"+suffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedSession.OIDCProvider != session.OIDCProvider || loadedSession.OIDCIDToken != session.OIDCIDToken || loadedSession.OIDCSubject != session.OIDCSubject || loadedSession.OIDCSID != session.OIDCSID {
+		t.Fatalf("session metadata=%+v, want=%+v", loadedSession, session)
+	}
 	if err := repository.SeedConversation(ctx, conversation); err != nil {
 		t.Fatal(err)
 	}
