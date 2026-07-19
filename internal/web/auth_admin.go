@@ -26,6 +26,13 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
+	h.setCSRFCookie(w, r)
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		http.Error(w, "session unavailable", http.StatusUnauthorized)
+		return
+	}
+	csrfToken := auth.CSRFToken(sessionCookie.Value)
 	names := make([]string, 0, len(h.Login.providers))
 	for name := range h.Login.providers {
 		names = append(names, name)
@@ -47,9 +54,9 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		if !method.Enabled {
 			button = "Enable"
 		}
-		output.WriteString(`<div class="row"><span><strong>` + providerLabel(name) + `</strong><br><small>` + state + `</small></span><form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="provider" value="` + name + `"><input type="hidden" name="enabled" value="` + fmt.Sprint(!method.Enabled) + `"><button class="` + class + `" type="submit">` + button + `</button></form></div>`)
+		output.WriteString(`<div class="row"><span><strong>` + providerLabel(name) + `</strong><br><small>` + state + `</small></span><form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="` + csrfToken + `"><input type="hidden" name="provider" value="` + name + `"><input type="hidden" name="enabled" value="` + fmt.Sprint(!method.Enabled) + `"><button class="` + class + `" type="submit">` + button + `</button></form></div>`)
 	}
-	output.WriteString(`<hr><h2>Manual user setup</h2><p>Invite a user into the workspace; approval and membership remain durable admin workflows.</p><form method="post" action="/api/admin.auth.users.invite"><label>Email <input name="email" type="email" required></label> <label>Name <input name="real_name" required></label> <button class="toggle" type="submit">Create invitation</button></form></main></body></html>`)
+	output.WriteString(`<hr><h2>Manual user setup</h2><p>Invite a user into the workspace; approval and membership remain durable admin workflows.</p><form method="post" action="/api/admin.auth.users.invite"><input type="hidden" name="_csrf" value="` + csrfToken + `"><label>Email <input name="email" type="email" required></label> <label>Name <input name="real_name" required></label> <button class="toggle" type="submit">Create invitation</button></form></main></body></html>`)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, output.String())
 }
@@ -77,6 +84,9 @@ func (h Handler) authMethodsList(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) authMethodSet(w http.ResponseWriter, r *http.Request) {
 	if !h.authAdminAllowed(w, r) {
+		return
+	}
+	if !h.requireCSRF(w, r) {
 		return
 	}
 	fields, err := decodeFormFields(w, r)
@@ -117,6 +127,9 @@ func (h Handler) authUserInvite(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
 	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminUsersWrite) {
 		writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
+		return
+	}
+	if !h.requireCSRF(w, r) {
 		return
 	}
 	fields, err := decodeFormFields(w, r)

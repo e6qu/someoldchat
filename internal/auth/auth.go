@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/base64"
 	"errors"
 	"net"
 	"net/http"
@@ -112,6 +115,12 @@ type Browser struct{ store SessionStore }
 
 const SessionCookieName = "sameoldchat_session"
 
+const (
+	CSRFTokenCookieName = "sameoldchat_csrf"
+	CSRFTokenFieldName  = "_csrf"
+	CSRFTokenHeaderName = "X-SameOldChat-CSRF"
+)
+
 func ValidateSessionCookieDomain(domain string) error {
 	domain = strings.TrimSpace(domain)
 	if domain == "" {
@@ -129,6 +138,35 @@ func ValidateSessionCookieDomain(domain string) error {
 
 func SessionCookie(value string, maxAge int, domain string) *http.Cookie {
 	return &http.Cookie{Name: SessionCookieName, Value: value, Domain: strings.TrimSpace(domain), Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
+}
+
+func CSRFToken(sessionToken string) string {
+	digest := sha256.Sum256([]byte("sameoldchat/csrf\x00" + sessionToken))
+	return base64.RawURLEncoding.EncodeToString(digest[:])
+}
+
+func CSRFCookie(value string, maxAge int, domain string) *http.Cookie {
+	return &http.Cookie{Name: CSRFTokenCookieName, Value: value, Domain: strings.TrimSpace(domain), Path: "/", MaxAge: maxAge, Secure: true, SameSite: http.SameSiteLaxMode}
+}
+
+func ValidateCSRF(r *http.Request) error {
+	session, err := r.Cookie(SessionCookieName)
+	if err != nil || strings.TrimSpace(session.Value) == "" {
+		return ErrNotAuthenticated
+	}
+	cookie, err := r.Cookie(CSRFTokenCookieName)
+	if err != nil || cookie.Value == "" {
+		return errors.New("CSRF token is missing")
+	}
+	provided := strings.TrimSpace(r.Header.Get(CSRFTokenHeaderName))
+	if provided == "" {
+		provided = strings.TrimSpace(r.FormValue(CSRFTokenFieldName))
+	}
+	expected := CSRFToken(session.Value)
+	if len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 || cookie.Value != expected {
+		return errors.New("CSRF token is invalid")
+	}
+	return nil
 }
 
 func AllScopes() []string {

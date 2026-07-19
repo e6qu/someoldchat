@@ -17,6 +17,13 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+func addBrowserCookies(request *http.Request) {
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	token := auth.CSRFToken("session")
+	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: token})
+	request.Header.Set(auth.CSRFTokenHeaderName, token)
+}
+
 func TestHTMXPostMessage(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
@@ -46,7 +53,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/app/message", &form)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	req.Header.Set("HX-Request", "true")
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -56,7 +63,7 @@ func TestHTMXPostMessage(t *testing.T) {
 		t.Fatalf("body = %s", res.Body)
 	}
 	index := httptest.NewRequest(http.MethodGet, "/app", nil)
-	index.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(index)
 	indexResult := httptest.NewRecorder()
 	mux.ServeHTTP(indexResult, index)
 	if indexResult.Code != http.StatusOK || !strings.Contains(indexResult.Body.String(), "general") || !strings.Contains(indexResult.Body.String(), "hello") || !strings.Contains(indexResult.Body.String(), "unread messages") || !strings.Contains(indexResult.Body.String(), "theme-toggle") || !strings.Contains(indexResult.Body.String(), "data-theme=\"light\"") || !strings.Contains(indexResult.Body.String(), "HX-Request") || !strings.Contains(indexResult.Body.String(), "last_event_id") || !strings.Contains(indexResult.Body.String(), "sessionStorage") || strings.Contains(indexResult.Body.String(), "const events=new EventSource") || !strings.Contains(indexResult.Body.String(), `method="get" action="/app/search"`) || !strings.Contains(indexResult.Body.String(), `name="q"`) {
@@ -72,7 +79,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	thread := domain.NewMessageTimestamp(page.Messages[0].CreatedAt)
 	reply := httptest.NewRequest(http.MethodPost, "/app/message?channel=C1", strings.NewReader("text=reply&thread_ts="+string(thread)))
 	reply.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	reply.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(reply)
 	replyResult := httptest.NewRecorder()
 	mux.ServeHTTP(replyResult, reply)
 	if replyResult.Code != http.StatusSeeOther || !strings.Contains(replyResult.Header().Get("Location"), "thread=") {
@@ -131,7 +138,7 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	req := httptest.NewRequest(http.MethodGet, "/app/search?q=hello", nil)
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	body := res.Body.String()
@@ -171,7 +178,7 @@ func TestWebFormRejectsRepeatedFields(t *testing.T) {
 	handler.Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/app/message", strings.NewReader("text=one&text=two"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusBadRequest {
@@ -195,7 +202,7 @@ func TestWebSessionRevocationClearsCookieAndDurablyInvalidates(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusSeeOther || res.Header().Get("Location") != "/" {
@@ -231,7 +238,7 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	req := httptest.NewRequest(http.MethodGet, "/app/members", nil)
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "Available") || !strings.Contains(res.Body.String(), ":wave:") {
@@ -239,7 +246,7 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	}
 	update := httptest.NewRequest(http.MethodPost, "/app/profile", strings.NewReader("display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&image_24=&image_32=&image_48=&image_72=&image_192=&image_512=&image_1024="))
 	update.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	update.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(update)
 	updateResult := httptest.NewRecorder()
 	mux.ServeHTTP(updateResult, update)
 	if updateResult.Code != http.StatusSeeOther {
@@ -279,7 +286,7 @@ func TestHTMXReactionAndPinMutationsUseExplicitMessageTarget(t *testing.T) {
 	reaction := httptest.NewRequest(http.MethodPost, "/app/reaction?channel=C1&ts="+string(timestamp), strings.NewReader("name=%3Awave%3A"))
 	reaction.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	reaction.Header.Set("HX-Request", "true")
-	reaction.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(reaction)
 	reactionResult := httptest.NewRecorder()
 	mux.ServeHTTP(reactionResult, reaction)
 	if reactionResult.Code != http.StatusNoContent || reactionResult.Header().Get("HX-Redirect") == "" {
@@ -291,7 +298,7 @@ func TestHTMXReactionAndPinMutationsUseExplicitMessageTarget(t *testing.T) {
 	}
 
 	pin := httptest.NewRequest(http.MethodPost, "/app/pin?channel=C1&ts="+string(timestamp), nil)
-	pin.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(pin)
 	pinResult := httptest.NewRecorder()
 	mux.ServeHTTP(pinResult, pin)
 	if pinResult.Code != http.StatusSeeOther {
@@ -325,7 +332,7 @@ func TestWebOpensNormalizedDirectConversation(t *testing.T) {
 	handler.Register(mux)
 	req := httptest.NewRequest(http.MethodPost, "/app/conversation/open", strings.NewReader("users=U2%2C%20U2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusSeeOther || !strings.Contains(res.Header().Get("Location"), "channel=") {

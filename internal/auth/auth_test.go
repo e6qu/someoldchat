@@ -94,3 +94,18 @@ func TestSessionCookieDomainIsExplicitAndShared(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateCSRFRequiresSessionBoundToken(t *testing.T) {
+	token := CSRFToken("session")
+	request := httptest.NewRequest(http.MethodPost, "/app/message", nil)
+	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
+	request.AddCookie(&http.Cookie{Name: CSRFTokenCookieName, Value: token})
+	request.Header.Set(CSRFTokenHeaderName, token)
+	if err := ValidateCSRF(request); err != nil {
+		t.Fatalf("valid CSRF token rejected: %v", err)
+	}
+	request.Header.Set(CSRFTokenHeaderName, CSRFToken("other-session"))
+	if err := ValidateCSRF(request); err == nil {
+		t.Fatal("CSRF token for another session was accepted")
+	}
+}
