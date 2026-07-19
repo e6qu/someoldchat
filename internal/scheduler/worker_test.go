@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -43,6 +44,52 @@ func TestWorkerPostsDueMessageExactlyOnceAcrossClaimReplay(t *testing.T) {
 	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "due" {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
+}
+
+func TestWorkerReportsRenewalFailureThatArrivesAfterPosting(t *testing.T) {
+	source := &lateRenewalFailureSource{Store: memory.New(), renewStarted: make(chan struct{}), postingReturned: make(chan struct{}), releaseRenewal: make(chan struct{})}
+	source.SeedWorkspace(domain.Workspace{ID: "T1"})
+	source.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	source.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	source.SeedConversationMember("C1", "U1")
+	worker, err := NewWorker(source, service.Messages{Store: source}, "worker-1", 1, 3*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := domain.ScheduledMessage{WorkspaceID: "T1", ID: "Q1", Channel: "C1", Author: "U1", Text: "scheduled", PostAt: time.Now().UTC()}
+	result := make(chan error, 1)
+	go func() { result <- worker.postWithLease(context.Background(), item) }()
+	<-source.postingReturned
+	close(source.releaseRenewal)
+	if err := <-result; !errors.Is(err, errScheduledLeaseLost) {
+		t.Fatalf("worker error=%v, want %v", err, errScheduledLeaseLost)
+	}
+}
+
+var errScheduledLeaseLost = errors.New("scheduled lease lost")
+
+type lateRenewalFailureSource struct {
+	*memory.Store
+	renewStarted    chan struct{}
+	postingReturned chan struct{}
+	releaseRenewal  chan struct{}
+}
+
+func (s *lateRenewalFailureSource) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	err := s.Store.CreateMessage(ctx, message, event, idempotencyKey)
+	<-s.renewStarted
+	close(s.postingReturned)
+	return err
+}
+
+func (s *lateRenewalFailureSource) RenewScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Duration) error {
+	select {
+	case <-s.renewStarted:
+	default:
+		close(s.renewStarted)
+	}
+	<-s.releaseRenewal
+	return errScheduledLeaseLost
 }
 
 func TestPublishWakeDeadlineUsesEarliestPendingMessage(t *testing.T) {

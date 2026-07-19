@@ -102,3 +102,53 @@ func TestWorkerRenewsLeaseDuringLongDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestWorkerReportsRenewalFailureThatArrivesAfterDelivery(t *testing.T) {
+	source := &lateRenewalFailureSource{renewStarted: make(chan struct{}), deliveryReturned: make(chan struct{}), releaseRenewal: make(chan struct{})}
+	worker, err := NewWorker(source, "worker-1", 1, 3*time.Millisecond, func(context.Context, events.Record) error {
+		<-source.renewStarted
+		close(source.deliveryReturned)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, runErr := worker.RunOnce(context.Background(), "T1")
+		result <- runErr
+	}()
+	<-source.deliveryReturned
+	close(source.releaseRenewal)
+	if err := <-result; !errors.Is(err, errLeaseLost) {
+		t.Fatalf("worker error=%v, want %v", err, errLeaseLost)
+	}
+}
+
+var errLeaseLost = errors.New("lease lost")
+
+type lateRenewalFailureSource struct {
+	renewStarted     chan struct{}
+	deliveryReturned chan struct{}
+	releaseRenewal   chan struct{}
+}
+
+func (s *lateRenewalFailureSource) ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error) {
+	return []events.Record{{Sequence: 1, Event: events.Event{ID: "event-1", WorkspaceID: "T1", Topic: "message.created"}}}, nil
+}
+
+func (s *lateRenewalFailureSource) RenewEvents(context.Context, string, []uint64, time.Duration) error {
+	select {
+	case <-s.renewStarted:
+	default:
+		close(s.renewStarted)
+	}
+	<-s.releaseRenewal
+	return errLeaseLost
+}
+
+func (s *lateRenewalFailureSource) AckEvents(context.Context, string, []uint64) error { return nil }
+
+func (s *lateRenewalFailureSource) ReleaseEvents(context.Context, string, []uint64, time.Time) error {
+	return nil
+}

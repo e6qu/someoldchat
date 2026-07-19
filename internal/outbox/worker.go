@@ -63,11 +63,13 @@ func (w Worker) deliverWithLease(ctx context.Context, sequences []uint64, record
 	defer cancel()
 	renewErrors := make(chan error, 1)
 	done := make(chan struct{})
+	renewDone := make(chan struct{})
 	interval := w.Lease / 3
 	if interval < time.Millisecond {
 		interval = time.Millisecond
 	}
 	go func() {
+		defer close(renewDone)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -75,7 +77,7 @@ func (w Worker) deliverWithLease(ctx context.Context, sequences []uint64, record
 			case <-done:
 				return
 			case <-ticker.C:
-				if err := w.Source.RenewEvents(ctx, w.Owner, sequences, w.Lease); err != nil {
+				if err := w.Source.RenewEvents(deliveryContext, w.Owner, sequences, w.Lease); err != nil {
 					cancel()
 					renewErrors <- err
 					return
@@ -84,10 +86,12 @@ func (w Worker) deliverWithLease(ctx context.Context, sequences []uint64, record
 		}
 	}()
 	deliveryError := w.Deliver(deliveryContext, record)
+	cancel()
 	close(done)
+	<-renewDone
 	select {
 	case renewalError := <-renewErrors:
-		if deliveryError == nil {
+		if !errors.Is(renewalError, context.Canceled) && (deliveryError == nil || errors.Is(deliveryError, context.Canceled)) {
 			return renewalError
 		}
 	default:

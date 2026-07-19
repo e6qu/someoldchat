@@ -62,11 +62,13 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 	defer cancel()
 	renewErrors := make(chan error, 1)
 	done := make(chan struct{})
+	renewDone := make(chan struct{})
 	interval := w.Lease / 3
 	if interval < time.Millisecond {
 		interval = time.Millisecond
 	}
 	go func() {
+		defer close(renewDone)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -74,7 +76,7 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 			case <-done:
 				return
 			case <-ticker.C:
-				if err := w.Source.RenewScheduledMessage(ctx, w.Owner, item.ID, w.Lease); err != nil {
+				if err := w.Source.RenewScheduledMessage(postContext, w.Owner, item.ID, w.Lease); err != nil {
 					cancel()
 					renewErrors <- err
 					return
@@ -83,10 +85,12 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 		}
 	}()
 	_, postErr := w.Poster.Post(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, "", string(item.ID))
+	cancel()
 	close(done)
+	<-renewDone
 	select {
 	case renewErr := <-renewErrors:
-		if postErr == nil {
+		if !errors.Is(renewErr, context.Canceled) && (postErr == nil || errors.Is(postErr, context.Canceled)) {
 			return renewErr
 		}
 	default:
