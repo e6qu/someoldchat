@@ -6,9 +6,9 @@ against the seeded local fixture.
 
 The Node Web API suite uses `@slack/web-api` 7.19.0, the Node Bolt suite uses
 `@slack/bolt` 4.7.3, the Node Socket Mode suite uses `@slack/socket-mode`
-3.0.0, the Python suite uses `slack-sdk` 3.43.0, and the Python Bolt suite
-uses `slack-bolt` 1.28.0. Their immutable artifact hashes and suite paths are
-recorded in [`../../specs/sdk-compatibility.yaml`](../../specs/sdk-compatibility.yaml).
+3.0.0, the Python Web API and Socket Mode suites use `slack-sdk` 3.43.0, and
+the Python Bolt suite uses `slack-bolt` 1.28.0. Their immutable artifact hashes
+and suite paths are recorded in [`../../specs/sdk-compatibility.yaml`](../../specs/sdk-compatibility.yaml).
 
 To run the reproducible Node, Python, and Java suites with artifact hash
 verification, run:

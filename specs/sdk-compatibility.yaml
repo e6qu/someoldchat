@@ -64,6 +64,17 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
+  - id: python-socket-mode
+    ecosystem: pypi
+    package: slack-sdk
+    upstream: https://github.com/slackapi/python-slack-sdk
+    release: 3.43.0
+    revision: 3a5cec2e79ebe58467c2c65781492a42938fdbfa
+    artifact: slack_sdk-3.43.0-py2.py3-none-any.whl
+    sha256: 4b6557c65577fc172f685af218b811f9f3b4909e24cddd839ada09565f10c585
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/python-socket-mode/qualification.py
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client

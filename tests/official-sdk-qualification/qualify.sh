@@ -105,6 +105,9 @@ python3 -m pip install --disable-pip-version-check --no-index --no-deps --target
 PYTHONPATH="$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ python3 "$root/tests/official-sdk-qualification/python-slack-sdk/qualification.py"
 stop_fixture
 start_fixture
+PYTHONPATH="$work/python-slack-sdk" SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ SAMEOLDCHAT_QUALIFICATION_URL=http://127.0.0.1:18080 python3 "$root/tests/official-sdk-qualification/python-socket-mode/qualification.py"
+stop_fixture
+start_fixture
 
 python3 -m pip download --disable-pip-version-check --no-deps --only-binary=:all: --dest "$work/python" slack-bolt==1.28.0
 python_wheel=$(find "$work/python" -maxdepth 1 -type f -name 'slack_bolt-1.28.0-*.whl' -print -quit)
