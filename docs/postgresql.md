@@ -41,8 +41,8 @@ SAMEOLDCHAT_POSTGRES_DSN='postgres://sameoldchat:sameoldchat@localhost:5432/same
 ```
 
 The qualification requires `SAMEOLDCHAT_POSTGRES_DSN`; an absent value is an
-error. It runs the shared repository contract, including the first published
-storage wave and migration path, against the configured server.
+error. It runs the shared repository contract, including the published storage
+waves and migration path, against the configured server.
 
 Related documents:
 
