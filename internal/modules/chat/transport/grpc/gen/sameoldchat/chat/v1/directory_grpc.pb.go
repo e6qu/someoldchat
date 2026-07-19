@@ -444,7 +444,7 @@ func (c *directoryServiceClient) AdminListApps(ctx context.Context, in *AppAppro
 }
 
 // DirectoryServiceServer is the server API for DirectoryService service.
-// All implementations must embed UnimplementedDirectoryServiceServer
+// All implementations should embed UnimplementedDirectoryServiceServer
 // for forward compatibility.
 type DirectoryServiceServer interface {
 	Users(context.Context, *UsersRequest) (*UserPage, error)
@@ -481,10 +481,9 @@ type DirectoryServiceServer interface {
 	AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminRestrictApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error)
-	mustEmbedUnimplementedDirectoryServiceServer()
 }
 
-// UnimplementedDirectoryServiceServer must be embedded to have
+// UnimplementedDirectoryServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -593,8 +592,7 @@ func (UnimplementedDirectoryServiceServer) AdminRestrictApp(context.Context, *Ap
 func (UnimplementedDirectoryServiceServer) AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminListApps not implemented")
 }
-func (UnimplementedDirectoryServiceServer) mustEmbedUnimplementedDirectoryServiceServer() {}
-func (UnimplementedDirectoryServiceServer) testEmbeddedByValue()                          {}
+func (UnimplementedDirectoryServiceServer) testEmbeddedByValue() {}
 
 // UnsafeDirectoryServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to DirectoryServiceServer will

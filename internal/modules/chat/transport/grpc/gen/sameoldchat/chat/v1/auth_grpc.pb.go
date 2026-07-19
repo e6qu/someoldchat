@@ -180,7 +180,7 @@ func (c *authServiceClient) CreateExternalIdentity(ctx context.Context, in *Exte
 }
 
 // AuthServiceServer is the server API for AuthService service.
-// All implementations must embed UnimplementedAuthServiceServer
+// All implementations should embed UnimplementedAuthServiceServer
 // for forward compatibility.
 type AuthServiceServer interface {
 	LookupToken(context.Context, *TokenRequest) (*TokenRecord, error)
@@ -195,10 +195,9 @@ type AuthServiceServer interface {
 	SetAuthMethod(context.Context, *AuthMethodRequest) (*AuthRevokeResponse, error)
 	GetExternalIdentity(context.Context, *ExternalIdentityRequest) (*ExternalIdentity, error)
 	CreateExternalIdentity(context.Context, *ExternalIdentityRequest) (*AuthRevokeResponse, error)
-	mustEmbedUnimplementedAuthServiceServer()
 }
 
-// UnimplementedAuthServiceServer must be embedded to have
+// UnimplementedAuthServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -241,8 +240,7 @@ func (UnimplementedAuthServiceServer) GetExternalIdentity(context.Context, *Exte
 func (UnimplementedAuthServiceServer) CreateExternalIdentity(context.Context, *ExternalIdentityRequest) (*AuthRevokeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateExternalIdentity not implemented")
 }
-func (UnimplementedAuthServiceServer) mustEmbedUnimplementedAuthServiceServer() {}
-func (UnimplementedAuthServiceServer) testEmbeddedByValue()                     {}
+func (UnimplementedAuthServiceServer) testEmbeddedByValue() {}
 
 // UnsafeAuthServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to AuthServiceServer will

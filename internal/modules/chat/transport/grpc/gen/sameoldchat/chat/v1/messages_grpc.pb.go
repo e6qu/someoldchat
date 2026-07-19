@@ -144,7 +144,7 @@ func (c *messagesServiceClient) Search(ctx context.Context, in *SearchRequest, o
 }
 
 // MessagesServiceServer is the server API for MessagesService service.
-// All implementations must embed UnimplementedMessagesServiceServer
+// All implementations should embed UnimplementedMessagesServiceServer
 // for forward compatibility.
 type MessagesServiceServer interface {
 	Post(context.Context, *PostRequest) (*Message, error)
@@ -156,10 +156,9 @@ type MessagesServiceServer interface {
 	History(context.Context, *HistoryRequest) (*MessagePage, error)
 	Replies(context.Context, *RepliesRequest) (*MessagePage, error)
 	Search(context.Context, *SearchRequest) (*MessagePage, error)
-	mustEmbedUnimplementedMessagesServiceServer()
 }
 
-// UnimplementedMessagesServiceServer must be embedded to have
+// UnimplementedMessagesServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -193,8 +192,7 @@ func (UnimplementedMessagesServiceServer) Replies(context.Context, *RepliesReque
 func (UnimplementedMessagesServiceServer) Search(context.Context, *SearchRequest) (*MessagePage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Search not implemented")
 }
-func (UnimplementedMessagesServiceServer) mustEmbedUnimplementedMessagesServiceServer() {}
-func (UnimplementedMessagesServiceServer) testEmbeddedByValue()                         {}
+func (UnimplementedMessagesServiceServer) testEmbeddedByValue() {}
 
 // UnsafeMessagesServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to MessagesServiceServer will

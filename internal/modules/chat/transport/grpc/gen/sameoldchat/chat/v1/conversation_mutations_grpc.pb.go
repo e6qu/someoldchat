@@ -276,7 +276,7 @@ func (c *conversationMutationsServiceClient) AdminSetConversationTeams(ctx conte
 }
 
 // ConversationMutationsServiceServer is the server API for ConversationMutationsService service.
-// All implementations must embed UnimplementedConversationMutationsServiceServer
+// All implementations should embed UnimplementedConversationMutationsServiceServer
 // for forward compatibility.
 type ConversationMutationsServiceServer interface {
 	OpenConversation(context.Context, *OpenConversationRequest) (*Conversation, error)
@@ -299,10 +299,9 @@ type ConversationMutationsServiceServer interface {
 	AdminConvertConversationToPrivate(context.Context, *ConvertConversationToPrivateRequest) (*Conversation, error)
 	AdminConversationTeams(context.Context, *AdminConversationTeamsRequest) (*AdminConversationTeamsResponse, error)
 	AdminSetConversationTeams(context.Context, *AdminConversationTeamsRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedConversationMutationsServiceServer()
 }
 
-// UnimplementedConversationMutationsServiceServer must be embedded to have
+// UnimplementedConversationMutationsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -368,8 +367,6 @@ func (UnimplementedConversationMutationsServiceServer) AdminConversationTeams(co
 }
 func (UnimplementedConversationMutationsServiceServer) AdminSetConversationTeams(context.Context, *AdminConversationTeamsRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminSetConversationTeams not implemented")
-}
-func (UnimplementedConversationMutationsServiceServer) mustEmbedUnimplementedConversationMutationsServiceServer() {
 }
 func (UnimplementedConversationMutationsServiceServer) testEmbeddedByValue() {}
 

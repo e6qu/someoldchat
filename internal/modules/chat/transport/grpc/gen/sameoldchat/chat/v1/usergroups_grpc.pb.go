@@ -168,7 +168,7 @@ func (c *userGroupsServiceClient) AdminAddUserGroupTeams(ctx context.Context, in
 }
 
 // UserGroupsServiceServer is the server API for UserGroupsService service.
-// All implementations must embed UnimplementedUserGroupsServiceServer
+// All implementations should embed UnimplementedUserGroupsServiceServer
 // for forward compatibility.
 type UserGroupsServiceServer interface {
 	CreateUserGroup(context.Context, *CreateUserGroupRequest) (*UserGroup, error)
@@ -182,10 +182,9 @@ type UserGroupsServiceServer interface {
 	AddUserGroupChannels(context.Context, *UserGroupChannelsRequest) (*MutationResponse, error)
 	RemoveUserGroupChannels(context.Context, *UserGroupChannelsRequest) (*MutationResponse, error)
 	AdminAddUserGroupTeams(context.Context, *AdminUserGroupTeamsRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedUserGroupsServiceServer()
 }
 
-// UnimplementedUserGroupsServiceServer must be embedded to have
+// UnimplementedUserGroupsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -225,8 +224,7 @@ func (UnimplementedUserGroupsServiceServer) RemoveUserGroupChannels(context.Cont
 func (UnimplementedUserGroupsServiceServer) AdminAddUserGroupTeams(context.Context, *AdminUserGroupTeamsRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method AdminAddUserGroupTeams not implemented")
 }
-func (UnimplementedUserGroupsServiceServer) mustEmbedUnimplementedUserGroupsServiceServer() {}
-func (UnimplementedUserGroupsServiceServer) testEmbeddedByValue()                           {}
+func (UnimplementedUserGroupsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeUserGroupsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to UserGroupsServiceServer will

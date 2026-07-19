@@ -48,14 +48,13 @@ func (c *oAuthServiceClient) ExchangeOAuth(ctx context.Context, in *OAuthExchang
 }
 
 // OAuthServiceServer is the server API for OAuthService service.
-// All implementations must embed UnimplementedOAuthServiceServer
+// All implementations should embed UnimplementedOAuthServiceServer
 // for forward compatibility.
 type OAuthServiceServer interface {
 	ExchangeOAuth(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
-	mustEmbedUnimplementedOAuthServiceServer()
 }
 
-// UnimplementedOAuthServiceServer must be embedded to have
+// UnimplementedOAuthServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -65,8 +64,7 @@ type UnimplementedOAuthServiceServer struct{}
 func (UnimplementedOAuthServiceServer) ExchangeOAuth(context.Context, *OAuthExchangeRequest) (*OAuthToken, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ExchangeOAuth not implemented")
 }
-func (UnimplementedOAuthServiceServer) mustEmbedUnimplementedOAuthServiceServer() {}
-func (UnimplementedOAuthServiceServer) testEmbeddedByValue()                      {}
+func (UnimplementedOAuthServiceServer) testEmbeddedByValue() {}
 
 // UnsafeOAuthServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to OAuthServiceServer will

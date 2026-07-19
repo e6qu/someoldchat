@@ -60,15 +60,14 @@ func (c *conversationsServiceClient) Conversations(ctx context.Context, in *Conv
 }
 
 // ConversationsServiceServer is the server API for ConversationsService service.
-// All implementations must embed UnimplementedConversationsServiceServer
+// All implementations should embed UnimplementedConversationsServiceServer
 // for forward compatibility.
 type ConversationsServiceServer interface {
 	ConversationInfo(context.Context, *ConversationInfoRequest) (*Conversation, error)
 	Conversations(context.Context, *ConversationsRequest) (*ConversationPage, error)
-	mustEmbedUnimplementedConversationsServiceServer()
 }
 
-// UnimplementedConversationsServiceServer must be embedded to have
+// UnimplementedConversationsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -81,8 +80,7 @@ func (UnimplementedConversationsServiceServer) ConversationInfo(context.Context,
 func (UnimplementedConversationsServiceServer) Conversations(context.Context, *ConversationsRequest) (*ConversationPage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Conversations not implemented")
 }
-func (UnimplementedConversationsServiceServer) mustEmbedUnimplementedConversationsServiceServer() {}
-func (UnimplementedConversationsServiceServer) testEmbeddedByValue()                              {}
+func (UnimplementedConversationsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeConversationsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to ConversationsServiceServer will

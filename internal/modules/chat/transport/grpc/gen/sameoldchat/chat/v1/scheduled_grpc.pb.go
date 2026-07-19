@@ -72,16 +72,15 @@ func (c *scheduledMessagesServiceClient) DeleteScheduledMessage(ctx context.Cont
 }
 
 // ScheduledMessagesServiceServer is the server API for ScheduledMessagesService service.
-// All implementations must embed UnimplementedScheduledMessagesServiceServer
+// All implementations should embed UnimplementedScheduledMessagesServiceServer
 // for forward compatibility.
 type ScheduledMessagesServiceServer interface {
 	ScheduleMessage(context.Context, *ScheduleMessageRequest) (*ScheduledMessage, error)
 	ScheduledMessages(context.Context, *ScheduledMessagesRequest) (*ScheduledMessagePage, error)
 	DeleteScheduledMessage(context.Context, *DeleteScheduledMessageRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedScheduledMessagesServiceServer()
 }
 
-// UnimplementedScheduledMessagesServiceServer must be embedded to have
+// UnimplementedScheduledMessagesServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -96,8 +95,6 @@ func (UnimplementedScheduledMessagesServiceServer) ScheduledMessages(context.Con
 }
 func (UnimplementedScheduledMessagesServiceServer) DeleteScheduledMessage(context.Context, *DeleteScheduledMessageRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteScheduledMessage not implemented")
-}
-func (UnimplementedScheduledMessagesServiceServer) mustEmbedUnimplementedScheduledMessagesServiceServer() {
 }
 func (UnimplementedScheduledMessagesServiceServer) testEmbeddedByValue() {}
 

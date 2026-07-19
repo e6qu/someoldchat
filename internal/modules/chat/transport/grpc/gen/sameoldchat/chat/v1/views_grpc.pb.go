@@ -84,17 +84,16 @@ func (c *viewsServiceClient) UpdateView(ctx context.Context, in *UpdateViewReque
 }
 
 // ViewsServiceServer is the server API for ViewsService service.
-// All implementations must embed UnimplementedViewsServiceServer
+// All implementations should embed UnimplementedViewsServiceServer
 // for forward compatibility.
 type ViewsServiceServer interface {
 	OpenView(context.Context, *OpenViewRequest) (*View, error)
 	PublishView(context.Context, *PublishViewRequest) (*View, error)
 	PushView(context.Context, *PushViewRequest) (*View, error)
 	UpdateView(context.Context, *UpdateViewRequest) (*View, error)
-	mustEmbedUnimplementedViewsServiceServer()
 }
 
-// UnimplementedViewsServiceServer must be embedded to have
+// UnimplementedViewsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -113,8 +112,7 @@ func (UnimplementedViewsServiceServer) PushView(context.Context, *PushViewReques
 func (UnimplementedViewsServiceServer) UpdateView(context.Context, *UpdateViewRequest) (*View, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateView not implemented")
 }
-func (UnimplementedViewsServiceServer) mustEmbedUnimplementedViewsServiceServer() {}
-func (UnimplementedViewsServiceServer) testEmbeddedByValue()                      {}
+func (UnimplementedViewsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeViewsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to ViewsServiceServer will

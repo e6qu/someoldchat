@@ -96,7 +96,7 @@ func (c *remindersServiceClient) DeleteReminder(ctx context.Context, in *Reminde
 }
 
 // RemindersServiceServer is the server API for RemindersService service.
-// All implementations must embed UnimplementedRemindersServiceServer
+// All implementations should embed UnimplementedRemindersServiceServer
 // for forward compatibility.
 type RemindersServiceServer interface {
 	AddReminder(context.Context, *AddReminderRequest) (*Reminder, error)
@@ -104,10 +104,9 @@ type RemindersServiceServer interface {
 	Reminders(context.Context, *RemindersRequest) (*ReminderPage, error)
 	CompleteReminder(context.Context, *ReminderRequest) (*MutationResponse, error)
 	DeleteReminder(context.Context, *ReminderRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedRemindersServiceServer()
 }
 
-// UnimplementedRemindersServiceServer must be embedded to have
+// UnimplementedRemindersServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -129,8 +128,7 @@ func (UnimplementedRemindersServiceServer) CompleteReminder(context.Context, *Re
 func (UnimplementedRemindersServiceServer) DeleteReminder(context.Context, *ReminderRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteReminder not implemented")
 }
-func (UnimplementedRemindersServiceServer) mustEmbedUnimplementedRemindersServiceServer() {}
-func (UnimplementedRemindersServiceServer) testEmbeddedByValue()                          {}
+func (UnimplementedRemindersServiceServer) testEmbeddedByValue() {}
 
 // UnsafeRemindersServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to RemindersServiceServer will

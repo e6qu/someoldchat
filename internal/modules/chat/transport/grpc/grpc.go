@@ -2000,30 +2000,6 @@ func (r Remote) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 }
 
 type Server struct {
-	chatv1.UnimplementedChatServiceServer
-	chatv1.UnimplementedAuthServiceServer
-	chatv1.UnimplementedConversationMutationsServiceServer
-	chatv1.UnimplementedConversationsServiceServer
-	chatv1.UnimplementedDirectoryServiceServer
-	chatv1.UnimplementedEventsServiceServer
-	chatv1.UnimplementedFilesServiceServer
-	chatv1.UnimplementedInteractionsServiceServer
-	chatv1.UnimplementedMessagesServiceServer
-	chatv1.UnimplementedPresenceServiceServer
-	chatv1.UnimplementedReactionsServiceServer
-	chatv1.UnimplementedRemindersServiceServer
-	chatv1.UnimplementedScheduledMessagesServiceServer
-	chatv1.UnimplementedUserGroupsServiceServer
-	chatv1.UnimplementedCallsServiceServer
-	chatv1.UnimplementedAccessLogsServiceServer
-	chatv1.UnimplementedViewsServiceServer
-	chatv1.UnimplementedWorkflowsServiceServer
-	chatv1.UnimplementedDialogsServiceServer
-	chatv1.UnimplementedBotsServiceServer
-	chatv1.UnimplementedMigrationServiceServer
-	chatv1.UnimplementedEnterpriseConversationsServiceServer
-	chatv1.UnimplementedOAuthServiceServer
-	chatv1.UnimplementedRTMServiceServer
 	implementation chatapi.Service
 	tokens         auth.TokenStore
 	tokenRevoker   auth.TokenRevoker

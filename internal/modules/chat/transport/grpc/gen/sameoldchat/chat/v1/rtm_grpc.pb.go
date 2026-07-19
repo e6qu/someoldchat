@@ -192,7 +192,7 @@ func (c *rTMServiceClient) ReleaseSocketModeResponses(ctx context.Context, in *S
 }
 
 // RTMServiceServer is the server API for RTMService service.
-// All implementations must embed UnimplementedRTMServiceServer
+// All implementations should embed UnimplementedRTMServiceServer
 // for forward compatibility.
 type RTMServiceServer interface {
 	CreateConnection(context.Context, *RTMConnectionRequest) (*RTMConnection, error)
@@ -208,10 +208,9 @@ type RTMServiceServer interface {
 	ClaimSocketModeResponses(context.Context, *SocketModeResponseLeaseRequest) (*SocketModeResponseBatch, error)
 	AckSocketModeResponses(context.Context, *SocketModeResponseAckRequest) (*SocketModeResponseBatch, error)
 	ReleaseSocketModeResponses(context.Context, *SocketModeResponseReleaseRequest) (*SocketModeResponseBatch, error)
-	mustEmbedUnimplementedRTMServiceServer()
 }
 
-// UnimplementedRTMServiceServer must be embedded to have
+// UnimplementedRTMServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -257,8 +256,7 @@ func (UnimplementedRTMServiceServer) AckSocketModeResponses(context.Context, *So
 func (UnimplementedRTMServiceServer) ReleaseSocketModeResponses(context.Context, *SocketModeResponseReleaseRequest) (*SocketModeResponseBatch, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReleaseSocketModeResponses not implemented")
 }
-func (UnimplementedRTMServiceServer) mustEmbedUnimplementedRTMServiceServer() {}
-func (UnimplementedRTMServiceServer) testEmbeddedByValue()                    {}
+func (UnimplementedRTMServiceServer) testEmbeddedByValue() {}
 
 // UnsafeRTMServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to RTMServiceServer will

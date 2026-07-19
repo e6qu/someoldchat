@@ -48,14 +48,13 @@ func (c *interactionsServiceClient) MarkRead(ctx context.Context, in *MarkReadRe
 }
 
 // InteractionsServiceServer is the server API for InteractionsService service.
-// All implementations must embed UnimplementedInteractionsServiceServer
+// All implementations should embed UnimplementedInteractionsServiceServer
 // for forward compatibility.
 type InteractionsServiceServer interface {
 	MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error)
-	mustEmbedUnimplementedInteractionsServiceServer()
 }
 
-// UnimplementedInteractionsServiceServer must be embedded to have
+// UnimplementedInteractionsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -65,8 +64,7 @@ type UnimplementedInteractionsServiceServer struct{}
 func (UnimplementedInteractionsServiceServer) MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method MarkRead not implemented")
 }
-func (UnimplementedInteractionsServiceServer) mustEmbedUnimplementedInteractionsServiceServer() {}
-func (UnimplementedInteractionsServiceServer) testEmbeddedByValue()                             {}
+func (UnimplementedInteractionsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeInteractionsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to InteractionsServiceServer will

@@ -156,7 +156,7 @@ func (c *reactionsServiceClient) Stars(ctx context.Context, in *StarsRequest, op
 }
 
 // ReactionsServiceServer is the server API for ReactionsService service.
-// All implementations must embed UnimplementedReactionsServiceServer
+// All implementations should embed UnimplementedReactionsServiceServer
 // for forward compatibility.
 type ReactionsServiceServer interface {
 	AddReaction(context.Context, *ReactionRequest) (*MutationResponse, error)
@@ -169,10 +169,9 @@ type ReactionsServiceServer interface {
 	AddStar(context.Context, *PinRequest) (*MutationResponse, error)
 	RemoveStar(context.Context, *PinRequest) (*MutationResponse, error)
 	Stars(context.Context, *StarsRequest) (*StarPage, error)
-	mustEmbedUnimplementedReactionsServiceServer()
 }
 
-// UnimplementedReactionsServiceServer must be embedded to have
+// UnimplementedReactionsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -209,8 +208,7 @@ func (UnimplementedReactionsServiceServer) RemoveStar(context.Context, *PinReque
 func (UnimplementedReactionsServiceServer) Stars(context.Context, *StarsRequest) (*StarPage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Stars not implemented")
 }
-func (UnimplementedReactionsServiceServer) mustEmbedUnimplementedReactionsServiceServer() {}
-func (UnimplementedReactionsServiceServer) testEmbeddedByValue()                          {}
+func (UnimplementedReactionsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeReactionsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to ReactionsServiceServer will

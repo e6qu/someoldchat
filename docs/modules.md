@@ -84,6 +84,10 @@ inside the module that owns the data. Transport generation must use a qualified
 RPC implementation rather than inventing framing, flow control, or schema
 evolution in application code.
 
+The generated gRPC server bindings do not use `Unimplemented` server embeddings.
+Each declared RPC must therefore have an explicit implementation in the chat
+transport; adding an RPC without implementing it fails the build.
+
 The transport source schema lives under [`proto/`](../proto/). Generated
 protobuf messages and service adapters are checked into the module transport
 package and regenerated through `go generate`; the dynamic envelope is not
