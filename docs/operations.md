@@ -93,6 +93,22 @@ Spool rows are claimed with durable per-replica leases; only the lease owner
 may delete a delivered row, and lease expiry is the crash-recovery path for a
 replica that dies during replay.
 
+The standalone activator receives an explicit process context. Shutdown
+cancels wake and replay work owned by that process, while accepted spool rows
+remain durable for a replacement replica to reclaim after lease expiry. A
+request context controls only that request's enqueue and response wait; it
+does not cancel the shared wake operation.
+
+The WebSocket activator uses the same termination rule. Signal handling
+cancels active request contexts, closes both sides of each proxied connection,
+and allows a bounded server drain. Lease release and scale-down cleanup use a
+separate short-lived cleanup context so a disconnected client cannot leave a
+live lease indefinitely. The proxy also applies a four-megabyte per-message
+read limit to bound memory use at the transport edge. Endpoint discovery reads
+all paginated Amazon Elastic Container Service task results and batches task
+description requests at the service limit, so replica counts do not silently
+truncate the active endpoint set.
+
 ## Snapshot retention and verification
 
 - Manifests are immutable and monotonically generated.

@@ -32,7 +32,7 @@ func (w *coordinatorWake) wake(_ context.Context, fence uint64) error {
 
 func TestActivateWakesExactlyOnce(t *testing.T) {
 	calls := 0
-	h, err := NewHandler(lifecycle.New(lifecycle.StateHibernated), func(_ context.Context, _ uint64) error { calls++; return nil }, observability.NewRegistry())
+	h, err := NewHandler(context.Background(), lifecycle.New(lifecycle.StateHibernated), func(_ context.Context, _ uint64) error { calls++; return nil }, observability.NewRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,8 +51,14 @@ func TestActivateWakesExactlyOnce(t *testing.T) {
 }
 
 func TestActivateWithoutDriverFailsClosed(t *testing.T) {
-	if _, err := NewHandler(lifecycle.New(lifecycle.StateHibernated), nil, observability.NewRegistry()); err == nil {
+	if _, err := NewHandler(context.Background(), lifecycle.New(lifecycle.StateHibernated), nil, observability.NewRegistry()); err == nil {
 		t.Fatal("expected missing driver error")
+	}
+}
+
+func TestHandlerRequiresExplicitContext(t *testing.T) {
+	if _, err := NewHandler(nil, lifecycle.New(lifecycle.StateHibernated), func(context.Context, uint64) error { return nil }, observability.NewRegistry()); err == nil {
+		t.Fatal("nil context was accepted")
 	}
 }
 
@@ -66,7 +72,7 @@ func TestFailedLifecycleDoesNotImplicitlyRetryWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := 0
-	h, err := NewForwardingHandler(controller, func(context.Context, uint64) error {
+	h, err := NewForwardingHandler(context.Background(), controller, func(context.Context, uint64) error {
 		calls++
 		return nil
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -85,7 +91,7 @@ func TestFailedLifecycleDoesNotImplicitlyRetryWake(t *testing.T) {
 func TestActivatorOwnsWakeFenceBeforeDriver(t *testing.T) {
 	controller := lifecycle.New(lifecycle.StateHibernated)
 	driver := &coordinatorWake{controller: controller}
-	h, err := NewHandler(controller, driver.wake, observability.NewRegistry())
+	h, err := NewHandler(context.Background(), controller, driver.wake, observability.NewRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +111,7 @@ func TestActivatorOwnsWakeFenceBeforeDriver(t *testing.T) {
 func TestForwardingActivatorWakesThenForwards(t *testing.T) {
 	controller := lifecycle.New(lifecycle.StateHibernated)
 	forwarded := 0
-	h, err := NewForwardingHandler(controller, func(_ context.Context, _ uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h, err := NewForwardingHandler(context.Background(), controller, func(_ context.Context, _ uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		forwarded++
 		w.WriteHeader(http.StatusCreated)
 	}), 1024, time.Second, observability.NewRegistry())
@@ -131,7 +137,7 @@ func TestConcurrentFirstRequestsShareOneWake(t *testing.T) {
 	releaseWake := make(chan struct{})
 	var wakeCalls, forwarded int
 	var mu sync.Mutex
-	h, err := NewForwardingHandler(controller, func(ctx context.Context, _ uint64) error {
+	h, err := NewForwardingHandler(context.Background(), controller, func(ctx context.Context, _ uint64) error {
 		mu.Lock()
 		wakeCalls++
 		mu.Unlock()
@@ -182,7 +188,7 @@ func TestForwardingActivatorRejectsMutationDuringQuiescence(t *testing.T) {
 	}
 	wakeCalls := 0
 	forwarded := 0
-	h, err := NewForwardingHandler(controller, func(context.Context, uint64) error {
+	h, err := NewForwardingHandler(context.Background(), controller, func(context.Context, uint64) error {
 		wakeCalls++
 		return nil
 	}, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -201,7 +207,7 @@ func TestForwardingActivatorRejectsMutationDuringQuiescence(t *testing.T) {
 
 func TestForwardingActivatorRejectsOversizedBody(t *testing.T) {
 	controller := lifecycle.New(lifecycle.StateActive)
-	h, err := NewForwardingHandler(controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h, err := NewForwardingHandler(context.Background(), controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.ReadAll(r.Body); err != nil {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)
 			return
@@ -220,11 +226,68 @@ func TestForwardingActivatorRejectsOversizedBody(t *testing.T) {
 	}
 }
 
+func TestDurableForwardingRejectsMalformedBodyAsBadRequest(t *testing.T) {
+	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	controller := lifecycle.New(lifecycle.StateActive)
+	h, err := NewDurableForwardingHandler(context.Background(), controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), spool, "activator-a", 1024, time.Second, observability.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/api/message", &failingReader{})
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d, want malformed body rejection", response.Code)
+	}
+}
+
+func TestHandlerCloseCancelsWakeDriver(t *testing.T) {
+	controller := lifecycle.New(lifecycle.StateHibernated)
+	wakeStarted := make(chan struct{})
+	wakeCanceled := make(chan struct{})
+	h, err := NewForwardingHandler(context.Background(), controller, func(ctx context.Context, _ uint64) error {
+		close(wakeStarted)
+		<-ctx.Done()
+		close(wakeCanceled)
+		return ctx.Err()
+	}, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}), 1024, time.Second, observability.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestDone := make(chan int, 1)
+	go func() {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/message", strings.NewReader("hello")))
+		requestDone <- response.Code
+	}()
+	<-wakeStarted
+	if err := h.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-wakeCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("wake driver was not canceled")
+	}
+	if code := <-requestDone; code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d, want wake failure", code)
+	}
+}
+
+type failingReader struct{}
+
+func (*failingReader) Read([]byte) (int, error) { return 0, errors.New("malformed request body") }
+func (*failingReader) Close() error             { return nil }
+
 func TestClientTimeoutDoesNotCancelSharedWake(t *testing.T) {
 	controller := lifecycle.New(lifecycle.StateHibernated)
 	started := make(chan struct{})
 	release := make(chan struct{})
-	h, err := NewForwardingHandler(controller, func(ctx context.Context, _ uint64) error {
+	h, err := NewForwardingHandler(context.Background(), controller, func(ctx context.Context, _ uint64) error {
 		close(started)
 		select {
 		case <-release:
@@ -271,7 +334,7 @@ func TestDurableForwardingSpoolsBeforeWakeAndDeletesAfterDelivery(t *testing.T) 
 	controller := lifecycle.New(lifecycle.StateHibernated)
 	var delivered, idempotencyKey string
 	var hopByHopHeadersForwarded bool
-	h, err := NewDurableForwardingHandler(controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h, err := NewDurableForwardingHandler(context.Background(), controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("read replay body: %v", err)
@@ -314,7 +377,7 @@ func TestDurableForwardingRejectsQueueOverflowWithRetryAfter(t *testing.T) {
 		t.Fatal(err)
 	}
 	controller := lifecycle.New(lifecycle.StateFailed)
-	h, err := NewDurableForwardingHandler(controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h, err := NewDurableForwardingHandler(context.Background(), controller, func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	}), spool, "activator-a", 1024, time.Second, observability.NewRegistry())
 	if err != nil {

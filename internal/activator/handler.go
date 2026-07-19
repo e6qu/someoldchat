@@ -18,6 +18,8 @@ import (
 type WakeFunc func(context.Context, uint64) error
 
 type Handler struct {
+	context    context.Context
+	cancel     context.CancelFunc
 	controller *lifecycle.Controller
 	wake       WakeFunc
 	forward    http.Handler
@@ -31,7 +33,10 @@ type Handler struct {
 	metrics    *observability.Registry
 }
 
-func NewHandler(controller *lifecycle.Controller, wake WakeFunc, metrics *observability.Registry) (Handler, error) {
+func NewHandler(ctx context.Context, controller *lifecycle.Controller, wake WakeFunc, metrics *observability.Registry) (Handler, error) {
+	if ctx == nil {
+		return Handler{}, errors.New("activator requires a context")
+	}
 	if controller == nil {
 		return Handler{}, errors.New("activator requires a lifecycle controller")
 	}
@@ -41,19 +46,20 @@ func NewHandler(controller *lifecycle.Controller, wake WakeFunc, metrics *observ
 	if metrics == nil {
 		return Handler{}, errors.New("activator requires metrics")
 	}
-	handler := Handler{controller: controller, wake: wake, metrics: metrics, processMu: &sync.Mutex{}, queueMu: &sync.Mutex{}, waiters: make(map[uint64]chan spoolResult)}
+	operationContext, cancel := context.WithCancel(ctx)
+	handler := Handler{context: operationContext, cancel: cancel, controller: controller, wake: wake, metrics: metrics, processMu: &sync.Mutex{}, queueMu: &sync.Mutex{}, waiters: make(map[uint64]chan spoolResult)}
 	handler.recordLifecycleState()
 	return handler, nil
 }
 
-func NewForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, maxBodyBytes int64, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
+func NewForwardingHandler(ctx context.Context, controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, maxBodyBytes int64, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
 	if forward == nil {
 		return Handler{}, errors.New("forwarding activator requires a forward handler")
 	}
 	if maxBodyBytes <= 0 || wakeDeadline <= 0 || metrics == nil {
 		return Handler{}, errors.New("forwarding activator requires positive body, wake, and metrics settings")
 	}
-	handler, err := NewHandler(controller, wake, metrics)
+	handler, err := NewHandler(ctx, controller, wake, metrics)
 	if err != nil {
 		return Handler{}, err
 	}
@@ -61,19 +67,30 @@ func NewForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forwa
 	return handler, nil
 }
 
-func NewDurableForwardingHandler(controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, spool Spool, spoolOwner string, maxBodyBytes int64, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
+func NewDurableForwardingHandler(ctx context.Context, controller *lifecycle.Controller, wake WakeFunc, forward http.Handler, spool Spool, spoolOwner string, maxBodyBytes int64, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
 	if spool == nil {
 		return Handler{}, errors.New("durable forwarding activator requires a request spool")
 	}
 	if strings.TrimSpace(spoolOwner) == "" {
 		return Handler{}, errors.New("durable forwarding activator requires a spool owner")
 	}
-	handler, err := NewForwardingHandler(controller, wake, forward, maxBodyBytes, wakeDeadline, metrics)
+	handler, err := NewForwardingHandler(ctx, controller, wake, forward, maxBodyBytes, wakeDeadline, metrics)
 	if err != nil {
 		return Handler{}, err
 	}
 	handler.spool, handler.spoolOwner = spool, spoolOwner
 	return handler, nil
+}
+
+// Close stops activator-owned wake and spool work. Durable requests remain in
+// the spool and a replacement activator can reclaim them after their leases
+// expire.
+func (h Handler) Close() error {
+	if h.cancel == nil {
+		return errors.New("activator is not initialized")
+	}
+	h.cancel()
+	return nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
@@ -116,7 +133,11 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, h.maxBody+1))
 	if err != nil {
 		h.recordRejected(0)
-		http.Error(w, "request body unavailable", http.StatusRequestEntityTooLarge)
+		if isBodyTooLargeError(err) {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "request body unavailable", http.StatusBadRequest)
 		return
 	}
 	if int64(len(body)) > h.maxBody {
@@ -125,7 +146,7 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.queueMu.Lock()
-	id, err := h.spool.Enqueue(context.Background(), r, body)
+	id, err := h.spool.Enqueue(r.Context(), r, body)
 	if err != nil {
 		h.queueMu.Unlock()
 		h.recordRejected(int64(len(body)))
@@ -140,7 +161,7 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	h.queueMu.Unlock()
 	defer h.removeSpoolWaiter(id, result)
 	go func() {
-		err := h.processSpool(context.Background())
+		err := h.processSpool(h.context)
 		if err != nil {
 			h.completeSpoolRequest(id, spoolResult{err: err})
 		}
@@ -159,6 +180,9 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) processSpool(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("activator spool processor requires a context")
+	}
 	if h.processMu == nil {
 		return errors.New("activator spool processor is not initialized")
 	}
@@ -382,7 +406,7 @@ func (h Handler) startWake(fence uint64) <-chan error {
 	go func() {
 		started := time.Now()
 		defer func() { h.metrics.ObserveDuration("sameoldchat_wake_driver_duration", time.Since(started)) }()
-		wakeContext, cancel := context.WithTimeout(context.Background(), h.wakeWait)
+		wakeContext, cancel := context.WithTimeout(h.context, h.wakeWait)
 		defer cancel()
 		if err := h.wake(wakeContext, fence); err != nil {
 			result <- errors.Join(err, h.controller.Fail(fence))
@@ -396,6 +420,11 @@ func (h Handler) startWake(fence uint64) <-chan error {
 		result <- nil
 	}()
 	return result
+}
+
+func isBodyTooLargeError(err error) bool {
+	var maxBytesError *http.MaxBytesError
+	return errors.As(err, &maxBytesError)
 }
 
 func (h Handler) recordRejected(bodyBytes int64) {

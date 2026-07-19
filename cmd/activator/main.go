@@ -10,8 +10,10 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -161,7 +163,9 @@ func main() {
 		os.Exit(2)
 	}
 	defer spool.Close()
-	handler, err := activator.NewDurableForwardingHandler(controller, coordinator.WakeAt, proxy, spool, *spoolOwner, 4<<20, 2*time.Minute, metrics)
+	applicationContext, stopApplication := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopApplication()
+	handler, err := activator.NewDurableForwardingHandler(applicationContext, controller, coordinator.WakeAt, proxy, spool, *spoolOwner, 4<<20, 2*time.Minute, metrics)
 	if err != nil {
 		logger.Error("configure forwarding activator", "error", err)
 		os.Exit(2)
@@ -209,10 +213,23 @@ func main() {
 	})
 	server := &http.Server{Addr: *listen, Handler: requireControlToken(mux, *controlToken)}
 	logger.Info("activator listening", "addr", *listen)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		logger.Error("activator stopped", "error", err)
-		os.Exit(1)
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- server.ListenAndServe() }()
+	select {
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			logger.Error("activator stopped", "error", err)
+			os.Exit(1)
+		}
+	case <-applicationContext.Done():
+		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelShutdown()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			logger.Error("activator shutdown failed", "error", err)
+			os.Exit(1)
+		}
 	}
+	_ = handler.Close()
 }
 
 func requireControlToken(next http.Handler, token string) http.Handler {

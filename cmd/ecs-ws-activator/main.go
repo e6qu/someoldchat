@@ -10,9 +10,11 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -25,7 +27,7 @@ import (
 )
 
 type activator struct {
-	ecs       *ecs.Client
+	ecs       ecsClient
 	dynamo    *dynamodb.Client
 	cluster   string
 	service   string
@@ -42,12 +44,20 @@ type activator struct {
 	mu        sync.Mutex
 }
 
+type ecsClient interface {
+	ListTasks(context.Context, *ecs.ListTasksInput, ...func(*ecs.Options)) (*ecs.ListTasksOutput, error)
+	DescribeTasks(context.Context, *ecs.DescribeTasksInput, ...func(*ecs.Options)) (*ecs.DescribeTasksOutput, error)
+	UpdateService(context.Context, *ecs.UpdateServiceInput, ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error)
+}
+
 type endpoint struct {
 	address string
 	arn     string
 }
 
 const scaleDownLock = "scale-down"
+
+const maxWebSocketMessageBytes = 4 << 20
 
 func main() {
 	listen := flag.String("listen", "", "HTTP listen address behind the TLS-terminating NLB (required)")
@@ -82,11 +92,25 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /", a.handle)
-	server := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	applicationContext, stopApplication := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopApplication()
+	server := &http.Server{Addr: *listen, Handler: mux, ReadHeaderTimeout: 10 * time.Second, BaseContext: func(net.Listener) context.Context { return applicationContext }}
 	logger.Info("websocket activator listening", "addr", *listen, "service", *service)
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		logger.Error("websocket activator stopped", "error", err)
-		os.Exit(1)
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- server.ListenAndServe() }()
+	select {
+	case err := <-serverErrors:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.Error("websocket activator stopped", "error", err)
+			os.Exit(1)
+		}
+	case <-applicationContext.Done():
+		shutdownContext, cancelShutdown := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelShutdown()
+		if err := server.Shutdown(shutdownContext); err != nil {
+			logger.Error("websocket activator shutdown failed", "error", err)
+			os.Exit(1)
+		}
 	}
 }
 
@@ -113,10 +137,12 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 	leaseContext, cancelLease := context.WithCancel(r.Context())
 	defer func() {
 		cancelLease()
-		if err := a.releaseLease(context.Background(), lease); err != nil {
+		cleanupContext, cancelCleanup := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelCleanup()
+		if err := a.releaseLease(cleanupContext, lease); err != nil {
 			a.logger.Error("release websocket lease failed", "error", err, "lease", lease)
 		}
-		if err := a.scaleDownIfIdle(context.Background()); err != nil {
+		if err := a.scaleDownIfIdle(cleanupContext); err != nil {
 			a.logger.Error("scale websocket service to zero failed", "error", err)
 		}
 	}()
@@ -149,6 +175,8 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer clientConn.Close()
+	backendConn.SetReadLimit(maxWebSocketMessageBytes)
+	clientConn.SetReadLimit(maxWebSocketMessageBytes)
 
 	errorsCh := make(chan error, 2)
 	go proxyMessages(errorsCh, clientConn, backendConn)
@@ -160,10 +188,16 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 		}
 	case err := <-leaseErrors:
 		a.logger.Error("websocket lease renewal failed", "error", err, "lease", lease)
+	case <-r.Context().Done():
+		_ = clientConn.Close()
+		_ = backendConn.Close()
 	}
 }
 
 func (a *activator) readyEndpoint(ctx context.Context) (endpoint, error) {
+	if err := ctx.Err(); err != nil {
+		return endpoint{}, err
+	}
 	deadline := time.Now().Add(a.startWait)
 	started := false
 	for time.Now().Before(deadline) {
@@ -193,7 +227,13 @@ func (a *activator) readyEndpoint(ctx context.Context) (endpoint, error) {
 			}
 			started = true
 		}
-		time.Sleep(250 * time.Millisecond)
+		timer := time.NewTimer(250 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return endpoint{}, ctx.Err()
+		case <-timer.C:
+		}
 	}
 	return endpoint{}, fmt.Errorf("websocket application did not become ready within %s", a.startWait)
 }
@@ -222,29 +262,43 @@ func (a *activator) ensureRunning(ctx context.Context) error {
 
 func (a *activator) runningEndpoints(ctx context.Context) ([]endpoint, error) {
 	input := &ecs.ListTasksInput{Cluster: aws.String(a.cluster), ServiceName: aws.String(a.service), DesiredStatus: ecstypes.DesiredStatusRunning, Family: aws.String(a.family)}
-	output, err := a.ecs.ListTasks(ctx, input)
-	if err != nil {
-		return nil, err
+	var taskARNs []string
+	for {
+		output, err := a.ecs.ListTasks(ctx, input)
+		if err != nil {
+			return nil, err
+		}
+		taskARNs = append(taskARNs, output.TaskArns...)
+		if output.NextToken == nil || *output.NextToken == "" {
+			break
+		}
+		input.NextToken = output.NextToken
 	}
-	if len(output.TaskArns) == 0 {
+	if len(taskARNs) == 0 {
 		return nil, nil
 	}
-	described, err := a.ecs.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String(a.cluster), Tasks: output.TaskArns})
-	if err != nil {
-		return nil, err
-	}
-	endpoints := make([]endpoint, 0, len(described.Tasks))
-	for _, task := range described.Tasks {
-		if task.LastStatus != aws.String("RUNNING") || task.TaskArn == nil {
-			continue
+	endpoints := make([]endpoint, 0, len(taskARNs))
+	for start := 0; start < len(taskARNs); start += 100 {
+		end := start + 100
+		if end > len(taskARNs) {
+			end = len(taskARNs)
 		}
-		for _, attachment := range task.Attachments {
-			if attachment.Type == nil || *attachment.Type != "ElasticNetworkInterface" {
+		described, err := a.ecs.DescribeTasks(ctx, &ecs.DescribeTasksInput{Cluster: aws.String(a.cluster), Tasks: taskARNs[start:end]})
+		if err != nil {
+			return nil, err
+		}
+		for _, task := range described.Tasks {
+			if aws.ToString(task.LastStatus) != "RUNNING" || task.TaskArn == nil {
 				continue
 			}
-			for _, detail := range attachment.Details {
-				if detail.Name != nil && detail.Value != nil && *detail.Name == "privateIPv4Address" {
-					endpoints = append(endpoints, endpoint{address: *detail.Value, arn: *task.TaskArn})
+			for _, attachment := range task.Attachments {
+				if aws.ToString(attachment.Type) != "ElasticNetworkInterface" {
+					continue
+				}
+				for _, detail := range attachment.Details {
+					if detail.Name != nil && detail.Value != nil && *detail.Name == "privateIPv4Address" {
+						endpoints = append(endpoints, endpoint{address: *detail.Value, arn: *task.TaskArn})
+					}
 				}
 			}
 		}
@@ -262,7 +316,7 @@ func (a *activator) scaleDownIfIdle(ctx context.Context) error {
 		return nil
 	}
 	defer func() {
-		if _, releaseErr := a.dynamo.DeleteItem(context.Background(), &dynamodb.DeleteItemInput{TableName: aws.String(a.table), Key: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}}, ConditionExpression: aws.String("owner = :owner"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":owner": &dynamodbtypes.AttributeValueMemberS{Value: owner}}}); releaseErr != nil {
+		if _, releaseErr := a.dynamo.DeleteItem(ctx, &dynamodb.DeleteItemInput{TableName: aws.String(a.table), Key: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}}, ConditionExpression: aws.String("owner = :owner"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":owner": &dynamodbtypes.AttributeValueMemberS{Value: owner}}}); releaseErr != nil {
 			a.logger.Error("release websocket scale-down lock failed", "error", releaseErr)
 		}
 	}()
