@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"hash/fnv"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -122,7 +124,7 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err)
 		return
 	}
-	backendURL := "ws://" + backend.address + r.URL.RequestURI()
+	backendURL := websocketEndpointURL(backend, a.port, r.URL.RequestURI())
 	backendHeaders := cloneHeaders(r.Header)
 	backendHeaders.Del("Connection")
 	backendHeaders.Del("Sec-WebSocket-Key")
@@ -162,7 +164,7 @@ func (a *activator) readyEndpoint(ctx context.Context) (endpoint, error) {
 		}
 		for _, candidate := range endpoints {
 			requestContext, cancel := context.WithTimeout(ctx, time.Second)
-			request, err := http.NewRequestWithContext(requestContext, http.MethodGet, "http://"+candidate.address+":"+fmt.Sprint(a.port)+"/readyz", nil)
+			request, err := http.NewRequestWithContext(requestContext, http.MethodGet, readinessURL(candidate, a.port), nil)
 			if err != nil {
 				cancel()
 				return endpoint{}, err
@@ -185,6 +187,14 @@ func (a *activator) readyEndpoint(ctx context.Context) (endpoint, error) {
 		time.Sleep(250 * time.Millisecond)
 	}
 	return endpoint{}, fmt.Errorf("websocket application did not become ready within %s", a.startWait)
+}
+
+func readinessURL(candidate endpoint, port int) string {
+	return "http://" + net.JoinHostPort(candidate.address, strconv.Itoa(port)) + "/readyz"
+}
+
+func websocketEndpointURL(candidate endpoint, port int, requestURI string) string {
+	return "ws://" + net.JoinHostPort(candidate.address, strconv.Itoa(port)) + requestURI
 }
 
 func (a *activator) ensureRunning(ctx context.Context) error {
