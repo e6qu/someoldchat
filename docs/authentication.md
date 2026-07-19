@@ -70,16 +70,21 @@ not the cross-application identity boundary.
 For a session created through the configured OpenID Connect provider, it then
 redirects the browser to the discovered `end_session_endpoint` with the
 durably retained ID token, the client ID, and
-`https://<application-host>/` as `post_logout_redirect_uri`. This ends the
+`https://<application-host>/signed-out` as `post_logout_redirect_uri`. This ends the
 identity-provider session and coordinates logout with the other relying
-applications instead of merely clearing SameOldChat's host-scoped cookie.
+applications instead of merely clearing SameOldChat's host-scoped cookie. The
+provider returns the browser to SameOldChat's non-redirecting signed-out page;
+only the explicit **Sign in again** link starts another authorization flow. If
+provider logout metadata is incomplete, SameOldChat still revokes its local
+session and reports the incomplete global logout on that application-owned
+page instead of silently claiming success.
 The identity provider also sends a signed OpenID Connect back-channel logout token to
 `POST /auth/oidc/backchannel-logout`. SameOldChat verifies the issuer, audience,
-signature, standard logout event, `sid`, `sub`, `iat`, and `jti`, rejects a
+signature, expiration, standard logout event, `sub`, `iat`, and `jti`, rejects a
 token carrying `nonce`, resolves the verified issuer subject, and revokes every
 local session for that user. The identity provider client must register
 `https://<application-host>/auth/oidc/backchannel-logout` as its back-channel
-logout URI and `https://<application-host>/` as an allowed post-logout redirect
+logout URI and `https://<application-host>/signed-out` as an allowed post-logout redirect
 URI. The application uses the same durable session store in monolith and
 separate modes; the gRPC session adapter remains the authoritative path for
 separate mode.
@@ -90,7 +95,10 @@ mutation. Re-enabling membership does not restore revoked credentials; the user
 must authenticate again or receive a newly issued token.
 
 The server creates a short-lived signed state cookie and uses
-Proof Key for Code Exchange (PKCE). It links a returned external subject to an
+Proof Key for Code Exchange (PKCE). OpenID Connect authorization requests also
+bind the returned ID token to a per-request nonce. The resulting SameOldChat
+session cannot outlive that ID token or the application's 24-hour maximum. It
+links a returned external subject to an
 existing workspace member by provider and subject, or by verified email when
 the subject has not been linked. An OpenID Connect identity is provisioned only
 when the configured issuer returns a supported `developer` or `admin` role;

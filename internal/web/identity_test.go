@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -85,6 +86,9 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
+	if err := service.CreateSession(context.Background(), "second-browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
 		Name: "oidc", Issuer: issuer.URL, ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: issuer.URL + "/oauth2/auth", TokenURL: issuer.URL + "/oauth2/token", UserInfoURL: issuer.URL + "/userinfo", Scopes: []string{"openid", "profile", "email"},
 	}})
@@ -99,33 +103,45 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	now := time.Now().UTC()
 	raw, err := jwt.Signed(signer).Claims(map[string]any{
 		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
-		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
+		"events": map[string]any{backchannelLogoutEvent: map[string]any{}, "https://example.test/other-event": map[string]any{}},
 	}).Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
-	form := url.Values{"logout_token": {raw}}
+	form := url.Values{"logout_token": {raw}, "unrecognized_parameter": {"ignored"}}
 	request := httptest.NewRequest(http.MethodPost, "/auth/oidc/backchannel-logout", strings.NewReader(form.Encode()))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response := httptest.NewRecorder()
 	handler.backchannelLogout(response, request)
-	if response.Code != http.StatusNoContent {
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
-	record, err := store.LookupSession(context.Background(), "browser-session")
-	if err != nil || !record.Revoked {
-		t.Fatalf("session=%+v err=%v", record, err)
+	for _, sessionToken := range []string{"browser-session", "second-browser-session"} {
+		record, err := store.LookupSession(context.Background(), sessionToken)
+		if err != nil || !record.Revoked {
+			t.Fatalf("session %q=%+v err=%v", sessionToken, record, err)
+		}
 	}
 
 	invalid, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}).Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := handler.verifyBackchannelLogout(context.Background(), invalid); err == nil {
-		t.Fatal("logout token without sid was accepted")
+		t.Fatal("logout token without a subject was accepted")
+	}
+	invalidEvent, err := jwt.Signed(signer).Claims(map[string]any{
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-event-id",
+		"events": map[string]any{backchannelLogoutEvent: "not-an-object"},
+	}).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.verifyBackchannelLogout(context.Background(), invalidEvent); err == nil {
+		t.Fatal("logout token with a non-object event was accepted")
 	}
 }
 
@@ -181,6 +197,97 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 	}
 }
 
+func TestOpenIDConnectCallbackBindsNonceAndProviderSessionLifetime(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keyID = "login-key"
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, (&jose.SignerOptions{}).WithHeader("kid", keyID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expectedNonce atomic.Value
+	providerExpiry := time.Now().UTC().Add(5 * time.Minute).Truncate(time.Second)
+	var issuer *httptest.Server
+	issuer = newIPv4TLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(OpenIDConfiguration{Issuer: issuer.URL, AuthorizationEndpoint: issuer.URL + "/authorize", TokenEndpoint: issuer.URL + "/token", UserInfoEndpoint: issuer.URL + "/userinfo", JWKSURI: issuer.URL + "/jwks", EndSessionEndpoint: issuer.URL + "/logout"})
+		case "/jwks":
+			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: keyID, Algorithm: string(jose.RS256), Use: "sig"}}})
+		case "/token":
+			nonceValue, ok := expectedNonce.Load().(string)
+			if !ok || nonceValue == "" {
+				http.Error(w, "authorization nonce was not captured", http.StatusBadRequest)
+				return
+			}
+			now := time.Now().UTC()
+			value, signErr := jwt.Signed(signer).Claims(map[string]any{"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-auth-subject", "sid": "sha-auth-session", "nonce": nonceValue, "iat": now.Unix(), "exp": providerExpiry.Unix()}).Serialize()
+			if signErr != nil {
+				http.Error(w, "ID token signing failed", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "access-token", "id_token": value})
+		case "/userinfo":
+			_ = json.NewEncoder(w).Encode(map[string]string{"sub": "sha-auth-subject", "email": "developer@example.test", "name": "Developer", "role": "developer"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer issuer.Close()
+	provider, err := DiscoverOpenIDConnectProvider(context.Background(), issuer.Client(), issuer.URL, "sameoldchat", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.test", Name: "admin"})
+	handler, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = issuer.Client()
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	begin := httptest.NewRecorder()
+	mux.ServeHTTP(begin, httptest.NewRequest(http.MethodGet, "/auth/oidc", nil))
+	location, err := url.Parse(begin.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonceValue := location.Query().Get("nonce")
+	expectedNonce.Store(nonceValue)
+	state := location.Query().Get("state")
+	if begin.Code != http.StatusFound || nonceValue == "" || state == "" {
+		t.Fatalf("authorization response=%d location=%s", begin.Code, location)
+	}
+	callbackRequest := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=code&state="+url.QueryEscape(state), nil)
+	for _, cookie := range begin.Result().Cookies() {
+		callbackRequest.AddCookie(cookie)
+	}
+	callback := httptest.NewRecorder()
+	mux.ServeHTTP(callback, callbackRequest)
+	if callback.Code != http.StatusSeeOther || callback.Header().Get("Location") != "/app" {
+		t.Fatalf("callback status=%d location=%q body=%s", callback.Code, callback.Header().Get("Location"), callback.Body.String())
+	}
+	sessionCookie := findSessionCookie(callback.Result().Cookies())
+	if sessionCookie == nil || sessionCookie.MaxAge < 240 || sessionCookie.MaxAge > 300 {
+		t.Fatalf("session cookie=%+v, want provider-bounded lifetime", sessionCookie)
+	}
+	record, err := store.LookupSession(context.Background(), sessionCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.OIDCProvider != "oidc" || record.OIDCSubject != "sha-auth-subject" || record.OIDCSID != "sha-auth-session" || record.OIDCIDToken == "" || !record.ExpiresAt.Equal(providerExpiry) {
+		t.Fatalf("durable session=%+v, want provider identity and expiry %s", record, providerExpiry)
+	}
+	if _, _, _, err := handler.verifyOIDCLoginToken(context.Background(), provider, record.OIDCIDToken, "wrong-nonce"); err == nil {
+		t.Fatal("ID token with a mismatched authorization nonce was accepted")
+	}
+}
+
 func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
@@ -220,12 +327,30 @@ func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if location.Scheme != "https" || location.Host != "auth.example.test" || location.Path != "/oauth2/sessions/logout" || location.Query().Get("id_token_hint") != "signed.id.token" || location.Query().Get("client_id") != "sameoldchat" || location.Query().Get("post_logout_redirect_uri") != "https://chat.example.test/" {
+	if location.Scheme != "https" || location.Host != "auth.example.test" || location.Path != "/oauth2/sessions/logout" || location.Query().Get("id_token_hint") != "signed.id.token" || location.Query().Get("client_id") != "sameoldchat" || location.Query().Get("post_logout_redirect_uri") != "https://chat.example.test/signed-out" {
 		t.Fatalf("logout redirect=%s", location)
 	}
 	record, err := store.LookupSession(context.Background(), "session")
 	if err != nil || !record.Revoked {
 		t.Fatalf("session=%+v err=%v", record, err)
+	}
+}
+
+func TestSignedOutPageStaysOnApplicationOriginAndDoesNotRestartSSO(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "https://chat.example.test/signed-out", nil)
+	response := httptest.NewRecorder()
+	signedOut(response, request)
+	if response.Code != http.StatusOK || response.Header().Get("Location") != "" || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status=%d location=%q headers=%v", response.Code, response.Header().Get("Location"), response.Header())
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, "You’re signed out") || !strings.Contains(body, `href="/login"`) || strings.Contains(body, `http-equiv="refresh"`) {
+		t.Fatalf("signed-out page=%s", body)
+	}
+	failure := httptest.NewRecorder()
+	signedOut(failure, httptest.NewRequest(http.MethodGet, "https://chat.example.test/signed-out?global=failed", nil))
+	if failure.Code != http.StatusServiceUnavailable || !strings.Contains(failure.Body.String(), "could not complete global sign-out") {
+		t.Fatalf("global logout failure status=%d body=%s", failure.Code, failure.Body.String())
 	}
 }
 
@@ -248,6 +373,28 @@ func TestOIDCLogoutRedirectFailsClosedForIncompleteProviderMetadata(t *testing.T
 	}
 	if _, err := login.logoutRedirectURL(context.Background(), "session"); err == nil || !strings.Contains(err.Error(), "end-session endpoint") {
 		t.Fatalf("logout redirect error=%v", err)
+	}
+	authenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service, authenticator, store, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	request := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/signed-out?global=failed" {
+		t.Fatalf("status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body.String())
+	}
+	record, err := store.LookupSession(context.Background(), "session")
+	if err != nil || !record.Revoked {
+		t.Fatalf("session=%+v err=%v", record, err)
 	}
 }
 

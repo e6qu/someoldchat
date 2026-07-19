@@ -120,12 +120,21 @@ Exit criteria:
   behavior that HTMX cannot provide.
 - Add accessibility, browser, and screenshot regression tests.
 
-The web identity flow persisted verified OIDC issuer, subject, session ID, and
-ID-token metadata with each durable application session. RP-initiated logout
-revoked that session and redirected through the provider's discovered
-end-session endpoint with an ID-token hint, client ID, and validated return URL;
-the signed back-channel receiver continued to revoke correlated sessions when
-the provider initiated logout.
+The web identity flow bound each authorization response to a per-request nonce
+and persisted its verified OIDC issuer, subject, session ID, ID-token metadata,
+and provider-bounded expiry with each durable application session. RP-initiated
+logout revoked the local session before redirecting through the provider's
+discovered end-session endpoint with an ID-token hint, client ID, and an exact
+return to SameOldChat's terminal signed-out page. Provider logout failures left
+the application signed out and were reported on that page. The signed
+back-channel receiver revoked every correlated local session when the provider
+initiated logout.
+
+Remote chat services preserved canonical store and context errors across the
+gRPC boundary, so first-login identity provisioning behaved the same in local
+and split-process deployments. Concurrent first login was qualified through a
+real gRPC server and PostgreSQL repository and converged on one durable user and
+external identity.
 
 Exit criteria:
 
@@ -195,6 +204,10 @@ Every change must pass:
 - dependency age, integrity, provenance, license, and vulnerability checks;
 - migration forward and restore compatibility checks; and
 - generated compatibility-ledger validation.
+
+The dependency-admission gate verified exact direct npm lockfile versions and
+Subresource Integrity checksums against the same aged evidence inventory used
+for Go modules, GitHub Actions, and container inputs.
 
 ## Initial milestone
 

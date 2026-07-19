@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html/template"
 	"io"
 	"net/http"
 	"net/url"
@@ -69,6 +70,7 @@ const (
 	maxAuthorizationTokenResponse     = 64 << 10
 	maxAuthorizationUserInfoResponse  = 256 << 10
 	maxAuthorizationEmailResponse     = 1 << 20
+	maxBackchannelLogoutRequest       = 64 << 10
 )
 
 func decodeAuthorizationJSON(body io.Reader, limit int64, target any) error {
@@ -225,11 +227,25 @@ func (h LoginHandler) Register(mux *http.ServeMux) {
 	}
 }
 
+func signedOut(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	message := "Your SameOldChat and organization sign-in sessions have ended."
+	if r.URL.Query().Get("global") == "failed" {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		message = "Your SameOldChat session ended, but the organization identity service could not complete global sign-out."
+	}
+	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Signed out · SameOldChat</title><style>:root{color-scheme:light dark;--bg:#f8f8fa;--panel:#fff;--text:#1d1c1d;--muted:#5e5e65;--line:#d5d5da;--accent:#611f69;--focus:#1264a3}@media(prefers-color-scheme:dark){:root{--bg:#1a1d21;--panel:#222529;--text:#f4f4f5;--muted:#c7c7cc;--line:#4a4e55;--accent:#b869c2;--focus:#5bb8ff}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(480px,100%);padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 42px #0002}h1{margin:0 0 12px;font-size:2rem}p{margin:0 0 24px;color:var(--muted)}a{display:inline-block;padding:11px 16px;border-radius:7px;background:var(--accent);color:#fff;font-weight:700;text-decoration:none}a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}</style></head><body><main class="card"><h1>You’re signed out</h1><p role="status">`+template.HTMLEscapeString(message)+`</p><a href="/login">Sign in again</a></main></body></html>`)
+}
+
 const backchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
 
 type backchannelLogoutClaims struct {
 	Events   map[string]json.RawMessage `json:"events"`
 	IssuedAt int64                      `json:"iat"`
+	Expires  int64                      `json:"exp"`
 	JWTID    string                     `json:"jti"`
 	Nonce    string                     `json:"nonce"`
 	SID      string                     `json:"sid"`
@@ -254,37 +270,51 @@ func (h LoginHandler) verifyBackchannelLogout(ctx context.Context, raw string) (
 	if err := token.Claims(&claims); err != nil {
 		return nil, fmt.Errorf("decode logout token: %w", err)
 	}
-	_, eventPresent := claims.Events[backchannelLogoutEvent]
-	if token.Subject == "" || claims.SID == "" || claims.IssuedAt == 0 || claims.JWTID == "" || claims.Nonce != "" || !eventPresent {
+	event, eventPresent := claims.Events[backchannelLogoutEvent]
+	var eventValue map[string]any
+	if eventPresent {
+		if err := json.Unmarshal(event, &eventValue); err != nil || eventValue == nil {
+			eventPresent = false
+		}
+	}
+	now := time.Now().UTC().Unix()
+	if token.Subject == "" || claims.IssuedAt == 0 || claims.Expires == 0 || claims.JWTID == "" || claims.Nonce != "" || !eventPresent || claims.IssuedAt > now+60 || claims.IssuedAt < now-600 {
 		return nil, errors.New("logout token claims are invalid")
 	}
 	return token, nil
 }
 
 func (h LoginHandler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	r.Body = http.MaxBytesReader(w, r.Body, maxBackchannelLogoutRequest)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "logout token is invalid", http.StatusBadRequest)
 		return
 	}
-	token, err := h.verifyBackchannelLogout(r.Context(), strings.TrimSpace(r.Form.Get("logout_token")))
+	values := r.Form["logout_token"]
+	if len(values) != 1 {
+		http.Error(w, "logout token is invalid", http.StatusBadRequest)
+		return
+	}
+	token, err := h.verifyBackchannelLogout(r.Context(), strings.TrimSpace(values[0]))
 	if err != nil {
 		http.Error(w, "logout token is invalid", http.StatusBadRequest)
 		return
 	}
 	identity, err := h.service.GetExternalIdentity(r.Context(), h.workspace, "oidc", token.Subject)
 	if errors.Is(err, store.ErrNotFound) {
-		w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 	if err != nil {
-		http.Error(w, "session revocation unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "logout token could not be applied", http.StatusBadRequest)
 		return
 	}
 	if err := h.service.ResetUserSessions(r.Context(), h.workspace, h.lookupUser, identity.UserID); err != nil && !errors.Is(err, store.ErrNotFound) {
-		http.Error(w, "session revocation unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "logout token could not be applied", http.StatusBadRequest)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusOK)
 }
 
 func (h LoginHandler) login(w http.ResponseWriter, _ *http.Request) {
@@ -345,10 +375,18 @@ func (h LoginHandler) begin(w http.ResponseWriter, r *http.Request, name string)
 		http.Error(w, "authorization verifier unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	payload := name + "\x00" + state + "\x00" + verifier
+	nonce, err := randomURLValue(32)
+	if err != nil {
+		http.Error(w, "authorization nonce unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	payload := name + "\x00" + state + "\x00" + verifier + "\x00" + nonce
 	signature := signState(h.stateKey, payload)
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: base64.RawURLEncoding.EncodeToString([]byte(payload + "\x00" + signature)), Path: "/auth/", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	query := url.Values{"client_id": {provider.ClientID}, "redirect_uri": {h.callbackURL(name)}, "response_type": {"code"}, "scope": {strings.Join(provider.Scopes, " ")}, "state": {state}, "code_challenge": {pkceChallenge(verifier)}, "code_challenge_method": {"S256"}}
+	if provider.Issuer != "" {
+		query.Set("nonce", nonce)
+	}
 	http.Redirect(w, r, provider.AuthorizeURL+"?"+query.Encode(), http.StatusFound)
 }
 
@@ -377,7 +415,7 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	parts := strings.Split(string(decoded), "\x00")
-	if len(parts) != 4 || parts[0] != name || !hmac.Equal([]byte(parts[3]), []byte(signState(h.stateKey, strings.Join(parts[:3], "\x00")))) || parts[1] != strings.TrimSpace(r.URL.Query().Get("state")) {
+	if len(parts) != 5 || parts[0] != name || !hmac.Equal([]byte(parts[4]), []byte(signState(h.stateKey, strings.Join(parts[:4], "\x00")))) || parts[1] != strings.TrimSpace(r.URL.Query().Get("state")) {
 		http.Error(w, "authorization state is invalid", http.StatusBadRequest)
 		return
 	}
@@ -388,11 +426,16 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	}
 	provider := h.providers[name]
 	oidcSubject, oidcSID := "", ""
+	sessionExpiresAt := time.Now().UTC().Add(24 * time.Hour)
 	if provider.Issuer != "" {
-		oidcSubject, oidcSID, err = h.verifyOIDCLoginToken(r.Context(), provider, tokens.IDToken)
+		var providerExpiresAt time.Time
+		oidcSubject, oidcSID, providerExpiresAt, err = h.verifyOIDCLoginToken(r.Context(), provider, tokens.IDToken, parts[3])
 		if err != nil {
 			http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
 			return
+		}
+		if providerExpiresAt.Before(sessionExpiresAt) {
+			sessionExpiresAt = providerExpiresAt
 		}
 	}
 	identity, err := h.userInfo(r.Context(), provider, tokens.AccessToken, name)
@@ -414,18 +457,23 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	record := domain.SessionRecord{WorkspaceID: user.WorkspaceID, UserID: user.ID, Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}
+	record := domain.SessionRecord{WorkspaceID: user.WorkspaceID, UserID: user.ID, Scopes: auth.AllScopes(), ExpiresAt: sessionExpiresAt}
 	if provider.Issuer != "" {
 		record.OIDCProvider = name
 		record.OIDCIDToken = tokens.IDToken
 		record.OIDCSubject = oidcSubject
 		record.OIDCSID = oidcSID
 	}
+	cookieMaxAge := int(time.Until(sessionExpiresAt).Seconds())
+	if cookieMaxAge < 1 {
+		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if err := h.service.CreateSession(r.Context(), sessionToken, record); err != nil {
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	http.SetCookie(w, auth.SessionCookie(sessionToken, 86400, h.cookieDomain))
+	http.SetCookie(w, auth.SessionCookie(sessionToken, cookieMaxAge, h.cookieDomain))
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: "", Path: "/auth/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
@@ -547,21 +595,25 @@ func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig,
 	return value, nil
 }
 
-func (h LoginHandler) verifyOIDCLoginToken(ctx context.Context, provider ProviderConfig, raw string) (string, string, error) {
+func (h LoginHandler) verifyOIDCLoginToken(ctx context.Context, provider ProviderConfig, raw, expectedNonce string) (string, string, time.Time, error) {
 	if provider.verifier == nil || strings.TrimSpace(raw) == "" {
-		return "", "", errors.New("OpenID Connect ID token verifier is unavailable")
+		return "", "", time.Time{}, errors.New("OpenID Connect ID token verifier is unavailable")
 	}
 	token, err := provider.verifier.Verify(ctx, raw)
 	if err != nil {
-		return "", "", err
+		return "", "", time.Time{}, err
 	}
 	var claims struct {
-		SID string `json:"sid"`
+		Nonce string `json:"nonce"`
+		SID   string `json:"sid"`
 	}
 	if err := token.Claims(&claims); err != nil {
-		return "", "", err
+		return "", "", time.Time{}, err
 	}
-	return token.Subject, strings.TrimSpace(claims.SID), nil
+	if expectedNonce == "" || !hmac.Equal([]byte(claims.Nonce), []byte(expectedNonce)) {
+		return "", "", time.Time{}, errors.New("OpenID Connect ID token nonce is invalid")
+	}
+	return token.Subject, strings.TrimSpace(claims.SID), token.Expiry.UTC(), nil
 }
 
 func (h LoginHandler) logoutRedirectURL(ctx context.Context, sessionToken string) (string, error) {
@@ -570,7 +622,7 @@ func (h LoginHandler) logoutRedirectURL(ctx context.Context, sessionToken string
 		return "", err
 	}
 	if record.OIDCProvider == "" {
-		return "/", nil
+		return "/signed-out", nil
 	}
 	provider, ok := h.providers[record.OIDCProvider]
 	if !ok {
@@ -589,7 +641,7 @@ func (h LoginHandler) logoutRedirectURL(ctx context.Context, sessionToken string
 	query := endpoint.Query()
 	query.Set("id_token_hint", record.OIDCIDToken)
 	query.Set("client_id", provider.ClientID)
-	query.Set("post_logout_redirect_uri", h.publicURL+"/")
+	query.Set("post_logout_redirect_uri", h.publicURL+"/signed-out")
 	endpoint.RawQuery = query.Encode()
 	return endpoint.String(), nil
 }

@@ -16,7 +16,14 @@ mount. This separation keeps SameOldChat portable while allowing an environment
 to use its own Amazon Elastic Container Service ingress module. Pass the
 `environment`, `secrets`, and `task_policy_json` outputs into that service.
 
-`bootstrap_admin_email` is deliberately required. SameOldChat resolves an OIDC
-identity only to an existing workspace user, so it must equal the verified
-email address issued by the configured OpenID Connect provider for the initial
-administrator.
+`bootstrap_admin_email` is deliberately required for the initial local
+administrator used by the authorization control plane. An authorized OpenID
+Connect identity carrying a `developer` or `admin` role is provisioned as its
+own durable workspace user on first sign-in; it is not collapsed into the
+bootstrap account by email.
+
+The OpenID Connect client registration must allow
+`https://<application-host>/signed-out` as the RP-initiated post-logout redirect
+URI and register
+`https://<application-host>/auth/oidc/backchannel-logout` as the back-channel
+logout URI.
