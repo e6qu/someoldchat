@@ -569,9 +569,18 @@ func (h LoginHandler) logoutRedirectURL(ctx context.Context, sessionToken string
 	if err != nil {
 		return "", err
 	}
-	provider, ok := h.providers[record.OIDCProvider]
-	if !ok || record.OIDCIDToken == "" || provider.EndSessionURL == "" {
+	if record.OIDCProvider == "" {
 		return "/", nil
+	}
+	provider, ok := h.providers[record.OIDCProvider]
+	if !ok {
+		return "", fmt.Errorf("OpenID Connect provider %q is not configured", record.OIDCProvider)
+	}
+	if record.OIDCIDToken == "" {
+		return "", errors.New("OpenID Connect session has no ID token")
+	}
+	if provider.EndSessionURL == "" {
+		return "", fmt.Errorf("OpenID Connect provider %q has no end-session endpoint", record.OIDCProvider)
 	}
 	endpoint, err := url.Parse(provider.EndSessionURL)
 	if err != nil {

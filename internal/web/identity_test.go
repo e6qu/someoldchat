@@ -229,6 +229,28 @@ func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
 	}
 }
 
+func TestOIDCLogoutRedirectFailsClosedForIncompleteProviderMetadata(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	if err := store.CreateSession(context.Background(), "session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := service.Messages{Store: store}
+	login, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := login.logoutRedirectURL(context.Background(), "session"); err == nil || !strings.Contains(err.Error(), "end-session endpoint") {
+		t.Fatalf("logout redirect error=%v", err)
+	}
+}
+
 func newIPv4TLSServer(t *testing.T, handler http.Handler) *httptest.Server {
 	t.Helper()
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
