@@ -1134,6 +1134,14 @@ func (r Remote) AdminCreateUser(ctx context.Context, workspaceID domain.Workspac
 	return decodeProtoUser(out)
 }
 
+func (r Remote) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
+	out, err := r.directory.AdminListUsers(ctx, &chatv1.AdminUsersRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	if err != nil {
+		return domain.AdminUserPage{}, err
+	}
+	return decodeProtoAdminUserPage(out)
+}
+
 func (r Remote) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, userID, targetID domain.UserID, channels []domain.ConversationID) error {
 	channelIDs := make([]string, 0, len(channels))
 	for _, channel := range channels {
@@ -2439,6 +2447,21 @@ func (s *Server) AdminCreateUser(ctx context.Context, input *chatv1.AdminCreateU
 		return nil, mapError(err)
 	}
 	return encodeProtoUser(value), nil
+}
+
+func (s *Server) AdminListUsers(ctx context.Context, input *chatv1.AdminUsersRequest) (*chatv1.AdminUserPage, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+	}
+	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	value, err := s.implementation.AdminListUsers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAdminUserPage(value), nil
 }
 
 func (s *Server) AdminAssignUser(ctx context.Context, input *chatv1.AdminAssignUserRequest) (*chatv1.MutationResponse, error) {
@@ -4160,6 +4183,32 @@ func encodeProtoUserPage(page domain.UserPage) *chatv1.UserPage {
 		users = append(users, encodeProtoUser(user))
 	}
 	return &chatv1.UserPage{Users: users, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
+func encodeProtoAdminUserPage(page domain.AdminUserPage) *chatv1.AdminUserPage {
+	users := make([]*chatv1.AdminUser, 0, len(page.Users))
+	for _, value := range page.Users {
+		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active})
+	}
+	return &chatv1.AdminUserPage{Users: users, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
+func decodeProtoAdminUserPage(value *chatv1.AdminUserPage) (domain.AdminUserPage, error) {
+	if value == nil {
+		return domain.AdminUserPage{}, errors.New("missing administrator user page")
+	}
+	users := make([]domain.AdminUser, 0, len(value.GetUsers()))
+	for _, item := range value.GetUsers() {
+		if item == nil || item.GetUser() == nil {
+			return domain.AdminUserPage{}, errors.New("administrator user page contains an empty user")
+		}
+		user, err := decodeProtoUser(item.GetUser())
+		if err != nil {
+			return domain.AdminUserPage{}, err
+		}
+		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive()}})
+	}
+	return domain.AdminUserPage{Users: users, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
 
 func decodeProtoUserPage(value *chatv1.UserPage) (domain.UserPage, error) {

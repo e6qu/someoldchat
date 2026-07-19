@@ -1628,6 +1628,54 @@ func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, req
 	return page, err
 }
 
+func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.AdminUserPage, error) {
+	if request.Limit <= 0 {
+		return domain.AdminUserPage{}, errors.New("page limit must be positive")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AdminUserPage{}, err
+	}
+	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, m.role, m.active FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
+	args := []any{workspace}
+	if after != "" {
+		query += ` AND u.id > ?`
+		args = append(args, after)
+	}
+	query += ` ORDER BY u.id LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.AdminUserPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.AdminUser, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.AdminUser
+		var deleted, active int
+		if err := rows.Scan(&value.User.ID, &value.User.WorkspaceID, &value.User.Email, &value.User.Name, &value.User.RealName, &value.User.Profile.DisplayName, &value.User.Profile.StatusText, &value.User.Profile.StatusEmoji, &value.User.Profile.Image24, &value.User.Profile.Image32, &value.User.Profile.Image48, &value.User.Profile.Image72, &value.User.Profile.Image192, &value.User.Profile.Image512, &value.User.Profile.Image1024, &deleted, &value.User.Presence, &value.Membership.Role, &active); err != nil {
+			return domain.AdminUserPage{}, err
+		}
+		value.User.Deleted = deleted != 0
+		value.Membership.WorkspaceID = workspace
+		value.Membership.UserID = value.User.ID
+		value.Membership.Active = active != 0
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.AdminUserPage{}, err
+	}
+	page := domain.AdminUserPage{HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		values = values[:request.Limit]
+	}
+	page.Users = values
+	if page.HasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].User.ID))
+	}
+	return page, err
+}
+
 func (s *Store) ListUsersByRole(ctx context.Context, workspace domain.WorkspaceID, role domain.WorkspaceRole, request domain.PageRequest) (domain.UserPage, error) {
 	if request.Limit <= 0 {
 		return domain.UserPage{}, errors.New("page limit must be positive")

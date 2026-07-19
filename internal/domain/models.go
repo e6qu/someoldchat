@@ -96,6 +96,17 @@ type User struct {
 	Deleted     bool
 }
 
+type AdminUser struct {
+	User       User
+	Membership WorkspaceMembership
+}
+
+type AdminUserPage struct {
+	Users      []AdminUser
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type CustomEmoji struct {
 	WorkspaceID WorkspaceID
 	Name        string

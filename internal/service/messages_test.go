@@ -133,6 +133,17 @@ func TestAdminCreateUserNormalizesAndPersistsMembership(t *testing.T) {
 	if _, err := (Messages{Store: s}).AdminCreateUser(ctx, "T1", "U1", "alice@example.com", "Duplicate", domain.WorkspaceRoleMember); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("duplicate error=%v", err)
 	}
+	page, err := (Messages{Store: s}).AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	foundAdmin := false
+	for _, item := range page.Users {
+		if item.User.Email == "alice@example.com" && item.Membership.Role == domain.WorkspaceRoleAdmin && item.Membership.Active {
+			foundAdmin = true
+			break
+		}
+	}
+	if err != nil || len(page.Users) != 2 || !foundAdmin {
+		t.Fatalf("administrator users=%+v err=%v", page, err)
+	}
 }
 
 func TestExternalIdentityLinkIsUniqueAndDurable(t *testing.T) {

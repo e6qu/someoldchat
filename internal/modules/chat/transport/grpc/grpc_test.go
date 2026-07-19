@@ -231,6 +231,18 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if _, err := remote.AdminCreateUser(ctx, "T1", "U1", "NEW@example.com", "Duplicate", domain.WorkspaceRoleMember); err == nil {
 		t.Fatal("duplicate manual user was accepted")
 	}
+	adminUsers, err := remote.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	if err != nil || len(adminUsers.Users) != 3 {
+		t.Fatalf("admin users=%+v err=%v", adminUsers, err)
+	}
+	if _, err := remote.AdminListUsers(ctx, "", "U1", domain.PageRequest{Limit: 10}); err == nil {
+		t.Fatal("administrator user listing accepted an empty workspace")
+	}
+	for _, item := range adminUsers.Users {
+		if item.User.ID == createdUser.ID && (item.Membership.Role != domain.WorkspaceRoleMember || !item.Membership.Active) {
+			t.Fatalf("created administrator user state=%+v", item)
+		}
+	}
 	tokenStore := auth.TokenStore(remote)
 	token, err := tokenStore.LookupToken(ctx, "api-token")
 	if err != nil || token.UserID != "U1" || len(token.Scopes) != 1 || token.Scopes[0] != "chat:write" {

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -143,6 +144,77 @@ func TestAuthAdminCreateUserRejectsMissingCSRF(t *testing.T) {
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func adminMutationRequest(method, target, body string) *http.Request {
+	request := httptest.NewRequest(method, target, strings.NewReader(body+"&_csrf="+auth.CSRFToken("session")))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: auth.CSRFToken("session")})
+	return request
+}
+
+func TestAuthAdminListsMembershipState(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersRead})
+	request := httptest.NewRequest(http.MethodGet, "/api/admin.auth.users.list?limit=10", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `"role":"member"`) || !strings.Contains(body, `"active":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, body)
+	}
+}
+
+func TestAuthAdminUpdatesUserLifecycle(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	create := adminMutationRequest(http.MethodPost, "/api/admin.auth.users.create", "email=target%40example.com&real_name=Target&role=member")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, create)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", response.Code, response.Body.String())
+	}
+	var created struct {
+		User domain.User `json:"user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id="+string(created.User.ID)+"&action=disable"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id="+string(created.User.ID)+"&action=enable"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("enable status=%d body=%s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id="+string(created.User.ID)+"&action=role&role=admin"))
+	if response.Code != http.StatusOK {
+		t.Fatalf("role status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAuthAdminRejectsUnknownUserMutation(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=U1&action=unknown"))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "invalid_action") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestAuthAdminReportsMissingUserAsNotFound(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=missing&action=disable"))
+	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), "user_not_found") {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }

@@ -95,9 +95,19 @@ The internal administration endpoints are:
 ```text
 GET  /api/admin.auth.methods.list
 POST /api/admin.auth.methods.set
+GET  /api/admin.auth.users.list
 POST /api/admin.auth.users.invite
 POST /api/admin.auth.users.create
+POST /api/admin.auth.users.set
 ```
+
+The user list accepts `limit` from 1 through 100 and an opaque `cursor`. It
+returns each user with the durable workspace role and active membership state.
+The user mutation endpoint requires `user_id` and one of `disable`, `enable`,
+or `role` as its explicit `action`. A role mutation accepts only `member` or
+`admin` in this internal control plane. Deactivation also revokes the user's
+sessions and access tokens. Re-enabling a user restores active membership
+without assigning conversation membership.
 
 Provider secrets remain deployment configuration. Enablement is workspace state
 stored by the selected durable store. The invitation endpoint remains the
