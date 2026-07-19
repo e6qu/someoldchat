@@ -18,13 +18,6 @@ type s3Client interface {
 	ListObjectsV2(context.Context, *s3.ListObjectsV2Input, ...func(*s3.Options)) (*s3.ListObjectsV2Output, error)
 }
 
-// ListStore extends Store with bounded object listing for manifest retention
-// and provider-backed lifecycle metadata.
-type ListStore interface {
-	Store
-	List(context.Context, string) ([]Object, error)
-}
-
 // S3 stores objects in an explicitly selected Amazon Simple Storage Service
 // bucket. It never substitutes a filesystem store when the service is
 // unavailable.
@@ -38,6 +31,7 @@ type S3 struct {
 var errExactSize = errors.New("blob source size does not match the declared size")
 
 var _ ListStore = S3{}
+var _ WalkStore = S3{}
 
 func NewS3(client *s3.Client, bucket, prefix string, maxSize int64) (S3, error) {
 	if client == nil {
@@ -116,6 +110,9 @@ func (s S3) List(ctx context.Context, prefix string) ([]Object, error) {
 		if err != nil {
 			return nil, err
 		}
+		if output == nil {
+			return nil, errors.New("object listing returned an empty response")
+		}
 		for _, item := range output.Contents {
 			if item.Key == nil || item.Size == nil || *item.Size < 0 || *item.Size > s.maxSize {
 				return nil, errors.New("object listing contains an invalid object")
@@ -128,6 +125,45 @@ func (s S3) List(ctx context.Context, prefix string) ([]Object, error) {
 		}
 		if output.NextContinuationToken == nil || *output.NextContinuationToken == "" {
 			return nil, errors.New("object listing is truncated without a continuation token")
+		}
+		token = output.NextContinuationToken
+	}
+}
+
+func (s S3) Walk(ctx context.Context, prefix string, visit func(Object) error) error {
+	if visit == nil {
+		return errors.New("object visitor is required")
+	}
+	objectPrefix := s.prefixWithSlash()
+	if prefix != "" {
+		var err error
+		objectPrefix, err = s.objectKey(prefix)
+		if err != nil {
+			return err
+		}
+	}
+	var token *string
+	for {
+		output, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), Prefix: aws.String(objectPrefix), ContinuationToken: token})
+		if err != nil {
+			return err
+		}
+		if output == nil {
+			return errors.New("object listing returned an empty response")
+		}
+		for _, item := range output.Contents {
+			if item.Key == nil || item.Size == nil || *item.Size < 0 || *item.Size > s.maxSize {
+				return errors.New("object listing contains an invalid object")
+			}
+			if err := visit(Object{Key: strings.TrimPrefix(*item.Key, s.prefixWithSlash()), Size: *item.Size}); err != nil {
+				return err
+			}
+		}
+		if !aws.ToBool(output.IsTruncated) {
+			return nil
+		}
+		if output.NextContinuationToken == nil || *output.NextContinuationToken == "" {
+			return errors.New("object listing is truncated without a continuation token")
 		}
 		token = output.NextContinuationToken
 	}

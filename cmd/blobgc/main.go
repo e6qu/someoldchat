@@ -23,18 +23,25 @@ func main() {
 	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address")
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
 	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name")
-	blobDirectory := flag.String("blob-dir", "", "external blob directory (required)")
+	blobDirectory := flag.String("blob-dir", "", "external blob directory")
 	blobMaxBytes := flag.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
 	workspace := flag.String("workspace", "", "workspace ID (required)")
-	owner := flag.String("owner", "", "unique cleanup worker owner ID (required)")
+	owner := flag.String("owner", "", "unique cleanup worker owner ID for cleanup mode")
+	audit := flag.Bool("audit", false, "audit durable blob references and provider objects, then exit")
+	enqueueOrphans := flag.Bool("enqueue-orphans", false, "enqueue audited orphan objects for leased cleanup")
+	maxResults := flag.Int("max-audit-results", 1000, "maximum orphan or missing keys returned by an audit")
 	limit := flag.Int("batch-size", 100, "bounded cleanup batch size")
 	lease := flag.Duration("lease", 30*time.Second, "durable cleanup lease")
 	poll := flag.Duration("poll", 250*time.Millisecond, "poll interval")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if *backend == "" || *blobDirectory == "" || *workspace == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 {
-		logger.Error("blobgc requires explicit store, blob directory, workspace, owner, and positive limits")
+	if *backend == "" || *workspace == "" || (*blobDirectory == "" && *blobS3Bucket == "") || (*blobDirectory != "" && *blobS3Bucket != "") || *maxResults <= 0 {
+		logger.Error("blobgc requires one explicit blob store, store backend, workspace, and positive audit limit")
+		os.Exit(2)
+	}
+	if !*audit && (*owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0) {
+		logger.Error("blobgc cleanup mode requires owner and positive batch, lease, and poll values")
 		os.Exit(2)
 	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
@@ -56,6 +63,40 @@ func main() {
 	if !ok {
 		logger.Error("blob cleanup state provided an invalid blob store")
 		os.Exit(1)
+	}
+	if *enqueueOrphans && !*audit {
+		logger.Error("-enqueue-orphans requires -audit")
+		os.Exit(2)
+	}
+	if *audit {
+		listStore, ok := runtime.BlobStore.(blob.WalkStore)
+		if !ok {
+			logger.Error("selected blob store does not support reconciliation")
+			os.Exit(1)
+		}
+		reconciler, err := blob.NewReconciler(runtime.Store, listStore, runtime.Store, *maxResults)
+		if err != nil {
+			logger.Error("configure blob reconciliation", "error", err)
+			os.Exit(2)
+		}
+		result, err := reconciler.Audit(context.Background(), domain.WorkspaceID(*workspace))
+		if err != nil {
+			logger.Error("audit blobs", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("blob audit", "objects", result.Objects, "references", result.References, "orphans", len(result.OrphanKeys), "missing", len(result.MissingKeys), "duplicates", result.DuplicateKeys)
+		if *enqueueOrphans {
+			count, err := reconciler.EnqueueOrphans(context.Background(), domain.WorkspaceID(*workspace), result)
+			if err != nil {
+				logger.Error("enqueue orphan cleanup", "count", count, "error", err)
+				os.Exit(1)
+			}
+			logger.Info("enqueued orphan cleanup", "count", count)
+		}
+		if len(result.MissingKeys) != 0 {
+			os.Exit(1)
+		}
+		return
 	}
 	worker, err := blob.NewCleanupWorker(runtime.CleanupSource, objects, *owner, *limit, *lease)
 	if err != nil {

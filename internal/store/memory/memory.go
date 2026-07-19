@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -2783,6 +2784,53 @@ func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, reque
 		}
 	}
 	return page, nil
+}
+
+func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.WorkspaceID, visit func(string) error) error {
+	if visit == nil {
+		return errors.New("blob reference visitor is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.RLock()
+	references := make([]string, 0)
+	for _, file := range s.files {
+		if file.WorkspaceID == workspace && !file.Deleted {
+			references = append(references, file.BlobKey)
+		}
+	}
+	for _, user := range s.users {
+		if user.WorkspaceID != workspace || user.Deleted {
+			continue
+		}
+		if user.Profile.Image24 != "" {
+			key, err := photoBlobKey(workspace, user)
+			if err != nil {
+				return err
+			}
+			references = append(references, key)
+		}
+	}
+	s.mu.RUnlock()
+	for _, reference := range references {
+		if err := visit(reference); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func photoBlobKey(workspace domain.WorkspaceID, user domain.User) (string, error) {
+	prefix := "/users/" + string(workspace) + "/" + string(user.ID) + "/photo/"
+	if !strings.HasPrefix(user.Profile.Image24, prefix) {
+		return "", fmt.Errorf("user %q has an invalid photo URL", user.ID)
+	}
+	token := strings.TrimPrefix(user.Profile.Image24, prefix)
+	if token == "" || strings.Contains(token, "/") {
+		return "", fmt.Errorf("user %q has an invalid photo URL", user.ID)
+	}
+	return string(workspace) + "/users/" + string(user.ID) + "/" + token, nil
 }
 
 func (s *Store) AddRemoteFile(_ context.Context, value domain.RemoteFile, event events.Event) error {

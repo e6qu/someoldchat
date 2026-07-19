@@ -20,6 +20,19 @@ type Store interface {
 	Delete(context.Context, string) error
 }
 
+// ListStore exposes bounded provider enumeration for reconciliation. Walk must
+// invoke visit in provider order and must stop immediately when visit returns
+// an error.
+type ListStore interface {
+	Store
+	List(context.Context, string) ([]Object, error)
+}
+
+type WalkStore interface {
+	Store
+	Walk(context.Context, string, func(Object) error) error
+}
+
 // Disabled is the explicit blob-store choice for deployments without file
 // storage. It fails every operation so a missing capability cannot be
 // mistaken for an empty store or silently degrade file behavior.

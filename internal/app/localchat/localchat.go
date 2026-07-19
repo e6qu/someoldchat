@@ -24,6 +24,7 @@ import (
 
 type Runtime struct {
 	Service         chatapi.Service
+	Store           store.Store
 	Closer          io.Closer
 	TokenStore      auth.TokenStore
 	TokenSeeder     TokenSeeder
@@ -192,7 +193,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 		_ = closer.Close()
 		return Runtime{}, errors.New("selected store does not support scheduled message execution")
 	}
-	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore), Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, BlobStore: blobStore}, nil
+	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore), Store: chatStore, Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, BlobStore: blobStore}, nil
 }
 
 func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {
