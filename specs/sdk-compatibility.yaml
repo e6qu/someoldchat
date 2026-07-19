@@ -42,6 +42,17 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
+  - id: node-rtm-api
+    ecosystem: npm
+    package: '@slack/rtm-api'
+    upstream: https://github.com/slackapi/node-slack-sdk
+    release: 7.0.4
+    revision: 18c4af44866519ca2cfb9a12848dabfedd3ae1aa
+    artifact: slack-rtm-api-7.0.4.tgz
+    sha256: 59ace7f544d2f724f21239e19169976c619e89b397c3fc90cf7fb269f7f7dbe9
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/node-rtm-api/qualification.mjs
   - id: python-slack-sdk
     ecosystem: pypi
     package: slack-sdk

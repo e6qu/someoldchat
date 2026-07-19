@@ -70,7 +70,12 @@ func (h Handler) Register(mux *http.ServeMux) {
 }
 
 func (h Handler) RegisterRTM(mux *http.ServeMux) {
-	mux.Handle("/rtm", websocket.Handler(h.rtmWebSocket))
+	mux.Handle("/rtm", websocket.Server{
+		Handler: websocket.Handler(h.rtmWebSocket),
+		Handshake: func(*websocket.Config, *http.Request) error {
+			return nil
+		},
+	})
 }
 
 func (h Handler) events(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +138,11 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 				}
 			}
 			payload, encodeErr := encodeRTMEvent(record)
-			if encodeErr != nil || websocket.Message.Send(conn, string(payload)) != nil {
+			if encodeErr != nil {
+				// The durable stream also carries internal records whose payloads are not Slack events.
+				continue
+			}
+			if websocket.Message.Send(conn, string(payload)) != nil {
 				return
 			}
 		}

@@ -16,6 +16,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -29,6 +30,15 @@ func main() {
 		Topic:       "message.created",
 		Payload:     `{"type":"event_callback","team_id":"T1","api_app_id":"A1","event_id":"qualification-socket-event","event_time":1,"event":{"type":"message","channel":"C1","user":"U1","text":"socket qualification event","ts":"1.000000","event_ts":"1.000000"}}`,
 		CreatedAt:   time.Unix(1, 0).UTC(),
+	}); err != nil {
+		panic(err)
+	}
+	if err := store.AppendEvent(context.Background(), events.Event{
+		ID:          "qualification-rtm-event",
+		WorkspaceID: "T1",
+		Topic:       "message.created",
+		Payload:     `{"type":"message","channel":"C1","user":"U1","text":"rtm qualification event","ts":"2.000000","event_ts":"2.000000"}`,
+		CreatedAt:   time.Unix(2, 0).UTC(),
 	}); err != nil {
 		panic(err)
 	}
@@ -98,6 +108,11 @@ func main() {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Events: messages, Cursors: messages, Responses: responses})
+	rtmHandler, err := realtime.NewRTMHandler(messages, "T1", messages, messages)
+	if err != nil {
+		panic(err)
+	}
+	rtmHandler.RegisterRTM(mux)
 	mux.HandleFunc("GET /qualification/socket-mode-response", func(w http.ResponseWriter, r *http.Request) {
 		envelopeID := r.URL.Query().Get("envelope_id")
 		payload, ok := responses.get(envelopeID)

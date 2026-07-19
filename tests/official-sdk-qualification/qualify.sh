@@ -90,6 +90,14 @@ cp "$root/tests/official-sdk-qualification/node-socket-mode/qualification.mjs" "
 stop_fixture
 start_fixture
 
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/rtm-api@7.0.4')
+require_hash "$work/npm/$npm_tarball" 59ace7f544d2f724f21239e19169976c619e89b397c3fc90cf7fb269f7f7dbe9
+npm install --prefix "$work/node-rtm-api" --no-save "$work/npm/$npm_tarball"
+cp "$root/tests/official-sdk-qualification/node-rtm-api/qualification.mjs" "$work/node-rtm-api/qualification.mjs"
+(cd "$work/node-rtm-api" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
+stop_fixture
+start_fixture
+
 npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@4.7.3')
 require_hash "$work/npm/$npm_tarball" 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
 npm install --prefix "$work/node-bolt" --no-save "$work/npm/$npm_tarball"
