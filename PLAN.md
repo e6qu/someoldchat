@@ -120,6 +120,13 @@ Exit criteria:
   behavior that HTMX cannot provide.
 - Add accessibility, browser, and screenshot regression tests.
 
+The web identity flow persisted verified OIDC issuer, subject, session ID, and
+ID-token metadata with each durable application session. RP-initiated logout
+revoked that session and redirected through the provider's discovered
+end-session endpoint with an ID-token hint, client ID, and validated return URL;
+the signed back-channel receiver continued to revoke correlated sessions when
+the provider initiated logout.
+
 Exit criteria:
 
 - A user can complete the core chat workflow after a cold wake.

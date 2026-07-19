@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -90,6 +91,25 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 	}
 	if strings.Contains(body, "/api/admin.auth.methods.set") {
 		t.Fatal("authorization-method section was exposed without its scope")
+	}
+}
+
+func TestAuthAdminPageOffersNextUserPage(t *testing.T) {
+	handler := newAuthAdminTestHandler(t, []auth.Scope{auth.ScopeAdminUsersWrite})
+	for index := 0; index < 51; index++ {
+		request := adminMutationRequest(http.MethodPost, "/api/admin.auth.users.create", "email=user-"+strconv.Itoa(index)+"%40example.com&real_name=User-"+strconv.Itoa(index)+"&role=member")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("create user %d status=%d body=%s", index, response.Code, response.Body.String())
+		}
+	}
+	request := adminPageRequest()
+	request.URL.RawQuery = "limit=10"
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "Next page") || !strings.Contains(response.Body.String(), "limit=10&amp;cursor=") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
 

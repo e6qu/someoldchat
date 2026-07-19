@@ -20,6 +20,7 @@ type Service interface {
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	RevokeSession(context.Context, string) error
+	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	GetAuthMethod(context.Context, domain.WorkspaceID, string) (domain.AuthMethod, error)
 	SetAuthMethod(context.Context, domain.AuthMethod) error

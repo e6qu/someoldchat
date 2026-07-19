@@ -39,6 +39,10 @@ message SessionRecord {
   repeated string scopes = 3;
   string expires_at = 4;
   bool revoked = 5;
+  string oidc_provider = 6;
+  string oidc_id_token = 7;
+  string oidc_subject = 8;
+  string oidc_sid = 9;
 }
 
 message TokenRequest {

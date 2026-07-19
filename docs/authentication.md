@@ -67,6 +67,12 @@ controls only the scope of SameOldChat's own secure, HTTP-only cookie. It is
 not the cross-application identity boundary.
 
 `POST /logout` revokes the current SameOldChat session and expires its cookie.
+For a session created through the configured OpenID Connect provider, it then
+redirects the browser to the discovered `end_session_endpoint` with the
+durably retained ID token, the client ID, and
+`https://<application-host>/` as `post_logout_redirect_uri`. This ends the
+identity-provider session and coordinates logout with the other relying
+applications instead of merely clearing SameOldChat's host-scoped cookie.
 The identity provider also sends a signed OpenID Connect back-channel logout token to
 `POST /auth/oidc/backchannel-logout`. SameOldChat verifies the issuer, audience,
 signature, standard logout event, `sid`, `sub`, `iat`, and `jti`, rejects a

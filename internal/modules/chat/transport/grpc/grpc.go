@@ -4846,7 +4846,7 @@ func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 }
 
 func encodeProtoSession(value domain.SessionRecord) *chatv1.SessionRecord {
-	return &chatv1.SessionRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: domain.NormalizeScopes(value.Scopes), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), Revoked: value.Revoked}
+	return &chatv1.SessionRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: domain.NormalizeScopes(value.Scopes), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano), Revoked: value.Revoked, OidcProvider: value.OIDCProvider, OidcIdToken: value.OIDCIDToken, OidcSubject: value.OIDCSubject, OidcSid: value.OIDCSID}
 }
 
 func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, error) {
@@ -4860,7 +4860,7 @@ func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, erro
 	if err != nil {
 		return domain.SessionRecord{}, errors.New("typed session expires_at is invalid")
 	}
-	return domain.SessionRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Scopes: domain.NormalizeScopes(value.GetScopes()), ExpiresAt: expires.UTC(), Revoked: value.GetRevoked()}, nil
+	return domain.SessionRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Scopes: domain.NormalizeScopes(value.GetScopes()), ExpiresAt: expires.UTC(), Revoked: value.GetRevoked(), OIDCProvider: value.GetOidcProvider(), OIDCIDToken: value.GetOidcIdToken(), OIDCSubject: value.GetOidcSubject(), OIDCSID: value.GetOidcSid()}, nil
 }
 
 func encodeProtoEvents(records []events.Record) *chatv1.EventsResponse {

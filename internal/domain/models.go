@@ -294,11 +294,15 @@ type AppTokenRecord struct {
 }
 
 type SessionRecord struct {
-	WorkspaceID WorkspaceID
-	UserID      UserID
-	Scopes      []string
-	ExpiresAt   time.Time
-	Revoked     bool
+	WorkspaceID  WorkspaceID
+	UserID       UserID
+	Scopes       []string
+	ExpiresAt    time.Time
+	Revoked      bool
+	OIDCProvider string
+	OIDCIDToken  string
+	OIDCSubject  string
+	OIDCSID      string
 }
 
 func HashToken(token string) string {

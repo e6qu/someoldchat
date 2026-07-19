@@ -24,6 +24,36 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+func TestDecodeAuthorizationJSONBoundsExternalResponses(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		body  string
+		limit int64
+		want  string
+	}{
+		{name: "within limit", body: `{"access_token":"token"}`, limit: 64, want: ""},
+		{name: "over limit", body: `{"access_token":"token"}`, limit: 10, want: "exceeds"},
+		{name: "invalid JSON", body: `{`, limit: 64, want: "unexpected end of JSON input"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var value tokenResponse
+			err := decodeAuthorizationJSON(strings.NewReader(test.body), test.limit, &value)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("decode error=%v", err)
+				}
+				if value.AccessToken != "token" {
+					t.Fatalf("decoded value=%+v", value)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("decode error=%v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -49,7 +79,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "person@example.com", Name: "person"})
 	service := service.Messages{Store: store}
-	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "sha-subject", UserID: "U2"}); err != nil {
+	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "oidc-subject", UserID: "U2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
@@ -68,7 +98,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 	now := time.Now().UTC()
 	raw, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-subject", "sid": "sha-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}).Serialize()
 	if err != nil {
@@ -88,7 +118,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 
 	invalid, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-subject", "sid": "", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}).Serialize()
 	if err != nil {
@@ -132,6 +162,7 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 			TokenEndpoint:         server.URL + "/token",
 			UserInfoEndpoint:      server.URL + "/userinfo",
 			JWKSURI:               server.URL + "/jwks",
+			EndSessionEndpoint:    server.URL + "/logout",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -142,11 +173,81 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provider.Name != "oidc" || provider.AuthorizeURL != server.URL+"/authorize" || provider.TokenURL != server.URL+"/token" || provider.UserInfoURL != server.URL+"/userinfo" {
+	if provider.Name != "oidc" || provider.AuthorizeURL != server.URL+"/authorize" || provider.TokenURL != server.URL+"/token" || provider.UserInfoURL != server.URL+"/userinfo" || provider.EndSessionURL != server.URL+"/logout" {
 		t.Fatalf("provider=%+v", provider)
 	}
 	if got := strings.Join(provider.Scopes, " "); got != "openid profile email" {
 		t.Fatalf("scopes=%q", got)
+	}
+}
+
+func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	if err := store.CreateSession(context.Background(), "session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := service.Messages{Store: store}
+	login, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", EndSessionURL: "https://auth.example.test/oauth2/sessions/logout", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service, authenticator, store, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	request := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	location, err := url.Parse(response.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Scheme != "https" || location.Host != "auth.example.test" || location.Path != "/oauth2/sessions/logout" || location.Query().Get("id_token_hint") != "signed.id.token" || location.Query().Get("client_id") != "sameoldchat" || location.Query().Get("post_logout_redirect_uri") != "https://chat.example.test/" {
+		t.Fatalf("logout redirect=%s", location)
+	}
+	record, err := store.LookupSession(context.Background(), "session")
+	if err != nil || !record.Revoked {
+		t.Fatalf("session=%+v err=%v", record, err)
+	}
+}
+
+func TestOIDCLogoutRedirectFailsClosedForIncompleteProviderMetadata(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	if err := store.CreateSession(context.Background(), "session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := service.Messages{Store: store}
+	login, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := login.logoutRedirectURL(context.Background(), "session"); err == nil || !strings.Contains(err.Error(), "end-session endpoint") {
+		t.Fatalf("logout redirect error=%v", err)
 	}
 }
 
@@ -261,7 +362,7 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 	}
 }
 
-func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *testing.T) {
+func TestOIDCAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
@@ -275,9 +376,9 @@ func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *tes
 	handler.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/oauth2/token":
-			return providerResponse(r, `{"access_token":"shauth-token"}`), nil
+			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
 		case "/userinfo":
-			return providerResponse(r, `{"sub":"shauth-subject","email":"alice@example.com","preferred_username":"alice","role":"admin"}`), nil
+			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","preferred_username":"alice","role":"admin"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -298,7 +399,7 @@ func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *tes
 	if err != nil || membership.Role != domain.WorkspaceRoleAdmin || !membership.Active {
 		t.Fatalf("membership=%+v err=%v", membership, err)
 	}
-	identity, err := store.GetExternalIdentity(context.Background(), "T1", "oidc", "shauth-subject")
+	identity, err := store.GetExternalIdentity(context.Background(), "T1", "oidc", "oidc-subject")
 	if err != nil || identity.UserID != user.ID {
 		t.Fatalf("identity=%+v err=%v", identity, err)
 	}
@@ -307,7 +408,7 @@ func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *tes
 	}
 }
 
-func TestShauthAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
+func TestOIDCAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
@@ -320,9 +421,9 @@ func TestShauthAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 	handler.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/oauth2/token":
-			return providerResponse(r, `{"access_token":"shauth-token"}`), nil
+			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
 		case "/userinfo":
-			return providerResponse(r, `{"sub":"shauth-subject","email":"alice@example.com","preferred_username":"alice"}`), nil
+			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","preferred_username":"alice"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -339,13 +440,13 @@ func TestShauthAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 	}
 }
 
-func TestShauthAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
+func TestOIDCAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
 	service := service.Messages{Store: store}
-	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "shauth-subject", UserID: "U2"}); err != nil {
+	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "oidc-subject", UserID: "U2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.SetUserRole(context.Background(), "T1", "U1", "U2", domain.WorkspaceRoleAdmin); err != nil {
@@ -357,7 +458,7 @@ func TestShauthAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "shauth-subject", Email: "alice@example.com", Role: "developer"})
+	user, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "oidc-subject", Email: "alice@example.com", Role: "developer"})
 	if err != nil || user.ID != "U2" {
 		t.Fatalf("user=%+v err=%v", user, err)
 	}

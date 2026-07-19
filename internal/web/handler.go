@@ -234,6 +234,14 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
+	redirectURL := "/"
+	if h.Login != nil {
+		redirectURL, err = h.Login.logoutRedirectURL(r.Context(), sessionCookie.Value)
+		if err != nil {
+			http.Error(w, "session revocation unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	if err := h.SessionRevoker.RevokeSession(r.Context(), sessionCookie.Value); err != nil {
 		status := http.StatusServiceUnavailable
 		if errors.Is(err, store.ErrNotFound) {
@@ -245,7 +253,7 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	cookie := auth.SessionCookie("", -1, h.CookieDomain)
 	cookie.Expires = time.Unix(1, 0).UTC()
 	http.SetCookie(w, cookie)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 
 func (h Handler) index(w http.ResponseWriter, r *http.Request) {
