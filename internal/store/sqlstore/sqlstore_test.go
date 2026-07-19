@@ -101,6 +101,35 @@ func TestSQLiteUserRemovalRevokesCredentialsAtomically(t *testing.T) {
 	}
 }
 
+func TestSQLiteSessionPreservesOIDCLogoutMetadata(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:oidc-session-metadata?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	expected := domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: []string{"users:read", "openid"}, ExpiresAt: time.Now().UTC().Add(time.Hour),
+		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session",
+	}
+	if err := s.CreateSession(ctx, "session", expected); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.LookupSession(ctx, "session")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkspaceID != expected.WorkspaceID || got.UserID != expected.UserID || got.OIDCProvider != expected.OIDCProvider || got.OIDCIDToken != expected.OIDCIDToken || got.OIDCSubject != expected.OIDCSubject || got.OIDCSID != expected.OIDCSID {
+		t.Fatalf("session metadata=%+v, want=%+v", got, expected)
+	}
+}
+
 func TestSQLiteViewLifecycleIsDurable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:view-lifecycle?mode=memory&cache=shared")

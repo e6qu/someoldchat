@@ -212,7 +212,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := store.SeedAppToken(context.Background(), "xapp-token", domain.AppTokenRecord{AppID: "A1", Scopes: []string{"connections:write"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.SeedSession(context.Background(), "session-token", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+	if err := store.SeedSession(context.Background(), "session-token", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour), OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session"}); err != nil {
 		t.Fatal(err)
 	}
 	local := service.Messages{Store: store}
@@ -254,6 +254,10 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		}
 	}
 	tokenStore := auth.TokenStore(remote)
+	session, err := remote.LookupSession(ctx, "session-token")
+	if err != nil || session.OIDCProvider != "oidc" || session.OIDCIDToken != "signed.id.token" || session.OIDCSubject != "subject" || session.OIDCSID != "provider-session" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
 	token, err := tokenStore.LookupToken(ctx, "api-token")
 	if err != nil || token.UserID != "U1" || len(token.Scopes) != 1 || token.Scopes[0] != "chat:write" {
 		t.Fatalf("token=%+v err=%v", token, err)
@@ -323,7 +327,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("revoked token=%+v err=%v", token, err)
 	}
 	sessionStore := auth.SessionStore(remote)
-	session, err := sessionStore.LookupSession(ctx, "session-token")
+	session, err = sessionStore.LookupSession(ctx, "session-token")
 	if err != nil || session.UserID != "U1" || session.ExpiresAt.IsZero() {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
