@@ -23,6 +23,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -37,6 +38,9 @@ func TestRemoteRequiresMutualTLS(t *testing.T) {
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	local := service.Messages{Store: store}
 	caCertificate, caKey := testCA(t)
 	serverCertificate := testLeafCertificate(t, caCertificate, caKey, "chatd.test", []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
@@ -201,6 +205,9 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversationMember("C1", "U2")
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	store.SeedToken(context.Background(), "api-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write"}})
 	if err := store.SeedAppToken(context.Background(), "xapp-token", domain.AppTokenRecord{AppID: "A1", Scopes: []string{"connections:write"}}); err != nil {
 		t.Fatal(err)
@@ -254,6 +261,24 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	appToken, err := remote.LookupAppToken(ctx, "xapp-token")
 	if err != nil || appToken.AppID != "A1" || len(appToken.Scopes) != 1 || appToken.Scopes[0] != "connections:write" {
 		t.Fatalf("app token=%+v err=%v", appToken, err)
+	}
+	installations, err := remote.ListAppInstallations(ctx, "A1")
+	if err != nil || len(installations) != 1 || installations[0].WorkspaceID != "T1" {
+		t.Fatalf("app installations=%+v err=%v", installations, err)
+	}
+	if err := store.AppendEvent(ctx, events.Event{ID: "event-grpc", WorkspaceID: "T1", Topic: "message.created", Payload: `{"text":"hello"}`, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	appEvents, err := remote.ListAppEventsAfter(ctx, "A1", 0, 10)
+	if err != nil || len(appEvents) == 0 || appEvents[len(appEvents)-1].Event.ID != "event-grpc" {
+		t.Fatalf("app events=%+v err=%v", appEvents, err)
+	}
+	if err := remote.SetSocketModeCursor(ctx, "A1", appEvents[len(appEvents)-1].Sequence); err != nil {
+		t.Fatal(err)
+	}
+	cursor, err := remote.GetSocketModeCursor(ctx, "A1")
+	if err != nil || cursor != appEvents[len(appEvents)-1].Sequence {
+		t.Fatalf("cursor=%d err=%v", cursor, err)
 	}
 	socketConnection := domain.SocketModeConnection{ID: "socket-grpc", AppID: appToken.AppID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
 	if err := remote.CreateSocketModeConnection(ctx, socketConnection); err != nil {

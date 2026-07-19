@@ -23,6 +23,8 @@ const (
 	RTMService_ConsumeConnection_FullMethodName           = "/sameoldchat.chat.v1.RTMService/ConsumeConnection"
 	RTMService_CreateSocketModeConnection_FullMethodName  = "/sameoldchat.chat.v1.RTMService/CreateSocketModeConnection"
 	RTMService_ConsumeSocketModeConnection_FullMethodName = "/sameoldchat.chat.v1.RTMService/ConsumeSocketModeConnection"
+	RTMService_GetSocketModeCursor_FullMethodName         = "/sameoldchat.chat.v1.RTMService/GetSocketModeCursor"
+	RTMService_SetSocketModeCursor_FullMethodName         = "/sameoldchat.chat.v1.RTMService/SetSocketModeCursor"
 )
 
 // RTMServiceClient is the client API for RTMService service.
@@ -33,6 +35,8 @@ type RTMServiceClient interface {
 	ConsumeConnection(ctx context.Context, in *RTMConnectionIDRequest, opts ...grpc.CallOption) (*RTMConnection, error)
 	CreateSocketModeConnection(ctx context.Context, in *SocketModeConnectionRequest, opts ...grpc.CallOption) (*SocketModeConnection, error)
 	ConsumeSocketModeConnection(ctx context.Context, in *RTMConnectionIDRequest, opts ...grpc.CallOption) (*SocketModeConnection, error)
+	GetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error)
+	SetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error)
 }
 
 type rTMServiceClient struct {
@@ -83,6 +87,26 @@ func (c *rTMServiceClient) ConsumeSocketModeConnection(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *rTMServiceClient) GetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeCursor)
+	err := c.cc.Invoke(ctx, RTMService_GetSocketModeCursor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rTMServiceClient) SetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeCursor)
+	err := c.cc.Invoke(ctx, RTMService_SetSocketModeCursor_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RTMServiceServer is the server API for RTMService service.
 // All implementations must embed UnimplementedRTMServiceServer
 // for forward compatibility.
@@ -91,6 +115,8 @@ type RTMServiceServer interface {
 	ConsumeConnection(context.Context, *RTMConnectionIDRequest) (*RTMConnection, error)
 	CreateSocketModeConnection(context.Context, *SocketModeConnectionRequest) (*SocketModeConnection, error)
 	ConsumeSocketModeConnection(context.Context, *RTMConnectionIDRequest) (*SocketModeConnection, error)
+	GetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error)
+	SetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error)
 	mustEmbedUnimplementedRTMServiceServer()
 }
 
@@ -112,6 +138,12 @@ func (UnimplementedRTMServiceServer) CreateSocketModeConnection(context.Context,
 }
 func (UnimplementedRTMServiceServer) ConsumeSocketModeConnection(context.Context, *RTMConnectionIDRequest) (*SocketModeConnection, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConsumeSocketModeConnection not implemented")
+}
+func (UnimplementedRTMServiceServer) GetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSocketModeCursor not implemented")
+}
+func (UnimplementedRTMServiceServer) SetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSocketModeCursor not implemented")
 }
 func (UnimplementedRTMServiceServer) mustEmbedUnimplementedRTMServiceServer() {}
 func (UnimplementedRTMServiceServer) testEmbeddedByValue()                    {}
@@ -206,6 +238,42 @@ func _RTMService_ConsumeSocketModeConnection_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RTMService_GetSocketModeCursor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeCursorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).GetSocketModeCursor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_GetSocketModeCursor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).GetSocketModeCursor(ctx, req.(*SocketModeCursorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RTMService_SetSocketModeCursor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeCursorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).SetSocketModeCursor(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_SetSocketModeCursor_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).SetSocketModeCursor(ctx, req.(*SocketModeCursorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RTMService_ServiceDesc is the grpc.ServiceDesc for RTMService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -228,6 +296,14 @@ var RTMService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConsumeSocketModeConnection",
 			Handler:    _RTMService_ConsumeSocketModeConnection_Handler,
+		},
+		{
+			MethodName: "GetSocketModeCursor",
+			Handler:    _RTMService_GetSocketModeCursor_Handler,
+		},
+		{
+			MethodName: "SetSocketModeCursor",
+			Handler:    _RTMService_SetSocketModeCursor_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

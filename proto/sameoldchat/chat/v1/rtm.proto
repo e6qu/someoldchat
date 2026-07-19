@@ -32,9 +32,21 @@ message SocketModeConnection {
   int64 expires_at_unix_nano = 3;
 }
 
+message SocketModeCursorRequest {
+  string app_id = 1;
+  uint64 sequence = 2;
+}
+
+message SocketModeCursor {
+  string app_id = 1;
+  uint64 sequence = 2;
+}
+
 service RTMService {
   rpc CreateConnection(RTMConnectionRequest) returns (RTMConnection);
   rpc ConsumeConnection(RTMConnectionIDRequest) returns (RTMConnection);
   rpc CreateSocketModeConnection(SocketModeConnectionRequest) returns (SocketModeConnection);
   rpc ConsumeSocketModeConnection(RTMConnectionIDRequest) returns (SocketModeConnection);
+  rpc GetSocketModeCursor(SocketModeCursorRequest) returns (SocketModeCursor);
+  rpc SetSocketModeCursor(SocketModeCursorRequest) returns (SocketModeCursor);
 }

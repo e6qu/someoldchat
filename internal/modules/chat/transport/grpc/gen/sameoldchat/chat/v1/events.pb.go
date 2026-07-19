@@ -110,6 +110,7 @@ type EventsRequest struct {
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	After         uint64                 `protobuf:"varint,2,opt,name=after,proto3" json:"after,omitempty"`
 	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	AppId         string                 `protobuf:"bytes,4,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -163,6 +164,13 @@ func (x *EventsRequest) GetLimit() int32 {
 		return x.Limit
 	}
 	return 0
+}
+
+func (x *EventsRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
 }
 
 type EventsResponse struct {
@@ -220,11 +228,12 @@ const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05topic\x18\x04 \x01(\tR\x05topic\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\tR\apayload\x12/\n" +
-	"\x14created_at_unix_nano\x18\x06 \x01(\x03R\x11createdAtUnixNano\"^\n" +
+	"\x14created_at_unix_nano\x18\x06 \x01(\x03R\x11createdAtUnixNano\"u\n" +
 	"\rEventsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05after\x18\x02 \x01(\x04R\x05after\x12\x14\n" +
-	"\x05limit\x18\x03 \x01(\x05R\x05limit\"L\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x15\n" +
+	"\x06app_id\x18\x04 \x01(\tR\x05appId\"L\n" +
 	"\x0eEventsResponse\x12:\n" +
 	"\arecords\x18\x01 \x03(\v2 .sameoldchat.chat.v1.EventRecordR\arecords2k\n" +
 	"\rEventsService\x12Z\n" +

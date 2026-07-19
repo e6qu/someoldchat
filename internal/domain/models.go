@@ -532,6 +532,13 @@ type AppApprovalPage struct {
 	HasMore    bool
 }
 
+type AppInstallation struct {
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	Enabled     bool
+	CreatedAt   time.Time
+}
+
 type AppPermissionRequest struct {
 	ID           AppRequestID
 	WorkspaceID  WorkspaceID

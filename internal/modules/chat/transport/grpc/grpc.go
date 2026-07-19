@@ -361,6 +361,19 @@ func (r Remote) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	return domain.SocketModeConnection{ID: out.GetId(), AppID: domain.AppID(out.GetAppId()), ExpiresAt: time.Unix(0, out.GetExpiresAtUnixNano()).UTC()}, nil
 }
 
+func (r Remote) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
+	out, err := r.rtm.GetSocketModeCursor(ctx, &chatv1.SocketModeCursorRequest{AppId: string(appID)})
+	if err != nil {
+		return 0, err
+	}
+	return out.GetSequence(), nil
+}
+
+func (r Remote) SetSocketModeCursor(ctx context.Context, appID domain.AppID, cursor uint64) error {
+	_, err := r.rtm.SetSocketModeCursor(ctx, &chatv1.SocketModeCursorRequest{AppId: string(appID), Sequence: cursor})
+	return err
+}
+
 func (r Remote) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
 	in := &chatv1.UpdateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text}
 	out, err := r.messages.Update(ctx, in)
@@ -541,6 +554,27 @@ func (r Remote) LookupAppToken(ctx context.Context, token string) (domain.AppTok
 		return domain.AppTokenRecord{}, err
 	}
 	return domain.AppTokenRecord{AppID: domain.AppID(out.GetAppId()), Scopes: append([]string(nil), out.GetScopes()...), Revoked: out.GetRevoked()}, nil
+}
+
+func (r Remote) CreateAppInstallation(ctx context.Context, value domain.AppInstallation) error {
+	_, err := r.auth.CreateAppInstallation(ctx, &chatv1.AppInstallationRequest{Installation: &chatv1.AppInstallation{AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), Enabled: value.Enabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano)}})
+	return err
+}
+
+func (r Remote) ListAppInstallations(ctx context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
+	out, err := r.auth.ListAppInstallations(ctx, &chatv1.AppInstallationRequest{AppId: string(appID)})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.AppInstallation, 0, len(out.GetInstallations()))
+	for _, item := range out.GetInstallations() {
+		created, parseErr := time.Parse(time.RFC3339Nano, item.GetCreatedAt())
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		values = append(values, domain.AppInstallation{AppID: domain.AppID(item.GetAppId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), Enabled: item.GetEnabled(), CreatedAt: created})
+	}
+	return values, nil
 }
 
 func (r Remote) LookupSession(ctx context.Context, token string) (domain.SessionRecord, error) {
@@ -1899,6 +1933,15 @@ func (r Remote) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 	return decodeProtoEvents(out)
 }
 
+func (r Remote) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
+	in := &chatv1.EventsRequest{AppId: string(appID), After: after, Limit: int32(limit)}
+	out, err := r.events.ListEventsAfter(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoEvents(out)
+}
+
 type Server struct {
 	chatv1.UnimplementedChatServiceServer
 	chatv1.UnimplementedAuthServiceServer
@@ -2565,6 +2608,36 @@ func (s *Server) LookupAppToken(ctx context.Context, input *chatv1.TokenRequest)
 	return &chatv1.AppTokenRecord{AppId: string(value.AppID), Scopes: value.Scopes, Revoked: value.Revoked}, nil
 }
 
+func (s *Server) CreateAppInstallation(ctx context.Context, input *chatv1.AppInstallationRequest) (*chatv1.AuthRevokeResponse, error) {
+	if input == nil || input.GetInstallation() == nil {
+		return nil, status.Error(codes.InvalidArgument, "installation is required")
+	}
+	value := input.GetInstallation()
+	created, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "installation created_at is invalid")
+	}
+	if err := s.implementation.CreateAppInstallation(ctx, domain.AppInstallation{AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Enabled: value.GetEnabled(), CreatedAt: created}); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AuthRevokeResponse{Ok: true}, nil
+}
+
+func (s *Server) ListAppInstallations(ctx context.Context, input *chatv1.AppInstallationRequest) (*chatv1.AppInstallationsResponse, error) {
+	if input == nil || input.GetAppId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "app_id is required")
+	}
+	values, err := s.implementation.ListAppInstallations(ctx, domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.AppInstallationsResponse{Installations: make([]*chatv1.AppInstallation, 0, len(values))}
+	for _, value := range values {
+		result.Installations = append(result.Installations, &chatv1.AppInstallation{AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), Enabled: value.Enabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano)})
+	}
+	return result, nil
+}
+
 func (s *Server) LookupSession(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.SessionRecord, error) {
 	return s.lookupSessionProto(ctx, input)
 }
@@ -2960,6 +3033,27 @@ func (s *Server) ConsumeSocketModeConnection(ctx context.Context, input *chatv1.
 		return nil, mapError(err)
 	}
 	return &chatv1.SocketModeConnection{Id: value.ID, AppId: string(value.AppID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano()}, nil
+}
+
+func (s *Server) GetSocketModeCursor(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeCursor, error) {
+	if input == nil || input.GetAppId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "app ID is required")
+	}
+	cursor, err := s.implementation.GetSocketModeCursor(ctx, domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeCursor{AppId: input.GetAppId(), Sequence: cursor}, nil
+}
+
+func (s *Server) SetSocketModeCursor(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeCursor, error) {
+	if input == nil || input.GetAppId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "app ID is required")
+	}
+	if err := s.implementation.SetSocketModeCursor(ctx, domain.AppID(input.GetAppId()), input.GetSequence()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeCursor{AppId: input.GetAppId(), Sequence: input.GetSequence()}, nil
 }
 
 func (s *Server) Update(ctx context.Context, input *chatv1.UpdateRequest) (*chatv1.Message, error) {
@@ -4101,13 +4195,19 @@ func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.
 }
 
 func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
-	if input.GetWorkspaceId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id is required")
+	if input.GetWorkspaceId() == "" && input.GetAppId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id or app_id is required")
 	}
 	if input.GetLimit() < 1 || input.GetLimit() > 100 {
 		return nil, status.Error(codes.InvalidArgument, "limit must be between 1 and 100")
 	}
-	records, err := s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), int(input.GetLimit()))
+	var records []events.Record
+	var err error
+	if input.GetAppId() != "" {
+		records, err = s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), int(input.GetLimit()))
+	} else {
+		records, err = s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), int(input.GetLimit()))
+	}
 	if err != nil {
 		return nil, mapError(err)
 	}

@@ -17,6 +17,7 @@ message EventsRequest {
   string workspace_id = 1;
   uint64 after = 2;
   int32 limit = 3;
+  string app_id = 4;
 }
 
 message EventsResponse {

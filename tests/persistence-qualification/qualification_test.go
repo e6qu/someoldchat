@@ -534,6 +534,13 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 
 	t.Run("app token and Socket Mode connection are durable and single use", func(t *testing.T) {
 		appToken := "xapp-qualification-" + suffix
+		if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A-qualification", WorkspaceID: workspaceID, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		installations, err := repository.ListAppInstallations(ctx, "A-qualification")
+		if err != nil || len(installations) != 1 || installations[0].WorkspaceID != workspaceID {
+			t.Fatalf("app installations=%+v err=%v", installations, err)
+		}
 		if err := repository.SeedAppToken(ctx, appToken, domain.AppTokenRecord{AppID: "A-qualification", Scopes: []string{" connections:write ", "connections:write"}}); err != nil {
 			t.Fatal(err)
 		}
@@ -551,6 +558,31 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		}
 		if _, err := repository.ConsumeSocketModeConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("replayed Socket Mode connection error=%v, want ErrNotFound", err)
+		}
+		before, err := repository.ListAppEventsAfter(ctx, "A-qualification", 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var after uint64
+		if len(before) > 0 {
+			after = before[len(before)-1].Sequence
+		}
+		if err := repository.AppendEvent(ctx, event("socket-event", "message.created", "socket-event")); err != nil {
+			t.Fatal(err)
+		}
+		records, err := repository.ListAppEventsAfter(ctx, "A-qualification", after, 10)
+		if err != nil || len(records) != 1 || records[0].Event.Topic != "message.created" {
+			t.Fatalf("app events=%+v err=%v", records, err)
+		}
+		if err := repository.SetSocketModeCursor(ctx, "A-qualification", records[0].Sequence); err != nil {
+			t.Fatal(err)
+		}
+		cursor, err := repository.GetSocketModeCursor(ctx, "A-qualification")
+		if err != nil || cursor != records[0].Sequence {
+			t.Fatalf("cursor=%d err=%v", cursor, err)
+		}
+		if err := repository.SetSocketModeCursor(ctx, "A-qualification", cursor-1); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("cursor regression error=%v, want ErrConflict", err)
 		}
 	})
 }

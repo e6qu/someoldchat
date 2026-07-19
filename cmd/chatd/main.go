@@ -95,6 +95,10 @@ func main() {
 			logger.Error("seed Socket Mode app token", "error", err)
 			os.Exit(1)
 		}
+		if err := runtime.Store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: domain.AppID(*appID), WorkspaceID: "Tdev", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+			logger.Error("seed Socket Mode app installation", "error", err)
+			os.Exit(1)
+		}
 	}
 	if err := runtime.SessionSeeder.SeedSession(context.Background(), *sessionToken, domain.SessionRecord{WorkspaceID: "Tdev", UserID: "Udev", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}); err != nil {
 		logger.Error("seed durable browser session", "error", err)
