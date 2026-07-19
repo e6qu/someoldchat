@@ -315,3 +315,219 @@ func TestPublishedWaveOneRepositoryContract(t *testing.T) {
 		t.Fatalf("emojis after remove=%+v err=%v", emojis, err)
 	}
 }
+
+func TestPublishedIntegrationRepositoryContract(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repository, closeRepository := openStore(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-integration-" + suffix)
+	userID := domain.UserID("U-integration-" + suffix)
+	conversationID := domain.ConversationID("C-integration-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic, payload string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: payload, CreatedAt: now}
+	}
+	workspace := domain.Workspace{ID: workspaceID, Name: "Integration qualification"}
+	user := domain.User{ID: userID, WorkspaceID: workspaceID, Email: "integration@example.com", Name: "integration"}
+	conversation := domain.Conversation{ID: conversationID, WorkspaceID: workspaceID, Name: "integration"}
+	for _, seed := range []func() error{
+		func() error { return repository.SeedWorkspace(ctx, workspace) },
+		func() error { return repository.SeedUser(ctx, user) },
+		func() error { return repository.SeedConversation(ctx, conversation) },
+		func() error { return repository.SeedConversationMember(ctx, conversationID, userID) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("conversation preferences normalize and round trip", func(t *testing.T) {
+		want := domain.ConversationPrefs{
+			ConversationID: conversationID,
+			CanThread: domain.ConversationPreferenceList{
+				Types: []domain.ConversationPreferenceType{"admins", "members"},
+				Users: []domain.UserID{userID},
+			},
+			WhoCanPost: domain.ConversationPreferenceList{
+				Types: []domain.ConversationPreferenceType{"admins"},
+				Users: []domain.UserID{userID},
+			},
+		}
+		stored, err := repository.SetConversationPrefs(ctx, conversationID, want, event("prefs", "conversation.preferences_changed", string(conversationID)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stored.ConversationID != conversationID || len(stored.CanThread.Types) != 2 || len(stored.WhoCanPost.Users) != 1 {
+			t.Fatalf("set preferences=%+v", stored)
+		}
+		stored, err = repository.GetConversationPrefs(ctx, conversationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(stored) != fmt.Sprint(want) {
+			t.Fatalf("preferences=%+v, want %+v", stored, want)
+		}
+	})
+
+	t.Run("OAuth authorization code is normalized and single use", func(t *testing.T) {
+		clientID := "client-" + suffix
+		if err := repository.CreateOAuthClient(ctx, domain.OAuthClient{ID: clientID, SecretHash: domain.HashToken("secret"), AppID: domain.AppID("A-" + suffix)}); err != nil {
+			t.Fatal(err)
+		}
+		client, err := repository.GetOAuthClient(ctx, clientID)
+		if err != nil || client.AppID == "" || client.SecretHash == "" {
+			t.Fatalf("client=%+v err=%v", client, err)
+		}
+		code := "code-" + suffix
+		redirect := "https://example.test/oauth/callback"
+		if err := repository.CreateOAuthCode(ctx, domain.OAuthCode{Code: code, ClientID: clientID, WorkspaceID: workspaceID, UserID: userID, Scopes: []string{"chat:write", " users:read ", "chat:write"}, RedirectURI: redirect}); err != nil {
+			t.Fatal(err)
+		}
+		token, err := repository.ExchangeOAuthCode(ctx, clientID, "secret", code, redirect, "access-"+suffix, domain.OAuthToken{TokenType: "bot"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if token.AppID != client.AppID || token.WorkspaceID != workspaceID || token.UserID != userID || fmt.Sprint(token.Scopes) != "[chat:write users:read]" {
+			t.Fatalf("token=%+v", token)
+		}
+		if _, err := repository.ExchangeOAuthCode(ctx, clientID, "secret", code, redirect, "access-replay-"+suffix, domain.OAuthToken{}); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("replayed OAuth code error=%v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("views retain ownership and enforce expected hash", func(t *testing.T) {
+		viewID := domain.ViewID("V-" + suffix)
+		view := domain.View{ID: viewID, WorkspaceID: workspaceID, UserID: userID, Type: "home", ExternalID: "home-" + suffix, Payload: `{"type":"home","blocks":[]}`, Hash: "hash-1", CreatedAt: now, UpdatedAt: now}
+		if err := repository.CreateView(ctx, view, event("view-create", "view.created", string(viewID))); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := repository.GetView(ctx, workspaceID, viewID)
+		if err != nil || loaded.UserID != userID || loaded.Payload != view.Payload {
+			t.Fatalf("view=%+v err=%v", loaded, err)
+		}
+		if published, err := repository.GetPublishedView(ctx, workspaceID, userID); err != nil || published.ID != viewID {
+			t.Fatalf("published=%+v err=%v", published, err)
+		}
+		updated := view
+		updated.Payload = `{"type":"home","blocks":[{"type":"divider"}]}`
+		updated.Hash = "hash-2"
+		updated.UpdatedAt = now.Add(time.Minute)
+		if _, err := repository.UpdateView(ctx, updated, "stale-hash", event("view-conflict", "view.update_rejected", string(viewID))); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("stale view update error=%v, want ErrConflict", err)
+		}
+		updatedView, err := repository.UpdateView(ctx, updated, view.Hash, event("view-update", "view.updated", string(viewID)))
+		if err != nil || updatedView.Hash != updated.Hash || updatedView.Payload != updated.Payload {
+			t.Fatalf("updated view=%+v err=%v", updatedView, err)
+		}
+		if latest, err := repository.GetLatestView(ctx, workspaceID, userID, "home"); err != nil || latest.Hash != "hash-2" {
+			t.Fatalf("latest=%+v err=%v", latest, err)
+		}
+	})
+
+	t.Run("workflow and dialog records survive restart-shaped reads", func(t *testing.T) {
+		step := domain.WorkflowStep{ID: domain.WorkflowStepID("W-" + suffix), WorkspaceID: workspaceID, UserID: userID, EditID: "edit-" + suffix, Status: domain.WorkflowStepConfigured, Inputs: `{"input":1}`, Outputs: `[]`, StepName: "Qualification", ImageURL: "https://example.test/step.png", CreatedAt: now, UpdatedAt: now}
+		if err := repository.SetWorkflowStep(ctx, step, event("workflow-configured", "workflow.step_configured", string(step.ID))); err != nil {
+			t.Fatal(err)
+		}
+		step.Status = domain.WorkflowStepCompleted
+		step.Outputs = `[{"name":"result"}]`
+		step.UpdatedAt = now.Add(time.Minute)
+		if err := repository.SetWorkflowStep(ctx, step, event("workflow-completed", "workflow.step_completed", string(step.ID))); err != nil {
+			t.Fatal(err)
+		}
+		loadedStep, err := repository.GetWorkflowStep(ctx, workspaceID, step.ID)
+		if err != nil || loadedStep.Status != domain.WorkflowStepCompleted || loadedStep.CreatedAt != now {
+			t.Fatalf("workflow=%+v err=%v", loadedStep, err)
+		}
+		dialog := domain.Dialog{ID: domain.DialogID("D-" + suffix), WorkspaceID: workspaceID, UserID: userID, Payload: `{"callback_id":"qualification"}`, CreatedAt: now}
+		if err := repository.CreateDialog(ctx, dialog, event("dialog", "dialog.opened", string(dialog.ID))); err != nil {
+			t.Fatal(err)
+		}
+		loadedDialog, err := repository.GetDialog(ctx, workspaceID, dialog.ID)
+		if err != nil || loadedDialog.Payload != dialog.Payload || loadedDialog.UserID != userID {
+			t.Fatalf("dialog=%+v err=%v", loadedDialog, err)
+		}
+	})
+
+	t.Run("invite and app approval state transitions are durable", func(t *testing.T) {
+		invite := domain.InviteRequest{ID: domain.InviteRequestID("I-" + suffix), WorkspaceID: workspaceID, Email: "invite@example.com", RequestedBy: userID, ChannelIDs: []domain.ConversationID{conversationID}, CustomMessage: "Welcome", RealName: "Invite User", Resend: true, Restricted: true, GuestExpirationAt: now.Add(24 * time.Hour), Status: domain.InviteRequestPending, CreatedAt: now}
+		if err := repository.CreateInviteRequest(ctx, invite, event("invite-create", "invite.requested", string(invite.ID))); err != nil {
+			t.Fatal(err)
+		}
+		page, err := repository.ListInviteRequests(ctx, workspaceID, domain.InviteRequestPending, domain.PageRequest{Limit: 1})
+		if err != nil || len(page.Requests) != 1 || page.Requests[0].Email != invite.Email || len(page.Requests[0].ChannelIDs) != 1 {
+			t.Fatalf("invites=%+v err=%v", page, err)
+		}
+		if err := repository.SetInviteRequestStatus(ctx, workspaceID, invite.ID, domain.InviteRequestApproved, now.Add(time.Minute), event("invite-approve", "invite.approved", string(invite.ID))); err != nil {
+			t.Fatal(err)
+		}
+		loadedInvite, err := repository.GetInviteRequest(ctx, workspaceID, invite.ID)
+		if err != nil || loadedInvite.Status != domain.InviteRequestApproved || loadedInvite.ReviewedAt.IsZero() {
+			t.Fatalf("invite=%+v err=%v", loadedInvite, err)
+		}
+		appID := domain.AppID("A-approval-" + suffix)
+		requestID := domain.AppRequestID("AR-" + suffix)
+		if err := repository.SetAppApproval(ctx, workspaceID, appID, requestID, domain.AppApprovalApproved, now, event("app-approve", "app.approved", string(appID))); err != nil {
+			t.Fatal(err)
+		}
+		approvals, err := repository.ListAppApprovals(ctx, workspaceID, domain.AppApprovalApproved, domain.PageRequest{Limit: 1})
+		if err != nil || len(approvals.Apps) != 1 || approvals.Apps[0].ID != appID {
+			t.Fatalf("approvals=%+v err=%v", approvals, err)
+		}
+		if err := repository.SetAppApproval(ctx, workspaceID, appID, requestID, domain.AppApprovalRestricted, now.Add(time.Minute), event("app-restrict", "app.restricted", string(appID))); err != nil {
+			t.Fatal(err)
+		}
+		restricted, err := repository.ListAppApprovals(ctx, workspaceID, domain.AppApprovalRestricted, domain.PageRequest{Limit: 1})
+		if err != nil || len(restricted.Apps) != 1 || restricted.Apps[0].RequestID != requestID {
+			t.Fatalf("restricted approvals=%+v err=%v", restricted, err)
+		}
+		permission := domain.AppPermissionRequest{ID: requestID, WorkspaceID: workspaceID, RequesterID: userID, TargetUserID: userID, Scopes: []string{"users:read", "chat:write", "users:read"}, TriggerID: "trigger-" + suffix, CreatedAt: now}
+		if err := repository.CreateAppPermissionRequest(ctx, permission, event("permission", "app.permission_requested", string(requestID))); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("call participants and lifecycle are durable", func(t *testing.T) {
+		call := domain.Call{ID: domain.CallID("CA-" + suffix), WorkspaceID: workspaceID, ExternalUniqueID: "external-" + suffix, ExternalDisplayID: "display-" + suffix, JoinURL: "https://example.test/join", DesktopAppJoinURL: "sameoldchat://join/" + suffix, Title: "Qualification call", CreatedBy: userID, Participants: []domain.UserID{userID}, StartedAt: now}
+		if err := repository.CreateCall(ctx, call, event("call-create", "call.created", string(call.ID))); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err := repository.GetCall(ctx, workspaceID, call.ID)
+		if err != nil || len(loaded.Participants) != 1 || loaded.Participants[0] != userID || loaded.StartedAt != now {
+			t.Fatalf("call=%+v err=%v", loaded, err)
+		}
+		call.Title = "Updated qualification call"
+		call.ExternalDisplayID = "display-updated-" + suffix
+		if err := repository.UpdateCall(ctx, call, event("call-update", "call.updated", string(call.ID))); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.SetCallParticipants(ctx, workspaceID, call.ID, []domain.UserID{userID}, event("call-participants", "call.participants_changed", string(call.ID))); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.EndCall(ctx, workspaceID, call.ID, 90, event("call-end", "call.ended", string(call.ID))); err != nil {
+			t.Fatal(err)
+		}
+		loaded, err = repository.GetCall(ctx, workspaceID, call.ID)
+		if err != nil || loaded.Title != call.Title || loaded.DurationSeconds != 90 || loaded.EndedAt.IsZero() {
+			t.Fatalf("ended call=%+v err=%v", loaded, err)
+		}
+	})
+
+	t.Run("RTM connection is consumed once and expires", func(t *testing.T) {
+		connection := domain.RTMConnection{ID: "rtm-" + suffix, WorkspaceID: workspaceID, UserID: userID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
+		if err := repository.CreateRTMConnection(ctx, connection); err != nil {
+			t.Fatal(err)
+		}
+		consumed, err := repository.ConsumeRTMConnection(ctx, connection.ID)
+		if err != nil || consumed.ID != connection.ID || !consumed.ExpiresAt.Equal(connection.ExpiresAt.Truncate(time.Nanosecond)) {
+			t.Fatalf("connection=%+v err=%v", consumed, err)
+		}
+		if _, err := repository.ConsumeRTMConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("replayed RTM connection error=%v, want ErrNotFound", err)
+		}
+	})
+}
