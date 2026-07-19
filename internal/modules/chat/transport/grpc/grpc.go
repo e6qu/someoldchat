@@ -361,6 +361,24 @@ func (r Remote) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	return domain.SocketModeConnection{ID: out.GetId(), AppID: domain.AppID(out.GetAppId()), ExpiresAt: time.Unix(0, out.GetExpiresAtUnixNano()).UTC()}, nil
 }
 
+func (r Remote) RenewSocketModeConnection(ctx context.Context, id string, expiresAt time.Time) error {
+	_, err := r.rtm.RenewSocketModeConnection(ctx, &chatv1.SocketModeConnectionRenewalRequest{Id: id, ExpiresAtUnixNano: expiresAt.UTC().UnixNano()})
+	return err
+}
+
+func (r Remote) ReleaseSocketModeConnection(ctx context.Context, id string) error {
+	_, err := r.rtm.ReleaseSocketModeConnection(ctx, &chatv1.RTMConnectionIDRequest{Id: id})
+	return err
+}
+
+func (r Remote) CountSocketModeConnections(ctx context.Context, appID domain.AppID) (int, error) {
+	out, err := r.rtm.CountSocketModeConnections(ctx, &chatv1.SocketModeCursorRequest{AppId: string(appID)})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetCount()), nil
+}
+
 func (r Remote) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
 	out, err := r.rtm.GetSocketModeCursor(ctx, &chatv1.SocketModeCursorRequest{AppId: string(appID)})
 	if err != nil {
@@ -3038,6 +3056,37 @@ func (s *Server) ConsumeSocketModeConnection(ctx context.Context, input *chatv1.
 		return nil, mapError(err)
 	}
 	return &chatv1.SocketModeConnection{Id: value.ID, AppId: string(value.AppID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano()}, nil
+}
+
+func (s *Server) RenewSocketModeConnection(ctx context.Context, input *chatv1.SocketModeConnectionRenewalRequest) (*chatv1.SocketModeConnection, error) {
+	if input == nil || input.GetId() == "" || input.GetExpiresAtUnixNano() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "connection renewal fields are required")
+	}
+	if err := s.implementation.RenewSocketModeConnection(ctx, input.GetId(), time.Unix(0, input.GetExpiresAtUnixNano()).UTC()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeConnection{Id: input.GetId(), ExpiresAtUnixNano: input.GetExpiresAtUnixNano()}, nil
+}
+
+func (s *Server) ReleaseSocketModeConnection(ctx context.Context, input *chatv1.RTMConnectionIDRequest) (*chatv1.SocketModeConnection, error) {
+	if input == nil || input.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "connection ID is required")
+	}
+	if err := s.implementation.ReleaseSocketModeConnection(ctx, input.GetId()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeConnection{Id: input.GetId()}, nil
+}
+
+func (s *Server) CountSocketModeConnections(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeConnectionCount, error) {
+	if input == nil || input.GetAppId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "app ID is required")
+	}
+	count, err := s.implementation.CountSocketModeConnections(ctx, domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeConnectionCount{AppId: input.GetAppId(), Count: int32(count)}, nil
 }
 
 func (s *Server) GetSocketModeCursor(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeCursor, error) {

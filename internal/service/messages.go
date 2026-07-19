@@ -97,6 +97,18 @@ func (m Messages) ConsumeSocketModeConnection(ctx context.Context, id string) (d
 	return m.Store.ConsumeSocketModeConnection(ctx, id)
 }
 
+func (m Messages) RenewSocketModeConnection(ctx context.Context, id string, expiresAt time.Time) error {
+	return m.Store.RenewSocketModeConnection(ctx, id, expiresAt)
+}
+
+func (m Messages) ReleaseSocketModeConnection(ctx context.Context, id string) error {
+	return m.Store.ReleaseSocketModeConnection(ctx, id)
+}
+
+func (m Messages) CountSocketModeConnections(ctx context.Context, appID domain.AppID) (int, error) {
+	return m.Store.CountSocketModeConnections(ctx, appID)
+}
+
 func (m Messages) RecordSocketModeResponse(ctx context.Context, value domain.SocketModeResponse) error {
 	return m.Store.RecordSocketModeResponse(ctx, value)
 }

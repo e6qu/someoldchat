@@ -677,6 +677,8 @@ type SocketModeConnection struct {
 	ExpiresAt time.Time
 }
 
+const SocketModeConnectionLimit = 10
+
 type SocketModeResponse struct {
 	AppID          AppID
 	EnvelopeID     string

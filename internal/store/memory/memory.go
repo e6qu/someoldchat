@@ -16,62 +16,63 @@ import (
 )
 
 type Store struct {
-	mu                   sync.RWMutex
-	workspaces           map[domain.WorkspaceID]domain.Workspace
-	members              map[string]domain.WorkspaceMembership
-	users                map[domain.UserID]domain.User
-	userExpirations      map[domain.UserID]time.Time
-	conversations        map[domain.ConversationID]domain.Conversation
-	conversationPrefs    map[domain.ConversationID]domain.ConversationPrefs
-	conversationAccess   map[domain.ConversationID][]domain.UserGroupID
-	conversationTeams    map[domain.ConversationID]map[domain.WorkspaceID]struct{}
-	conversationOrg      map[domain.ConversationID]bool
-	inviteRequests       map[domain.InviteRequestID]domain.InviteRequest
-	appApprovals         map[domain.AppID]domain.AppApproval
-	appInstallations     map[string]domain.AppInstallation
-	permissionRequests   map[domain.AppRequestID]domain.AppPermissionRequest
-	views                map[domain.ViewID]domain.View
-	workflowSteps        map[domain.WorkflowStepID]domain.WorkflowStep
-	dialogs              map[domain.DialogID]domain.Dialog
-	bots                 map[domain.BotID]domain.Bot
-	migrations           map[string]domain.UserMigration
-	oauthClients         map[string]domain.OAuthClient
-	oauthCodes           map[string]domain.OAuthCode
-	rtmConnections       map[string]domain.RTMConnection
-	socketConnections    map[string]domain.SocketModeConnection
-	socketResponses      map[string]domain.SocketModeResponse
-	socketCursors        map[domain.AppID]uint64
-	memberships          map[domain.ConversationID]map[domain.UserID]struct{}
-	tokens               map[string]domain.TokenRecord
-	appTokens            map[string]domain.AppTokenRecord
-	sessions             map[string]domain.SessionRecord
-	authMethods          map[string]domain.AuthMethod
-	externalIdentities   map[string]domain.ExternalIdentity
-	messages             map[domain.ConversationID][]domain.Message
-	outbox               []events.Event
-	outboxLeases         map[uint64]memoryLease
-	delivered            map[uint64]bool
-	idempotency          map[string]domain.MessageID
-	nextAttempt          map[uint64]time.Time
-	readCursors          map[string]domain.ReadCursor
-	reactions            map[domain.MessageID]map[string]domain.Reaction
-	pins                 map[domain.MessageID]map[domain.UserID]domain.Pin
-	files                map[domain.FileID]domain.File
-	fileComments         map[domain.FileCommentID]domain.FileComment
-	remoteFiles          map[domain.FileID]domain.RemoteFile
-	remoteFileShares     map[domain.FileID][]domain.ConversationID
-	dnd                  map[domain.UserID]domain.DoNotDisturb
-	stars                map[domain.UserID]map[domain.MessageID]domain.Star
-	reminders            map[domain.ReminderID]domain.Reminder
-	scheduled            map[domain.ScheduledMessageID]domain.ScheduledMessage
-	scheduledLeases      map[domain.ScheduledMessageID]memoryLease
-	scheduledDelivered   map[domain.ScheduledMessageID]bool
-	scheduledNextAttempt map[domain.ScheduledMessageID]time.Time
-	userGroups           map[domain.UserGroupID]domain.UserGroup
-	calls                map[domain.CallID]domain.Call
-	emojis               map[string]domain.CustomEmoji
-	accessLogs           []domain.AccessLog
-	eventSequence        uint64
+	mu                     sync.RWMutex
+	workspaces             map[domain.WorkspaceID]domain.Workspace
+	members                map[string]domain.WorkspaceMembership
+	users                  map[domain.UserID]domain.User
+	userExpirations        map[domain.UserID]time.Time
+	conversations          map[domain.ConversationID]domain.Conversation
+	conversationPrefs      map[domain.ConversationID]domain.ConversationPrefs
+	conversationAccess     map[domain.ConversationID][]domain.UserGroupID
+	conversationTeams      map[domain.ConversationID]map[domain.WorkspaceID]struct{}
+	conversationOrg        map[domain.ConversationID]bool
+	inviteRequests         map[domain.InviteRequestID]domain.InviteRequest
+	appApprovals           map[domain.AppID]domain.AppApproval
+	appInstallations       map[string]domain.AppInstallation
+	permissionRequests     map[domain.AppRequestID]domain.AppPermissionRequest
+	views                  map[domain.ViewID]domain.View
+	workflowSteps          map[domain.WorkflowStepID]domain.WorkflowStep
+	dialogs                map[domain.DialogID]domain.Dialog
+	bots                   map[domain.BotID]domain.Bot
+	migrations             map[string]domain.UserMigration
+	oauthClients           map[string]domain.OAuthClient
+	oauthCodes             map[string]domain.OAuthCode
+	rtmConnections         map[string]domain.RTMConnection
+	socketConnections      map[string]domain.SocketModeConnection
+	socketConnectionActive map[string]bool
+	socketResponses        map[string]domain.SocketModeResponse
+	socketCursors          map[domain.AppID]uint64
+	memberships            map[domain.ConversationID]map[domain.UserID]struct{}
+	tokens                 map[string]domain.TokenRecord
+	appTokens              map[string]domain.AppTokenRecord
+	sessions               map[string]domain.SessionRecord
+	authMethods            map[string]domain.AuthMethod
+	externalIdentities     map[string]domain.ExternalIdentity
+	messages               map[domain.ConversationID][]domain.Message
+	outbox                 []events.Event
+	outboxLeases           map[uint64]memoryLease
+	delivered              map[uint64]bool
+	idempotency            map[string]domain.MessageID
+	nextAttempt            map[uint64]time.Time
+	readCursors            map[string]domain.ReadCursor
+	reactions              map[domain.MessageID]map[string]domain.Reaction
+	pins                   map[domain.MessageID]map[domain.UserID]domain.Pin
+	files                  map[domain.FileID]domain.File
+	fileComments           map[domain.FileCommentID]domain.FileComment
+	remoteFiles            map[domain.FileID]domain.RemoteFile
+	remoteFileShares       map[domain.FileID][]domain.ConversationID
+	dnd                    map[domain.UserID]domain.DoNotDisturb
+	stars                  map[domain.UserID]map[domain.MessageID]domain.Star
+	reminders              map[domain.ReminderID]domain.Reminder
+	scheduled              map[domain.ScheduledMessageID]domain.ScheduledMessage
+	scheduledLeases        map[domain.ScheduledMessageID]memoryLease
+	scheduledDelivered     map[domain.ScheduledMessageID]bool
+	scheduledNextAttempt   map[domain.ScheduledMessageID]time.Time
+	userGroups             map[domain.UserGroupID]domain.UserGroup
+	calls                  map[domain.CallID]domain.Call
+	emojis                 map[string]domain.CustomEmoji
+	accessLogs             []domain.AccessLog
+	eventSequence          uint64
 }
 
 var _ store.Store = (*Store)(nil)
@@ -130,7 +131,7 @@ type memoryLease struct {
 }
 
 func New() *Store {
-	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), appInstallations: make(map[string]domain.AppInstallation), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
+	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -1279,6 +1280,9 @@ func appInstallationKey(appID domain.AppID, workspaceID domain.WorkspaceID) stri
 func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstallation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.appInstallations == nil {
+		s.appInstallations = make(map[string]domain.AppInstallation)
+	}
 	if value.AppID == "" || value.WorkspaceID == "" || value.CreatedAt.IsZero() {
 		return store.ErrInvalidAppApproval
 	}
@@ -1824,7 +1828,18 @@ func (s *Store) CreateSocketModeConnection(_ context.Context, value domain.Socke
 	if _, exists := s.socketConnections[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	now := time.Now().UTC()
+	active := 0
+	for id, connection := range s.socketConnections {
+		if s.socketConnectionActive[id] && connection.AppID == value.AppID && connection.ExpiresAt.After(now) {
+			active++
+		}
+	}
+	if active >= domain.SocketModeConnectionLimit {
+		return store.ErrSocketModeConnectionLimit
+	}
 	s.socketConnections[value.ID] = value
+	s.socketConnectionActive[value.ID] = false
 	return nil
 }
 
@@ -1832,12 +1847,57 @@ func (s *Store) ConsumeSocketModeConnection(_ context.Context, id string) (domai
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, exists := s.socketConnections[id]
-	if !exists || !value.ExpiresAt.After(time.Now().UTC()) {
-		delete(s.socketConnections, id)
+	if !exists || s.socketConnectionActive[id] || !value.ExpiresAt.After(time.Now().UTC()) {
+		if exists && !value.ExpiresAt.After(time.Now().UTC()) {
+			delete(s.socketConnections, id)
+			delete(s.socketConnectionActive, id)
+		}
 		return domain.SocketModeConnection{}, store.ErrNotFound
 	}
-	delete(s.socketConnections, id)
+	s.socketConnectionActive[id] = true
 	return value, nil
+}
+
+func (s *Store) RenewSocketModeConnection(_ context.Context, id string, expiresAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.socketConnections[id]
+	if !exists || !s.socketConnectionActive[id] {
+		return store.ErrNotFound
+	}
+	if !expiresAt.After(time.Now().UTC()) {
+		return errors.New("invalid Socket Mode connection renewal")
+	}
+	value.ExpiresAt = expiresAt.UTC()
+	s.socketConnections[id] = value
+	return nil
+}
+
+func (s *Store) ReleaseSocketModeConnection(_ context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.socketConnectionActive[id] {
+		return store.ErrNotFound
+	}
+	delete(s.socketConnections, id)
+	delete(s.socketConnectionActive, id)
+	return nil
+}
+
+func (s *Store) CountSocketModeConnections(_ context.Context, appID domain.AppID) (int, error) {
+	if appID == "" {
+		return 0, store.ErrInvalidAppApproval
+	}
+	now := time.Now().UTC()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for id, value := range s.socketConnections {
+		if s.socketConnectionActive[id] && value.AppID == appID && value.ExpiresAt.After(now) {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func socketModeResponseKey(appID domain.AppID, envelopeID string) string {

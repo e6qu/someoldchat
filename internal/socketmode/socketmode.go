@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 const (
@@ -20,10 +21,14 @@ const (
 )
 
 var ErrInvalidAppID = errors.New("Socket Mode app ID is required")
+var ErrConnectionLimit = errors.New("Socket Mode connection limit reached")
 
 type ConnectionStore interface {
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
 	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
+	RenewSocketModeConnection(context.Context, string, time.Time) error
+	ReleaseSocketModeConnection(context.Context, string) error
+	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 }
 
 type EventSource interface {
@@ -82,12 +87,22 @@ func (s Service) Open(ctx context.Context, appID domain.AppID) (OpenResult, erro
 	if strings.TrimSpace(s.Host) == "" {
 		return OpenResult{}, errors.New("Socket Mode requires a public host")
 	}
+	active, err := s.Store.CountSocketModeConnections(ctx, appID)
+	if err != nil {
+		return OpenResult{}, err
+	}
+	if active >= domain.SocketModeConnectionLimit {
+		return OpenResult{}, ErrConnectionLimit
+	}
 	id, err := domain.NewSocketModeConnectionID()
 	if err != nil {
 		return OpenResult{}, err
 	}
 	connection := domain.SocketModeConnection{ID: id, AppID: appID, ExpiresAt: time.Now().UTC().Add(connectionLifetime)}
 	if err := s.Store.CreateSocketModeConnection(ctx, connection); err != nil {
+		if errors.Is(err, store.ErrSocketModeConnectionLimit) {
+			return OpenResult{}, ErrConnectionLimit
+		}
 		return OpenResult{}, err
 	}
 	scheme := "ws"
@@ -120,6 +135,11 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "connection is invalid or expired", http.StatusUnauthorized)
 		return
 	}
+	defer func() {
+		if releaseErr := h.Store.ReleaseSocketModeConnection(context.Background(), connection.ID); releaseErr != nil {
+			return
+		}
+	}()
 	upgrader := h.Upgrader
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -135,7 +155,12 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := conn.WriteJSON(map[string]any{"type": "hello", "num_connections": 1, "debug_info": map[string]string{"host": string(connection.AppID)}}); err != nil {
+	connectionCount, err := h.Store.CountSocketModeConnections(r.Context(), connection.AppID)
+	if err != nil {
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "connection state unavailable"), time.Now().Add(time.Second))
+		return
+	}
+	if err := conn.WriteJSON(map[string]any{"type": "hello", "num_connections": connectionCount, "debug_info": map[string]string{"host": string(connection.AppID)}}); err != nil {
 		return
 	}
 	readErrors := make(chan error, 1)
@@ -156,6 +181,8 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
+	leaseTicker := time.NewTicker(connectionLifetime / 3)
+	defer leaseTicker.Stop()
 	pending := make(map[string]uint64, 1)
 	for {
 		select {
@@ -229,6 +256,11 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			pending[string(record.Event.ID)] = record.Sequence
+		case <-leaseTicker.C:
+			if err := h.Store.RenewSocketModeConnection(r.Context(), connection.ID, time.Now().UTC().Add(connectionLifetime)); err != nil {
+				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "connection lease unavailable"), time.Now().Add(time.Second))
+				return
+			}
 		}
 	}
 }
