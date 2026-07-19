@@ -110,7 +110,9 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 		a.fail(w, err)
 		return
 	}
+	leaseContext, cancelLease := context.WithCancel(r.Context())
 	defer func() {
+		cancelLease()
 		if err := a.releaseLease(context.Background(), lease); err != nil {
 			a.logger.Error("release websocket lease failed", "error", err, "lease", lease)
 		}
@@ -118,6 +120,8 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 			a.logger.Error("scale websocket service to zero failed", "error", err)
 		}
 	}()
+	leaseErrors := make(chan error, 1)
+	go a.renewLeaseLoop(leaseContext, lease, leaseErrors)
 
 	backend, err := a.readyEndpoint(r.Context())
 	if err != nil {
@@ -149,8 +153,13 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 	errorsCh := make(chan error, 2)
 	go proxyMessages(errorsCh, clientConn, backendConn)
 	go proxyMessages(errorsCh, backendConn, clientConn)
-	if err := <-errorsCh; err != nil && !isNormalWebSocketClose(err) {
-		a.logger.Info("websocket proxy closed", "error", err)
+	select {
+	case err := <-errorsCh:
+		if err != nil && !isNormalWebSocketClose(err) {
+			a.logger.Info("websocket proxy closed", "error", err)
+		}
+	case err := <-leaseErrors:
+		a.logger.Error("websocket lease renewal failed", "error", err, "lease", lease)
 	}
 }
 
@@ -274,6 +283,40 @@ func (a *activator) acquireLease(ctx context.Context, lease string) error {
 		{ConditionCheck: &dynamodbtypes.ConditionCheck{TableName: aws.String(a.table), Key: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: scaleDownLock}}, ConditionExpression: aws.String("attribute_not_exists(id) OR expires < :now"), ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":now": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(now)}}}},
 		{Put: &dynamodbtypes.Put{TableName: aws.String(a.table), Item: map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: lease}, "expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(a.startWait + time.Hour).Unix())}}, ConditionExpression: aws.String("attribute_not_exists(id)")}},
 	}})
+	return err
+}
+
+func (a *activator) renewLeaseLoop(ctx context.Context, lease string, errorsCh chan<- error) {
+	interval := (a.startWait + time.Hour) / 3
+	if interval <= 0 {
+		interval = time.Second
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := a.renewLease(ctx, lease); err != nil {
+				if ctx.Err() == nil {
+					errorsCh <- err
+				}
+				return
+			}
+		}
+	}
+}
+
+func (a *activator) renewLease(ctx context.Context, lease string) error {
+	_, err := a.dynamo.UpdateItem(ctx, &dynamodb.UpdateItemInput{
+		TableName:                 aws.String(a.table),
+		Key:                       map[string]dynamodbtypes.AttributeValue{"id": &dynamodbtypes.AttributeValueMemberS{Value: lease}},
+		UpdateExpression:          aws.String("SET #expires = :expires"),
+		ExpressionAttributeNames:  map[string]string{"#expires": "expires"},
+		ExpressionAttributeValues: map[string]dynamodbtypes.AttributeValue{":expires": &dynamodbtypes.AttributeValueMemberN{Value: fmt.Sprint(time.Now().Add(a.startWait + time.Hour).Unix())}},
+		ConditionExpression:       aws.String("attribute_exists(id)"),
+	})
 	return err
 }
 
