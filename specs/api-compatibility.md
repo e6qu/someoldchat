@@ -40,9 +40,11 @@ OpenAPI snapshot may enter the ledger with `provenance: slack-reference` only
 when its official method reference and an executable qualification are recorded.
 
 Run `make compatibility-report` to print the current operation count and the
-number implemented at each evidence level. The implementation target is
+number at or above each evidence level. The implementation target is
 `verified-against-slack` for every operation; the report does not treat a
-schema-compatible handler as behavior verification.
+schema-compatible handler as behavior verification. A higher status includes
+the evidence represented by every lower status, so the report uses
+`<status>-or-better` for those cumulative counts.
 
 Community SDKs, including Go SDKs, MAY be test targets but MUST NOT override an
 official source merely because their behavior differs.
