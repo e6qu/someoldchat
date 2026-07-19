@@ -1642,6 +1642,13 @@ func (m Messages) Users(ctx context.Context, workspaceID domain.WorkspaceID, use
 	return m.Store.ListUsers(ctx, workspaceID, request)
 }
 
+func (m Messages) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return domain.AdminUserPage{}, err
+	}
+	return m.Store.ListAdminUsers(ctx, workspaceID, request)
+}
+
 func (m Messages) ConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) (domain.UserPage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.UserPage{}, err

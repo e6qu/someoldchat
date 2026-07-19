@@ -785,6 +785,38 @@ func (s *Store) ListUsers(_ context.Context, workspace domain.WorkspaceID, reque
 	return page, nil
 }
 
+func (s *Store) ListAdminUsers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.AdminUserPage, error) {
+	if request.Limit <= 0 {
+		return domain.AdminUserPage{}, errors.New("page limit must be positive")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.AdminUserPage{}, err
+	}
+	s.mu.RLock()
+	values := make([]domain.AdminUser, 0, request.Limit+1)
+	for _, membership := range s.members {
+		if membership.WorkspaceID != workspace || (after != "" && string(membership.UserID) <= after) {
+			continue
+		}
+		user, ok := s.users[membership.UserID]
+		if !ok || user.WorkspaceID != workspace {
+			continue
+		}
+		values = appendSorted(values, domain.AdminUser{User: user, Membership: membership}, request.Limit+1, func(left, right domain.AdminUser) bool { return left.User.ID < right.User.ID })
+	}
+	s.mu.RUnlock()
+	page := domain.AdminUserPage{HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		values = values[:request.Limit]
+	}
+	page.Users = values
+	if page.HasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].User.ID))
+	}
+	return page, err
+}
+
 func (s *Store) ListUsersByRole(_ context.Context, workspace domain.WorkspaceID, role domain.WorkspaceRole, request domain.PageRequest) (domain.UserPage, error) {
 	if request.Limit <= 0 {
 		return domain.UserPage{}, errors.New("page limit must be positive")

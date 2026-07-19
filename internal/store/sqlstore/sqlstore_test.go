@@ -57,6 +57,10 @@ func TestSQLiteCreateUserIsTransactionalAndWorkspaceScoped(t *testing.T) {
 	if err != nil || role.Role != domain.WorkspaceRoleAdmin {
 		t.Fatalf("membership=%+v err=%v", role, err)
 	}
+	adminUsers, err := s.ListAdminUsers(ctx, "T1", domain.PageRequest{Limit: 1})
+	if err != nil || len(adminUsers.Users) != 1 || adminUsers.Users[0].User.ID != "U2" || adminUsers.Users[0].Membership.Role != domain.WorkspaceRoleAdmin || !adminUsers.Users[0].Membership.Active {
+		t.Fatalf("administrator users=%+v err=%v", adminUsers, err)
+	}
 	if err := s.CreateUser(ctx, domain.User{ID: "U3", WorkspaceID: "T1", Email: "ALICE@EXAMPLE.COM", Name: "Other"}, domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U3", Role: domain.WorkspaceRoleMember, Active: true}, events.Event{ID: "E-duplicate", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != store.ErrAlreadyExists {
 		t.Fatalf("duplicate error=%v", err)
 	}

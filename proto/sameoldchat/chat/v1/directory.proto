@@ -14,6 +14,25 @@ message UserPage {
   bool has_more = 3;
 }
 
+message AdminUser {
+  User user = 1;
+  string role = 2;
+  bool active = 3;
+}
+
+message AdminUserPage {
+  repeated AdminUser users = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message AdminUsersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+}
+
 message UsersRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -315,6 +334,7 @@ service DirectoryService {
   rpc AdminTeamUsers(AdminTeamUsersRequest) returns (UserPage);
   rpc AdminInviteUser(AdminInviteUserRequest) returns (MutationResponse);
   rpc AdminCreateUser(AdminCreateUserRequest) returns (User);
+  rpc AdminListUsers(AdminUsersRequest) returns (AdminUserPage);
   rpc AdminAssignUser(AdminAssignUserRequest) returns (MutationResponse);
   rpc AdminApproveInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
   rpc AdminDenyInviteRequest(InviteRequestMutationRequest) returns (MutationResponse);
