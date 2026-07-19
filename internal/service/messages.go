@@ -117,6 +117,10 @@ func (m Messages) ClaimSocketModeResponses(ctx context.Context, appID domain.App
 	return m.Store.ClaimSocketModeResponses(ctx, appID, owner, limit, lease)
 }
 
+func (m Messages) RenewSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, lease time.Duration) error {
+	return m.Store.RenewSocketModeResponses(ctx, owner, values, lease)
+}
+
 func (m Messages) AckSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse) error {
 	return m.Store.AckSocketModeResponses(ctx, owner, values)
 }

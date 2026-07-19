@@ -81,6 +81,7 @@ type Service interface {
 	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
 	ClaimSocketModeResponses(context.Context, domain.AppID, string, int, time.Duration) ([]domain.SocketModeResponse, error)
+	RenewSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Duration) error
 	AckSocketModeResponses(context.Context, string, []domain.SocketModeResponse) error
 	ReleaseSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Time) error
 	AdminInviteConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID) (domain.Conversation, error)

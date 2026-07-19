@@ -1985,6 +1985,33 @@ func (s *Store) AckSocketModeResponses(_ context.Context, owner string, values [
 	return nil
 }
 
+func (s *Store) RenewSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse, lease time.Duration) error {
+	if strings.TrimSpace(owner) == "" || len(values) == 0 || lease <= 0 {
+		return errors.New("Socket Mode response renewal fields are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	expiresAt := now.Add(lease)
+	for _, value := range values {
+		key := socketModeResponseKey(value.AppID, value.EnvelopeID)
+		stored, ok := s.socketResponses[key]
+		if !ok {
+			return store.ErrNotFound
+		}
+		if !stored.AcknowledgedAt.IsZero() || stored.LeaseOwner != owner || !stored.LeaseExpiresAt.After(now) {
+			return store.ErrConflict
+		}
+	}
+	for _, value := range values {
+		key := socketModeResponseKey(value.AppID, value.EnvelopeID)
+		stored := s.socketResponses[key]
+		stored.LeaseExpiresAt = expiresAt
+		s.socketResponses[key] = stored
+	}
+	return nil
+}
+
 func (s *Store) ReleaseSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
 	if strings.TrimSpace(owner) == "" || retryAt.IsZero() {
 		return errors.New("Socket Mode response release fields are required")

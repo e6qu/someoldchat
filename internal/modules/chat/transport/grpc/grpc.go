@@ -405,6 +405,15 @@ func (r Remote) ClaimSocketModeResponses(ctx context.Context, appID domain.AppID
 	return decodeSocketModeResponses(out.GetResponses()), nil
 }
 
+func (r Remote) RenewSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, lease time.Duration) error {
+	keys := make([]*chatv1.SocketModeResponseKey, 0, len(values))
+	for _, value := range values {
+		keys = append(keys, &chatv1.SocketModeResponseKey{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID})
+	}
+	_, err := r.rtm.RenewSocketModeResponses(ctx, &chatv1.SocketModeResponseRenewRequest{Owner: owner, Responses: keys, LeaseNanos: lease.Nanoseconds()})
+	return err
+}
+
 func (r Remote) AckSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse) error {
 	keys := make([]*chatv1.SocketModeResponseKey, 0, len(values))
 	for _, value := range values {
@@ -3144,6 +3153,20 @@ func (s *Server) ClaimSocketModeResponses(ctx context.Context, input *chatv1.Soc
 		responses = append(responses, &chatv1.SocketModeResponse{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID, Payload: value.Payload, ReceivedAtUnixNano: value.ReceivedAt.UnixNano()})
 	}
 	return &chatv1.SocketModeResponseBatch{Responses: responses}, nil
+}
+
+func (s *Server) RenewSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseRenewRequest) (*chatv1.SocketModeResponseBatch, error) {
+	if input == nil || input.GetOwner() == "" || len(input.GetResponses()) == 0 || input.GetLeaseNanos() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "Socket Mode response renewal fields are required")
+	}
+	values, err := socketModeResponseKeys(input.GetResponses())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.implementation.RenewSocketModeResponses(ctx, input.GetOwner(), values, time.Duration(input.GetLeaseNanos())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeResponseBatch{}, nil
 }
 
 func (s *Server) AckSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseAckRequest) (*chatv1.SocketModeResponseBatch, error) {

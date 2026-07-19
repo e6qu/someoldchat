@@ -150,7 +150,8 @@ fallback. The reusable response processor claims records with an owner and a
 lease, invokes an explicitly supplied handler, acknowledges each successful
 record, and releases failed records at an explicit retry time. A crash before
 acknowledgement leaves the record reclaimable after the lease expires. The
-processor does not guess application-specific response semantics or run an
+processor claims one response at a time and renews its lease while the handler
+runs. It does not guess application-specific response semantics or run an
 unbounded retry loop. See this section and the compatibility ledger for the
 supported wire contract.
 
