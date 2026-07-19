@@ -20,7 +20,21 @@ message RTMConnection {
   int64 expires_at_unix_nano = 4;
 }
 
+message SocketModeConnectionRequest {
+  string app_id = 1;
+  string id = 2;
+  int64 expires_at_unix_nano = 3;
+}
+
+message SocketModeConnection {
+  string id = 1;
+  string app_id = 2;
+  int64 expires_at_unix_nano = 3;
+}
+
 service RTMService {
   rpc CreateConnection(RTMConnectionRequest) returns (RTMConnection);
   rpc ConsumeConnection(RTMConnectionIDRequest) returns (RTMConnection);
+  rpc CreateSocketModeConnection(SocketModeConnectionRequest) returns (SocketModeConnection);
+  rpc ConsumeSocketModeConnection(RTMConnectionIDRequest) returns (SocketModeConnection);
 }

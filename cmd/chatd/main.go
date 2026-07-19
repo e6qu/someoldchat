@@ -31,6 +31,8 @@ func main() {
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
 	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name; required for local dqlite storage")
 	apiToken := flag.String("api-token", "", "durable API bearer token (required)")
+	appToken := flag.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
+	appID := flag.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
 	sessionToken := flag.String("session-token", "", "durable browser session token (required)")
 	blobDirectory := flag.String("blob-dir", "", "external blob directory for file storage")
 	blobMaxBytes := flag.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
@@ -76,6 +78,23 @@ func main() {
 	if err := runtime.TokenSeeder.SeedToken(context.Background(), *apiToken, domain.TokenRecord{WorkspaceID: "Tdev", UserID: "Udev", Scopes: auth.AllScopes()}); err != nil {
 		logger.Error("seed durable API token", "error", err)
 		os.Exit(1)
+	}
+	if *appToken != "" || *appID != "" {
+		if *appToken == "" || *appID == "" {
+			logger.Error("Socket Mode requires both app token and app ID")
+			os.Exit(2)
+		}
+		seedAppToken, ok := runtime.TokenStore.(interface {
+			SeedAppToken(context.Context, string, domain.AppTokenRecord) error
+		})
+		if !ok {
+			logger.Error("storage backend cannot seed Socket Mode app tokens")
+			os.Exit(1)
+		}
+		if err := seedAppToken.SeedAppToken(context.Background(), *appToken, domain.AppTokenRecord{AppID: domain.AppID(*appID), Scopes: []string{string(auth.ScopeConnectionsWrite)}}); err != nil {
+			logger.Error("seed Socket Mode app token", "error", err)
+			os.Exit(1)
+		}
 	}
 	if err := runtime.SessionSeeder.SeedSession(context.Background(), *sessionToken, domain.SessionRecord{WorkspaceID: "Tdev", UserID: "Udev", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}); err != nil {
 		logger.Error("seed durable browser session", "error", err)

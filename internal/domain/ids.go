@@ -120,3 +120,5 @@ func NewDialogID() (DialogID, error) {
 func NewOAuthToken() (string, error) { return PublicID("xoxp-") }
 
 func NewRTMConnectionID() (string, error) { return PublicID("rtm-") }
+
+func NewSocketModeConnectionID() (string, error) { return PublicID("socket-") }

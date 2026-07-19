@@ -14,6 +14,7 @@ import (
 
 type qualificationStore interface {
 	store.Store
+	SeedAppToken(context.Context, string, domain.AppTokenRecord) error
 	SeedWorkspace(context.Context, domain.Workspace) error
 	SeedUser(context.Context, domain.User) error
 	SeedConversation(context.Context, domain.Conversation) error
@@ -528,6 +529,28 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		}
 		if _, err := repository.ConsumeRTMConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("replayed RTM connection error=%v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("app token and Socket Mode connection are durable and single use", func(t *testing.T) {
+		appToken := "xapp-qualification-" + suffix
+		if err := repository.SeedAppToken(ctx, appToken, domain.AppTokenRecord{AppID: "A-qualification", Scopes: []string{" connections:write ", "connections:write"}}); err != nil {
+			t.Fatal(err)
+		}
+		token, err := repository.LookupAppToken(ctx, appToken)
+		if err != nil || token.AppID != "A-qualification" || len(token.Scopes) != 1 || token.Scopes[0] != "connections:write" {
+			t.Fatalf("app token=%+v err=%v", token, err)
+		}
+		connection := domain.SocketModeConnection{ID: "socket-" + suffix, AppID: token.AppID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
+		if err := repository.CreateSocketModeConnection(ctx, connection); err != nil {
+			t.Fatal(err)
+		}
+		consumed, err := repository.ConsumeSocketModeConnection(ctx, connection.ID)
+		if err != nil || consumed.AppID != connection.AppID || !consumed.ExpiresAt.Equal(connection.ExpiresAt.Truncate(time.Nanosecond)) {
+			t.Fatalf("Socket Mode connection=%+v err=%v", consumed, err)
+		}
+		if _, err := repository.ConsumeSocketModeConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("replayed Socket Mode connection error=%v, want ErrNotFound", err)
 		}
 	})
 }

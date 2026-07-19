@@ -20,6 +20,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,6 +29,43 @@ import (
 func testHandler() http.Handler {
 	handler, _ := testHandlerWithStore()
 	return handler
+}
+
+func TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection(t *testing.T) {
+	store := memory.New()
+	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
+	userAuth, err := auth.NewStatic("user-token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChatWrite: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appAuth, err := auth.NewAppStored(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store}, userAuth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "example.test"}, appAuth)
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	request := httptest.NewRequest(http.MethodPost, "/api/apps.connections.open", nil)
+	request.Header.Set("Authorization", "Bearer xapp-test")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	var body struct {
+		OK  bool   `json:"ok"`
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK || !strings.Contains(body.URL, "connection_id=") {
+		t.Fatalf("body=%+v", body)
+	}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {

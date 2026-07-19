@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AuthService_LookupToken_FullMethodName            = "/sameoldchat.chat.v1.AuthService/LookupToken"
+	AuthService_LookupAppToken_FullMethodName         = "/sameoldchat.chat.v1.AuthService/LookupAppToken"
 	AuthService_LookupSession_FullMethodName          = "/sameoldchat.chat.v1.AuthService/LookupSession"
 	AuthService_RevokeSession_FullMethodName          = "/sameoldchat.chat.v1.AuthService/RevokeSession"
 	AuthService_RevokeToken_FullMethodName            = "/sameoldchat.chat.v1.AuthService/RevokeToken"
@@ -35,6 +36,7 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AuthServiceClient interface {
 	LookupToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*TokenRecord, error)
+	LookupAppToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AppTokenRecord, error)
 	LookupSession(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*SessionRecord, error)
 	RevokeSession(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 	RevokeToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
@@ -57,6 +59,16 @@ func (c *authServiceClient) LookupToken(ctx context.Context, in *TokenRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(TokenRecord)
 	err := c.cc.Invoke(ctx, AuthService_LookupToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) LookupAppToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AppTokenRecord, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppTokenRecord)
+	err := c.cc.Invoke(ctx, AuthService_LookupAppToken_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +160,7 @@ func (c *authServiceClient) CreateExternalIdentity(ctx context.Context, in *Exte
 // for forward compatibility.
 type AuthServiceServer interface {
 	LookupToken(context.Context, *TokenRequest) (*TokenRecord, error)
+	LookupAppToken(context.Context, *TokenRequest) (*AppTokenRecord, error)
 	LookupSession(context.Context, *TokenRequest) (*SessionRecord, error)
 	RevokeSession(context.Context, *TokenRequest) (*AuthRevokeResponse, error)
 	RevokeToken(context.Context, *TokenRequest) (*AuthRevokeResponse, error)
@@ -168,6 +181,9 @@ type UnimplementedAuthServiceServer struct{}
 
 func (UnimplementedAuthServiceServer) LookupToken(context.Context, *TokenRequest) (*TokenRecord, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LookupToken not implemented")
+}
+func (UnimplementedAuthServiceServer) LookupAppToken(context.Context, *TokenRequest) (*AppTokenRecord, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LookupAppToken not implemented")
 }
 func (UnimplementedAuthServiceServer) LookupSession(context.Context, *TokenRequest) (*SessionRecord, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method LookupSession not implemented")
@@ -228,6 +244,24 @@ func _AuthService_LookupToken_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).LookupToken(ctx, req.(*TokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_LookupAppToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(TokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).LookupAppToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_LookupAppToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).LookupAppToken(ctx, req.(*TokenRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -386,6 +420,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "LookupToken",
 			Handler:    _AuthService_LookupToken_Handler,
+		},
+		{
+			MethodName: "LookupAppToken",
+			Handler:    _AuthService_LookupAppToken_Handler,
 		},
 		{
 			MethodName: "LookupSession",

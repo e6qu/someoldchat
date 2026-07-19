@@ -36,8 +36,10 @@ type Store struct {
 	oauthClients         map[string]domain.OAuthClient
 	oauthCodes           map[string]domain.OAuthCode
 	rtmConnections       map[string]domain.RTMConnection
+	socketConnections    map[string]domain.SocketModeConnection
 	memberships          map[domain.ConversationID]map[domain.UserID]struct{}
 	tokens               map[string]domain.TokenRecord
+	appTokens            map[string]domain.AppTokenRecord
 	sessions             map[string]domain.SessionRecord
 	authMethods          map[string]domain.AuthMethod
 	externalIdentities   map[string]domain.ExternalIdentity
@@ -124,7 +126,7 @@ type memoryLease struct {
 }
 
 func New() *Store {
-	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
+	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -256,6 +258,32 @@ func (s *Store) LookupToken(_ context.Context, token string) (domain.TokenRecord
 	return record, nil
 }
 
+func (s *Store) SeedAppToken(_ context.Context, token string, record domain.AppTokenRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := domain.HashToken(token)
+	if _, exists := s.appTokens[key]; exists {
+		return nil
+	}
+	if record.AppID == "" {
+		return errors.New("app token requires an app ID")
+	}
+	record.Scopes = domain.NormalizeScopes(record.Scopes)
+	s.appTokens[key] = record
+	return nil
+}
+
+func (s *Store) LookupAppToken(_ context.Context, token string) (domain.AppTokenRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	record, ok := s.appTokens[domain.HashToken(token)]
+	if !ok {
+		return domain.AppTokenRecord{}, store.ErrNotFound
+	}
+	record.Scopes = append([]string(nil), record.Scopes...)
+	return record, nil
+}
+
 func (s *Store) RevokeToken(_ context.Context, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -266,6 +294,19 @@ func (s *Store) RevokeToken(_ context.Context, token string) error {
 	}
 	record.Revoked = true
 	s.tokens[key] = record
+	return nil
+}
+
+func (s *Store) RevokeAppToken(_ context.Context, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := domain.HashToken(token)
+	record, ok := s.appTokens[key]
+	if !ok {
+		return store.ErrNotFound
+	}
+	record.Revoked = true
+	s.appTokens[key] = record
 	return nil
 }
 
@@ -1726,6 +1767,31 @@ func (s *Store) ConsumeRTMConnection(_ context.Context, id string) (domain.RTMCo
 	if !value.ExpiresAt.After(time.Now().UTC()) {
 		return domain.RTMConnection{}, store.ErrNotFound
 	}
+	return value, nil
+}
+
+func (s *Store) CreateSocketModeConnection(_ context.Context, value domain.SocketModeConnection) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
+		return errors.New("invalid Socket Mode connection")
+	}
+	if _, exists := s.socketConnections[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.socketConnections[value.ID] = value
+	return nil
+}
+
+func (s *Store) ConsumeSocketModeConnection(_ context.Context, id string) (domain.SocketModeConnection, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.socketConnections[id]
+	if !exists || !value.ExpiresAt.After(time.Now().UTC()) {
+		delete(s.socketConnections, id)
+		return domain.SocketModeConnection{}, store.ErrNotFound
+	}
+	delete(s.socketConnections, id)
 	return value, nil
 }
 

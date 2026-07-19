@@ -89,6 +89,66 @@ func (x *TokenRecord) GetRevoked() bool {
 	return false
 }
 
+type AppTokenRecord struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Scopes        []string               `protobuf:"bytes,2,rep,name=scopes,proto3" json:"scopes,omitempty"`
+	Revoked       bool                   `protobuf:"varint,3,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppTokenRecord) Reset() {
+	*x = AppTokenRecord{}
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppTokenRecord) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppTokenRecord) ProtoMessage() {}
+
+func (x *AppTokenRecord) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppTokenRecord.ProtoReflect.Descriptor instead.
+func (*AppTokenRecord) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AppTokenRecord) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *AppTokenRecord) GetScopes() []string {
+	if x != nil {
+		return x.Scopes
+	}
+	return nil
+}
+
+func (x *AppTokenRecord) GetRevoked() bool {
+	if x != nil {
+		return x.Revoked
+	}
+	return false
+}
+
 type SessionRecord struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -102,7 +162,7 @@ type SessionRecord struct {
 
 func (x *SessionRecord) Reset() {
 	*x = SessionRecord{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -114,7 +174,7 @@ func (x *SessionRecord) String() string {
 func (*SessionRecord) ProtoMessage() {}
 
 func (x *SessionRecord) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -127,7 +187,7 @@ func (x *SessionRecord) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SessionRecord.ProtoReflect.Descriptor instead.
 func (*SessionRecord) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{1}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SessionRecord) GetWorkspaceId() string {
@@ -174,7 +234,7 @@ type TokenRequest struct {
 
 func (x *TokenRequest) Reset() {
 	*x = TokenRequest{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -186,7 +246,7 @@ func (x *TokenRequest) String() string {
 func (*TokenRequest) ProtoMessage() {}
 
 func (x *TokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -199,7 +259,7 @@ func (x *TokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TokenRequest.ProtoReflect.Descriptor instead.
 func (*TokenRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TokenRequest) GetToken() string {
@@ -218,7 +278,7 @@ type AuthRevokeResponse struct {
 
 func (x *AuthRevokeResponse) Reset() {
 	*x = AuthRevokeResponse{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -230,7 +290,7 @@ func (x *AuthRevokeResponse) String() string {
 func (*AuthRevokeResponse) ProtoMessage() {}
 
 func (x *AuthRevokeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -243,7 +303,7 @@ func (x *AuthRevokeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthRevokeResponse.ProtoReflect.Descriptor instead.
 func (*AuthRevokeResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AuthRevokeResponse) GetOk() bool {
@@ -263,7 +323,7 @@ type CreateSessionRequest struct {
 
 func (x *CreateSessionRequest) Reset() {
 	*x = CreateSessionRequest{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -275,7 +335,7 @@ func (x *CreateSessionRequest) String() string {
 func (*CreateSessionRequest) ProtoMessage() {}
 
 func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -288,7 +348,7 @@ func (x *CreateSessionRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSessionRequest.ProtoReflect.Descriptor instead.
 func (*CreateSessionRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CreateSessionRequest) GetToken() string {
@@ -316,7 +376,7 @@ type AuthMethodRequest struct {
 
 func (x *AuthMethodRequest) Reset() {
 	*x = AuthMethodRequest{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +388,7 @@ func (x *AuthMethodRequest) String() string {
 func (*AuthMethodRequest) ProtoMessage() {}
 
 func (x *AuthMethodRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +401,7 @@ func (x *AuthMethodRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthMethodRequest.ProtoReflect.Descriptor instead.
 func (*AuthMethodRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AuthMethodRequest) GetWorkspaceId() string {
@@ -376,7 +436,7 @@ type AuthMethod struct {
 
 func (x *AuthMethod) Reset() {
 	*x = AuthMethod{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +448,7 @@ func (x *AuthMethod) String() string {
 func (*AuthMethod) ProtoMessage() {}
 
 func (x *AuthMethod) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +461,7 @@ func (x *AuthMethod) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AuthMethod.ProtoReflect.Descriptor instead.
 func (*AuthMethod) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AuthMethod) GetWorkspaceId() string {
@@ -437,7 +497,7 @@ type ExternalIdentityRequest struct {
 
 func (x *ExternalIdentityRequest) Reset() {
 	*x = ExternalIdentityRequest{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -449,7 +509,7 @@ func (x *ExternalIdentityRequest) String() string {
 func (*ExternalIdentityRequest) ProtoMessage() {}
 
 func (x *ExternalIdentityRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -462,7 +522,7 @@ func (x *ExternalIdentityRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalIdentityRequest.ProtoReflect.Descriptor instead.
 func (*ExternalIdentityRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ExternalIdentityRequest) GetWorkspaceId() string {
@@ -505,7 +565,7 @@ type ExternalIdentity struct {
 
 func (x *ExternalIdentity) Reset() {
 	*x = ExternalIdentity{}
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -517,7 +577,7 @@ func (x *ExternalIdentity) String() string {
 func (*ExternalIdentity) ProtoMessage() {}
 
 func (x *ExternalIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -530,7 +590,7 @@ func (x *ExternalIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExternalIdentity.ProtoReflect.Descriptor instead.
 func (*ExternalIdentity) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *ExternalIdentity) GetWorkspaceId() string {
@@ -570,7 +630,11 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06scopes\x18\x03 \x03(\tR\x06scopes\x12\x18\n" +
-	"\arevoked\x18\x04 \x01(\bR\arevoked\"\x9c\x01\n" +
+	"\arevoked\x18\x04 \x01(\bR\arevoked\"Y\n" +
+	"\x0eAppTokenRecord\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x16\n" +
+	"\x06scopes\x18\x02 \x03(\tR\x06scopes\x12\x18\n" +
+	"\arevoked\x18\x03 \x01(\bR\arevoked\"\x9c\x01\n" +
 	"\rSessionRecord\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
@@ -603,9 +667,10 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x18\n" +
 	"\asubject\x18\x03 \x01(\tR\asubject\x12\x17\n" +
-	"\auser_id\x18\x04 \x01(\tR\x06userId2\xef\x06\n" +
+	"\auser_id\x18\x04 \x01(\tR\x06userId2\xc9\a\n" +
 	"\vAuthService\x12R\n" +
-	"\vLookupToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a .sameoldchat.chat.v1.TokenRecord\x12V\n" +
+	"\vLookupToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a .sameoldchat.chat.v1.TokenRecord\x12X\n" +
+	"\x0eLookupAppToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a#.sameoldchat.chat.v1.AppTokenRecord\x12V\n" +
 	"\rLookupSession\x12!.sameoldchat.chat.v1.TokenRequest\x1a\".sameoldchat.chat.v1.SessionRecord\x12[\n" +
 	"\rRevokeSession\x12!.sameoldchat.chat.v1.TokenRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponse\x12Y\n" +
 	"\vRevokeToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponse\x12c\n" +
@@ -627,40 +692,43 @@ func file_sameoldchat_chat_v1_auth_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_auth_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_sameoldchat_chat_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_sameoldchat_chat_v1_auth_proto_goTypes = []any{
 	(*TokenRecord)(nil),             // 0: sameoldchat.chat.v1.TokenRecord
-	(*SessionRecord)(nil),           // 1: sameoldchat.chat.v1.SessionRecord
-	(*TokenRequest)(nil),            // 2: sameoldchat.chat.v1.TokenRequest
-	(*AuthRevokeResponse)(nil),      // 3: sameoldchat.chat.v1.AuthRevokeResponse
-	(*CreateSessionRequest)(nil),    // 4: sameoldchat.chat.v1.CreateSessionRequest
-	(*AuthMethodRequest)(nil),       // 5: sameoldchat.chat.v1.AuthMethodRequest
-	(*AuthMethod)(nil),              // 6: sameoldchat.chat.v1.AuthMethod
-	(*ExternalIdentityRequest)(nil), // 7: sameoldchat.chat.v1.ExternalIdentityRequest
-	(*ExternalIdentity)(nil),        // 8: sameoldchat.chat.v1.ExternalIdentity
+	(*AppTokenRecord)(nil),          // 1: sameoldchat.chat.v1.AppTokenRecord
+	(*SessionRecord)(nil),           // 2: sameoldchat.chat.v1.SessionRecord
+	(*TokenRequest)(nil),            // 3: sameoldchat.chat.v1.TokenRequest
+	(*AuthRevokeResponse)(nil),      // 4: sameoldchat.chat.v1.AuthRevokeResponse
+	(*CreateSessionRequest)(nil),    // 5: sameoldchat.chat.v1.CreateSessionRequest
+	(*AuthMethodRequest)(nil),       // 6: sameoldchat.chat.v1.AuthMethodRequest
+	(*AuthMethod)(nil),              // 7: sameoldchat.chat.v1.AuthMethod
+	(*ExternalIdentityRequest)(nil), // 8: sameoldchat.chat.v1.ExternalIdentityRequest
+	(*ExternalIdentity)(nil),        // 9: sameoldchat.chat.v1.ExternalIdentity
 }
 var file_sameoldchat_chat_v1_auth_proto_depIdxs = []int32{
-	1,  // 0: sameoldchat.chat.v1.CreateSessionRequest.session:type_name -> sameoldchat.chat.v1.SessionRecord
-	2,  // 1: sameoldchat.chat.v1.AuthService.LookupToken:input_type -> sameoldchat.chat.v1.TokenRequest
-	2,  // 2: sameoldchat.chat.v1.AuthService.LookupSession:input_type -> sameoldchat.chat.v1.TokenRequest
-	2,  // 3: sameoldchat.chat.v1.AuthService.RevokeSession:input_type -> sameoldchat.chat.v1.TokenRequest
-	2,  // 4: sameoldchat.chat.v1.AuthService.RevokeToken:input_type -> sameoldchat.chat.v1.TokenRequest
-	4,  // 5: sameoldchat.chat.v1.AuthService.CreateSession:input_type -> sameoldchat.chat.v1.CreateSessionRequest
-	5,  // 6: sameoldchat.chat.v1.AuthService.GetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
-	5,  // 7: sameoldchat.chat.v1.AuthService.SetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
-	7,  // 8: sameoldchat.chat.v1.AuthService.GetExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
-	7,  // 9: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
-	0,  // 10: sameoldchat.chat.v1.AuthService.LookupToken:output_type -> sameoldchat.chat.v1.TokenRecord
-	1,  // 11: sameoldchat.chat.v1.AuthService.LookupSession:output_type -> sameoldchat.chat.v1.SessionRecord
-	3,  // 12: sameoldchat.chat.v1.AuthService.RevokeSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	3,  // 13: sameoldchat.chat.v1.AuthService.RevokeToken:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	3,  // 14: sameoldchat.chat.v1.AuthService.CreateSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	6,  // 15: sameoldchat.chat.v1.AuthService.GetAuthMethod:output_type -> sameoldchat.chat.v1.AuthMethod
-	3,  // 16: sameoldchat.chat.v1.AuthService.SetAuthMethod:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	8,  // 17: sameoldchat.chat.v1.AuthService.GetExternalIdentity:output_type -> sameoldchat.chat.v1.ExternalIdentity
-	3,  // 18: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	10, // [10:19] is the sub-list for method output_type
-	1,  // [1:10] is the sub-list for method input_type
+	2,  // 0: sameoldchat.chat.v1.CreateSessionRequest.session:type_name -> sameoldchat.chat.v1.SessionRecord
+	3,  // 1: sameoldchat.chat.v1.AuthService.LookupToken:input_type -> sameoldchat.chat.v1.TokenRequest
+	3,  // 2: sameoldchat.chat.v1.AuthService.LookupAppToken:input_type -> sameoldchat.chat.v1.TokenRequest
+	3,  // 3: sameoldchat.chat.v1.AuthService.LookupSession:input_type -> sameoldchat.chat.v1.TokenRequest
+	3,  // 4: sameoldchat.chat.v1.AuthService.RevokeSession:input_type -> sameoldchat.chat.v1.TokenRequest
+	3,  // 5: sameoldchat.chat.v1.AuthService.RevokeToken:input_type -> sameoldchat.chat.v1.TokenRequest
+	5,  // 6: sameoldchat.chat.v1.AuthService.CreateSession:input_type -> sameoldchat.chat.v1.CreateSessionRequest
+	6,  // 7: sameoldchat.chat.v1.AuthService.GetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
+	6,  // 8: sameoldchat.chat.v1.AuthService.SetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
+	8,  // 9: sameoldchat.chat.v1.AuthService.GetExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
+	8,  // 10: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
+	0,  // 11: sameoldchat.chat.v1.AuthService.LookupToken:output_type -> sameoldchat.chat.v1.TokenRecord
+	1,  // 12: sameoldchat.chat.v1.AuthService.LookupAppToken:output_type -> sameoldchat.chat.v1.AppTokenRecord
+	2,  // 13: sameoldchat.chat.v1.AuthService.LookupSession:output_type -> sameoldchat.chat.v1.SessionRecord
+	4,  // 14: sameoldchat.chat.v1.AuthService.RevokeSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	4,  // 15: sameoldchat.chat.v1.AuthService.RevokeToken:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	4,  // 16: sameoldchat.chat.v1.AuthService.CreateSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	7,  // 17: sameoldchat.chat.v1.AuthService.GetAuthMethod:output_type -> sameoldchat.chat.v1.AuthMethod
+	4,  // 18: sameoldchat.chat.v1.AuthService.SetAuthMethod:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	9,  // 19: sameoldchat.chat.v1.AuthService.GetExternalIdentity:output_type -> sameoldchat.chat.v1.ExternalIdentity
+	4,  // 20: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	11, // [11:21] is the sub-list for method output_type
+	1,  // [1:11] is the sub-list for method input_type
 	1,  // [1:1] is the sub-list for extension type_name
 	1,  // [1:1] is the sub-list for extension extendee
 	0,  // [0:1] is the sub-list for field type_name
@@ -677,7 +745,7 @@ func file_sameoldchat_chat_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_auth_proto_rawDesc), len(file_sameoldchat_chat_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

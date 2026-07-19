@@ -120,6 +120,24 @@ The endpoint also rejects messages larger than 16 kilobytes at the WebSocket
 boundary. See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
 upstream wire contract.
 
+### Socket Mode
+
+Socket Mode uses an app-level token with the `connections:write` scope. The
+`apps.connections.open` method creates a short-lived, single-use connection
+lease and returns a WebSocket URL. The WebSocket consumes that lease, sends a
+`hello` message, and acknowledges each valid received envelope by returning
+its `envelope_id`. A missing envelope identifier closes the connection with a
+protocol error. The lease is stored through the same repository boundary as
+the rest of the application, so separate HTTP replicas do not depend on local
+process memory. Event delivery and response payload routing remain tracked
+work in the compatibility ledger.
+
+The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
+and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).
+Socket Mode is available in both local composition and distributed composition:
+the HTTP process calls the repository directly in local composition and uses
+the generated gRPC boundary in distributed composition.
+
 ## Snapshot retention and verification
 
 - Manifests are immutable and monotonically generated.

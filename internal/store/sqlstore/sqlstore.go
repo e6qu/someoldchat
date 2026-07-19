@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS conversation_teams (conversation_id TEXT NOT NULL REF
 CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, app_id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS conversation_prefs (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
@@ -185,7 +187,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 58
+const schemaVersion = 59
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -938,6 +940,14 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX users_workspace_email ON users(workspace_id, lower(email)) WHERE email <> ''`); err != nil {
 			return fmt.Errorf("index user emails: %w", err)
+		}
+	}
+	if version < 59 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			return fmt.Errorf("migrate app tokens: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL)`); err != nil {
+			return fmt.Errorf("migrate Socket Mode connections: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -1792,8 +1802,48 @@ func (s *Store) LookupToken(ctx context.Context, token string) (domain.TokenReco
 	return record, nil
 }
 
+func (s *Store) SeedAppToken(ctx context.Context, token string, record domain.AppTokenRecord) error {
+	if record.AppID == "" {
+		return errors.New("app token requires an app ID")
+	}
+	revoked := 0
+	if record.Revoked {
+		revoked = 1
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO app_tokens(token_hash, app_id, scopes, revoked) VALUES (?, ?, ?, ?) ON CONFLICT(token_hash) DO NOTHING`, domain.HashToken(token), record.AppID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), revoked)
+	return err
+}
+
+func (s *Store) LookupAppToken(ctx context.Context, token string) (domain.AppTokenRecord, error) {
+	var record domain.AppTokenRecord
+	var scopes string
+	var revoked int
+	err := s.db.QueryRowContext(ctx, `SELECT app_id, scopes, revoked FROM app_tokens WHERE token_hash = ?`, domain.HashToken(token)).Scan(&record.AppID, &scopes, &revoked)
+	if err != nil {
+		return domain.AppTokenRecord{}, translateNotFound(err)
+	}
+	record.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	record.Revoked = revoked != 0
+	return record, nil
+}
+
 func (s *Store) RevokeToken(ctx context.Context, token string) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE token_hash = ?`, domain.HashToken(token))
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) RevokeAppToken(ctx context.Context, token string) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE app_tokens SET revoked = 1 WHERE token_hash = ?`, domain.HashToken(token))
 	if err != nil {
 		return err
 	}
@@ -3021,6 +3071,51 @@ func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTM
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.RTMConnection{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.SocketModeConnection) error {
+	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
+		return errors.New("invalid Socket Mode connection")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_connections(id, app_id, expires_at) VALUES (?, ?, ?)`, value.ID, value.AppID, value.ExpiresAt.UTC().UnixNano())
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
+		return store.ErrAlreadyExists
+	}
+	return err
+}
+
+func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (domain.SocketModeConnection, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.SocketModeConnection{}, err
+	}
+	defer tx.Rollback()
+	var value domain.SocketModeConnection
+	var expiresAt int64
+	if err := tx.QueryRowContext(ctx, `SELECT id, app_id, expires_at FROM socket_mode_connections WHERE id = ?`, id).Scan(&value.ID, &value.AppID, &expiresAt); err != nil {
+		return domain.SocketModeConnection{}, translateNotFound(err)
+	}
+	value.ExpiresAt = time.Unix(0, expiresAt).UTC()
+	result, err := tx.ExecContext(ctx, `DELETE FROM socket_mode_connections WHERE id = ?`, id)
+	if err != nil {
+		return domain.SocketModeConnection{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.SocketModeConnection{}, err
+	}
+	if changed != 1 || !value.ExpiresAt.After(time.Now().UTC()) {
+		if changed == 1 {
+			if err := tx.Commit(); err != nil {
+				return domain.SocketModeConnection{}, err
+			}
+		}
+		return domain.SocketModeConnection{}, store.ErrNotFound
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SocketModeConnection{}, err
 	}
 	return value, nil
 }

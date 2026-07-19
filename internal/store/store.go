@@ -25,6 +25,7 @@ type Store interface {
 	RecordAccess(context.Context, domain.AccessLog) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
+	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	GetAuthMethod(context.Context, domain.WorkspaceID, string) (domain.AuthMethod, error)
@@ -34,6 +35,7 @@ type Store interface {
 	RevokeSession(context.Context, string) error
 	RevokeUserSessions(context.Context, domain.WorkspaceID, domain.UserID, events.Event) error
 	RevokeToken(context.Context, string) error
+	RevokeAppToken(context.Context, string) error
 	GetWorkspace(context.Context, domain.WorkspaceID) (domain.Workspace, error)
 	CreateWorkspace(context.Context, domain.Workspace, events.Event) error
 	SetWorkspaceName(context.Context, domain.WorkspaceID, string, events.Event) (domain.Workspace, error)
@@ -95,6 +97,8 @@ type Store interface {
 	ExchangeOAuthCode(context.Context, string, string, string, string, string, domain.OAuthToken) (domain.OAuthToken, error)
 	CreateRTMConnection(context.Context, domain.RTMConnection) error
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
+	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
+	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
 	GetConversationPrefs(context.Context, domain.ConversationID) (domain.ConversationPrefs, error)
 	SetConversationPrefs(context.Context, domain.ConversationID, domain.ConversationPrefs, events.Event) (domain.ConversationPrefs, error)

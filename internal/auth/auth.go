@@ -40,6 +40,7 @@ const (
 	ScopeEmojiRead               Scope = "emoji:read"
 	ScopeIdentityBasic           Scope = "identity.basic"
 	ScopeRTMStream               Scope = "rtm:stream"
+	ScopeConnectionsWrite        Scope = "connections:write"
 	ScopeDNDRead                 Scope = "dnd:read"
 	ScopeDNDWrite                Scope = "dnd:write"
 	ScopeStarsRead               Scope = "stars:read"
@@ -71,6 +72,7 @@ const (
 type Principal struct {
 	WorkspaceID domain.WorkspaceID
 	UserID      domain.UserID
+	AppID       domain.AppID
 	Scopes      map[Scope]struct{}
 }
 
@@ -82,6 +84,10 @@ type Authenticator interface {
 
 type TokenStore interface {
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
+}
+
+type AppTokenStore interface {
+	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 }
 
 type TokenRevoker interface {
@@ -110,6 +116,7 @@ type Static struct {
 }
 
 type Stored struct{ store TokenStore }
+type AppStored struct{ store AppTokenStore }
 
 type Browser struct{ store SessionStore }
 
@@ -170,7 +177,7 @@ func ValidateCSRF(r *http.Request) error {
 }
 
 func AllScopes() []string {
-	return []string{string(ScopeChatWrite), string(ScopeChannelsHistory), string(ScopeUsersRead), string(ScopeUsersReadEmail), string(ScopeUsersWrite), string(ScopeUsersProfileWrite), string(ScopeChannelsRead), string(ScopeChannelsManage), string(ScopeReactionsWrite), string(ScopeReactionsRead), string(ScopePinsWrite), string(ScopePinsRead), string(ScopeSearchRead), string(ScopeFilesWrite), string(ScopeFilesRead), string(ScopeRemoteFilesRead), string(ScopeRemoteFilesWrite), string(ScopeRemoteFilesShare), string(ScopeTeamRead), string(ScopeEmojiRead), string(ScopeIdentityBasic), string(ScopeRTMStream), string(ScopeDNDRead), string(ScopeDNDWrite), string(ScopeStarsRead), string(ScopeStarsWrite), string(ScopeRemindersRead), string(ScopeRemindersWrite), string(ScopeUserGroupsRead), string(ScopeUserGroupsWrite), string(ScopeCallsRead), string(ScopeCallsWrite), string(ScopeWorkflowStepsExecute), string(ScopeTokensBasic), string(ScopeAdmin), string(ScopeAdminUsersRead), string(ScopeAdminUsersWrite), string(ScopeAdminConversationsRead), string(ScopeAdminConversationsWrite), string(ScopeAdminEmojiWrite), string(ScopeAdminUserGroupsRead), string(ScopeAdminUserGroupsWrite), string(ScopeAdminTeamsRead), string(ScopeAdminTeamsWrite), string(ScopeAdminInvitesRead), string(ScopeAdminInvitesWrite), string(ScopeAdminAppsRead), string(ScopeAdminAppsWrite)}
+	return []string{string(ScopeChatWrite), string(ScopeChannelsHistory), string(ScopeUsersRead), string(ScopeUsersReadEmail), string(ScopeUsersWrite), string(ScopeUsersProfileWrite), string(ScopeChannelsRead), string(ScopeChannelsManage), string(ScopeReactionsWrite), string(ScopeReactionsRead), string(ScopePinsWrite), string(ScopePinsRead), string(ScopeSearchRead), string(ScopeFilesWrite), string(ScopeFilesRead), string(ScopeRemoteFilesRead), string(ScopeRemoteFilesWrite), string(ScopeRemoteFilesShare), string(ScopeTeamRead), string(ScopeEmojiRead), string(ScopeIdentityBasic), string(ScopeRTMStream), string(ScopeConnectionsWrite), string(ScopeDNDRead), string(ScopeDNDWrite), string(ScopeStarsRead), string(ScopeStarsWrite), string(ScopeRemindersRead), string(ScopeRemindersWrite), string(ScopeUserGroupsRead), string(ScopeUserGroupsWrite), string(ScopeCallsRead), string(ScopeCallsWrite), string(ScopeWorkflowStepsExecute), string(ScopeTokensBasic), string(ScopeAdmin), string(ScopeAdminUsersRead), string(ScopeAdminUsersWrite), string(ScopeAdminConversationsRead), string(ScopeAdminConversationsWrite), string(ScopeAdminEmojiWrite), string(ScopeAdminUserGroupsRead), string(ScopeAdminUserGroupsWrite), string(ScopeAdminTeamsRead), string(ScopeAdminTeamsWrite), string(ScopeAdminInvitesRead), string(ScopeAdminInvitesWrite), string(ScopeAdminAppsRead), string(ScopeAdminAppsWrite)}
 }
 
 func NewBrowser(store SessionStore) (Browser, error) {
@@ -206,6 +213,29 @@ func NewStored(store TokenStore) (Stored, error) {
 		return Stored{}, errors.New("stored authenticator requires a token store")
 	}
 	return Stored{store: store}, nil
+}
+
+func NewAppStored(store AppTokenStore) (AppStored, error) {
+	if store == nil {
+		return AppStored{}, errors.New("app stored authenticator requires an app token store")
+	}
+	return AppStored{store: store}, nil
+}
+
+func (s AppStored) Authenticate(r *http.Request) (Principal, error) {
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if token == "" {
+		token = strings.TrimSpace(r.FormValue("token"))
+	}
+	record, err := s.store.LookupAppToken(r.Context(), token)
+	if err != nil || record.Revoked || record.AppID == "" {
+		return Principal{}, ErrNotAuthenticated
+	}
+	scopes := make(map[Scope]struct{}, len(record.Scopes))
+	for _, scope := range record.Scopes {
+		scopes[Scope(scope)] = struct{}{}
+	}
+	return Principal{AppID: record.AppID, Scopes: scopes}, nil
 }
 
 func (s Stored) Authenticate(r *http.Request) (Principal, error) {

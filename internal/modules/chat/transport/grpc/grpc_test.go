@@ -202,6 +202,9 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversationMember("C1", "U2")
 	store.SeedToken(context.Background(), "api-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write"}})
+	if err := store.SeedAppToken(context.Background(), "xapp-token", domain.AppTokenRecord{AppID: "A1", Scopes: []string{"connections:write"}}); err != nil {
+		t.Fatal(err)
+	}
 	if err := store.SeedSession(context.Background(), "session-token", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -247,6 +250,21 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	token, err := tokenStore.LookupToken(ctx, "api-token")
 	if err != nil || token.UserID != "U1" || len(token.Scopes) != 1 || token.Scopes[0] != "chat:write" {
 		t.Fatalf("token=%+v err=%v", token, err)
+	}
+	appToken, err := remote.LookupAppToken(ctx, "xapp-token")
+	if err != nil || appToken.AppID != "A1" || len(appToken.Scopes) != 1 || appToken.Scopes[0] != "connections:write" {
+		t.Fatalf("app token=%+v err=%v", appToken, err)
+	}
+	socketConnection := domain.SocketModeConnection{ID: "socket-grpc", AppID: appToken.AppID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
+	if err := remote.CreateSocketModeConnection(ctx, socketConnection); err != nil {
+		t.Fatal(err)
+	}
+	consumedSocket, err := remote.ConsumeSocketModeConnection(ctx, socketConnection.ID)
+	if err != nil || consumedSocket.AppID != socketConnection.AppID {
+		t.Fatalf("Socket Mode connection=%+v err=%v", consumedSocket, err)
+	}
+	if _, err := remote.ConsumeSocketModeConnection(ctx, socketConnection.ID); err == nil {
+		t.Fatal("Socket Mode connection was replayed")
 	}
 	if err := remote.RevokeToken(ctx, "api-token"); err != nil {
 		t.Fatal(err)
