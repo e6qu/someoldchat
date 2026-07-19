@@ -603,6 +603,36 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	}
 }
 
+func TestSQLiteScheduledMessageShortLeaseRemainsUsable(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:scheduled-short-lease?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, seed := range []func() error{
+		func() error { return s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}) },
+		func() error { return s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}) },
+		func() error { return s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1"}) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	value := domain.ScheduledMessage{WorkspaceID: "T1", ID: "Q-short-lease", Channel: "C1", Author: "U1", Text: "short lease", PostAt: now.Add(-time.Minute), CreatedAt: now}
+	if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: "scheduled-short-lease", WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(value.ID), CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimScheduledMessages(ctx, value.WorkspaceID, "worker-1", 1, 20*time.Millisecond)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	if err := s.MarkScheduledMessageDelivered(ctx, "worker-1", value.ID); err != nil {
+		t.Fatalf("short scheduled-message lease was not usable: %v", err)
+	}
+}
+
 func TestSQLiteEarliestScheduledMessage(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:scheduled-deadline?mode=memory&cache=shared")
