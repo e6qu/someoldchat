@@ -320,6 +320,10 @@ type SessionRecord struct {
 	Scopes        []string               `protobuf:"bytes,3,rep,name=scopes,proto3" json:"scopes,omitempty"`
 	ExpiresAt     string                 `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	Revoked       bool                   `protobuf:"varint,5,opt,name=revoked,proto3" json:"revoked,omitempty"`
+	OidcProvider  string                 `protobuf:"bytes,6,opt,name=oidc_provider,json=oidcProvider,proto3" json:"oidc_provider,omitempty"`
+	OidcIdToken   string                 `protobuf:"bytes,7,opt,name=oidc_id_token,json=oidcIdToken,proto3" json:"oidc_id_token,omitempty"`
+	OidcSubject   string                 `protobuf:"bytes,8,opt,name=oidc_subject,json=oidcSubject,proto3" json:"oidc_subject,omitempty"`
+	OidcSid       string                 `protobuf:"bytes,9,opt,name=oidc_sid,json=oidcSid,proto3" json:"oidc_sid,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -387,6 +391,34 @@ func (x *SessionRecord) GetRevoked() bool {
 		return x.Revoked
 	}
 	return false
+}
+
+func (x *SessionRecord) GetOidcProvider() string {
+	if x != nil {
+		return x.OidcProvider
+	}
+	return ""
+}
+
+func (x *SessionRecord) GetOidcIdToken() string {
+	if x != nil {
+		return x.OidcIdToken
+	}
+	return ""
+}
+
+func (x *SessionRecord) GetOidcSubject() string {
+	if x != nil {
+		return x.OidcSubject
+	}
+	return ""
+}
+
+func (x *SessionRecord) GetOidcSid() string {
+	if x != nil {
+		return x.OidcSid
+	}
+	return ""
 }
 
 type TokenRequest struct {
@@ -809,14 +841,18 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\finstallation\x18\x01 \x01(\v2$.sameoldchat.chat.v1.AppInstallationR\finstallation\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\"f\n" +
 	"\x18AppInstallationsResponse\x12J\n" +
-	"\rinstallations\x18\x01 \x03(\v2$.sameoldchat.chat.v1.AppInstallationR\rinstallations\"\x9c\x01\n" +
+	"\rinstallations\x18\x01 \x03(\v2$.sameoldchat.chat.v1.AppInstallationR\rinstallations\"\xa3\x02\n" +
 	"\rSessionRecord\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06scopes\x18\x03 \x03(\tR\x06scopes\x12\x1d\n" +
 	"\n" +
 	"expires_at\x18\x04 \x01(\tR\texpiresAt\x12\x18\n" +
-	"\arevoked\x18\x05 \x01(\bR\arevoked\"$\n" +
+	"\arevoked\x18\x05 \x01(\bR\arevoked\x12#\n" +
+	"\roidc_provider\x18\x06 \x01(\tR\foidcProvider\x12\"\n" +
+	"\roidc_id_token\x18\a \x01(\tR\voidcIdToken\x12!\n" +
+	"\foidc_subject\x18\b \x01(\tR\voidcSubject\x12\x19\n" +
+	"\boidc_sid\x18\t \x01(\tR\aoidcSid\"$\n" +
 	"\fTokenRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\"$\n" +
 	"\x12AuthRevokeResponse\x12\x0e\n" +

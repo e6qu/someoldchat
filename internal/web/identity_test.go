@@ -162,6 +162,7 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 			TokenEndpoint:         server.URL + "/token",
 			UserInfoEndpoint:      server.URL + "/userinfo",
 			JWKSURI:               server.URL + "/jwks",
+			EndSessionEndpoint:    server.URL + "/logout",
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -172,11 +173,59 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if provider.Name != "oidc" || provider.AuthorizeURL != server.URL+"/authorize" || provider.TokenURL != server.URL+"/token" || provider.UserInfoURL != server.URL+"/userinfo" {
+	if provider.Name != "oidc" || provider.AuthorizeURL != server.URL+"/authorize" || provider.TokenURL != server.URL+"/token" || provider.UserInfoURL != server.URL+"/userinfo" || provider.EndSessionURL != server.URL+"/logout" {
 		t.Fatalf("provider=%+v", provider)
 	}
 	if got := strings.Join(provider.Scopes, " "); got != "openid profile email" {
 		t.Fatalf("scopes=%q", got)
+	}
+}
+
+func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	if err := store.CreateSession(context.Background(), "session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := service.Messages{Store: store}
+	login, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", EndSessionURL: "https://auth.example.test/oauth2/sessions/logout", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service, authenticator, store, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	request := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	location, err := url.Parse(response.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location.Scheme != "https" || location.Host != "auth.example.test" || location.Path != "/oauth2/sessions/logout" || location.Query().Get("id_token_hint") != "signed.id.token" || location.Query().Get("client_id") != "sameoldchat" || location.Query().Get("post_logout_redirect_uri") != "https://chat.example.test/" {
+		t.Fatalf("logout redirect=%s", location)
+	}
+	record, err := store.LookupSession(context.Background(), "session")
+	if err != nil || !record.Revoked {
+		t.Fatalf("session=%+v err=%v", record, err)
 	}
 }
 

@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS tokens (
 );
 CREATE TABLE IF NOT EXISTS sessions (
  session_hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
-	user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
+	user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0,
+	oidc_provider TEXT NOT NULL DEFAULT '', oidc_id_token TEXT NOT NULL DEFAULT '', oidc_subject TEXT NOT NULL DEFAULT '', oidc_sid TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS auth_methods (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, enabled INTEGER NOT NULL, PRIMARY KEY(workspace_id, provider));
 CREATE TABLE IF NOT EXISTS external_identities (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(workspace_id, provider, subject));
@@ -190,7 +191,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 63
+const schemaVersion = 64
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -976,6 +977,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		if !columns["consumed_at"] {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE socket_mode_connections ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return fmt.Errorf("migrate Socket Mode connection state: %w", err)
+			}
+		}
+	}
+	if version < 64 {
+		columns, err := s.sessionColumns(ctx, db)
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{"oidc_provider", "oidc_id_token", "oidc_subject", "oidc_sid"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE sessions ADD COLUMN `+column+` TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("migrate session %s: %w", column, err)
+				}
 			}
 		}
 	}
@@ -1891,7 +1905,7 @@ func (s *Store) SeedSession(ctx context.Context, token string, record domain.Ses
 	if record.Revoked {
 		revoked = 1
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), record.ExpiresAt.UTC().Format(time.RFC3339Nano), revoked)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), record.ExpiresAt.UTC().Format(time.RFC3339Nano), revoked, record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
 	return err
 }
 
@@ -1899,7 +1913,7 @@ func (s *Store) CreateSession(ctx context.Context, token string, record domain.S
 	if strings.TrimSpace(token) == "" || record.WorkspaceID == "" || record.UserID == "" || record.ExpiresAt.IsZero() || !record.ExpiresAt.After(time.Now().UTC()) || len(domain.NormalizeScopes(record.Scopes)) == 0 {
 		return errors.New("invalid session")
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), record.ExpiresAt.UTC().Format(time.RFC3339Nano), boolInt(record.Revoked))
+	result, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), record.ExpiresAt.UTC().Format(time.RFC3339Nano), boolInt(record.Revoked), record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
 	if err != nil {
 		return err
 	}
@@ -1917,7 +1931,7 @@ func (s *Store) LookupSession(ctx context.Context, token string) (domain.Session
 	var record domain.SessionRecord
 	var scopes, expires string
 	var revoked int
-	err := s.db.QueryRowContext(ctx, `SELECT s.workspace_id, s.user_id, s.scopes, s.expires_at, s.revoked FROM sessions s WHERE s.session_hash = ? AND NOT EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = s.user_id AND e.workspace_id = s.workspace_id AND e.expiration_ts > 0 AND e.expiration_ts <= ?)`, domain.HashToken(token), time.Now().UTC().Unix()).Scan(&record.WorkspaceID, &record.UserID, &scopes, &expires, &revoked)
+	err := s.db.QueryRowContext(ctx, `SELECT s.workspace_id, s.user_id, s.scopes, s.expires_at, s.revoked, s.oidc_provider, s.oidc_id_token, s.oidc_subject, s.oidc_sid FROM sessions s WHERE s.session_hash = ? AND NOT EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = s.user_id AND e.workspace_id = s.workspace_id AND e.expiration_ts > 0 AND e.expiration_ts <= ?)`, domain.HashToken(token), time.Now().UTC().Unix()).Scan(&record.WorkspaceID, &record.UserID, &scopes, &expires, &revoked, &record.OIDCProvider, &record.OIDCIDToken, &record.OIDCSubject, &record.OIDCSID)
 	if err != nil {
 		return domain.SessionRecord{}, translateNotFound(err)
 	}

@@ -24,16 +24,17 @@ import (
 )
 
 type ProviderConfig struct {
-	Name         string
-	Issuer       string
-	ClientID     string
-	ClientSecret string
-	AuthorizeURL string
-	TokenURL     string
-	UserInfoURL  string
-	EmailURL     string
-	Scopes       []string
-	verifier     *oidc.IDTokenVerifier
+	Name          string
+	Issuer        string
+	ClientID      string
+	ClientSecret  string
+	AuthorizeURL  string
+	TokenURL      string
+	UserInfoURL   string
+	EmailURL      string
+	EndSessionURL string
+	Scopes        []string
+	verifier      *oidc.IDTokenVerifier
 }
 
 type OpenIDConfiguration struct {
@@ -42,6 +43,7 @@ type OpenIDConfiguration struct {
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint"`
 	JWKSURI               string `json:"jwks_uri"`
+	EndSessionEndpoint    string `json:"end_session_endpoint"`
 }
 
 type LoginHandler struct {
@@ -123,9 +125,15 @@ func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, iss
 			return ProviderConfig{}, fmt.Errorf("OpenID Connect %s endpoint must be an absolute HTTPS URL", label)
 		}
 	}
+	if document.EndSessionEndpoint != "" {
+		parsedEndpoint, parseErr := url.Parse(strings.TrimSpace(document.EndSessionEndpoint))
+		if parseErr != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Host == "" || parsedEndpoint.User != nil || parsedEndpoint.Fragment != "" {
+			return ProviderConfig{}, errors.New("OpenID Connect end-session endpoint must be an absolute HTTPS URL")
+		}
+	}
 	keySet := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, client), document.JWKSURI)
 	verifier := oidc.NewVerifier(issuer, keySet, &oidc.Config{ClientID: clientID})
-	return ProviderConfig{Name: "oidc", Issuer: issuer, ClientID: clientID, ClientSecret: clientSecret, AuthorizeURL: document.AuthorizationEndpoint, TokenURL: document.TokenEndpoint, UserInfoURL: document.UserInfoEndpoint, Scopes: []string{"openid", "profile", "email"}, verifier: verifier}, nil
+	return ProviderConfig{Name: "oidc", Issuer: issuer, ClientID: clientID, ClientSecret: clientSecret, AuthorizeURL: document.AuthorizationEndpoint, TokenURL: document.TokenEndpoint, UserInfoURL: document.UserInfoEndpoint, EndSessionURL: document.EndSessionEndpoint, Scopes: []string{"openid", "profile", "email"}, verifier: verifier}, nil
 }
 
 func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, lookupUser domain.UserID, publicURL, cookieDomain string, stateKey []byte, providers []ProviderConfig) (LoginHandler, error) {
@@ -153,6 +161,7 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		provider.TokenURL = strings.TrimSpace(provider.TokenURL)
 		provider.UserInfoURL = strings.TrimSpace(provider.UserInfoURL)
 		provider.EmailURL = strings.TrimSpace(provider.EmailURL)
+		provider.EndSessionURL = strings.TrimSpace(provider.EndSessionURL)
 		if provider.Name == "" || provider.ClientID == "" || provider.ClientSecret == "" || provider.AuthorizeURL == "" || provider.TokenURL == "" || provider.UserInfoURL == "" {
 			return LoginHandler{}, fmt.Errorf("provider %q is incomplete", provider.Name)
 		}
@@ -161,6 +170,12 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		}
 		if provider.Name == "github" && provider.EmailURL == "" {
 			return LoginHandler{}, errors.New("github provider requires an email endpoint")
+		}
+		if provider.EndSessionURL != "" {
+			endpoint, parseErr := url.Parse(provider.EndSessionURL)
+			if parseErr != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.Fragment != "" {
+				return LoginHandler{}, fmt.Errorf("provider %q end-session endpoint must be an absolute HTTPS URL", provider.Name)
+			}
 		}
 		normalizedScopes, err := normalizeScopes(provider.Scopes)
 		if err != nil {
@@ -366,13 +381,26 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "authorization state is invalid", http.StatusBadRequest)
 		return
 	}
-	token, err := h.exchangeCode(r.Context(), h.providers[name], r.URL.Query().Get("code"), parts[2], name)
+	tokens, err := h.exchangeCode(r.Context(), h.providers[name], r.URL.Query().Get("code"), parts[2], name)
 	if err != nil {
 		http.Error(w, "authorization token exchange failed", http.StatusBadGateway)
 		return
 	}
-	identity, err := h.userInfo(r.Context(), h.providers[name], token, name)
+	provider := h.providers[name]
+	oidcSubject, oidcSID := "", ""
+	if provider.Issuer != "" {
+		oidcSubject, oidcSID, err = h.verifyOIDCLoginToken(r.Context(), provider, tokens.IDToken)
+		if err != nil {
+			http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
+			return
+		}
+	}
+	identity, err := h.userInfo(r.Context(), provider, tokens.AccessToken, name)
 	if err != nil || strings.TrimSpace(identity.Email) == "" {
+		http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
+		return
+	}
+	if oidcSubject != "" && oidcSubject != identity.Subject {
 		http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
 		return
 	}
@@ -386,7 +414,14 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if err := h.service.CreateSession(r.Context(), sessionToken, domain.SessionRecord{WorkspaceID: user.WorkspaceID, UserID: user.ID, Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}); err != nil {
+	record := domain.SessionRecord{WorkspaceID: user.WorkspaceID, UserID: user.ID, Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(24 * time.Hour)}
+	if provider.Issuer != "" {
+		record.OIDCProvider = name
+		record.OIDCIDToken = tokens.IDToken
+		record.OIDCSubject = oidcSubject
+		record.OIDCSID = oidcSID
+	}
+	if err := h.service.CreateSession(r.Context(), sessionToken, record); err != nil {
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -478,32 +513,76 @@ type externalIdentity struct {
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
+	IDToken     string `json:"id_token"`
 }
 
-func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig, code, verifier, name string) (string, error) {
+func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig, code, verifier, name string) (tokenResponse, error) {
 	if strings.TrimSpace(code) == "" {
-		return "", errors.New("authorization code is required")
+		return tokenResponse{}, errors.New("authorization code is required")
 	}
 	form := url.Values{"client_id": {provider.ClientID}, "client_secret": {provider.ClientSecret}, "code": {code}, "code_verifier": {verifier}, "grant_type": {"authorization_code"}, "redirect_uri": {h.callbackURL(name)}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.TokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return tokenResponse{}, err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	response, err := h.client.Do(request)
 	if err != nil {
-		return "", err
+		return tokenResponse{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("token endpoint returned %s", response.Status)
+		return tokenResponse{}, fmt.Errorf("token endpoint returned %s", response.Status)
 	}
 	var value tokenResponse
 	if err := decodeAuthorizationJSON(response.Body, maxAuthorizationTokenResponse, &value); err != nil || strings.TrimSpace(value.AccessToken) == "" {
-		return "", errors.New("token response did not contain an access token")
+		return tokenResponse{}, errors.New("token response did not contain an access token")
 	}
-	return value.AccessToken, nil
+	value.AccessToken = strings.TrimSpace(value.AccessToken)
+	value.IDToken = strings.TrimSpace(value.IDToken)
+	if provider.Issuer != "" && value.IDToken == "" {
+		return tokenResponse{}, errors.New("OpenID Connect token response did not contain an ID token")
+	}
+	return value, nil
+}
+
+func (h LoginHandler) verifyOIDCLoginToken(ctx context.Context, provider ProviderConfig, raw string) (string, string, error) {
+	if provider.verifier == nil || strings.TrimSpace(raw) == "" {
+		return "", "", errors.New("OpenID Connect ID token verifier is unavailable")
+	}
+	token, err := provider.verifier.Verify(ctx, raw)
+	if err != nil {
+		return "", "", err
+	}
+	var claims struct {
+		SID string `json:"sid"`
+	}
+	if err := token.Claims(&claims); err != nil {
+		return "", "", err
+	}
+	return token.Subject, strings.TrimSpace(claims.SID), nil
+}
+
+func (h LoginHandler) logoutRedirectURL(ctx context.Context, sessionToken string) (string, error) {
+	record, err := h.service.LookupSession(ctx, sessionToken)
+	if err != nil {
+		return "", err
+	}
+	provider, ok := h.providers[record.OIDCProvider]
+	if !ok || record.OIDCIDToken == "" || provider.EndSessionURL == "" {
+		return "/", nil
+	}
+	endpoint, err := url.Parse(provider.EndSessionURL)
+	if err != nil {
+		return "", err
+	}
+	query := endpoint.Query()
+	query.Set("id_token_hint", record.OIDCIDToken)
+	query.Set("client_id", provider.ClientID)
+	query.Set("post_logout_redirect_uri", h.publicURL+"/")
+	endpoint.RawQuery = query.Encode()
+	return endpoint.String(), nil
 }
 
 func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, token, name string) (externalIdentity, error) {
