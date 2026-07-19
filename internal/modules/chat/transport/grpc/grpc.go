@@ -48,6 +48,7 @@ type Remote struct {
 
 var _ chatapi.Service = Remote{}
 var _ auth.TokenStore = Remote{}
+var _ auth.AppTokenStore = Remote{}
 var _ auth.TokenRevoker = Remote{}
 var _ auth.SessionStore = Remote{}
 var _ auth.SessionRevoker = Remote{}
@@ -347,6 +348,19 @@ func (r Remote) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTM
 	return decodeProtoRTMConnection(out), nil
 }
 
+func (r Remote) CreateSocketModeConnection(ctx context.Context, value domain.SocketModeConnection) error {
+	_, err := r.rtm.CreateSocketModeConnection(ctx, &chatv1.SocketModeConnectionRequest{AppId: string(value.AppID), Id: value.ID, ExpiresAtUnixNano: value.ExpiresAt.UnixNano()})
+	return err
+}
+
+func (r Remote) ConsumeSocketModeConnection(ctx context.Context, id string) (domain.SocketModeConnection, error) {
+	out, err := r.rtm.ConsumeSocketModeConnection(ctx, &chatv1.RTMConnectionIDRequest{Id: id})
+	if err != nil {
+		return domain.SocketModeConnection{}, err
+	}
+	return domain.SocketModeConnection{ID: out.GetId(), AppID: domain.AppID(out.GetAppId()), ExpiresAt: time.Unix(0, out.GetExpiresAtUnixNano()).UTC()}, nil
+}
+
 func (r Remote) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
 	in := &chatv1.UpdateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text}
 	out, err := r.messages.Update(ctx, in)
@@ -519,6 +533,14 @@ func (r Remote) LookupToken(ctx context.Context, token string) (domain.TokenReco
 		return domain.TokenRecord{}, err
 	}
 	return decodeProtoToken(out)
+}
+
+func (r Remote) LookupAppToken(ctx context.Context, token string) (domain.AppTokenRecord, error) {
+	out, err := r.auth.LookupAppToken(ctx, &chatv1.TokenRequest{Token: token})
+	if err != nil {
+		return domain.AppTokenRecord{}, err
+	}
+	return domain.AppTokenRecord{AppID: domain.AppID(out.GetAppId()), Scopes: append([]string(nil), out.GetScopes()...), Revoked: out.GetRevoked()}, nil
 }
 
 func (r Remote) LookupSession(ctx context.Context, token string) (domain.SessionRecord, error) {
@@ -2532,6 +2554,17 @@ func (s *Server) LookupToken(ctx context.Context, input *chatv1.TokenRequest) (*
 	return s.lookupTokenProto(ctx, input)
 }
 
+func (s *Server) LookupAppToken(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.AppTokenRecord, error) {
+	if input == nil || input.GetToken() == "" {
+		return nil, status.Error(codes.InvalidArgument, "token is required")
+	}
+	value, err := s.implementation.LookupAppToken(ctx, input.GetToken())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppTokenRecord{AppId: string(value.AppID), Scopes: value.Scopes, Revoked: value.Revoked}, nil
+}
+
 func (s *Server) LookupSession(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.SessionRecord, error) {
 	return s.lookupSessionProto(ctx, input)
 }
@@ -2905,6 +2938,28 @@ func (s *Server) ConsumeConnection(ctx context.Context, input *chatv1.RTMConnect
 		return nil, mapError(err)
 	}
 	return encodeProtoRTMConnection(value), nil
+}
+
+func (s *Server) CreateSocketModeConnection(ctx context.Context, input *chatv1.SocketModeConnectionRequest) (*chatv1.SocketModeConnection, error) {
+	if input == nil || input.GetId() == "" || input.GetAppId() == "" || input.GetExpiresAtUnixNano() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "Socket Mode connection fields are required")
+	}
+	value := domain.SocketModeConnection{ID: input.GetId(), AppID: domain.AppID(input.GetAppId()), ExpiresAt: time.Unix(0, input.GetExpiresAtUnixNano()).UTC()}
+	if err := s.implementation.CreateSocketModeConnection(ctx, value); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeConnection{Id: value.ID, AppId: string(value.AppID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano()}, nil
+}
+
+func (s *Server) ConsumeSocketModeConnection(ctx context.Context, input *chatv1.RTMConnectionIDRequest) (*chatv1.SocketModeConnection, error) {
+	if input == nil || input.GetId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "connection ID is required")
+	}
+	value, err := s.implementation.ConsumeSocketModeConnection(ctx, input.GetId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeConnection{Id: value.ID, AppId: string(value.AppID), ExpiresAtUnixNano: value.ExpiresAt.UnixNano()}, nil
 }
 
 func (s *Server) Update(ctx context.Context, input *chatv1.UpdateRequest) (*chatv1.Message, error) {

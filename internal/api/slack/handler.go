@@ -20,6 +20,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -28,6 +29,8 @@ import (
 type Handler struct {
 	Messages      chatapi.Service
 	Authenticator auth.Authenticator
+	SocketMode    socketmode.Service
+	SocketAuth    auth.Authenticator
 }
 
 var errAccessLogging = errors.New("access logging failed")
@@ -92,6 +95,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/team.info", h.teamInfo)
 	mux.HandleFunc("GET /api/rtm.connect", h.rtmConnect)
 	mux.HandleFunc("POST /api/rtm.connect", h.rtmConnect)
+	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
+	mux.HandleFunc("GET /api/apps.connections.open", h.appsConnectionsOpen)
 	mux.HandleFunc("GET /api/bots.info", h.botsInfo)
 	mux.HandleFunc("POST /api/bots.info", h.botsInfo)
 	mux.HandleFunc("GET /api/migration.exchange", h.migrationExchange)
@@ -308,6 +313,33 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
 	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
 	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+}
+
+func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
+	if h == nil {
+		return
+	}
+	h.SocketMode = service
+	h.SocketAuth = authenticator
+}
+
+func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
+	if h.SocketAuth == nil || h.SocketMode.Store == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "socket_mode_unavailable"})
+		return
+	}
+	principal, err := h.SocketAuth.Authenticate(r)
+	if err != nil || !principal.HasScope(auth.ScopeConnectionsWrite) || principal.AppID == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid_auth"})
+		return
+	}
+	result, err := h.SocketMode.Open(r.Context(), principal.AppID)
+	if err != nil {
+		code, reason := mapServiceError(err, "service_unavailable")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": result.URL})
 }
 
 func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {

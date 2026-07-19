@@ -13,6 +13,7 @@ import (
 // local or generated remote clients; callers do not select transport per call.
 type Service interface {
 	RevokeToken(context.Context, string) error
+	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	RevokeSession(context.Context, string) error
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	GetAuthMethod(context.Context, domain.WorkspaceID, string) (domain.AuthMethod, error)
@@ -68,6 +69,8 @@ type Service interface {
 	OAuthExchange(context.Context, string, string, string, string) (domain.OAuthToken, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
+	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
+	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
 	AdminInviteConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID) (domain.Conversation, error)
 	AdminConvertConversationToPrivate(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Conversation, error)
 	AdminGetConversationPrefs(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationPrefs, error)

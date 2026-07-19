@@ -287,6 +287,12 @@ type TokenRecord struct {
 	Revoked     bool
 }
 
+type AppTokenRecord struct {
+	AppID   AppID
+	Scopes  []string
+	Revoked bool
+}
+
 type SessionRecord struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
@@ -656,4 +662,10 @@ type RTMConnection struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	ExpiresAt   time.Time
+}
+
+type SocketModeConnection struct {
+	ID        string
+	AppID     AppID
+	ExpiresAt time.Time
 }

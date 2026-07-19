@@ -65,6 +65,18 @@ func (m Messages) LookupToken(ctx context.Context, token string) (domain.TokenRe
 	return m.Store.LookupToken(ctx, token)
 }
 
+func (m Messages) LookupAppToken(ctx context.Context, token string) (domain.AppTokenRecord, error) {
+	return m.Store.LookupAppToken(ctx, token)
+}
+
+func (m Messages) CreateSocketModeConnection(ctx context.Context, value domain.SocketModeConnection) error {
+	return m.Store.CreateSocketModeConnection(ctx, value)
+}
+
+func (m Messages) ConsumeSocketModeConnection(ctx context.Context, id string) (domain.SocketModeConnection, error) {
+	return m.Store.ConsumeSocketModeConnection(ctx, id)
+}
+
 func (m Messages) RevokeToken(ctx context.Context, token string) error {
 	if strings.TrimSpace(token) == "" {
 		return store.ErrNotFound

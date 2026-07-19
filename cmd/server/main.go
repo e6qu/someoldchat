@@ -20,6 +20,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/generated"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/realtime"
+	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/web"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -51,6 +52,10 @@ func main() {
 	authCookieDomain := flag.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "shared parent DNS domain for browser single sign-on across applications")
 	authStateKeyHex := flag.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
 	bootstrapAdminEmail := flag.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
+	appToken := flag.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
+	appID := flag.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
+	socketHost := flag.String("socket-host", os.Getenv("SAMEOLDCHAT_SOCKET_HOST"), "public host used in Socket Mode connection URLs")
+	socketTLS := flag.Bool("socket-tls", os.Getenv("SAMEOLDCHAT_SOCKET_TLS") == "1", "use secure WebSocket URLs for Socket Mode")
 	googleClientID := flag.String("google-client-id", "", "Google OAuth client ID")
 	googleClientSecret := flag.String("google-client-secret", "", "Google OAuth client secret")
 	githubClientID := flag.String("github-client-id", "", "GitHub OAuth client ID")
@@ -62,6 +67,9 @@ func main() {
 	oidcClientID := flag.String("oidc-client-id", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_ID"), "OpenID Connect client ID")
 	oidcClientSecret := flag.String("oidc-client-secret", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_SECRET"), "OpenID Connect client secret")
 	flag.Parse()
+	if *socketHost == "" {
+		*socketHost = "localhost:8080"
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mux := http.NewServeMux()
@@ -77,6 +85,8 @@ func main() {
 	var authenticator auth.Authenticator
 	var webAuthenticator auth.Authenticator
 	var sessionRevoker auth.SessionRevoker
+	var socketModeStore socketmode.ConnectionStore
+	var socketModeAuth auth.Authenticator
 	switch *chatMode {
 	case "local":
 		if *chatAddress != "" || *chatCA != "" || *chatServerName != "" {
@@ -94,6 +104,35 @@ func main() {
 			os.Exit(1)
 		}
 		chatService = runtime.Service
+		socketModeStore = runtime.Store
+		if *appToken != "" || *appID != "" {
+			if *appToken == "" || *appID == "" {
+				logger.Error("Socket Mode requires both app token and app ID")
+				os.Exit(2)
+			}
+			appTokenStore, ok := runtime.TokenStore.(interface {
+				SeedAppToken(context.Context, string, domain.AppTokenRecord) error
+				auth.AppTokenStore
+			})
+			if !ok {
+				logger.Error("storage backend cannot seed Socket Mode app tokens")
+				os.Exit(1)
+			}
+			if err := appTokenStore.SeedAppToken(context.Background(), *appToken, domain.AppTokenRecord{AppID: domain.AppID(*appID), Scopes: []string{string(auth.ScopeConnectionsWrite)}}); err != nil {
+				logger.Error("seed Socket Mode app token", "error", err)
+				os.Exit(1)
+			}
+		}
+		appTokenStore, ok := runtime.TokenStore.(auth.AppTokenStore)
+		if !ok {
+			logger.Error("storage backend cannot authenticate Socket Mode app tokens")
+			os.Exit(1)
+		}
+		socketModeAuth, err = auth.NewAppStored(appTokenStore)
+		if err != nil {
+			logger.Error("configure Socket Mode authenticator", "error", err)
+			os.Exit(1)
+		}
 		if err := runtime.TokenSeeder.SeedToken(context.Background(), *apiToken, domain.TokenRecord{WorkspaceID: "Tdev", UserID: "Udev", Scopes: auth.AllScopes()}); err != nil {
 			logger.Error("seed API token", "error", err)
 			os.Exit(1)
@@ -170,12 +209,29 @@ func main() {
 		sessionRevoker = remoteSessionRevoker
 		defer connection.Close()
 	}
+	if socketModeStore == nil {
+		if value, ok := chatService.(socketmode.ConnectionStore); ok {
+			socketModeStore = value
+		}
+		if value, ok := chatService.(auth.AppTokenStore); ok {
+			configured, configureErr := auth.NewAppStored(value)
+			if configureErr != nil {
+				logger.Error("configure distributed Socket Mode authenticator", "error", configureErr)
+				os.Exit(1)
+			}
+			socketModeAuth = configured
+		}
+	}
 	slackHandler, err := slack.NewHandler(chatService, authenticator)
 	if err != nil {
 		logger.Error("configure Slack API", "error", err)
 		os.Exit(1)
 	}
 	slackHandler.Register(mux)
+	if socketModeStore != nil {
+		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: *socketHost, TLS: *socketTLS}, socketModeAuth)
+		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore})
+	}
 	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, "Cdev", *authCookieDomain)
 	if err != nil {
 		logger.Error("configure web", "error", err)

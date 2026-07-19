@@ -33,7 +33,9 @@ sources:
 operations:
   - method: api.test
     status: behavior-compatible
-    provenance: slack-api-specs-openapi
+  - method: apps.connections.open
+    status: schema-compatible
+    provenance: slack-reference
   - method: auth.revoke
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -562,6 +564,9 @@ operations:
     provenance: slack-api-specs-openapi
 
 decisions:
+  - method: apps.connections.open
+    evidence: https://docs.slack.dev/reference/methods/apps.connections.open/
+    decision: The current official method reference defines this Socket Mode method, while the pinned Web API OpenAPI snapshot does not contain it. Track the method against the official reference and the repository Socket Mode qualification.
   - method: functions.completeSuccess
     evidence: https://docs.slack.dev/reference/methods/functions.completeSuccess/
     decision: The current official method reference defines this POST method, but the pinned OpenAPI snapshot does not contain it. Track it as a supplemental Slack method until the vendored snapshot is refreshed.

@@ -11,6 +11,12 @@ message TokenRecord {
   bool revoked = 4;
 }
 
+message AppTokenRecord {
+  string app_id = 1;
+  repeated string scopes = 2;
+  bool revoked = 3;
+}
+
 message SessionRecord {
   string workspace_id = 1;
   string user_id = 2;
@@ -60,6 +66,7 @@ message ExternalIdentity {
 
 service AuthService {
   rpc LookupToken(TokenRequest) returns (TokenRecord);
+  rpc LookupAppToken(TokenRequest) returns (AppTokenRecord);
   rpc LookupSession(TokenRequest) returns (SessionRecord);
   rpc RevokeSession(TokenRequest) returns (AuthRevokeResponse);
   rpc RevokeToken(TokenRequest) returns (AuthRevokeResponse);
