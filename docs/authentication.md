@@ -7,8 +7,7 @@ explicitly configured authorization sources:
 - Google;
 - GitHub; and
 - Microsoft Entra ID; and
-- any standards-compliant OpenID Connect issuer discovered from its issuer URL,
-  including Shauth.
+- any standards-compliant OpenID Connect issuer discovered from its issuer URL.
 
 The server accepts a source only when its required configuration is complete.
 It rejects unknown source names, incomplete GitHub email configuration, empty
@@ -61,20 +60,20 @@ workspace user with the same verified email.
 
 Cross-application single sign-on comes from the configured OpenID Connect
 issuer session. Each relying application keeps its own host-scoped session;
-when a new application starts authorization, Shauth recognizes the existing
-identity session and completes the authorization-code flow without asking the
-user to authenticate again. `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` controls only the
-scope of SameOldChat's own secure, HTTP-only cookie. It is not the
-cross-application identity boundary.
+when a new application starts authorization, the identity provider recognizes
+the existing identity session and completes the authorization-code flow
+without asking the user to authenticate again. `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN`
+controls only the scope of SameOldChat's own secure, HTTP-only cookie. It is
+not the cross-application identity boundary.
 
 `POST /logout` revokes the current SameOldChat session and expires its cookie.
-Shauth also sends a signed OpenID Connect back-channel logout token to
+The identity provider also sends a signed OpenID Connect back-channel logout token to
 `POST /auth/oidc/backchannel-logout`. SameOldChat verifies the issuer, audience,
 signature, standard logout event, `sid`, `sub`, `iat`, and `jti`, rejects a
 token carrying `nonce`, resolves the verified issuer subject, and revokes every
-local session for that user. The Shauth client must register
-`https://chat.dev.e6qu.dev/auth/oidc/backchannel-logout` as its back-channel
-logout URI and `https://chat.dev.e6qu.dev/` as an allowed post-logout redirect
+local session for that user. The identity provider client must register
+`https://<application-host>/auth/oidc/backchannel-logout` as its back-channel
+logout URI and `https://<application-host>/` as an allowed post-logout redirect
 URI. The application uses the same durable session store in monolith and
 separate modes; the gRPC session adapter remains the authoritative path for
 separate mode.

@@ -62,7 +62,7 @@ type Config struct {
 
 func ParseCluster(value string) ([]string, error) {
 	if value == "" {
-		return nil, nil
+		return []string{}, nil
 	}
 	parts := strings.Split(value, ",")
 	cluster := make([]string, 0, len(parts))

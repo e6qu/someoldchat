@@ -275,7 +275,7 @@ func (a *activator) runningEndpoints(ctx context.Context) ([]endpoint, error) {
 		input.NextToken = output.NextToken
 	}
 	if len(taskARNs) == 0 {
-		return nil, nil
+		return []endpoint{}, nil
 	}
 	endpoints := make([]endpoint, 0, len(taskARNs))
 	for start := 0; start < len(taskARNs); start += 100 {
