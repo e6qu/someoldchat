@@ -146,10 +146,13 @@ ack does not erase the response input. The local and distributed compositions
 use the same generated chat boundary for this write.
 
 The response record is an input journal, not an implicit retry or a hidden
-fallback. A response processor must claim and acknowledge records explicitly;
-until that processor exists, the record remains durable and observable rather
-than being applied speculatively. See this section and the compatibility
-ledger for the supported wire contract.
+fallback. The reusable response processor claims records with an owner and a
+lease, invokes an explicitly supplied handler, acknowledges each successful
+record, and releases failed records at an explicit retry time. A crash before
+acknowledgement leaves the record reclaimable after the lease expires. The
+processor does not guess application-specific response semantics or run an
+unbounded retry loop. See this section and the compatibility ledger for the
+supported wire contract.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).

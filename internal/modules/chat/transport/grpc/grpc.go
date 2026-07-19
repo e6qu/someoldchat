@@ -397,6 +397,40 @@ func (r Remote) RecordSocketModeResponse(ctx context.Context, value domain.Socke
 	return err
 }
 
+func (r Remote) ClaimSocketModeResponses(ctx context.Context, appID domain.AppID, owner string, limit int, lease time.Duration) ([]domain.SocketModeResponse, error) {
+	out, err := r.rtm.ClaimSocketModeResponses(ctx, &chatv1.SocketModeResponseLeaseRequest{AppId: string(appID), Owner: owner, Limit: int32(limit), LeaseNanos: lease.Nanoseconds()})
+	if err != nil {
+		return nil, err
+	}
+	return decodeSocketModeResponses(out.GetResponses()), nil
+}
+
+func (r Remote) AckSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse) error {
+	keys := make([]*chatv1.SocketModeResponseKey, 0, len(values))
+	for _, value := range values {
+		keys = append(keys, &chatv1.SocketModeResponseKey{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID})
+	}
+	_, err := r.rtm.AckSocketModeResponses(ctx, &chatv1.SocketModeResponseAckRequest{Owner: owner, Responses: keys})
+	return err
+}
+
+func (r Remote) ReleaseSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
+	keys := make([]*chatv1.SocketModeResponseKey, 0, len(values))
+	for _, value := range values {
+		keys = append(keys, &chatv1.SocketModeResponseKey{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID})
+	}
+	_, err := r.rtm.ReleaseSocketModeResponses(ctx, &chatv1.SocketModeResponseReleaseRequest{Owner: owner, Responses: keys, RetryAtUnixNano: retryAt.UTC().UnixNano()})
+	return err
+}
+
+func decodeSocketModeResponses(values []*chatv1.SocketModeResponse) []domain.SocketModeResponse {
+	result := make([]domain.SocketModeResponse, 0, len(values))
+	for _, value := range values {
+		result = append(result, domain.SocketModeResponse{AppID: domain.AppID(value.GetAppId()), EnvelopeID: value.GetEnvelopeId(), Payload: value.GetPayload(), ReceivedAt: time.Unix(0, value.GetReceivedAtUnixNano()).UTC()})
+	}
+	return result
+}
+
 func (r Remote) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
 	in := &chatv1.UpdateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text}
 	out, err := r.messages.Update(ctx, in)
@@ -3119,6 +3153,60 @@ func (s *Server) RecordSocketModeResponse(ctx context.Context, input *chatv1.Soc
 		return nil, mapError(err)
 	}
 	return &chatv1.SocketModeResponse{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID, Payload: value.Payload, ReceivedAtUnixNano: value.ReceivedAt.UnixNano()}, nil
+}
+
+func (s *Server) ClaimSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseLeaseRequest) (*chatv1.SocketModeResponseBatch, error) {
+	if input == nil || input.GetAppId() == "" || input.GetOwner() == "" || input.GetLimit() < 1 || input.GetLeaseNanos() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "Socket Mode response lease fields are required")
+	}
+	values, err := s.implementation.ClaimSocketModeResponses(ctx, domain.AppID(input.GetAppId()), input.GetOwner(), int(input.GetLimit()), time.Duration(input.GetLeaseNanos()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	responses := make([]*chatv1.SocketModeResponse, 0, len(values))
+	for _, value := range values {
+		responses = append(responses, &chatv1.SocketModeResponse{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID, Payload: value.Payload, ReceivedAtUnixNano: value.ReceivedAt.UnixNano()})
+	}
+	return &chatv1.SocketModeResponseBatch{Responses: responses}, nil
+}
+
+func (s *Server) AckSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseAckRequest) (*chatv1.SocketModeResponseBatch, error) {
+	if input == nil || input.GetOwner() == "" || len(input.GetResponses()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "Socket Mode response acknowledgement fields are required")
+	}
+	values, err := socketModeResponseKeys(input.GetResponses())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.implementation.AckSocketModeResponses(ctx, input.GetOwner(), values); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeResponseBatch{}, nil
+}
+
+func (s *Server) ReleaseSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseReleaseRequest) (*chatv1.SocketModeResponseBatch, error) {
+	if input == nil || input.GetOwner() == "" || len(input.GetResponses()) == 0 || input.GetRetryAtUnixNano() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "Socket Mode response release fields are required")
+	}
+	values, err := socketModeResponseKeys(input.GetResponses())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	if err := s.implementation.ReleaseSocketModeResponses(ctx, input.GetOwner(), values, time.Unix(0, input.GetRetryAtUnixNano()).UTC()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeResponseBatch{}, nil
+}
+
+func socketModeResponseKeys(keys []*chatv1.SocketModeResponseKey) ([]domain.SocketModeResponse, error) {
+	values := make([]domain.SocketModeResponse, 0, len(keys))
+	for _, key := range keys {
+		if key == nil || key.GetAppId() == "" || key.GetEnvelopeId() == "" {
+			return nil, errors.New("Socket Mode response keys are required")
+		}
+		values = append(values, domain.SocketModeResponse{AppID: domain.AppID(key.GetAppId()), EnvelopeID: key.GetEnvelopeId()})
+	}
+	return values, nil
 }
 
 func (s *Server) Update(ctx context.Context, input *chatv1.UpdateRequest) (*chatv1.Message, error) {

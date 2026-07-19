@@ -113,6 +113,18 @@ func (m Messages) RecordSocketModeResponse(ctx context.Context, value domain.Soc
 	return m.Store.RecordSocketModeResponse(ctx, value)
 }
 
+func (m Messages) ClaimSocketModeResponses(ctx context.Context, appID domain.AppID, owner string, limit int, lease time.Duration) ([]domain.SocketModeResponse, error) {
+	return m.Store.ClaimSocketModeResponses(ctx, appID, owner, limit, lease)
+}
+
+func (m Messages) AckSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse) error {
+	return m.Store.AckSocketModeResponses(ctx, owner, values)
+}
+
+func (m Messages) ReleaseSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
+	return m.Store.ReleaseSocketModeResponses(ctx, owner, values, retryAt)
+}
+
 func (m Messages) RevokeToken(ctx context.Context, token string) error {
 	if strings.TrimSpace(token) == "" {
 		return store.ErrNotFound

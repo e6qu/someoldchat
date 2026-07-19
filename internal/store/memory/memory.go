@@ -1921,6 +1921,95 @@ func (s *Store) RecordSocketModeResponse(_ context.Context, value domain.SocketM
 	return nil
 }
 
+func validateSocketModeResponseLease(appID domain.AppID, owner string, limit int, lease time.Duration) error {
+	if appID == "" || strings.TrimSpace(owner) == "" || limit <= 0 || limit > 1000 || lease <= 0 {
+		return errors.New("invalid Socket Mode response lease")
+	}
+	return nil
+}
+
+func (s *Store) ClaimSocketModeResponses(_ context.Context, appID domain.AppID, owner string, limit int, lease time.Duration) ([]domain.SocketModeResponse, error) {
+	if err := validateSocketModeResponseLease(appID, owner, limit, lease); err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	expiresAt := now.Add(lease)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := make([]domain.SocketModeResponse, 0, limit)
+	for key, value := range s.socketResponses {
+		if len(values) == limit || value.AppID != appID || !value.AcknowledgedAt.IsZero() || value.LeaseExpiresAt.After(now) {
+			continue
+		}
+		value.LeaseOwner = owner
+		value.LeaseExpiresAt = expiresAt
+		s.socketResponses[key] = value
+		values = append(values, value)
+	}
+	slices.SortFunc(values, func(left, right domain.SocketModeResponse) int {
+		if left.ReceivedAt.Before(right.ReceivedAt) {
+			return -1
+		}
+		if left.ReceivedAt.After(right.ReceivedAt) {
+			return 1
+		}
+		return strings.Compare(left.EnvelopeID, right.EnvelopeID)
+	})
+	return values, nil
+}
+
+func (s *Store) AckSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse) error {
+	if strings.TrimSpace(owner) == "" {
+		return errors.New("Socket Mode response owner is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	for _, value := range values {
+		key := socketModeResponseKey(value.AppID, value.EnvelopeID)
+		stored, ok := s.socketResponses[key]
+		if !ok {
+			return store.ErrNotFound
+		}
+		if !stored.AcknowledgedAt.IsZero() {
+			continue
+		}
+		if stored.LeaseOwner != owner || !stored.LeaseExpiresAt.After(now) {
+			return store.ErrConflict
+		}
+		stored.AcknowledgedAt = now
+		stored.LeaseOwner = ""
+		stored.LeaseExpiresAt = time.Time{}
+		s.socketResponses[key] = stored
+	}
+	return nil
+}
+
+func (s *Store) ReleaseSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
+	if strings.TrimSpace(owner) == "" || retryAt.IsZero() {
+		return errors.New("Socket Mode response release fields are required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, value := range values {
+		key := socketModeResponseKey(value.AppID, value.EnvelopeID)
+		stored, ok := s.socketResponses[key]
+		if !ok {
+			return store.ErrNotFound
+		}
+		if !stored.AcknowledgedAt.IsZero() {
+			continue
+		}
+		if stored.LeaseOwner != owner {
+			return store.ErrConflict
+		}
+		stored.LeaseOwner = ""
+		stored.LeaseExpiresAt = retryAt.UTC()
+		s.socketResponses[key] = stored
+	}
+	return nil
+}
+
 func (s *Store) GetSocketModeCursor(_ context.Context, appID domain.AppID) (uint64, error) {
 	if appID == "" {
 		return 0, store.ErrInvalidAppApproval
