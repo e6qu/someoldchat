@@ -34,7 +34,7 @@ jobs:
           github_token: ${{ github.token }}
 
       - name: Check formatting and generated files
-        run: make fmt-check workflow-check generated-check proto-lint
+        run: make fmt-check workflow-check container-check generated-check proto-lint
 
       - name: Check contracts and SDK inventory
         run: make contract-check sdk-inventory-check
@@ -196,7 +196,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: postgres:18.1
+        image: postgres:18.1@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
         env:
           POSTGRES_USER: sameoldchat
           POSTGRES_PASSWORD: sameoldchat
