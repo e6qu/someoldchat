@@ -367,15 +367,16 @@ func TestDurableForwardingSpoolsBeforeWakeAndDeletesAfterDelivery(t *testing.T) 
 }
 
 func TestDurableForwardingRenewsLeaseDuringSlowDelivery(t *testing.T) {
+	const leaseDuration = time.Second
 	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer spool.Close()
 	h, err := NewDurableForwardingHandler(context.Background(), lifecycle.New(lifecycle.StateActive), func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(2 * leaseDuration)
 		w.WriteHeader(http.StatusCreated)
-	}), spool, "slow-owner", 1024, 60*time.Millisecond, observability.NewRegistry())
+	}), spool, "slow-owner", 1024, leaseDuration, observability.NewRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}
