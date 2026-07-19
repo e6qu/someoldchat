@@ -234,4 +234,84 @@ func TestPublishedWaveOneRepositoryContract(t *testing.T) {
 	if err != nil || len(scheduledPage.Items) != 0 {
 		t.Fatalf("delivered scheduled=%+v err=%v", scheduledPage, err)
 	}
+
+	updatedWorkspace, err := repository.SetWorkspaceName(ctx, workspaceID, "Wave one renamed", event("workspace-name", "team.name_changed", string(workspaceID)))
+	if err != nil || updatedWorkspace.Name != "Wave one renamed" {
+		t.Fatalf("renamed workspace=%+v err=%v", updatedWorkspace, err)
+	}
+	updatedWorkspace, err = repository.SetWorkspaceDescription(ctx, workspaceID, "Durable storage qualification", event("workspace-description", "team.description_changed", string(workspaceID)))
+	if err != nil || updatedWorkspace.Description != "Durable storage qualification" {
+		t.Fatalf("described workspace=%+v err=%v", updatedWorkspace, err)
+	}
+	updatedWorkspace, err = repository.SetWorkspaceDiscoverability(ctx, workspaceID, domain.WorkspaceDiscoverabilityInviteOnly, event("workspace-discoverability", "team.discoverability_changed", string(workspaceID)))
+	if err != nil || updatedWorkspace.Discoverability != domain.WorkspaceDiscoverabilityInviteOnly {
+		t.Fatalf("discoverable workspace=%+v err=%v", updatedWorkspace, err)
+	}
+	updatedWorkspace, err = repository.SetWorkspaceIcon(ctx, workspaceID, "https://files.example/icon.png", event("workspace-icon", "team.icon_changed", string(workspaceID)))
+	if err != nil || updatedWorkspace.IconURL == "" {
+		t.Fatalf("icon workspace=%+v err=%v", updatedWorkspace, err)
+	}
+	updatedWorkspace, err = repository.SetWorkspaceDefaultChannels(ctx, workspaceID, []domain.ConversationID{conversationID}, event("workspace-defaults", "team.default_channels_changed", string(conversationID)))
+	if err != nil || len(updatedWorkspace.DefaultChannelIDs) != 1 || updatedWorkspace.DefaultChannelIDs[0] != conversationID {
+		t.Fatalf("default channels=%+v err=%v", updatedWorkspace, err)
+	}
+	storedWorkspace, err := repository.GetWorkspace(ctx, workspaceID)
+	if err != nil || storedWorkspace.Name != updatedWorkspace.Name || len(storedWorkspace.DefaultChannelIDs) != 1 {
+		t.Fatalf("stored workspace=%+v err=%v", storedWorkspace, err)
+	}
+
+	group := domain.UserGroup{ID: domain.UserGroupID("S-wave-one-" + suffix), WorkspaceID: workspaceID, Name: "Wave one group", Handle: "wave_one", Description: "Qualification group", Creator: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now, Enabled: true}
+	if err := repository.CreateUserGroup(ctx, group, event("user-group", "usergroup.created", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetUserGroupUsers(ctx, workspaceID, group.ID, []domain.UserID{userID}, userID, event("user-group-users", "usergroup.users_changed", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetUserGroupChannels(ctx, workspaceID, group.ID, []domain.ConversationID{conversationID}, userID, event("user-group-channels", "usergroup.channels_changed", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	groupValue, err := repository.GetUserGroup(ctx, workspaceID, group.ID)
+	if err != nil || len(groupValue.Users) != 1 || groupValue.Users[0] != userID || len(groupValue.Channels) != 1 || groupValue.Channels[0] != conversationID {
+		t.Fatalf("user group=%+v err=%v", groupValue, err)
+	}
+	group.Name = "Updated wave one group"
+	group.Handle = "updated_wave_one"
+	group.UpdatedBy = userID
+	group.UpdatedAt = now.Add(time.Minute)
+	if err := repository.UpdateUserGroup(ctx, group, event("user-group-update", "usergroup.updated", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetUserGroupEnabled(ctx, workspaceID, group.ID, false, userID, event("user-group-disable", "usergroup.disabled", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+	activeGroups, err := repository.ListUserGroups(ctx, workspaceID, false, domain.PageRequest{Limit: 1})
+	if err != nil || len(activeGroups.Groups) != 0 {
+		t.Fatalf("active groups=%+v err=%v", activeGroups, err)
+	}
+	allGroups, err := repository.ListUserGroups(ctx, workspaceID, true, domain.PageRequest{Limit: 1})
+	if err != nil || len(allGroups.Groups) != 1 || allGroups.Groups[0].Name != group.Name {
+		t.Fatalf("all groups=%+v err=%v", allGroups, err)
+	}
+	if err := repository.SetUserGroupEnabled(ctx, workspaceID, group.ID, true, userID, event("user-group-enable", "usergroup.enabled", string(group.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	emoji := domain.CustomEmoji{WorkspaceID: workspaceID, Name: "wave_one", URL: "https://files.example/wave.png"}
+	if err := repository.AddEmoji(ctx, emoji, event("emoji-add", "emoji.added", emoji.Name)); err != nil {
+		t.Fatal(err)
+	}
+	emojis, err := repository.ListEmojis(ctx, workspaceID)
+	if err != nil || len(emojis) != 1 || emojis[0].Name != emoji.Name {
+		t.Fatalf("emojis=%+v err=%v", emojis, err)
+	}
+	if err := repository.RenameEmoji(ctx, workspaceID, emoji.Name, "wave_updated", event("emoji-rename", "emoji.renamed", emoji.Name)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.RemoveEmoji(ctx, workspaceID, "wave_updated", event("emoji-remove", "emoji.removed", "wave_updated")); err != nil {
+		t.Fatal(err)
+	}
+	emojis, err = repository.ListEmojis(ctx, workspaceID)
+	if err != nil || len(emojis) != 0 {
+		t.Fatalf("emojis after remove=%+v err=%v", emojis, err)
+	}
 }
