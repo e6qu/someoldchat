@@ -496,7 +496,7 @@ func TestSQLiteDoNotDisturbIsDurable(t *testing.T) {
 	}
 	defer s.Close()
 	got, err := s.GetDoNotDisturb(ctx, "T1", "U1")
-	if err != nil || !got.Enabled || !got.SnoozeUntil.Equal(until) {
+	if err != nil || !got.Enabled || !got.SnoozeUntil.Equal(until) || !got.NextStartAt.IsZero() || !got.NextEndAt.IsZero() {
 		t.Fatalf("dnd=%+v err=%v", got, err)
 	}
 }

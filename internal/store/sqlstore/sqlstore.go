@@ -1516,9 +1516,9 @@ func (s *Store) GetDoNotDisturb(ctx context.Context, workspaceID domain.Workspac
 		return domain.DoNotDisturb{}, err
 	}
 	value.Enabled = enabled != 0
-	value.SnoozeUntil = time.Unix(snooze, 0).UTC()
-	value.NextStartAt = time.Unix(nextStart, 0).UTC()
-	value.NextEndAt = time.Unix(nextEnd, 0).UTC()
+	value.SnoozeUntil = fromUnixSeconds(snooze)
+	value.NextStartAt = fromUnixSeconds(nextStart)
+	value.NextEndAt = fromUnixSeconds(nextEnd)
 	return value, nil
 }
 
@@ -1535,7 +1535,7 @@ func (s *Store) SetDoNotDisturb(ctx context.Context, value domain.DoNotDisturb, 
 		}
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO do_not_disturb(workspace_id, user_id, enabled, snooze_until, next_start_at, next_end_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET enabled = excluded.enabled, snooze_until = excluded.snooze_until, next_start_at = excluded.next_start_at, next_end_at = excluded.next_end_at`, value.WorkspaceID, value.UserID, boolInt(value.Enabled), value.SnoozeUntil.Unix(), value.NextStartAt.Unix(), value.NextEndAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO do_not_disturb(workspace_id, user_id, enabled, snooze_until, next_start_at, next_end_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET enabled = excluded.enabled, snooze_until = excluded.snooze_until, next_start_at = excluded.next_start_at, next_end_at = excluded.next_end_at`, value.WorkspaceID, value.UserID, boolInt(value.Enabled), unixSeconds(value.SnoozeUntil), unixSeconds(value.NextStartAt), unixSeconds(value.NextEndAt)); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
@@ -1581,6 +1581,13 @@ func unixSeconds(value time.Time) int64 {
 		return 0
 	}
 	return value.Unix()
+}
+
+func fromUnixSeconds(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(value, 0).UTC()
 }
 
 func (s *Store) ListUsers(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.UserPage, error) {
