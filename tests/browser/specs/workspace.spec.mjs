@@ -31,6 +31,12 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
   await expect(postResponse.status(), postBody).toBe(200);
   await expect(page.locator('.message-text').last()).toHaveText(message);
 
+  const reaction = page.locator('.message').last().locator('form[aria-label="Add reaction"] input[name="name"]');
+  await reaction.fill(':wave:');
+  await reaction.press('Enter');
+  await expect(page).toHaveURL(/\/app\?channel=Cdev/);
+  await expect(page.locator('.message-text').last()).toHaveText(message);
+
   const search = page.locator('form[aria-label="Search the workspace"] input[name="q"]');
   await search.fill('browser qualification');
   await expect(search).toHaveValue('browser qualification');
