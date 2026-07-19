@@ -1,0 +1,360 @@
+version: 1
+project: sameoldchat
+quarantine_hours: 24
+
+# The publication times are copied from the evidence URLs. The verifier uses
+# the current UTC time at execution and rejects entries that have not aged past
+# the quarantine. A revision and a checksum are both retained because a
+# version label is not an integrity claim.
+entries:
+  - id: go/github.com/aws/aws-sdk-go-v2
+    kind: go-module
+    canonical: github.com/aws/aws-sdk-go-v2
+    source: https://github.com/aws/aws-sdk-go-v2
+    version: v1.42.1
+    revision: b4784c17b51e7f4dff48ac6016a09e21eeb683a8
+    published_at: 2026-07-01T18:16:50Z
+    evidence: https://proxy.golang.org/github.com/aws/aws-sdk-go-v2/@v/v1.42.1.info
+    checksum: h1:9eOTgu1z/dVtYpNZ3/8/XbbaX0x/BqE3HUzAzs6K0ek=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: Amazon Web Services client base
+    runtime: true
+  - id: go/github.com/aws/aws-sdk-go-v2/config
+    kind: go-module
+    canonical: github.com/aws/aws-sdk-go-v2/config
+    source: https://github.com/aws/aws-sdk-go-v2
+    version: v1.32.29
+    revision: ed75d3d097568d903f639876299d03241605fd7c
+    published_at: 2026-07-08T23:19:12Z
+    evidence: https://proxy.golang.org/github.com/aws/aws-sdk-go-v2/config/@v/v1.32.29.info
+    checksum: h1:BcMHHnpiWKogf+gGfpj3K1w+Sktz29XDo/cPSAPO3FU=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: Amazon Web Services configuration loading
+    runtime: true
+  - id: go/github.com/aws/aws-sdk-go-v2/service/dynamodb
+    kind: go-module
+    canonical: github.com/aws/aws-sdk-go-v2/service/dynamodb
+    source: https://github.com/aws/aws-sdk-go-v2
+    version: v1.60.0
+    revision: fc087ca9c93f355ac25ad7d78cd1f60170424e0c
+    published_at: 2026-07-06T18:20:27Z
+    evidence: https://proxy.golang.org/github.com/aws/aws-sdk-go-v2/service/dynamodb/@v/v1.60.0.info
+    checksum: h1:wnyC01GGkqvRvVI73+xRTr8qDyIZMzqjHlsFqWUUVSo=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: lifecycle metadata storage
+    runtime: true
+  - id: go/github.com/aws/aws-sdk-go-v2/service/ecs
+    kind: go-module
+    canonical: github.com/aws/aws-sdk-go-v2/service/ecs
+    source: https://github.com/aws/aws-sdk-go-v2
+    version: v1.88.0
+    revision: cb69824f6c68e6fe0144def8e757be46ad4cfcbb
+    published_at: 2026-07-08T18:19:57Z
+    evidence: https://proxy.golang.org/github.com/aws/aws-sdk-go-v2/service/ecs/@v/v1.88.0.info
+    checksum: h1:6DHfk708kwLjbyxxAMFYUUX6dOSQK4biuuWP0DqxQ7w=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: Amazon Elastic Container Service lifecycle control
+    runtime: true
+  - id: go/github.com/aws/aws-sdk-go-v2/service/s3
+    kind: go-module
+    canonical: github.com/aws/aws-sdk-go-v2/service/s3
+    source: https://github.com/aws/aws-sdk-go-v2
+    version: v1.105.2
+    revision: 0ffbcb97471596ba81b4df82a95b7d7d12b261b1
+    published_at: 2026-07-16T18:16:22Z
+    evidence: https://proxy.golang.org/github.com/aws/aws-sdk-go-v2/service/s3/@v/v1.105.2.info
+    checksum: h1:5C00eQYpTrgQXnp6V3P6P7zPElna3AXvlukbANE6nJI=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: object storage for files and snapshots
+    runtime: true
+  - id: go/github.com/aws/smithy-go
+    kind: go-module
+    canonical: github.com/aws/smithy-go
+    source: https://github.com/aws/smithy-go
+    version: v1.27.3
+    revision: 94459270154bbf890f0e45c69bab7d401dc41170
+    published_at: 2026-06-26T23:04:56Z
+    evidence: https://proxy.golang.org/github.com/aws/smithy-go/@v/v1.27.3.info
+    checksum: h1:F3Zb497UhhskkfpJmfkXswyo+t0sh9OTBnIHjogWbVY=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: Amazon Web Services protocol support
+    runtime: true
+  - id: go/github.com/canonical/go-dqlite/v3
+    kind: go-module
+    canonical: github.com/canonical/go-dqlite/v3
+    source: https://github.com/canonical/go-dqlite
+    version: v3.0.4
+    revision: d046c957251f7c77565d878eab950de4ff3bba5b
+    published_at: 2026-02-18T17:54:39Z
+    evidence: https://proxy.golang.org/github.com/canonical/go-dqlite/v3/@v/v3.0.4.info
+    checksum: h1:JhITsrvVL0pii9arxDksXfsRqBI+je1VpcqVuzDllUM=
+    provenance: vcs-tag
+    license: LGPL-3.0-only
+    purpose: replicated SQLite storage
+    runtime: true
+  - id: go/github.com/coreos/go-oidc/v3
+    kind: go-module
+    canonical: github.com/coreos/go-oidc/v3
+    source: https://github.com/coreos/go-oidc
+    version: v3.17.0
+    revision: 35b8e031bcac7fed73b96b09d42e6e233a6e6562
+    published_at: 2025-11-21T03:32:42Z
+    evidence: https://proxy.golang.org/github.com/coreos/go-oidc/v3/@v/v3.17.0.info
+    checksum: h1:hWBGaQfbi0iVviX4ibC7bk8OKT5qNr4klBaCHVNvehc=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: OpenID Connect identity verification
+    runtime: true
+  - id: go/github.com/go-jose/go-jose/v4
+    kind: go-module
+    canonical: github.com/go-jose/go-jose/v4
+    source: https://github.com/go-jose/go-jose
+    version: v4.1.4
+    revision: 0e59876635f3dbf46d7b5e97b52bb75a3f96e7d9
+    published_at: 2026-03-31T23:33:50Z
+    evidence: https://proxy.golang.org/github.com/go-jose/go-jose/v4/@v/v4.1.4.info
+    checksum: h1:moDMcTHmvE6Groj34emNPLs/qtYXRVcd6S7NHbHz3kA=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: signed identity and session tokens
+    runtime: true
+  - id: go/github.com/gorilla/websocket
+    kind: go-module
+    canonical: github.com/gorilla/websocket
+    source: https://github.com/gorilla/websocket
+    version: v1.5.3
+    revision: ce903f6d1d961af3a8602f2842c8b1c3fca58c4d
+    published_at: 2024-06-14T03:18:03Z
+    evidence: https://proxy.golang.org/github.com/gorilla/websocket/@v/v1.5.3.info
+    checksum: h1:saDtZ6Pbx/0u+bgYQ3q96pZgCzfhKXGPqt7kZ72aNNg=
+    provenance: vcs-tag
+    license: BSD-2-Clause
+    purpose: WebSocket transport
+    runtime: true
+  - id: go/github.com/jackc/pgx/v5
+    kind: go-module
+    canonical: github.com/jackc/pgx/v5
+    source: https://github.com/jackc/pgx
+    version: v5.10.0
+    revision: 7293fb11125be0373a92f716683f2d494f6fd4b0
+    published_at: 2026-06-03T00:41:58Z
+    evidence: https://proxy.golang.org/github.com/jackc/pgx/v5/@v/v5.10.0.info
+    checksum: h1:VhSvgU2jSli8o3AqIEOTJr7rZwAEUVo4E4XhR94Zfr0=
+    provenance: vcs-tag
+    license: MIT
+    purpose: PostgreSQL storage adapter
+    runtime: true
+  - id: go/golang.org/x/net
+    kind: go-module
+    canonical: golang.org/x/net
+    source: https://go.googlesource.com/net
+    version: v0.53.0
+    revision: a8d1fc14d9e33e1f6842ab78a0127d42cd8fff44
+    published_at: 2026-04-09T19:17:33Z
+    evidence: https://proxy.golang.org/golang.org/x/net/@v/v0.53.0.info
+    checksum: h1:d+qAbo5L0orcWAr0a9JweQpjXF19LMXJE8Ey7hwOdUA=
+    provenance: vcs-tag
+    license: BSD-3-Clause
+    purpose: HTTP and identity protocol support
+    runtime: true
+  - id: go/google.golang.org/grpc
+    kind: go-module
+    canonical: google.golang.org/grpc
+    source: https://github.com/grpc/grpc-go
+    version: v1.82.0
+    revision: bd239854f0ab7f1ee63457d47f7c1d2675e1f736
+    published_at: 2026-06-30T13:47:03Z
+    evidence: https://proxy.golang.org/google.golang.org/grpc/@v/v1.82.0.info
+    checksum: h1:vguDnZUPjE26w09A63VoxZPnvPjB5Riyc0mkXPFmAIU=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: distributed module transport
+    runtime: true
+  - id: go/google.golang.org/protobuf
+    kind: go-module
+    canonical: google.golang.org/protobuf
+    source: https://go.googlesource.com/protobuf
+    version: v1.36.11
+    revision: 96a179180f0ad6bba9b1e7b6e38d0affb0168e9a
+    published_at: 2025-12-12T08:48:31Z
+    evidence: https://proxy.golang.org/google.golang.org/protobuf/@v/v1.36.11.info
+    checksum: h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
+    provenance: vcs-tag
+    license: BSD-3-Clause
+    purpose: generated protocol transport
+    runtime: true
+  - id: go/gopkg.in/yaml.v2
+    kind: go-module
+    canonical: gopkg.in/yaml.v2
+    source: https://gopkg.in/yaml.v2
+    version: v2.4.0
+    revision: h1:D8xgwECY7CYvx+Y2n4sBz93Jn9JRvxdiyyo8CTfuKaY=
+    published_at: 2020-11-17T15:46:20Z
+    evidence: https://proxy.golang.org/gopkg.in/yaml.v2/@v/v2.4.0.info
+    checksum: h1:D8xgwECY7CYvx+Y2n4sBz93Jn9JRvxdiyyo8CTfuKaY=
+    provenance: module-proxy
+    license: Apache-2.0
+    purpose: machine-readable project metadata
+    runtime: true
+  - id: go/modernc.org/sqlite
+    kind: go-module
+    canonical: modernc.org/sqlite
+    source: https://gitlab.com/cznic/sqlite
+    version: v1.53.0
+    revision: 6b32d1ee965dfe59bf2e50baeb6f451b67d6a71e
+    published_at: 2026-06-21T10:19:42Z
+    evidence: https://proxy.golang.org/modernc.org/sqlite/@v/v1.53.0.info
+    checksum: h1:20WG8N9q4ji/dEqGk4uiI0c6OPjSeLTNYGFCc3+7c1M=
+    provenance: vcs-tag
+    license: BSD-3-Clause
+    purpose: SQLite storage adapter
+    runtime: true
+  - id: action/actions/checkout
+    kind: github-action
+    canonical: actions/checkout
+    source: https://github.com/actions/checkout
+    version: v7.0.0
+    revision: 9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+    published_at: 2026-06-17T17:51:53Z
+    evidence: https://api.github.com/repos/actions/checkout/commits/9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+    checksum: git:9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+    provenance: github-commit
+    license: MIT
+    purpose: source checkout in CI
+    runtime: false
+  - id: action/actions/setup-go
+    kind: github-action
+    canonical: actions/setup-go
+    source: https://github.com/actions/setup-go
+    version: v7.0.0
+    revision: b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+    published_at: 2026-07-16T02:47:49Z
+    evidence: https://api.github.com/repos/actions/setup-go/commits/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+    checksum: git:b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+    provenance: github-commit
+    license: MIT
+    purpose: Go toolchain setup in CI
+    runtime: false
+  - id: action/bufbuild/buf-setup-action
+    kind: github-action
+    canonical: bufbuild/buf-setup-action
+    source: https://github.com/bufbuild/buf-setup-action
+    version: v1.50.0
+    revision: a47c93e0b1648d5651a065437926377d060baa99
+    published_at: 2025-01-17T19:42:06Z
+    evidence: https://api.github.com/repos/bufbuild/buf-setup-action/commits/a47c93e0b1648d5651a065437926377d060baa99
+    checksum: git:a47c93e0b1648d5651a065437926377d060baa99
+    provenance: github-commit
+    license: Apache-2.0
+    purpose: protocol lint and generation tooling in CI
+    runtime: false
+  - id: action/hashicorp/setup-terraform
+    kind: github-action
+    canonical: hashicorp/setup-terraform
+    source: https://github.com/hashicorp/setup-terraform
+    version: v4.0.1
+    revision: dfe3c3f87815947d99a8997f908cb6525fc44e9e
+    published_at: 2026-05-12T12:22:33Z
+    evidence: https://api.github.com/repos/hashicorp/setup-terraform/commits/dfe3c3f87815947d99a8997f908cb6525fc44e9e
+    checksum: git:dfe3c3f87815947d99a8997f908cb6525fc44e9e
+    provenance: github-commit
+    license: MPL-2.0
+    purpose: Terraform validation in CI
+    runtime: false
+  - id: action/actions/setup-node
+    kind: github-action
+    canonical: actions/setup-node
+    source: https://github.com/actions/setup-node
+    version: v7.0.0
+    revision: 820762786026740c76f36085b0efc47a31fe5020
+    published_at: 2026-07-14T02:38:27Z
+    evidence: https://api.github.com/repos/actions/setup-node/commits/820762786026740c76f36085b0efc47a31fe5020
+    checksum: git:820762786026740c76f36085b0efc47a31fe5020
+    provenance: github-commit
+    license: MIT
+    purpose: Node.js SDK qualification in CI
+    runtime: false
+  - id: action/actions/setup-python
+    kind: github-action
+    canonical: actions/setup-python
+    source: https://github.com/actions/setup-python
+    version: v6.3.0
+    revision: ece7cb06caefa5fff74198d8649806c4678c61a1
+    published_at: 2026-06-23T18:01:57Z
+    evidence: https://api.github.com/repos/actions/setup-python/commits/ece7cb06caefa5fff74198d8649806c4678c61a1
+    checksum: git:ece7cb06caefa5fff74198d8649806c4678c61a1
+    provenance: github-commit
+    license: MIT
+    purpose: Python SDK qualification in CI
+    runtime: false
+  - id: action/actions/setup-java
+    kind: github-action
+    canonical: actions/setup-java
+    source: https://github.com/actions/setup-java
+    version: v5.6.0
+    revision: 03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+    published_at: 2026-07-14T21:14:30Z
+    evidence: https://api.github.com/repos/actions/setup-java/commits/03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+    checksum: git:03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+    provenance: github-commit
+    license: MIT
+    purpose: Java SDK qualification in CI
+    runtime: false
+  - id: action/denoland/setup-deno
+    kind: github-action
+    canonical: denoland/setup-deno
+    source: https://github.com/denoland/setup-deno
+    version: v2.0.5
+    revision: 22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+    published_at: 2026-07-03T09:27:31Z
+    evidence: https://api.github.com/repos/denoland/setup-deno/commits/22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+    checksum: git:22d081ff2d3a40755e97629de92e3bcbfa7cf2ed
+    provenance: github-commit
+    license: MIT
+    purpose: Deno SDK qualification in CI
+    runtime: false
+  - id: action/docker/setup-buildx-action
+    kind: github-action
+    canonical: docker/setup-buildx-action
+    source: https://github.com/docker/setup-buildx-action
+    version: v4.2.0
+    revision: bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+    published_at: 2026-07-02T09:21:40Z
+    evidence: https://api.github.com/repos/docker/setup-buildx-action/commits/bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+    checksum: git:bb05f3f5519dd87d3ba754cc423b652a5edd6d2c
+    provenance: github-commit
+    license: MIT
+    purpose: reproducible container builds in CI
+    runtime: false
+  - id: action/docker/login-action
+    kind: github-action
+    canonical: docker/login-action
+    source: https://github.com/docker/login-action
+    version: v4.4.0
+    revision: af1e73f918a031802d376d3c8bbc3fe56130a9b0
+    published_at: 2026-07-03T13:02:31Z
+    evidence: https://api.github.com/repos/docker/login-action/commits/af1e73f918a031802d376d3c8bbc3fe56130a9b0
+    checksum: git:af1e73f918a031802d376d3c8bbc3fe56130a9b0
+    provenance: github-commit
+    license: MIT
+    purpose: container registry authentication in CI
+    runtime: false
+  - id: action/docker/build-push-action
+    kind: github-action
+    canonical: docker/build-push-action
+    source: https://github.com/docker/build-push-action
+    version: v7.3.0
+    revision: 53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+    published_at: 2026-07-01T14:11:18Z
+    evidence: https://api.github.com/repos/docker/build-push-action/commits/53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+    checksum: git:53b7df96c91f9c12dcc8a07bcb9ccacbed38856a
+    provenance: github-commit
+    license: MIT
+    purpose: container publication in CI
+    runtime: false

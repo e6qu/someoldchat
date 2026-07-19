@@ -87,6 +87,17 @@ CI MUST fail closed when age or integrity evidence is unavailable.
 
 ## Automation
 
+The committed dependency admission inventory is the machine-readable record of
+the selected versions and their evidence. `make dependency-check` MUST run in
+local checks and pull-request continuous integration. It fails when an entry
+is incomplete, uses a mutable revision or checksum, lacks HTTPS evidence, uses
+a prerelease version, has a future publication time, or has not passed the
+publication quarantine. Pin syntax for workflow actions and container images
+is checked separately by `make workflow-check` and `make container-check`.
+CI language runtimes and Terraform MUST use exact versions; `workflow-check`
+rejects bare major or minor selections and requires an explicit Terraform
+version.
+
 A daily job SHOULD propose the newest eligible version after its quarantine has
 elapsed. Updates MUST be narrow, reviewable, and never automatically merged.
 Coupled packages MAY update together when separate versions cannot be tested

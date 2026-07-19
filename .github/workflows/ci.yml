@@ -34,7 +34,7 @@ jobs:
           github_token: ${{ github.token }}
 
       - name: Check formatting and generated files
-        run: make fmt-check workflow-check container-check generated-check proto-lint
+        run: make fmt-check workflow-check container-check dependency-check generated-check proto-lint
 
       - name: Check contracts and SDK inventory
         run: make contract-check sdk-inventory-check
@@ -93,6 +93,8 @@ jobs:
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.13.5
 
       - name: Check Terraform formatting
         run: terraform fmt -check -recursive
@@ -120,18 +122,18 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.7.0
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          python-version: '3.12'
+          python-version: '3.12.11'
 
       - name: Set up Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '17.0.15'
           cache: maven
 
       - name: Set up Deno
@@ -153,7 +155,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24
+          node-version: 24.7.0
 
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
