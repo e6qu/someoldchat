@@ -138,6 +138,6 @@ Each release MUST include or reference:
 - an SPDX or CycloneDX SBOM;
 - exact source and image digests;
 - dependency-age and vulnerability reports;
-- build provenance;
-- signatures for distributed artifacts; and
+- max-level container build provenance and an SPDX SBOM attestation;
+- a signed registry attestation for each published architecture image; and
 - the pinned Slack compatibility-source inventory.
