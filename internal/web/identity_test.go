@@ -49,7 +49,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "person@example.com", Name: "person"})
 	service := service.Messages{Store: store}
-	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "sha-subject", UserID: "U2"}); err != nil {
+	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "oidc-subject", UserID: "U2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
@@ -68,7 +68,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 	now := time.Now().UTC()
 	raw, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-subject", "sid": "sha-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}).Serialize()
 	if err != nil {
@@ -88,7 +88,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 
 	invalid, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-subject", "sid": "", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}).Serialize()
 	if err != nil {
@@ -261,7 +261,7 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 	}
 }
 
-func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *testing.T) {
+func TestOIDCAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
@@ -275,9 +275,9 @@ func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *tes
 	handler.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/oauth2/token":
-			return providerResponse(r, `{"access_token":"shauth-token"}`), nil
+			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
 		case "/userinfo":
-			return providerResponse(r, `{"sub":"shauth-subject","email":"alice@example.com","preferred_username":"alice","role":"admin"}`), nil
+			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","preferred_username":"alice","role":"admin"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -298,7 +298,7 @@ func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *tes
 	if err != nil || membership.Role != domain.WorkspaceRoleAdmin || !membership.Active {
 		t.Fatalf("membership=%+v err=%v", membership, err)
 	}
-	identity, err := store.GetExternalIdentity(context.Background(), "T1", "oidc", "shauth-subject")
+	identity, err := store.GetExternalIdentity(context.Background(), "T1", "oidc", "oidc-subject")
 	if err != nil || identity.UserID != user.ID {
 		t.Fatalf("identity=%+v err=%v", identity, err)
 	}
@@ -307,7 +307,7 @@ func TestShauthAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *tes
 	}
 }
 
-func TestShauthAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
+func TestOIDCAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
@@ -320,9 +320,9 @@ func TestShauthAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 	handler.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		switch r.URL.Path {
 		case "/oauth2/token":
-			return providerResponse(r, `{"access_token":"shauth-token"}`), nil
+			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
 		case "/userinfo":
-			return providerResponse(r, `{"sub":"shauth-subject","email":"alice@example.com","preferred_username":"alice"}`), nil
+			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","preferred_username":"alice"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -339,13 +339,13 @@ func TestShauthAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 	}
 }
 
-func TestShauthAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
+func TestOIDCAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
 	service := service.Messages{Store: store}
-	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "shauth-subject", UserID: "U2"}); err != nil {
+	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "oidc-subject", UserID: "U2"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.SetUserRole(context.Background(), "T1", "U1", "U2", domain.WorkspaceRoleAdmin); err != nil {
@@ -357,7 +357,7 @@ func TestShauthAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "shauth-subject", Email: "alice@example.com", Role: "developer"})
+	user, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "oidc-subject", Email: "alice@example.com", Role: "developer"})
 	if err != nil || user.ID != "U2" {
 		t.Fatalf("user=%+v err=%v", user, err)
 	}
