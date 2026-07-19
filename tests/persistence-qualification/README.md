@@ -28,6 +28,8 @@ The shared contract covers normalized user lookup, seeded workspace and
 conversation state, message persistence, idempotent message replay, bounded
 message listing, search, presence, do-not-disturb state, stars, files, remote
 file sharing and updates, reminders, scheduled-message claim and delivery,
-workspace settings, user groups and their bindings, and custom emoji.
+workspace settings, user groups and their bindings, custom emoji, and the
+integration state used by OAuth, views, workflows, dialogs, app approvals,
+invites, conversation preferences, calls, and RTM connections.
 The package does not replace the broader SQLite repository tests or the
 selected dqlite cluster and snapshot tests.

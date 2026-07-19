@@ -42,7 +42,10 @@ SAMEOLDCHAT_POSTGRES_DSN='postgres://sameoldchat:sameoldchat@localhost:5432/same
 
 The qualification requires `SAMEOLDCHAT_POSTGRES_DSN`; an absent value is an
 error. It runs the shared repository contract, including the published storage
-waves and migration path, against the configured server.
+waves, integration state, and migration path, against the configured server.
+The adapter translates shared SQLite `INTEGER` declarations to PostgreSQL
+`BIGINT` because the repository stores some timestamps as nanoseconds and must
+retain the `int64` range on both backends.
 
 Related documents:
 
