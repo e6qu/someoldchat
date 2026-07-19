@@ -200,7 +200,7 @@ func TestHandlerDeliversEventAndAdvancesOnlyAfterAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	responses := new(testResponseSink)
-	server := httptest.NewServer(Handler{Store: connections, Events: testEventSource{record: events.Record{Sequence: 4, Event: events.Event{ID: "event-4", Topic: "message.created", Payload: `{"text":"hello"}`}}}, Cursors: connections, Responses: responses})
+	server := httptest.NewServer(Handler{Store: connections, Events: testEventSource{record: events.Record{Sequence: 4, Event: events.Event{ID: "event-4", Topic: "message.created", Payload: `{"type":"message","text":"hello"}`}}}, Cursors: connections, Responses: responses})
 	defer server.Close()
 	parsed.Scheme = "ws"
 	parsed.Host = strings.TrimPrefix(server.URL, "http://")
@@ -255,15 +255,23 @@ func TestResponseRecorderRequiresDurableStore(t *testing.T) {
 }
 
 func FuzzEncodeEventProducesJSON(f *testing.F) {
-	f.Add(`{"text":"hello"}`, "message.created")
+	f.Add(`{"type":"event_callback","event":{"type":"message"}}`, "message.created")
 	f.Add("not json", "message.created")
 	f.Fuzz(func(t *testing.T, payload, topic string) {
 		encoded, err := encodeEvent(events.Record{Event: events.Event{ID: "event", Topic: topic, Payload: payload}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := json.Marshal(encoded); err != nil {
-			t.Fatal(err)
+		var object map[string]json.RawMessage
+		valid := json.Unmarshal([]byte(payload), &object) == nil && object != nil
+		var eventType string
+		valid = valid && json.Unmarshal(object["type"], &eventType) == nil && strings.TrimSpace(eventType) != ""
+		if valid {
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := json.Marshal(encoded); err != nil {
+				t.Fatal(err)
+			}
+		} else if err == nil {
+			t.Fatalf("invalid payload was accepted: %q", payload)
 		}
 	})
 }

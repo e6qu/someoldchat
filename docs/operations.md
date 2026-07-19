@@ -179,6 +179,10 @@ and [the `apps.connections.open` method reference](https://docs.slack.dev/refere
 Socket Mode is available in both local composition and distributed composition:
 the HTTP process calls the repository directly in local composition and uses
 the generated gRPC boundary in distributed composition.
+Malformed Socket Mode event payloads are closed as protocol errors; the server
+does not synthesize a replacement payload from an internal topic and string.
+The Real Time Messaging event stream applies the same rule and rejects invalid
+or type-less JSON event payloads.
 
 ## Snapshot retention and verification
 

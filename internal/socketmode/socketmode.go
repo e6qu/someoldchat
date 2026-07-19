@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -266,11 +267,19 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func encodeEvent(record events.Record) (map[string]any, error) {
+	if strings.TrimSpace(string(record.Event.ID)) == "" {
+		return nil, errors.New("Socket Mode event ID is required")
+	}
 	var payload map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(record.Event.Payload), &payload); err != nil || payload == nil {
-		typeValue, _ := json.Marshal(record.Event.Topic)
-		dataValue, _ := json.Marshal(record.Event.Payload)
-		payload = map[string]json.RawMessage{"type": typeValue, "data": dataValue}
+	if err := json.Unmarshal([]byte(record.Event.Payload), &payload); err != nil {
+		return nil, fmt.Errorf("Socket Mode event payload is not JSON: %w", err)
+	}
+	if payload == nil {
+		return nil, errors.New("Socket Mode event payload must be a JSON object")
+	}
+	var eventType string
+	if err := json.Unmarshal(payload["type"], &eventType); err != nil || strings.TrimSpace(eventType) == "" {
+		return nil, errors.New("Socket Mode event payload requires a non-empty type")
 	}
 	return map[string]any{"envelope_id": string(record.Event.ID), "payload": payload, "type": "events_api", "accepts_response_payload": true}, nil
 }

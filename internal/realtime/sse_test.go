@@ -88,7 +88,7 @@ func TestSSEReplaysFromDurableSequence(t *testing.T) {
 }
 
 func TestRTMEventEncodingIsJSONProtocol(t *testing.T) {
-	payload, err := encodeRTMEvent(events.Record{Sequence: 7, Event: events.Event{Topic: "message.created", Payload: `{"text":"hello"}`}})
+	payload, err := encodeRTMEvent(events.Record{Sequence: 7, Event: events.Event{Topic: "message.created", Payload: `{"type":"message","text":"hello"}`}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +96,16 @@ func TestRTMEventEncodingIsJSONProtocol(t *testing.T) {
 	if err := json.Unmarshal(payload, &value); err != nil {
 		t.Fatal(err)
 	}
-	if value["type"] != "message.created" || value["text"] != "hello" {
+	if value["type"] != "message" || value["text"] != "hello" {
 		t.Fatalf("event=%s", payload)
+	}
+}
+
+func TestRTMEventEncodingRejectsInvalidPayload(t *testing.T) {
+	for _, payload := range []string{"not json", `{"text":"missing type"}`} {
+		if _, err := encodeRTMEvent(events.Record{Event: events.Event{Payload: payload}}); err == nil {
+			t.Fatalf("payload %q was accepted", payload)
+		}
 	}
 }
 
