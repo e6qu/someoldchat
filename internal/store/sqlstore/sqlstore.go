@@ -969,9 +969,12 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 63 {
-		if _, err := db.ExecContext(ctx, `ALTER TABLE socket_mode_connections ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0`); err != nil {
-			message := strings.ToLower(err.Error())
-			if !strings.Contains(message, "duplicate column") && !strings.Contains(message, "already exists") {
+		columns, err := s.tableColumns(ctx, db, "socket_mode_connections")
+		if err != nil {
+			return fmt.Errorf("inspect Socket Mode connection state: %w", err)
+		}
+		if !columns["consumed_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE socket_mode_connections ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return fmt.Errorf("migrate Socket Mode connection state: %w", err)
 			}
 		}
@@ -1048,7 +1051,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
