@@ -164,7 +164,17 @@ The worker continues after a handler delivery failure because it has released
 the records at an explicit retry time. It exits on claim, release, or
 acknowledgement failure so the deployment platform can restart it.
 
-The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
+The outbox worker requires `--delivery-format`. Use `record` only for an
+integration that explicitly accepts the internal `events.Record` JSON shape.
+Use `slack-events` with `--app-id` and `--signing-secret` for a Slack Events
+API request URL. That mode requires each delivered payload to be a JSON Slack
+inner event or a validated complete `event_callback` envelope. It does not
+turn an identifier-only domain event into a guessed Slack event. The request
+includes `X-Slack-Request-Timestamp`, `X-Slack-Signature`, and the durable event
+ID as `Idempotency-Key`.
+
+The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
+[Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),
 and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).
 Socket Mode is available in both local composition and distributed composition:
 the HTTP process calls the repository directly in local composition and uses
