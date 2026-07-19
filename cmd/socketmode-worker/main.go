@@ -77,7 +77,14 @@ func main() {
 	defer ticker.Stop()
 	for {
 		if err := processor.ProcessOnce(ctx, time.Now().UTC(), delivery); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			logger.Error("Socket Mode response processing failed", "error", err)
+			var deliveryErr socketmode.ResponseDeliveryError
+			if !errors.As(err, &deliveryErr) {
+				os.Exit(1)
+			}
 		}
 		select {
 		case <-ctx.Done():

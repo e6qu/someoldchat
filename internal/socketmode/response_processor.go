@@ -18,6 +18,17 @@ type ResponseQueue interface {
 
 type ResponseHandler func(context.Context, domain.SocketModeResponse) error
 
+type ResponseDeliveryError struct {
+	EnvelopeID string
+	Err        error
+}
+
+func (e ResponseDeliveryError) Error() string {
+	return fmt.Sprintf("deliver Socket Mode response %q: %v", e.EnvelopeID, e.Err)
+}
+
+func (e ResponseDeliveryError) Unwrap() error { return e.Err }
+
 type ResponseProcessor struct {
 	Queue      ResponseQueue
 	AppID      domain.AppID
@@ -56,7 +67,7 @@ func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handl
 			if releaseErr != nil {
 				return errors.Join(fmt.Errorf("handle Socket Mode response %q: %w", value.EnvelopeID, err), fmt.Errorf("release Socket Mode responses after handler failure: %w", releaseErr))
 			}
-			return fmt.Errorf("handle Socket Mode response %q: %w", value.EnvelopeID, err)
+			return ResponseDeliveryError{EnvelopeID: value.EnvelopeID, Err: err}
 		}
 		if err := p.Queue.AckSocketModeResponses(ctx, p.Owner, []domain.SocketModeResponse{value}); err != nil {
 			return fmt.Errorf("acknowledge Socket Mode response %q: %w", value.EnvelopeID, err)

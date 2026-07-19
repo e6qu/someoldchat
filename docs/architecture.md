@@ -172,6 +172,9 @@ the application identifier, envelope identifier, and idempotency key. A
 successful destination response acknowledges the durable record. A failed
 delivery releases it at the configured retry time, and a process crash leaves
 the lease available to another replica after expiry.
+The worker treats a destination failure as an explicit, bounded retry, but
+exits on durable-store or acknowledgement failure so the orchestrator can
+restart it rather than hiding a broken storage path.
 
 The runnable `cmd/blobgc` is a separate stateless blob-cleanup replica. It
 claims only the durable `file.blob_delete` topic, uses the same lease/retry
