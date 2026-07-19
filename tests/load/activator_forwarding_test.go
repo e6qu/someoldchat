@@ -26,7 +26,7 @@ func TestDurableActivatorForwardsConcurrentRequestsToTheirCallers(t *testing.T) 
 
 	var mu sync.Mutex
 	forwarded := make(map[string]struct{}, requests)
-	handler, err := activator.NewDurableForwardingHandler(lifecycle.New(lifecycle.StateHibernated), func(context.Context, uint64) error {
+	handler, err := activator.NewDurableForwardingHandler(context.Background(), lifecycle.New(lifecycle.StateHibernated), func(context.Context, uint64) error {
 		return nil
 	}, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, readErr := io.ReadAll(r.Body)
