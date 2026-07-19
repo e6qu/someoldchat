@@ -1936,25 +1936,37 @@ func (s *Store) ClaimSocketModeResponses(_ context.Context, appID domain.AppID, 
 	expiresAt := now.Add(lease)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	values := make([]domain.SocketModeResponse, 0, limit)
+	type candidate struct {
+		key   string
+		value domain.SocketModeResponse
+	}
+	candidates := make([]candidate, 0, len(s.socketResponses))
 	for key, value := range s.socketResponses {
-		if len(values) == limit || value.AppID != appID || !value.AcknowledgedAt.IsZero() || value.LeaseExpiresAt.After(now) {
+		if value.AppID != appID || !value.AcknowledgedAt.IsZero() || value.LeaseExpiresAt.After(now) {
 			continue
 		}
-		value.LeaseOwner = owner
-		value.LeaseExpiresAt = expiresAt
-		s.socketResponses[key] = value
-		values = append(values, value)
+		candidates = append(candidates, candidate{key: key, value: value})
 	}
-	slices.SortFunc(values, func(left, right domain.SocketModeResponse) int {
-		if left.ReceivedAt.Before(right.ReceivedAt) {
+	slices.SortFunc(candidates, func(left, right candidate) int {
+		if left.value.ReceivedAt.Before(right.value.ReceivedAt) {
 			return -1
 		}
-		if left.ReceivedAt.After(right.ReceivedAt) {
+		if left.value.ReceivedAt.After(right.value.ReceivedAt) {
 			return 1
 		}
-		return strings.Compare(left.EnvelopeID, right.EnvelopeID)
+		return strings.Compare(left.value.EnvelopeID, right.value.EnvelopeID)
 	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	values := make([]domain.SocketModeResponse, 0, len(candidates))
+	for _, candidate := range candidates {
+		value := candidate.value
+		value.LeaseOwner = owner
+		value.LeaseExpiresAt = expiresAt
+		s.socketResponses[candidate.key] = value
+		values = append(values, value)
+	}
 	return values, nil
 }
 
