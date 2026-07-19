@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -84,12 +84,12 @@ generated-check:
 fmt-check:
 	test -z "$$(gofmt -l .)"
 
-workflow-check:
-	if rg --pcre2 -n 'uses:[[:space:]]+[^@]+@(?!(?:[0-9a-f]{40})(?:[[:space:]]|$$))[^[:space:]]+' .github/workflows; then exit 1; fi
+workflow-check: dependency-check
 
-container-check:
-	if rg --pcre2 -n '^# syntax=[^\\s]+(?<!@sha256:[0-9a-f]{64})\\s*$$' Dockerfile deploy/ecs-scale-zero/Dockerfile.websocket-edge; then exit 1; fi
-	if rg --pcre2 -n '^\\s*FROM\\s+[^\\s]+(?<!@sha256:[0-9a-f]{64})(?:\\s+AS\\s+[^\\s]+)?\\s*$$' Dockerfile deploy/ecs-scale-zero/Dockerfile.websocket-edge; then exit 1; fi
+container-check: dependency-check
+
+dependency-check:
+	GOCACHE=$(GOCACHE) go run ./cmd/dependencycheck
 
 contract-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck
@@ -112,7 +112,7 @@ browser-qualification:
 	npx --prefix tests/browser playwright install --with-deps chromium
 	npm test --prefix tests/browser
 
-check: fmt-check workflow-check container-check contract-check sdk-inventory-check proto-lint generated-check test
+check: fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check proto-lint generated-check test
 
 clean:
 	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform
