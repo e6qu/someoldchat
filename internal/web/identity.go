@@ -62,6 +62,27 @@ var supportedAuthorizationProviders = map[string]struct{}{
 	"oidc":   {},
 }
 
+const (
+	maxAuthorizationDiscoveryResponse = 1 << 20
+	maxAuthorizationTokenResponse     = 64 << 10
+	maxAuthorizationUserInfoResponse  = 256 << 10
+	maxAuthorizationEmailResponse     = 1 << 20
+)
+
+func decodeAuthorizationJSON(body io.Reader, limit int64, target any) error {
+	payload, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return err
+	}
+	if int64(len(payload)) > limit {
+		return fmt.Errorf("authorization response exceeds %d bytes", limit)
+	}
+	if err := json.Unmarshal(payload, target); err != nil {
+		return err
+	}
+	return nil
+}
+
 func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, issuer, clientID, clientSecret string) (ProviderConfig, error) {
 	issuer = strings.TrimRight(strings.TrimSpace(issuer), "/")
 	clientID = strings.TrimSpace(clientID)
@@ -90,7 +111,7 @@ func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, iss
 		return ProviderConfig{}, fmt.Errorf("OpenID Connect discovery returned %s", response.Status)
 	}
 	var document OpenIDConfiguration
-	if err := json.NewDecoder(response.Body).Decode(&document); err != nil {
+	if err := decodeAuthorizationJSON(response.Body, maxAuthorizationDiscoveryResponse, &document); err != nil {
 		return ProviderConfig{}, fmt.Errorf("decode OpenID Connect discovery: %w", err)
 	}
 	if strings.TrimRight(document.Issuer, "/") != issuer {
@@ -479,7 +500,7 @@ func (h LoginHandler) exchangeCode(ctx context.Context, provider ProviderConfig,
 		return "", fmt.Errorf("token endpoint returned %s", response.Status)
 	}
 	var value tokenResponse
-	if err := json.NewDecoder(response.Body).Decode(&value); err != nil || strings.TrimSpace(value.AccessToken) == "" {
+	if err := decodeAuthorizationJSON(response.Body, maxAuthorizationTokenResponse, &value); err != nil || strings.TrimSpace(value.AccessToken) == "" {
 		return "", errors.New("token response did not contain an access token")
 	}
 	return value.AccessToken, nil
@@ -509,7 +530,7 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 		PreferredUsername string `json:"preferred_username"`
 		Role              string `json:"role"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
+	if err := decodeAuthorizationJSON(response.Body, maxAuthorizationUserInfoResponse, &value); err != nil {
 		return externalIdentity{}, err
 	}
 	identity := externalIdentity{
@@ -560,7 +581,7 @@ func (h LoginHandler) githubEmail(ctx context.Context, endpoint, token string) (
 		Primary  bool   `json:"primary"`
 		Verified bool   `json:"verified"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&values); err != nil {
+	if err := decodeAuthorizationJSON(response.Body, maxAuthorizationEmailResponse, &values); err != nil {
 		return "", err
 	}
 	for _, value := range values {

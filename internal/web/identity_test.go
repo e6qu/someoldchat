@@ -24,6 +24,36 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+func TestDecodeAuthorizationJSONBoundsExternalResponses(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		body  string
+		limit int64
+		want  string
+	}{
+		{name: "within limit", body: `{"access_token":"token"}`, limit: 64, want: ""},
+		{name: "over limit", body: `{"access_token":"token"}`, limit: 10, want: "exceeds"},
+		{name: "invalid JSON", body: `{`, limit: 64, want: "unexpected end of JSON input"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var value tokenResponse
+			err := decodeAuthorizationJSON(strings.NewReader(test.body), test.limit, &value)
+			if test.want == "" {
+				if err != nil {
+					t.Fatalf("decode error=%v", err)
+				}
+				if value.AccessToken != "token" {
+					t.Fatalf("decoded value=%+v", value)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("decode error=%v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
 func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
