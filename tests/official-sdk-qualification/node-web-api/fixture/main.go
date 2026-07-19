@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -22,6 +23,15 @@ import (
 
 func main() {
 	store := memory.New()
+	if err := store.AppendEvent(context.Background(), events.Event{
+		ID:          "qualification-socket-event",
+		WorkspaceID: "T1",
+		Topic:       "message.created",
+		Payload:     `{"type":"event_callback","team_id":"T1","api_app_id":"A1","event_id":"qualification-socket-event","event_time":1,"event":{"type":"message","channel":"C1","user":"U1","text":"socket qualification event","ts":"1.000000","event_ts":"1.000000"}}`,
+		CreatedAt:   time.Unix(1, 0).UTC(),
+	}); err != nil {
+		panic(err)
+	}
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice"}})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", Email: "bob@example.com"})
@@ -47,6 +57,9 @@ func main() {
 	}
 	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
 	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		panic(err)
+	}
 	if err := store.SeedSession(context.Background(), "qualification-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		panic(err)
 	}
@@ -76,6 +89,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	responses := &qualificationResponseSink{store: store, values: make(map[string]string)}
 	appAuthenticator, err := auth.NewAppStored(store)
 	if err != nil {
 		panic(err)
@@ -83,6 +97,17 @@ func main() {
 	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
 	mux := http.NewServeMux()
 	handler.Register(mux)
+	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Events: messages, Cursors: messages, Responses: responses})
+	mux.HandleFunc("GET /qualification/socket-mode-response", func(w http.ResponseWriter, r *http.Request) {
+		envelopeID := r.URL.Query().Get("envelope_id")
+		payload, ok := responses.get(envelopeID)
+		if !ok {
+			http.Error(w, "response not recorded", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(payload))
+	})
 	server := &http.Server{Addr: "127.0.0.1:18080", Handler: mux}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -95,6 +120,29 @@ func main() {
 	if err := server.Shutdown(context.Background()); err != nil {
 		panic(err)
 	}
+}
+
+type qualificationResponseSink struct {
+	store  *memory.Store
+	mu     sync.RWMutex
+	values map[string]string
+}
+
+func (s *qualificationResponseSink) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
+	if err := (socketmode.ResponseRecorder{Store: s.store}).HandleSocketModeResponse(ctx, appID, envelopeID, payload); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.values[envelopeID] = string(payload)
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *qualificationResponseSink) get(envelopeID string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	payload, ok := s.values[envelopeID]
+	return payload, ok
 }
 
 func scopeSet() map[auth.Scope]struct{} {

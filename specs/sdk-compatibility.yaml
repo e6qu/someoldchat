@@ -31,6 +31,17 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
+  - id: node-socket-mode
+    ecosystem: npm
+    package: '@slack/socket-mode'
+    upstream: https://github.com/slackapi/node-slack-sdk
+    release: 3.0.0
+    revision: 70e15b8442745d215f9ae259a2c970b306aff51a
+    artifact: socket-mode-3.0.0.tgz
+    sha256: 3d70683ca2872323150747e9611f4de35d9df333bdc6321bb4360c9f1d165fe6
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
   - id: python-slack-sdk
     ecosystem: pypi
     package: slack-sdk

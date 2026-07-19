@@ -1,0 +1,8 @@
+{
+  "name": "sameoldchat-node-socket-mode-qualification",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@slack/socket-mode": "3.0.0"
+  }
+}

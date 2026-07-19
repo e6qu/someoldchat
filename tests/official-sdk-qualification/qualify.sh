@@ -82,6 +82,14 @@ cp "$root/tests/official-sdk-qualification/node-web-api/qualification.mjs" "$wor
 stop_fixture
 start_fixture
 
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/socket-mode@3.0.0')
+require_hash "$work/npm/$npm_tarball" 3d70683ca2872323150747e9611f4de35d9df333bdc6321bb4360c9f1d165fe6
+npm install --prefix "$work/node-socket-mode" --no-save "$work/npm/$npm_tarball"
+cp "$root/tests/official-sdk-qualification/node-socket-mode/qualification.mjs" "$work/node-socket-mode/qualification.mjs"
+(cd "$work/node-socket-mode" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
+stop_fixture
+start_fixture
+
 npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@4.7.3')
 require_hash "$work/npm/$npm_tarball" 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
 npm install --prefix "$work/node-bolt" --no-save "$work/npm/$npm_tarball"
