@@ -51,8 +51,11 @@ For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` sets the shared parent DNS hostname for
 cross-application browser single sign-on. `SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL`
 provides the email address of the initial
-workspace user. It must be the verified email the issuer returns: external
-identities are linked only to existing users and are never auto-provisioned.
+workspace user. A configured OpenID Connect issuer is an authorization
+boundary: an identity carrying a `developer` or `admin` role is provisioned as
+an active workspace member on first sign-in, and its workspace role is kept in
+sync on later sign-ins. Other external providers still require an existing
+workspace user with the same verified email.
 
 ## Single sign-on and logout
 
@@ -78,8 +81,9 @@ must authenticate again or receive a newly issued token.
 The server creates a short-lived signed state cookie and uses
 Proof Key for Code Exchange (PKCE). It links a returned external subject to an
 existing workspace member by provider and subject, or by verified email when
-the subject has not been linked. It does not provision an unapproved member
-implicitly.
+the subject has not been linked. An OpenID Connect identity is provisioned only
+when the configured issuer returns a supported `developer` or `admin` role;
+missing or unknown roles fail closed.
 
 ## Administration
 
