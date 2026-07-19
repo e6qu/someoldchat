@@ -205,17 +205,36 @@ func printReport() error {
 	if err != nil {
 		return fmt.Errorf("decode compatibility ledger: %w", err)
 	}
-	counts := make(map[string]int, len(statusRank))
-	for _, item := range ledger.Operations {
-		counts[item.Status]++
-	}
+	counts := cumulativeEvidenceCounts(ledger.Operations)
 	total := len(ledger.Operations)
-	implemented := total - counts["unimplemented"]
+	implemented := 0
+	unimplemented := 0
+	for _, operation := range ledger.Operations {
+		if operation.Status == "unimplemented" {
+			unimplemented++
+			continue
+		}
+		implemented++
+	}
 	fmt.Printf("operations=%d implemented=%d/%d verified-against-slack=%d/%d\n", total, implemented, total, counts["verified-against-slack"], total)
-	for _, status := range []string{"unimplemented", "schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
-		fmt.Printf("%s=%d\n", status, counts[status])
+	fmt.Printf("unimplemented=%d\n", unimplemented)
+	for _, status := range []string{"schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
+		fmt.Printf("%s-or-better=%d/%d\n", status, counts[status], total)
 	}
 	return nil
+}
+
+func cumulativeEvidenceCounts(operations []operation) map[string]int {
+	counts := make(map[string]int, len(statusRank))
+	for _, operation := range operations {
+		rank := statusRank[operation.Status]
+		for status, level := range statusRank {
+			if rank >= level {
+				counts[status]++
+			}
+		}
+	}
+	return counts
 }
 
 func verifyHandlerRegistrations(implementedMethods, ledgerMethods map[string]struct{}) error {
