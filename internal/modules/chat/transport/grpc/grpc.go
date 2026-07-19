@@ -374,6 +374,11 @@ func (r Remote) SetSocketModeCursor(ctx context.Context, appID domain.AppID, cur
 	return err
 }
 
+func (r Remote) RecordSocketModeResponse(ctx context.Context, value domain.SocketModeResponse) error {
+	_, err := r.rtm.RecordSocketModeResponse(ctx, &chatv1.SocketModeResponseRequest{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID, Payload: value.Payload, ReceivedAtUnixNano: value.ReceivedAt.UTC().UnixNano()})
+	return err
+}
+
 func (r Remote) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
 	in := &chatv1.UpdateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text}
 	out, err := r.messages.Update(ctx, in)
@@ -3054,6 +3059,17 @@ func (s *Server) SetSocketModeCursor(ctx context.Context, input *chatv1.SocketMo
 		return nil, mapError(err)
 	}
 	return &chatv1.SocketModeCursor{AppId: input.GetAppId(), Sequence: input.GetSequence()}, nil
+}
+
+func (s *Server) RecordSocketModeResponse(ctx context.Context, input *chatv1.SocketModeResponseRequest) (*chatv1.SocketModeResponse, error) {
+	if input == nil || input.GetAppId() == "" || input.GetEnvelopeId() == "" || input.GetPayload() == "" || input.GetReceivedAtUnixNano() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "Socket Mode response fields are required")
+	}
+	value := domain.SocketModeResponse{AppID: domain.AppID(input.GetAppId()), EnvelopeID: input.GetEnvelopeId(), Payload: input.GetPayload(), ReceivedAt: time.Unix(0, input.GetReceivedAtUnixNano()).UTC()}
+	if err := s.implementation.RecordSocketModeResponse(ctx, value); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SocketModeResponse{AppId: string(value.AppID), EnvelopeId: value.EnvelopeID, Payload: value.Payload, ReceivedAtUnixNano: value.ReceivedAt.UnixNano()}, nil
 }
 
 func (s *Server) Update(ctx context.Context, input *chatv1.UpdateRequest) (*chatv1.Message, error) {

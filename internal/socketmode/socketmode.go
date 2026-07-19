@@ -39,6 +39,29 @@ type ResponseSink interface {
 	HandleSocketModeResponse(context.Context, domain.AppID, string, []byte) error
 }
 
+type ResponseRecorder struct {
+	Store interface {
+		RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
+	}
+	Now func() time.Time
+}
+
+func (r ResponseRecorder) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
+	if r.Store == nil {
+		return errors.New("Socket Mode response recorder requires a store")
+	}
+	now := time.Now
+	if r.Now != nil {
+		now = r.Now
+	}
+	return r.Store.RecordSocketModeResponse(ctx, domain.SocketModeResponse{
+		AppID:      appID,
+		EnvelopeID: envelopeID,
+		Payload:    string(payload),
+		ReceivedAt: now().UTC(),
+	})
+}
+
 type Service struct {
 	Store ConnectionStore
 	Host  string

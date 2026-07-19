@@ -42,6 +42,20 @@ message SocketModeCursor {
   uint64 sequence = 2;
 }
 
+message SocketModeResponseRequest {
+  string app_id = 1;
+  string envelope_id = 2;
+  string payload = 3;
+  int64 received_at_unix_nano = 4;
+}
+
+message SocketModeResponse {
+  string app_id = 1;
+  string envelope_id = 2;
+  string payload = 3;
+  int64 received_at_unix_nano = 4;
+}
+
 service RTMService {
   rpc CreateConnection(RTMConnectionRequest) returns (RTMConnection);
   rpc ConsumeConnection(RTMConnectionIDRequest) returns (RTMConnection);
@@ -49,4 +63,5 @@ service RTMService {
   rpc ConsumeSocketModeConnection(RTMConnectionIDRequest) returns (SocketModeConnection);
   rpc GetSocketModeCursor(SocketModeCursorRequest) returns (SocketModeCursor);
   rpc SetSocketModeCursor(SocketModeCursorRequest) returns (SocketModeCursor);
+  rpc RecordSocketModeResponse(SocketModeResponseRequest) returns (SocketModeResponse);
 }

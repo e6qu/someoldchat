@@ -584,6 +584,18 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if err := repository.SetSocketModeCursor(ctx, "A-qualification", cursor-1); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("cursor regression error=%v, want ErrConflict", err)
 		}
+		response := domain.SocketModeResponse{AppID: "A-qualification", EnvelopeID: "event-4", Payload: `{"ok":true}`, ReceivedAt: time.Now().UTC()}
+		if err := repository.RecordSocketModeResponse(ctx, response); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.RecordSocketModeResponse(ctx, response); err != nil {
+			t.Fatalf("identical response replay error=%v", err)
+		}
+		conflict := response
+		conflict.Payload = `{"ok":false}`
+		if err := repository.RecordSocketModeResponse(ctx, conflict); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("conflicting response replay error=%v, want ErrConflict", err)
+		}
 	})
 }
 

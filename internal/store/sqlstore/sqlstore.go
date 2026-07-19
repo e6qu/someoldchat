@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TE
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS socket_mode_responses (app_id TEXT NOT NULL, envelope_id TEXT NOT NULL, payload TEXT NOT NULL, received_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (app_id, envelope_id));
 CREATE TABLE IF NOT EXISTS conversation_prefs (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
@@ -189,7 +190,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 61
+const schemaVersion = 62
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -960,6 +961,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 	if version < 61 {
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0)`); err != nil {
 			return fmt.Errorf("migrate Socket Mode cursors: %w", err)
+		}
+	}
+	if version < 62 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_responses (app_id TEXT NOT NULL, envelope_id TEXT NOT NULL, payload TEXT NOT NULL, received_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (app_id, envelope_id))`); err != nil {
+			return fmt.Errorf("migrate Socket Mode responses: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -3162,6 +3168,31 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 		return domain.SocketModeConnection{}, err
 	}
 	return value, nil
+}
+
+func (s *Store) RecordSocketModeResponse(ctx context.Context, value domain.SocketModeResponse) error {
+	if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" || strings.TrimSpace(value.Payload) == "" || value.ReceivedAt.IsZero() {
+		return errors.New("invalid Socket Mode response")
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_responses(app_id, envelope_id, payload, received_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, envelope_id) DO NOTHING`, value.AppID, value.EnvelopeID, value.Payload, value.ReceivedAt.UTC().UnixNano())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 1 {
+		return nil
+	}
+	var payload string
+	if err := s.db.QueryRowContext(ctx, `SELECT payload FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&payload); err != nil {
+		return translateNotFound(err)
+	}
+	if payload != value.Payload {
+		return store.ErrConflict
+	}
+	return nil
 }
 
 func (s *Store) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {

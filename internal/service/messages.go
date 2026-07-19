@@ -97,6 +97,10 @@ func (m Messages) ConsumeSocketModeConnection(ctx context.Context, id string) (d
 	return m.Store.ConsumeSocketModeConnection(ctx, id)
 }
 
+func (m Messages) RecordSocketModeResponse(ctx context.Context, value domain.SocketModeResponse) error {
+	return m.Store.RecordSocketModeResponse(ctx, value)
+}
+
 func (m Messages) RevokeToken(ctx context.Context, token string) error {
 	if strings.TrimSpace(token) == "" {
 		return store.ErrNotFound

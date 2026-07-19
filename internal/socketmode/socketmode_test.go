@@ -208,4 +208,25 @@ func TestHandlerDeliversEventAndAdvancesOnlyAfterAcknowledgement(t *testing.T) {
 	}
 }
 
+func TestResponseRecorderRequiresDurableStore(t *testing.T) {
+	recorder := ResponseRecorder{}
+	if err := recorder.HandleSocketModeResponse(context.Background(), "A123", "env-1", []byte(`{"ok":true}`)); err == nil {
+		t.Fatal("response recorder without a store succeeded")
+	}
+}
+
+func FuzzEncodeEventProducesJSON(f *testing.F) {
+	f.Add(`{"text":"hello"}`, "message.created")
+	f.Add("not json", "message.created")
+	f.Fuzz(func(t *testing.T, payload, topic string) {
+		encoded, err := encodeEvent(events.Record{Event: events.Event{ID: "event", Topic: topic, Payload: payload}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := json.Marshal(encoded); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
 var _ http.Handler = Handler{}
