@@ -201,7 +201,10 @@ type queryExecutor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-type Store struct{ db *sql.DB }
+type Store struct {
+	db                     *sql.DB
+	migrationLockStatement string
+}
 
 var _ store.Store = (*Store)(nil)
 
@@ -265,27 +268,27 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 }
 
 func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, true)
+	return fromDB(ctx, db, true, "")
 }
 
 // FromDqliteDB initializes the repository against a dqlite-managed database.
 // dqlite owns connection configuration and rejects SQLite-only PRAGMA statements.
 func FromDqliteDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, false)
+	return fromDB(ctx, db, false, "")
 }
 
 // FromPostgresDB initializes the repository against a PostgreSQL database
 // opened by the PostgreSQL adapter. The adapter owns PostgreSQL-specific
 // connection settings and SQL translation.
 func FromPostgresDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, false)
+	return fromDB(ctx, db, false, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`)
 }
 
-func fromDB(ctx context.Context, db *sql.DB, configureSQLite bool) (*Store, error) {
+func fromDB(ctx context.Context, db *sql.DB, configureSQLite bool, migrationLockStatement string) (*Store, error) {
 	if db == nil {
-		return nil, errors.New("SQLite store requires a database handle")
+		return nil, errors.New("SQL store requires a database handle")
 	}
-	s := &Store{db: db}
+	s := &Store{db: db, migrationLockStatement: migrationLockStatement}
 	if configureSQLite {
 		if err := s.configure(ctx); err != nil {
 			return nil, err
@@ -421,11 +424,11 @@ func (s *Store) SeedConversationMember(ctx context.Context, conversation domain.
 func (s *Store) Migrate(ctx context.Context) error {
 	connection, err := s.db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("acquire sqlite migration connection: %w", err)
+		return fmt.Errorf("acquire migration connection: %w", err)
 	}
 	defer connection.Close()
 	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return fmt.Errorf("acquire sqlite migration lock: %w", err)
+		return fmt.Errorf("begin migration transaction: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -433,11 +436,16 @@ func (s *Store) Migrate(ctx context.Context) error {
 			_, _ = connection.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
+	if s.migrationLockStatement != "" {
+		if _, err := connection.ExecContext(ctx, s.migrationLockStatement); err != nil {
+			return fmt.Errorf("acquire migration lock: %w", err)
+		}
+	}
 	if err := s.migrateOn(ctx, connection); err != nil {
 		return err
 	}
 	if _, err := connection.ExecContext(ctx, "COMMIT"); err != nil {
-		return fmt.Errorf("commit sqlite migration: %w", err)
+		return fmt.Errorf("commit migration: %w", err)
 	}
 	committed = true
 	return nil
@@ -445,11 +453,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 
 func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 	if _, err := db.ExecContext(ctx, schema); err != nil {
-		return fmt.Errorf("migrate sqlite: %w", err)
+		return fmt.Errorf("migrate schema: %w", err)
 	}
 	var version int
 	if err := db.QueryRowContext(ctx, `SELECT COALESCE(MAX(version), 0) FROM schema_migrations`).Scan(&version); err != nil {
-		return fmt.Errorf("read sqlite schema version: %w", err)
+		return fmt.Errorf("read schema version: %w", err)
 	}
 	if version < 2 {
 		columns, err := s.outboxColumns(ctx, db)
@@ -994,13 +1002,13 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-		return fmt.Errorf("record sqlite schema version: %w", err)
+		return fmt.Errorf("record schema version: %w", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
-		return fmt.Errorf("read sqlite schema version: %w", err)
+		return fmt.Errorf("read schema version: %w", err)
 	}
 	if version != schemaVersion {
-		return fmt.Errorf("unsupported sqlite schema version %d (want %d)", version, schemaVersion)
+		return fmt.Errorf("unsupported schema version %d (want %d)", version, schemaVersion)
 	}
 	return nil
 }

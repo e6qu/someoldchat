@@ -39,8 +39,7 @@ test-dqlite:
 
 test-postgres:
 	test -n "$(SAMEOLDCHAT_POSTGRES_DSN)"
-	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification
-	GOCACHE=$(GOCACHE) go test -tags postgres ./internal/web
+	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification ./internal/store/postgres ./internal/web
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...

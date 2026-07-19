@@ -548,18 +548,19 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 
 	t.Run("app token and Socket Mode connection are durable and single use", func(t *testing.T) {
 		appToken := "xapp-qualification-" + suffix
-		if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A-qualification", WorkspaceID: workspaceID, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		appID := domain.AppID("A-qualification-" + suffix)
+		if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: appID, WorkspaceID: workspaceID, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 			t.Fatal(err)
 		}
-		installations, err := repository.ListAppInstallations(ctx, "A-qualification")
+		installations, err := repository.ListAppInstallations(ctx, appID)
 		if err != nil || len(installations) != 1 || installations[0].WorkspaceID != workspaceID {
 			t.Fatalf("app installations=%+v err=%v", installations, err)
 		}
-		if err := repository.SeedAppToken(ctx, appToken, domain.AppTokenRecord{AppID: "A-qualification", Scopes: []string{" connections:write ", "connections:write"}}); err != nil {
+		if err := repository.SeedAppToken(ctx, appToken, domain.AppTokenRecord{AppID: appID, Scopes: []string{" connections:write ", "connections:write"}}); err != nil {
 			t.Fatal(err)
 		}
 		token, err := repository.LookupAppToken(ctx, appToken)
-		if err != nil || token.AppID != "A-qualification" || len(token.Scopes) != 1 || token.Scopes[0] != "connections:write" {
+		if err != nil || token.AppID != appID || len(token.Scopes) != 1 || token.Scopes[0] != "connections:write" {
 			t.Fatalf("app token=%+v err=%v", token, err)
 		}
 		connection := domain.SocketModeConnection{ID: "socket-" + suffix, AppID: token.AppID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
@@ -587,7 +588,7 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if _, err := repository.ConsumeSocketModeConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("replayed Socket Mode connection error=%v, want ErrNotFound", err)
 		}
-		before, err := repository.ListAppEventsAfter(ctx, "A-qualification", 0, 100)
+		before, err := repository.ListAppEventsAfter(ctx, appID, 0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -598,21 +599,21 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if err := repository.AppendEvent(ctx, event("socket-event", "message.created", "socket-event")); err != nil {
 			t.Fatal(err)
 		}
-		records, err := repository.ListAppEventsAfter(ctx, "A-qualification", after, 10)
+		records, err := repository.ListAppEventsAfter(ctx, appID, after, 10)
 		if err != nil || len(records) != 1 || records[0].Event.Topic != "message.created" {
 			t.Fatalf("app events=%+v err=%v", records, err)
 		}
-		if err := repository.SetSocketModeCursor(ctx, "A-qualification", records[0].Sequence); err != nil {
+		if err := repository.SetSocketModeCursor(ctx, appID, records[0].Sequence); err != nil {
 			t.Fatal(err)
 		}
-		cursor, err := repository.GetSocketModeCursor(ctx, "A-qualification")
+		cursor, err := repository.GetSocketModeCursor(ctx, appID)
 		if err != nil || cursor != records[0].Sequence {
 			t.Fatalf("cursor=%d err=%v", cursor, err)
 		}
-		if err := repository.SetSocketModeCursor(ctx, "A-qualification", cursor-1); !errors.Is(err, store.ErrConflict) {
+		if err := repository.SetSocketModeCursor(ctx, appID, cursor-1); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("cursor regression error=%v, want ErrConflict", err)
 		}
-		response := domain.SocketModeResponse{AppID: "A-qualification", EnvelopeID: "event-4", Payload: `{"ok":true}`, ReceivedAt: time.Now().UTC()}
+		response := domain.SocketModeResponse{AppID: appID, EnvelopeID: "event-4-" + suffix, Payload: `{"ok":true}`, ReceivedAt: time.Now().UTC()}
 		if err := repository.RecordSocketModeResponse(ctx, response); err != nil {
 			t.Fatal(err)
 		}
@@ -624,7 +625,7 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if err := repository.RecordSocketModeResponse(ctx, conflict); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("conflicting response replay error=%v, want ErrConflict", err)
 		}
-		queued := domain.SocketModeResponse{AppID: "A-queue-qualification", EnvelopeID: "event-5", Payload: `{"ok":true}`, ReceivedAt: time.Now().UTC()}
+		queued := domain.SocketModeResponse{AppID: domain.AppID("A-queue-qualification-" + suffix), EnvelopeID: "event-5-" + suffix, Payload: `{"ok":true}`, ReceivedAt: time.Now().UTC()}
 		if err := repository.RecordSocketModeResponse(ctx, queued); err != nil {
 			t.Fatal(err)
 		}
@@ -642,7 +643,7 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 			t.Fatalf("acknowledged responses reclaimed=%+v err=%v", claimed, err)
 		}
 		retry := queued
-		retry.EnvelopeID = "event-6"
+		retry.EnvelopeID = "event-6-" + suffix
 		if err := repository.RecordSocketModeResponse(ctx, retry); err != nil {
 			t.Fatal(err)
 		}

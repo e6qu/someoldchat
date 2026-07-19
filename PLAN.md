@@ -88,6 +88,12 @@ Exit criteria:
 - A dqlite leader failure produces either one committed command or no committed
   command, never a duplicate or partial command.
 
+PostgreSQL schema migration acquired a database-scoped transaction advisory
+lock before touching the catalog, so concurrent application replicas started
+against a fresh database without racing on schema creation. Its qualification
+used isolated durable identifiers and passed repeatedly against both fresh and
+already-populated databases.
+
 ### Phase 2: Core Slack API vertical slice
 
 Implement the first usable slice:
