@@ -22,8 +22,16 @@ func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
 
 func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
-	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || (!principal.HasScope(auth.ScopeAdminAppsWrite) && !principal.HasScope(auth.ScopeAdminUsersWrite)) {
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	if !principal.HasScope(auth.ScopeAdminAppsWrite) && !principal.HasScope(auth.ScopeAdminUsersWrite) {
+		h.writeAuthError(w, auth.ErrMissingScope)
 		return
 	}
 	h.setCSRFCookie(w, r)
