@@ -86,6 +86,17 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+  - id: java-socket-mode
+    ecosystem: maven
+    package: com.slack.api:slack-api-client
+    upstream: https://github.com/slackapi/java-slack-sdk
+    release: 1.49.0
+    revision: 06f512b9d2741ed38573915528c9f66cee90df48
+    artifact: slack-api-client-1.49.0.jar
+    sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/SocketModeQualification.java
   - id: deno-slack-runtime
     ecosystem: deno
     package: deno-slack-runtime

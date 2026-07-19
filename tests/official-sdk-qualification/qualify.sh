@@ -120,8 +120,11 @@ start_fixture
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:go-offline compile
 java_api_jar="$HOME/.m2/repository/com/slack/api/slack-api-client/1.49.0/slack-api-client-1.49.0.jar"
 java_bolt_jar="$HOME/.m2/repository/com/slack/api/bolt/1.49.0/bolt-1.49.0.jar"
+java_websocket_jar="$HOME/.m2/repository/org/java-websocket/Java-WebSocket/1.6.0/Java-WebSocket-1.6.0.jar"
 require_hash "$java_api_jar" eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
 require_hash "$java_bolt_jar" 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
+require_hash "$java_websocket_jar" eae29213e4f16515639c28957200f011b3967fffcada1962cf0255d24919c22f
 mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" dependency:build-classpath -Dmdep.outputFile="$work/java-classpath"
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" exec:java
+SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ SAMEOLDCHAT_QUALIFICATION_URL=http://127.0.0.1:18080 java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.SocketModeQualification
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.BoltQualification
