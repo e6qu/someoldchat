@@ -95,6 +95,29 @@ func TestSocketModeResponseRenewalKeepsSlowLeaseOwned(t *testing.T) {
 	}
 }
 
+func TestScheduledMessageClaimsSortBeforeApplyingLimit(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	created := time.Now().UTC().Add(-time.Minute)
+	for _, id := range []domain.ScheduledMessageID{"scheduled-a", "scheduled-b"} {
+		value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", Text: string(id), PostAt: created, CreatedAt: created}
+		if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: domain.EventID("event-" + string(id)), WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(id), CreatedAt: created}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	first, err := s.ClaimScheduledMessages(ctx, "T1", "worker-1", 1, time.Minute)
+	if err != nil || len(first) != 1 || first[0].ID != "scheduled-a" {
+		t.Fatalf("first claim=%+v err=%v", first, err)
+	}
+	second, err := s.ClaimScheduledMessages(ctx, "T1", "worker-2", 1, time.Minute)
+	if err != nil || len(second) != 1 || second[0].ID != "scheduled-b" {
+		t.Fatalf("second claim=%+v err=%v", second, err)
+	}
+}
+
 func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	ctx := context.Background()
 	s := New()
