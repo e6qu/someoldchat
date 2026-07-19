@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"flag"
@@ -235,14 +236,26 @@ func main() {
 func requireControlToken(next http.Handler, token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/activate" || r.URL.Path == "/hibernate" || r.URL.Path == "/recover" {
-			value := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-			if value == "" || value != token {
+			if !validControlToken(r.Header.Get("Authorization"), token) {
 				w.WriteHeader(http.StatusUnauthorized)
 				return
 			}
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func validControlToken(header, expected string) bool {
+	const bearerPrefix = "Bearer "
+	if !strings.HasPrefix(header, bearerPrefix) {
+		return false
+	}
+	provided := strings.TrimSpace(strings.TrimPrefix(header, bearerPrefix))
+	expected = strings.TrimSpace(expected)
+	if provided == "" || len(provided) != len(expected) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
 }
 
 type commandFlags struct {
