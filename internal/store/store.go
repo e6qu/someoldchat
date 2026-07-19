@@ -101,6 +101,7 @@ type Store interface {
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
 	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
+	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)

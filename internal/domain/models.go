@@ -676,3 +676,13 @@ type SocketModeConnection struct {
 	AppID     AppID
 	ExpiresAt time.Time
 }
+
+type SocketModeResponse struct {
+	AppID          AppID
+	EnvelopeID     string
+	Payload        string
+	ReceivedAt     time.Time
+	LeaseOwner     string
+	LeaseExpiresAt time.Time
+	AcknowledgedAt time.Time
+}

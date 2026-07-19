@@ -135,8 +135,19 @@ active connection per app and uses a bounded one-event-at-a-time delivery loop;
 the client must acknowledge an event before the next event is sent.
 
 Response payloads are accepted only for known event envelopes and must be
-valid JSON. Their application-specific routing remains tracked in the
-compatibility ledger.
+valid JSON. The HTTP process records each response durably by app identifier
+and envelope identifier before it advances the event cursor. Replaying the
+same response is idempotent; replaying the envelope with different payload
+bytes fails with a state conflict. The response record is the explicit handoff
+to the application response processor, so a process crash after the WebSocket
+ack does not erase the response input. The local and distributed compositions
+use the same generated chat boundary for this write.
+
+The response record is an input journal, not an implicit retry or a hidden
+fallback. A response processor must claim and acknowledge records explicitly;
+until that processor exists, the record remains durable and observable rather
+than being applied speculatively. See this section and the compatibility
+ledger for the supported wire contract.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
 and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).

@@ -234,7 +234,7 @@ func main() {
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
 		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: *socketHost, TLS: *socketTLS}, socketModeAuth)
-		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Events: chatService, Cursors: chatService})
+		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Events: chatService, Cursors: chatService, Responses: socketmode.ResponseRecorder{Store: chatService}})
 	}
 	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, "Cdev", *authCookieDomain)
 	if err != nil {
