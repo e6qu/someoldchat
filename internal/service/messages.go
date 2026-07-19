@@ -880,6 +880,40 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 	return m.Store.CreateInviteRequest(ctx, value, event)
 }
 
+func (m Messages) AdminCreateUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, email, realName string, role domain.WorkspaceRole) (domain.User, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return domain.User{}, err
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	realName = strings.TrimSpace(realName)
+	if workspaceID == "" || email == "" || !strings.Contains(email, "@") || len(email) > 320 || realName == "" || len(realName) > 200 {
+		return domain.User{}, ErrInvalidInviteRequest
+	}
+	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin {
+		return domain.User{}, ErrInvalidInviteRequest
+	}
+	if _, err := m.Store.FindUserByEmail(ctx, workspaceID, email); err == nil {
+		return domain.User{}, store.ErrAlreadyExists
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return domain.User{}, err
+	}
+	id, err := domain.NewUserID()
+	if err != nil {
+		return domain.User{}, err
+	}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.User{}, err
+	}
+	now := time.Now().UTC()
+	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: realName, RealName: realName, Presence: domain.PresenceAuto}
+	membership := domain.WorkspaceMembership{WorkspaceID: workspaceID, UserID: id, Role: role, Active: true}
+	if err := m.Store.CreateUser(ctx, user, membership, events.Event{ID: eventID, WorkspaceID: workspaceID, ActorID: actorID, Topic: "user.created", Payload: string(id), CreatedAt: now}); err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
+}
+
 func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID, channels []domain.ConversationID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
 		return err

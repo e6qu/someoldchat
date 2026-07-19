@@ -224,6 +224,13 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	createdUser, err := remote.AdminCreateUser(ctx, "T1", "U1", "new@example.com", "New User", domain.WorkspaceRoleMember)
+	if err != nil || createdUser.Email != "new@example.com" || createdUser.RealName != "New User" {
+		t.Fatalf("created user=%+v err=%v", createdUser, err)
+	}
+	if _, err := remote.AdminCreateUser(ctx, "T1", "U1", "NEW@example.com", "Duplicate", domain.WorkspaceRoleMember); err == nil {
+		t.Fatal("duplicate manual user was accepted")
+	}
 	tokenStore := auth.TokenStore(remote)
 	token, err := tokenStore.LookupToken(ctx, "api-token")
 	if err != nil || token.UserID != "U1" || len(token.Scopes) != 1 || token.Scopes[0] != "chat:write" {
@@ -387,7 +394,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("reused=%+v direct=%+v err=%v", reused, direct, err)
 	}
 	users, err := remote.Users(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
-	if err != nil || len(users.Users) != 2 || users.Users[0].ID != "U1" {
+	if err != nil || len(users.Users) != 3 || !containsUser(users.Users, "U1") || !containsUser(users.Users, "U2") || !containsUser(users.Users, createdUser.ID) {
 		t.Fatalf("users=%+v err=%v", users, err)
 	}
 	workspace, err := remote.WorkspaceInfo(ctx, "T1", "U1")
@@ -464,7 +471,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	records, err := remote.ListEventsAfter(ctx, "T1", 0, 23)
-	if err != nil || len(records) != 23 || records[0].Sequence != 1 || records[0].Event.Payload != string(message.ID) {
+	if err != nil || len(records) != 23 || records[0].Sequence != 1 || records[0].Event.Topic != "user.created" || records[0].Event.Payload != string(createdUser.ID) {
 		t.Fatalf("events=%+v err=%v", records, err)
 	}
 }
@@ -562,6 +569,15 @@ func TestRemoteConcurrentPostsPreserveEveryCall(t *testing.T) {
 }
 
 func containsConversation(values []domain.Conversation, want domain.ConversationID) bool {
+	for _, value := range values {
+		if value.ID == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsUser(values []domain.User, want domain.UserID) bool {
 	for _, value := range values {
 		if value.ID == want {
 			return true

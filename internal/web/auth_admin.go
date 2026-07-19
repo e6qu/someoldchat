@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
@@ -30,7 +33,9 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
-	if !principal.HasScope(auth.ScopeAdminAppsWrite) && !principal.HasScope(auth.ScopeAdminUsersWrite) {
+	canReadApps := principal.HasScope(auth.ScopeAdminAppsRead) || principal.HasScope(auth.ScopeAdminAppsWrite)
+	canWriteApps := principal.HasScope(auth.ScopeAdminAppsWrite)
+	if !canReadApps && !principal.HasScope(auth.ScopeAdminUsersWrite) {
 		h.writeAuthError(w, auth.ErrMissingScope)
 		return
 	}
@@ -43,7 +48,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 	csrfToken := auth.CSRFToken(sessionCookie.Value)
 	var output strings.Builder
 	output.WriteString(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorization methods · SameOldChat</title><style>body{font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8f8fa;color:#1d1c1d;margin:0}.wrap{max-width:760px;margin:40px auto;background:#fff;padding:28px;border:1px solid #ddd;border-radius:10px}h1{margin-top:0}.row{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #ddd;padding:16px 0}.toggle{background:#007a5a;color:#fff;border:0;border-radius:5px;padding:8px 12px}.toggle.off{background:#777}</style></head><body><main class="wrap"><h1>Authorization methods</h1><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p>`)
-	if principal.HasScope(auth.ScopeAdminAppsWrite) {
+	if canReadApps {
 		names := make([]string, 0, len(h.Login.providers))
 		for name := range h.Login.providers {
 			names = append(names, name)
@@ -63,11 +68,15 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 			if !method.Enabled {
 				button = "Enable"
 			}
-			output.WriteString(`<div class="row"><span><strong>` + providerLabel(name) + `</strong><br><small>` + state + `</small></span><form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="` + csrfToken + `"><input type="hidden" name="provider" value="` + name + `"><input type="hidden" name="enabled" value="` + fmt.Sprint(!method.Enabled) + `"><button class="` + class + `" type="submit">` + button + `</button></form></div>`)
+			if canWriteApps {
+				output.WriteString(`<div class="row"><span><strong>` + providerLabel(name) + `</strong><br><small>` + state + `</small></span><form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="` + csrfToken + `"><input type="hidden" name="provider" value="` + name + `"><input type="hidden" name="enabled" value="` + fmt.Sprint(!method.Enabled) + `"><button class="` + class + `" type="submit">` + button + `</button></form></div>`)
+			} else {
+				output.WriteString(`<div class="row"><span><strong>` + providerLabel(name) + `</strong><br><small>` + state + `</small></span></div>`)
+			}
 		}
 	}
 	if principal.HasScope(auth.ScopeAdminUsersWrite) {
-		output.WriteString(`<hr><h2>Manual user setup</h2><p>Invite a user into the workspace; approval and membership remain durable admin workflows.</p><form method="post" action="/api/admin.auth.users.invite"><input type="hidden" name="_csrf" value="` + csrfToken + `"><label>Email <input name="email" type="email" required></label> <label>Name <input name="real_name" required></label> <button class="toggle" type="submit">Create invitation</button></form>`)
+		output.WriteString(`<hr><h2>Manual user setup</h2><p>Create an active workspace member directly. External authorization still requires a matching verified email.</p><form method="post" action="/api/admin.auth.users.create"><input type="hidden" name="_csrf" value="` + csrfToken + `"><label>Email <input name="email" type="email" maxlength="320" required></label> <label>Name <input name="real_name" maxlength="200" required></label> <label>Role <select name="role"><option value="member">Member</option><option value="admin">Administrator</option></select></label> <button class="toggle" type="submit">Create user</button></form>`)
 	}
 	output.WriteString(`</main></body></html>`)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -75,7 +84,7 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) authMethodsList(w http.ResponseWriter, r *http.Request) {
-	if !h.authAdminAllowed(w, r) {
+	if !h.authAdminAllowed(w, r, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite) {
 		return
 	}
 	names := make([]string, 0, len(h.Login.providers))
@@ -96,7 +105,7 @@ func (h Handler) authMethodsList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) authMethodSet(w http.ResponseWriter, r *http.Request) {
-	if !h.authAdminAllowed(w, r) {
+	if !h.authAdminAllowed(w, r, auth.ScopeAdminAppsWrite) {
 		return
 	}
 	if !h.requireCSRF(w, r) {
@@ -127,18 +136,60 @@ func (h Handler) authMethodSet(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/app/admin/auth", http.StatusSeeOther)
 }
 
-func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request) bool {
+func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request, scopes ...auth.Scope) bool {
 	principal, err := h.Authenticator.Authenticate(r)
-	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminAppsWrite) {
+	if err != nil {
+		writeAuthAdminJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authenticated"})
+		return false
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace {
 		writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
 		return false
 	}
-	return true
+	for _, scope := range scopes {
+		if principal.HasScope(scope) {
+			return true
+		}
+	}
+	writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
+	return false
+}
+
+func normalizeAdminInviteChannels(raw string) []domain.ConversationID {
+	values := strings.Split(raw, ",")
+	channels := make([]domain.ConversationID, 0, len(values))
+	seen := make(map[domain.ConversationID]struct{}, len(values))
+	for _, value := range values {
+		channel := domain.ConversationID(strings.TrimSpace(value))
+		if channel == "" {
+			continue
+		}
+		if _, exists := seen[channel]; exists {
+			continue
+		}
+		seen[channel] = struct{}{}
+		channels = append(channels, channel)
+	}
+	return channels
+}
+
+func authAdminInvitationError(err error) (int, string) {
+	if errors.Is(err, service.ErrInvalidInviteRequest) {
+		return http.StatusBadRequest, "invalid_invitation"
+	}
+	if errors.Is(err, store.ErrAlreadyExists) {
+		return http.StatusConflict, "invitation_already_exists"
+	}
+	return http.StatusServiceUnavailable, "user_invitation_unavailable"
 }
 
 func (h Handler) authUserInvite(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.Authenticator.Authenticate(r)
-	if err != nil || h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminUsersWrite) {
+	if err != nil {
+		writeAuthAdminJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authenticated"})
+		return
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminUsersWrite) {
 		writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
 		return
 	}
@@ -153,12 +204,51 @@ func (h Handler) authUserInvite(w http.ResponseWriter, r *http.Request) {
 		writeAuthAdminJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_user"})
 		return
 	}
-	if err := h.Messages.AdminInviteUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], nil, fields["custom_message"], fields["real_name"], false, false, false, time.Time{}); err != nil {
-		writeAuthAdminJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "user_invitation_unavailable"})
+	channels := normalizeAdminInviteChannels(fields["channel_ids"])
+	if err := h.Messages.AdminInviteUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], channels, fields["custom_message"], fields["real_name"], false, false, false, time.Time{}); err != nil {
+		status, code := authAdminInvitationError(err)
+		writeAuthAdminJSON(w, status, map[string]any{"ok": false, "error": code})
 		return
 	}
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
 		writeAuthAdminJSON(w, http.StatusOK, map[string]any{"ok": true})
+		return
+	}
+	http.Redirect(w, r, "/app/admin/auth", http.StatusSeeOther)
+}
+
+func (h Handler) authUserCreate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
+		writeAuthAdminJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authenticated"})
+		return
+	}
+	if h.Login == nil || principal.WorkspaceID != h.Login.workspace || !principal.HasScope(auth.ScopeAdminUsersWrite) {
+		writeAuthAdminJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
+		return
+	}
+	if !h.requireCSRF(w, r) {
+		return
+	}
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
+		return
+	}
+	role := domain.WorkspaceRole(strings.ToLower(strings.TrimSpace(fields["role"])))
+	user, err := h.Login.service.AdminCreateUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], fields["real_name"], role)
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		code := "user_creation_unavailable"
+		if errors.Is(err, store.ErrAlreadyExists) {
+			status, code = http.StatusConflict, "user_already_exists"
+		} else if errors.Is(err, service.ErrInvalidInviteRequest) {
+			status, code = http.StatusBadRequest, "invalid_user"
+		}
+		writeAuthAdminJSON(w, status, map[string]any{"ok": false, "error": code})
+		return
+	}
+	if strings.Contains(r.Header.Get("Accept"), "application/json") {
+		writeAuthAdminJSON(w, http.StatusCreated, map[string]any{"ok": true, "user": user})
 		return
 	}
 	http.Redirect(w, r, "/app/admin/auth", http.StatusSeeOther)

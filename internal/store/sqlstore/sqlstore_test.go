@@ -34,6 +34,69 @@ func TestSQLiteFindUserByEmailIsCaseInsensitiveAndMigrated(t *testing.T) {
 	}
 }
 
+func TestSQLiteCreateUserIsTransactionalAndWorkspaceScoped(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:create-user?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	value := domain.User{ID: "U2", WorkspaceID: "T1", Email: "alice@example.com", Name: "Alice", RealName: "Alice"}
+	membership := domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U2", Role: domain.WorkspaceRoleAdmin, Active: true}
+	if err := s.CreateUser(ctx, value, membership, events.Event{ID: "E-user", WorkspaceID: "T1", Topic: "user.created", Payload: "U2", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := s.GetUser(ctx, "U2")
+	if err != nil || loaded.Email != value.Email {
+		t.Fatalf("loaded=%+v err=%v", loaded, err)
+	}
+	role, err := s.GetWorkspaceMembership(ctx, "T1", "U2")
+	if err != nil || role.Role != domain.WorkspaceRoleAdmin {
+		t.Fatalf("membership=%+v err=%v", role, err)
+	}
+	if err := s.CreateUser(ctx, domain.User{ID: "U3", WorkspaceID: "T1", Email: "ALICE@EXAMPLE.COM", Name: "Other"}, domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U3", Role: domain.WorkspaceRoleMember, Active: true}, events.Event{ID: "E-duplicate", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != store.ErrAlreadyExists {
+		t.Fatalf("duplicate error=%v", err)
+	}
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name) VALUES (?, ?, ?, ?)`, "U4", "T1", "Alice@Example.com", "Other"); err == nil {
+		t.Fatal("database accepted a case-insensitive duplicate user email")
+	}
+}
+
+func TestSQLiteUserRemovalRevokesCredentialsAtomically(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:remove-user-credentials?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1", Email: "u2@example.com", Name: "User Two"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedToken(ctx, "user-two-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U2", Scopes: []string{"chat:write"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedSession(ctx, "user-two-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: []string{"chat:write"}, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetUserDeleted(ctx, "T1", "U2", true, events.Event{ID: "E-remove-user", WorkspaceID: "T1", Topic: "user.removed", Payload: "U2", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.LookupToken(ctx, "user-two-token")
+	if err != nil || !token.Revoked {
+		t.Fatalf("token=%+v err=%v", token, err)
+	}
+	session, err := s.LookupSession(ctx, "user-two-session")
+	if err != nil || !session.Revoked {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+}
+
 func TestSQLiteViewLifecycleIsDurable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:view-lifecycle?mode=memory&cache=shared")

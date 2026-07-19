@@ -66,6 +66,7 @@ func IsPublicID(value, prefix string) bool {
 func NewMessageID() (MessageID, error) { value, err := PublicID("msg_"); return MessageID(value), err }
 func NewEventID() (EventID, error)     { value, err := PublicID("evt_"); return EventID(value), err }
 func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return FileID(value), err }
+func NewUserID() (UserID, error)       { value, err := PublicID("U"); return UserID(value), err }
 func NewReminderID() (ReminderID, error) {
 	value, err := PublicID("Rm")
 	if err != nil {

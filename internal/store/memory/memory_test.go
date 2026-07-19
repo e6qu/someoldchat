@@ -24,6 +24,21 @@ func TestFindUserByEmailIsCaseInsensitiveAndWorkspaceScoped(t *testing.T) {
 	}
 }
 
+func TestCreateUserRequiresWorkspaceAndRejectsDuplicateEmail(t *testing.T) {
+	s := New()
+	ctx := context.Background()
+	if err := s.CreateUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Email: "a@example.com", Name: "Alice"}, domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U1", Role: domain.WorkspaceRoleMember, Active: true}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "user.created"}); err != store.ErrNotFound {
+		t.Fatalf("missing workspace error=%v", err)
+	}
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	if err := s.CreateUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Email: "a@example.com", Name: "Alice"}, domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U1", Role: domain.WorkspaceRoleMember, Active: true}, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "user.created"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1", Email: "A@EXAMPLE.COM", Name: "Other"}, domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U2", Role: domain.WorkspaceRoleMember, Active: true}, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "user.created"}); err != store.ErrAlreadyExists {
+		t.Fatalf("duplicate email error=%v", err)
+	}
+}
+
 func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	ctx := context.Background()
 	s := New()

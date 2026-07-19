@@ -70,6 +70,11 @@ application signs the user out of all applications using that session. The
 application must use the same session store in monolith and separate modes;
 the gRPC session adapter is the authoritative path for separate mode.
 
+Administrative user removal deactivates workspace membership and revokes every
+session and Slack-compatible token owned by that user in the same durable
+mutation. Re-enabling membership does not restore revoked credentials; the user
+must authenticate again or receive a newly issued token.
+
 The server creates a short-lived signed state cookie and uses
 Proof Key for Code Exchange (PKCE). It links a returned external subject to an
 existing workspace member by provider and subject, or by verified email when
@@ -80,7 +85,10 @@ implicitly.
 
 When external authorization is configured, an administrator with the relevant
 Slack-compatible scope can use `/app/admin/auth` to enable or disable the
-configured sources and invite a member manually.
+configured sources and create an active member manually. Manual creation uses
+the supplied verified email, creates durable workspace membership, and accepts
+only the `member` or `admin` role. It does not create a password or bypass the
+configured authorization source.
 
 The internal administration endpoints are:
 
@@ -88,12 +96,15 @@ The internal administration endpoints are:
 GET  /api/admin.auth.methods.list
 POST /api/admin.auth.methods.set
 POST /api/admin.auth.users.invite
+POST /api/admin.auth.users.create
 ```
 
 Provider secrets remain deployment configuration. Enablement is workspace state
-stored by the selected durable store. A disabled source returns a handled
-not-found response from its login and callback routes; it does not fall back to
-another source.
+stored by the selected durable store. The invitation endpoint remains the
+Slack-compatible invitation workflow and requires its channel and invitation
+parameters. The manual-user endpoint is the explicit internal administration
+workflow. A disabled source returns a handled not-found response from its login
+and callback routes; it does not fall back to another source.
 
 Related documents: [architecture](architecture.md),
 [operations](operations.md), and [terminology](terminology.md).

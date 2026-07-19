@@ -526,6 +526,36 @@ func (s *Store) GetUser(_ context.Context, id domain.UserID) (domain.User, error
 	return value, nil
 }
 
+func (s *Store) CreateUser(_ context.Context, user domain.User, membership domain.WorkspaceMembership, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
+		return errors.New("user and active workspace membership are required")
+	}
+	if membership.Role != domain.WorkspaceRoleMember && membership.Role != domain.WorkspaceRoleAdmin {
+		return errors.New("user membership role must be member or admin")
+	}
+	if _, exists := s.workspaces[user.WorkspaceID]; !exists {
+		return store.ErrNotFound
+	}
+	if _, exists := s.users[user.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	for _, existing := range s.users {
+		if existing.WorkspaceID == user.WorkspaceID && strings.EqualFold(existing.Email, user.Email) {
+			return store.ErrAlreadyExists
+		}
+	}
+	if user.Presence == "" {
+		user.Presence = domain.PresenceAuto
+	}
+	s.users[user.ID] = user
+	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
 func (s *Store) FindUserByEmail(_ context.Context, workspace domain.WorkspaceID, email string) (domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -603,6 +633,20 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 	if exists {
 		membership.Active = !deleted
 		s.members[key] = membership
+	}
+	if deleted {
+		for tokenKey, token := range s.tokens {
+			if token.WorkspaceID == workspaceID && token.UserID == userID {
+				token.Revoked = true
+				s.tokens[tokenKey] = token
+			}
+		}
+		for sessionKey, session := range s.sessions {
+			if session.WorkspaceID == workspaceID && session.UserID == userID {
+				session.Revoked = true
+				s.sessions[sessionKey] = session
+			}
+		}
 	}
 	s.outbox = append(s.outbox, event)
 	s.eventSequence++
