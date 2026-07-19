@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -1334,6 +1335,46 @@ func TestSQLiteBlobCleanupTopicHasSeparateLeaseStream(t *testing.T) {
 	cleanup, err := s.ClaimEventsForTopic(ctx, "T1", events.FileBlobDeleteTopic, "cleanup", 10, time.Minute)
 	if err != nil || len(cleanup) != 1 || cleanup[0].Event.Payload != file.BlobKey {
 		t.Fatalf("cleanup events=%v err=%v", cleanup, err)
+	}
+}
+
+func TestSQLiteWalkBlobReferencesStreamsLiveFilesAndPhotos(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:blob-references?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Profile: domain.UserProfile{Image24: "/users/T1/U1/photo/photo_1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1", Name: "deleted", Deleted: true, Profile: domain.UserProfile{Image24: "/users/T1/U2/photo/photo_2"}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := s.CreateFile(ctx, domain.File{ID: "file_live", WorkspaceID: "T1", Uploader: "U1", Name: "x", Title: "x", BlobKey: "T1/file_live", Size: 1, CreatedAt: now}, events.Event{ID: "E-live", WorkspaceID: "T1", Topic: "file.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateFile(ctx, domain.File{ID: "file_deleted", WorkspaceID: "T1", Uploader: "U1", Name: "y", Title: "y", BlobKey: "T1/file_deleted", Size: 1, CreatedAt: now}, events.Event{ID: "E-deleted", WorkspaceID: "T1", Topic: "file.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(ctx, "file_deleted", events.Event{ID: "E-delete", WorkspaceID: "T1", Topic: events.FileBlobDeleteTopic, Payload: "T1/file_deleted", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	var references []string
+	if err := s.WalkBlobReferences(ctx, "T1", func(reference string) error {
+		references = append(references, reference)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sort.Strings(references)
+	want := []string{"T1/file_live", "T1/users/U1/photo_1"}
+	if !sort.StringsAreSorted(want) || len(references) != len(want) || references[0] != want[0] || references[1] != want[1] {
+		t.Fatalf("references=%v want=%v", references, want)
 	}
 }
 

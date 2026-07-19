@@ -4774,6 +4774,56 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 	return page, nil
 }
 
+func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.WorkspaceID, visit func(string) error) error {
+	if visit == nil {
+		return errors.New("blob reference visitor is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT blob_key FROM files WHERE workspace_id = ? AND deleted = 0`, workspace)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			return err
+		}
+		if reference == "" {
+			return errors.New("database contains an empty blob reference")
+		}
+		if err := visit(reference); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT id, image_24 FROM users WHERE workspace_id = ? AND deleted = 0 AND image_24 <> ''`, workspace)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	prefix := "/users/" + string(workspace) + "/"
+	for rows.Next() {
+		var userID, imageURL string
+		if err := rows.Scan(&userID, &imageURL); err != nil {
+			return err
+		}
+		if !strings.HasPrefix(imageURL, prefix) {
+			return fmt.Errorf("user %q has an invalid photo URL", userID)
+		}
+		photo := strings.TrimPrefix(imageURL, prefix)
+		parts := strings.Split(photo, "/photo/")
+		if len(parts) != 2 || parts[0] != userID || parts[1] == "" || strings.Contains(parts[1], "/") {
+			return fmt.Errorf("user %q has an invalid photo URL", userID)
+		}
+		if err := visit(string(workspace) + "/users/" + userID + "/" + parts[1]); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

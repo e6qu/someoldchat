@@ -15,6 +15,20 @@ type Filesystem struct {
 	maxSize int64
 }
 
+var _ ListStore = Filesystem{}
+var _ WalkStore = Filesystem{}
+
+func (s Filesystem) List(ctx context.Context, prefix string) ([]Object, error) {
+	objects := make([]Object, 0)
+	if err := s.Walk(ctx, prefix, func(object Object) error {
+		objects = append(objects, object)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return objects, nil
+}
+
 var _ Store = Filesystem{}
 
 func NewFilesystem(root string, maxSize int64) (Filesystem, error) {
@@ -114,6 +128,43 @@ func (s Filesystem) Delete(_ context.Context, key string) error {
 	}
 	defer directory.Close()
 	return directory.Sync()
+}
+
+func (s Filesystem) Walk(ctx context.Context, prefix string, visit func(Object) error) error {
+	if visit == nil {
+		return errors.New("object visitor is required")
+	}
+	if prefix != "" {
+		if _, err := s.safePath(prefix); err != nil {
+			return err
+		}
+	}
+	root := s.root
+	if prefix != "" {
+		root = filepath.Join(root, filepath.FromSlash(prefix))
+	}
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) && path == root {
+				return nil
+			}
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(s.root, path)
+		if err != nil {
+			return err
+		}
+		if info.Size() < 0 || info.Size() > s.maxSize {
+			return errors.New("stored blob exceeds size limit")
+		}
+		return visit(Object{Key: filepath.ToSlash(relative), Size: info.Size()})
+	})
 }
 
 func (s Filesystem) safePath(key string) (string, error) {

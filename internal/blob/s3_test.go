@@ -14,8 +14,9 @@ import (
 )
 
 type fakeS3Client struct {
-	objects  map[string][]byte
-	getError error
+	objects       map[string][]byte
+	getError      error
+	listNilOutput bool
 }
 
 func (f *fakeS3Client) PutObject(_ context.Context, input *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
@@ -44,6 +45,9 @@ func (f *fakeS3Client) DeleteObject(_ context.Context, input *s3.DeleteObjectInp
 }
 
 func (f *fakeS3Client) ListObjectsV2(_ context.Context, input *s3.ListObjectsV2Input, _ ...func(*s3.Options)) (*s3.ListObjectsV2Output, error) {
+	if f.listNilOutput {
+		return nil, nil
+	}
 	contents := make([]types.Object, 0)
 	for key, body := range f.objects {
 		if len(aws.ToString(input.Prefix)) <= len(key) && key[:len(aws.ToString(input.Prefix))] == aws.ToString(input.Prefix) {
@@ -51,6 +55,36 @@ func (f *fakeS3Client) ListObjectsV2(_ context.Context, input *s3.ListObjectsV2I
 		}
 	}
 	return &s3.ListObjectsV2Output{Contents: contents}, nil
+}
+
+func TestS3WalkStreamsObjectsAndStopsOnVisitorError(t *testing.T) {
+	client := &fakeS3Client{objects: map[string][]byte{"snapshots/T1/a": []byte("a"), "snapshots/T1/b": []byte("bb")}}
+	store, err := newS3(client, "bucket", "snapshots", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	wantErr := errors.New("stop")
+	err = store.Walk(context.Background(), "T1/", func(object Object) error {
+		keys = append(keys, object.Key)
+		if len(keys) == 1 {
+			return wantErr
+		}
+		return nil
+	})
+	if !errors.Is(err, wantErr) || len(keys) != 1 {
+		t.Fatalf("walk keys=%v err=%v", keys, err)
+	}
+}
+
+func TestS3RejectsEmptyListResponse(t *testing.T) {
+	store, err := newS3(&fakeS3Client{listNilOutput: true}, "bucket", "snapshots", 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Walk(context.Background(), "T1/", func(Object) error { return nil }); err == nil {
+		t.Fatal("accepted empty provider list response")
+	}
 }
 
 func TestS3StoresBoundedObjectsAndListsByPrefix(t *testing.T) {

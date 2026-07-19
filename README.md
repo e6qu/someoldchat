@@ -12,6 +12,7 @@ request-triggered restoration for deployments that support scale-to-zero.
 - [Authentication](docs/authentication.md)
 - [PostgreSQL storage](docs/postgresql.md)
 - [dqlite qualification](docs/dqlite.md)
+- [Blob lifecycle and reconciliation](docs/blob-lifecycle.md)
 - [SDK qualification inventory](specs/sdk-compatibility.yaml)
 - [Browser qualification](tests/browser/README.md)
 - [Qualification suites](tests/README.md)

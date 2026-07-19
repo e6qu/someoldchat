@@ -168,6 +168,7 @@ type Store interface {
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.FileID, events.Event) error
 	GetPublicFile(context.Context, string) (domain.File, error)
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
+	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
 	AddRemoteFile(context.Context, domain.RemoteFile, events.Event) error
 	GetRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup) (domain.RemoteFile, error)
 	ListRemoteFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.RemoteFilePage, error)
