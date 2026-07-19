@@ -95,6 +95,30 @@ func TestDirectGoModulesIgnoresIndirectRequirements(t *testing.T) {
 	}
 }
 
+func TestValidateGoModuleSumsRequiresArchiveAndGoModChecksums(t *testing.T) {
+	goMod := "require example.test/direct v1.2.3\n\nrequire (\n\texample.test/indirect v2.0.0 // indirect\n)"
+	goSum := strings.Join([]string{
+		"example.test/direct v1.2.3 h1:0123456789+/=",
+		"example.test/direct v1.2.3/go.mod h1:0123456789+/=",
+		"example.test/indirect v2.0.0 h1:0123456789+/=",
+		"example.test/indirect v2.0.0/go.mod h1:0123456789+/=",
+	}, "\n")
+	if err := validateGoModuleSums(goMod, goSum); err != nil {
+		t.Fatalf("validateGoModuleSums() error = %v", err)
+	}
+}
+
+func TestValidateGoModuleSumsRejectsMissingIndirectChecksum(t *testing.T) {
+	goMod := "require example.test/direct v1.2.3\n\nrequire (\n\texample.test/indirect v2.0.0 // indirect\n)"
+	goSum := strings.Join([]string{
+		"example.test/direct v1.2.3 h1:0123456789+/=",
+		"example.test/direct v1.2.3/go.mod h1:0123456789+/=",
+	}, "\n")
+	if err := validateGoModuleSums(goMod, goSum); err == nil || !strings.Contains(err.Error(), "indirect@v2.0.0") {
+		t.Fatalf("validateGoModuleSums() error = %v, want missing indirect checksum", err)
+	}
+}
+
 func TestParseActionUseRequiresAnImmutableRevision(t *testing.T) {
 	repository, revision, ok := parseActionUse("- uses: actions/checkout@0123456789012345678901234567890123456789 # pinned")
 	if !ok || repository != "actions/checkout" || revision != "0123456789012345678901234567890123456789" {

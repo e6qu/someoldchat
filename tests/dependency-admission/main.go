@@ -167,6 +167,13 @@ func validateRepository(root string, value inventory) error {
 	if err != nil {
 		return fmt.Errorf("read go.mod: %w", err)
 	}
+	goSumBody, err := os.ReadFile(root + "/go.sum")
+	if err != nil {
+		return fmt.Errorf("read go.sum: %w", err)
+	}
+	if err := validateGoModuleSums(string(goBody), string(goSumBody)); err != nil {
+		return err
+	}
 	for _, module := range directGoModules(string(goBody)) {
 		item, ok := byID["go/"+module.path]
 		if !ok {
@@ -208,12 +215,36 @@ func validateRepository(root string, value inventory) error {
 	return nil
 }
 
+func validateGoModuleSums(goModBody, goSumBody string) error {
+	sums := make(map[string]struct{})
+	for _, line := range strings.Split(goSumBody, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && moduleSumPattern.MatchString(fields[2]) {
+			sums[fields[0]+"@"+fields[1]] = struct{}{}
+		}
+	}
+	for _, module := range declaredGoModules(goModBody, true) {
+		key := module.path + "@" + module.version
+		if _, ok := sums[key]; !ok {
+			return fmt.Errorf("declared Go module %q has no archive checksum in go.sum", key)
+		}
+		if _, ok := sums[key+"/go.mod"]; !ok {
+			return fmt.Errorf("declared Go module %q has no go.mod checksum in go.sum", key)
+		}
+	}
+	return nil
+}
+
 type goModule struct {
 	path    string
 	version string
 }
 
 func directGoModules(body string) []goModule {
+	return declaredGoModules(body, false)
+}
+
+func declaredGoModules(body string, includeIndirect bool) []goModule {
 	var modules []goModule
 	inRequireBlock := false
 	for _, line := range strings.Split(body, "\n") {
@@ -232,7 +263,7 @@ func directGoModules(body string) []goModule {
 		if strings.HasPrefix(trimmed, "require ") {
 			trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "require "))
 		}
-		if strings.HasPrefix(trimmed, "//") || strings.Contains(trimmed, "// indirect") {
+		if strings.HasPrefix(trimmed, "//") || (!includeIndirect && strings.Contains(trimmed, "// indirect")) {
 			continue
 		}
 		fields := strings.Fields(trimmed)
@@ -300,6 +331,11 @@ func validateWorkflowPins(root string, paths []string) error {
 		"java-version: '17.0.15'",
 		"deno-version: 2.8.1",
 		"version: 1.71.0",
+		"dqlite-tools-v3=3.0.4~noble1",
+		"libdqlite-dev=1.18.3~noble1",
+		"libdqlite1.18=1.18.7~noble1",
+		"libdqlite1.18-dev=1.18.7~noble1",
+		"libuv1-dev=1.48.0-1.1build1",
 	} {
 		if !strings.Contains(all, pin) {
 			return fmt.Errorf("workflow pin %q is absent", pin)
