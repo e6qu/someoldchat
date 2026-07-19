@@ -1437,12 +1437,16 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 	user.Profile.Image24, user.Profile.Image32, user.Profile.Image48, user.Profile.Image72, user.Profile.Image192, user.Profile.Image512, user.Profile.Image1024 = photoURL, photoURL, photoURL, photoURL, photoURL, photoURL, photoURL
 	eventID, err := domain.NewEventID()
 	if err != nil {
-		_ = m.Blob.Delete(context.Background(), key)
+		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
+			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
+		}
 		return domain.User{}, err
 	}
 	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.profile_changed", Payload: string(userID), CreatedAt: time.Now().UTC()})
 	if err != nil {
-		_ = m.Blob.Delete(context.Background(), key)
+		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
+			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
+		}
 		return domain.User{}, err
 	}
 	if oldToken != "" {
