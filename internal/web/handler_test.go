@@ -80,7 +80,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	}
 }
 
-func TestApplicationRedirectsUnauthenticatedBrowserToConfiguredOIDC(t *testing.T) {
+func TestApplicationRedirectsUnauthenticatedBrowserToLogin(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
@@ -93,7 +93,7 @@ func TestApplicationRedirectsUnauthenticatedBrowserToConfiguredOIDC(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "oidc", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/oauth2/userinfo", Scopes: []string{"openid", "profile", "email"}}})
+	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "google", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://openidconnect.googleapis.com/v1/userinfo", Scopes: []string{"openid", "profile", "email"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestApplicationRedirectsUnauthenticatedBrowserToConfiguredOIDC(t *testing.T
 	handler.Register(mux)
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app", nil))
-	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/auth/oidc" {
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login" {
 		t.Fatalf("unauthenticated application response = %d location=%q", response.Code, response.Header().Get("Location"))
 	}
 }
