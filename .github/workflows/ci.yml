@@ -34,7 +34,7 @@ jobs:
           github_token: ${{ github.token }}
 
       - name: Check formatting and generated files
-        run: make fmt-check generated-check proto-lint
+        run: make fmt-check workflow-check generated-check proto-lint
 
       - name: Check contracts and SDK inventory
         run: make contract-check sdk-inventory-check
