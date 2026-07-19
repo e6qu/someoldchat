@@ -10,14 +10,15 @@ import (
 )
 
 var (
-	ErrNotFound                = errors.New("not found")
-	ErrLeaseConflict           = errors.New("outbox lease conflict")
-	ErrIdempotencyConflict     = errors.New("idempotency key already committed")
-	ErrAlreadyExists           = errors.New("already exists")
-	ErrInvalidConversationType = errors.New("invalid conversation type")
-	ErrInvalidInviteRequest    = errors.New("invalid invite request")
-	ErrInvalidAppApproval      = errors.New("invalid app approval")
-	ErrConflict                = errors.New("state conflict")
+	ErrNotFound                  = errors.New("not found")
+	ErrLeaseConflict             = errors.New("outbox lease conflict")
+	ErrIdempotencyConflict       = errors.New("idempotency key already committed")
+	ErrAlreadyExists             = errors.New("already exists")
+	ErrInvalidConversationType   = errors.New("invalid conversation type")
+	ErrInvalidInviteRequest      = errors.New("invalid invite request")
+	ErrInvalidAppApproval        = errors.New("invalid app approval")
+	ErrConflict                  = errors.New("state conflict")
+	ErrSocketModeConnectionLimit = errors.New("Socket Mode connection limit reached")
 )
 
 type Store interface {
@@ -101,6 +102,9 @@ type Store interface {
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
 	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
+	RenewSocketModeConnection(context.Context, string, time.Time) error
+	ReleaseSocketModeConnection(context.Context, string) error
+	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error

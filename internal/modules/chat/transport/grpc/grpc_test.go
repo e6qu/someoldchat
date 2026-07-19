@@ -288,6 +288,16 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil || consumedSocket.AppID != socketConnection.AppID {
 		t.Fatalf("Socket Mode connection=%+v err=%v", consumedSocket, err)
 	}
+	activeConnections, err := remote.CountSocketModeConnections(ctx, socketConnection.AppID)
+	if err != nil || activeConnections != 1 {
+		t.Fatalf("active Socket Mode connections=%d err=%v", activeConnections, err)
+	}
+	if err := remote.RenewSocketModeConnection(ctx, socketConnection.ID, time.Now().UTC().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.ReleaseSocketModeConnection(ctx, socketConnection.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := remote.ConsumeSocketModeConnection(ctx, socketConnection.ID); err == nil {
 		t.Fatal("Socket Mode connection was replayed")
 	}

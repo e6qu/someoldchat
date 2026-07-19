@@ -23,6 +23,9 @@ const (
 	RTMService_ConsumeConnection_FullMethodName           = "/sameoldchat.chat.v1.RTMService/ConsumeConnection"
 	RTMService_CreateSocketModeConnection_FullMethodName  = "/sameoldchat.chat.v1.RTMService/CreateSocketModeConnection"
 	RTMService_ConsumeSocketModeConnection_FullMethodName = "/sameoldchat.chat.v1.RTMService/ConsumeSocketModeConnection"
+	RTMService_RenewSocketModeConnection_FullMethodName   = "/sameoldchat.chat.v1.RTMService/RenewSocketModeConnection"
+	RTMService_ReleaseSocketModeConnection_FullMethodName = "/sameoldchat.chat.v1.RTMService/ReleaseSocketModeConnection"
+	RTMService_CountSocketModeConnections_FullMethodName  = "/sameoldchat.chat.v1.RTMService/CountSocketModeConnections"
 	RTMService_GetSocketModeCursor_FullMethodName         = "/sameoldchat.chat.v1.RTMService/GetSocketModeCursor"
 	RTMService_SetSocketModeCursor_FullMethodName         = "/sameoldchat.chat.v1.RTMService/SetSocketModeCursor"
 	RTMService_RecordSocketModeResponse_FullMethodName    = "/sameoldchat.chat.v1.RTMService/RecordSocketModeResponse"
@@ -36,6 +39,9 @@ type RTMServiceClient interface {
 	ConsumeConnection(ctx context.Context, in *RTMConnectionIDRequest, opts ...grpc.CallOption) (*RTMConnection, error)
 	CreateSocketModeConnection(ctx context.Context, in *SocketModeConnectionRequest, opts ...grpc.CallOption) (*SocketModeConnection, error)
 	ConsumeSocketModeConnection(ctx context.Context, in *RTMConnectionIDRequest, opts ...grpc.CallOption) (*SocketModeConnection, error)
+	RenewSocketModeConnection(ctx context.Context, in *SocketModeConnectionRenewalRequest, opts ...grpc.CallOption) (*SocketModeConnection, error)
+	ReleaseSocketModeConnection(ctx context.Context, in *RTMConnectionIDRequest, opts ...grpc.CallOption) (*SocketModeConnection, error)
+	CountSocketModeConnections(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeConnectionCount, error)
 	GetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error)
 	SetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error)
 	RecordSocketModeResponse(ctx context.Context, in *SocketModeResponseRequest, opts ...grpc.CallOption) (*SocketModeResponse, error)
@@ -89,6 +95,36 @@ func (c *rTMServiceClient) ConsumeSocketModeConnection(ctx context.Context, in *
 	return out, nil
 }
 
+func (c *rTMServiceClient) RenewSocketModeConnection(ctx context.Context, in *SocketModeConnectionRenewalRequest, opts ...grpc.CallOption) (*SocketModeConnection, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeConnection)
+	err := c.cc.Invoke(ctx, RTMService_RenewSocketModeConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rTMServiceClient) ReleaseSocketModeConnection(ctx context.Context, in *RTMConnectionIDRequest, opts ...grpc.CallOption) (*SocketModeConnection, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeConnection)
+	err := c.cc.Invoke(ctx, RTMService_ReleaseSocketModeConnection_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rTMServiceClient) CountSocketModeConnections(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeConnectionCount, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeConnectionCount)
+	err := c.cc.Invoke(ctx, RTMService_CountSocketModeConnections_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *rTMServiceClient) GetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(SocketModeCursor)
@@ -127,6 +163,9 @@ type RTMServiceServer interface {
 	ConsumeConnection(context.Context, *RTMConnectionIDRequest) (*RTMConnection, error)
 	CreateSocketModeConnection(context.Context, *SocketModeConnectionRequest) (*SocketModeConnection, error)
 	ConsumeSocketModeConnection(context.Context, *RTMConnectionIDRequest) (*SocketModeConnection, error)
+	RenewSocketModeConnection(context.Context, *SocketModeConnectionRenewalRequest) (*SocketModeConnection, error)
+	ReleaseSocketModeConnection(context.Context, *RTMConnectionIDRequest) (*SocketModeConnection, error)
+	CountSocketModeConnections(context.Context, *SocketModeCursorRequest) (*SocketModeConnectionCount, error)
 	GetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error)
 	SetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error)
 	RecordSocketModeResponse(context.Context, *SocketModeResponseRequest) (*SocketModeResponse, error)
@@ -151,6 +190,15 @@ func (UnimplementedRTMServiceServer) CreateSocketModeConnection(context.Context,
 }
 func (UnimplementedRTMServiceServer) ConsumeSocketModeConnection(context.Context, *RTMConnectionIDRequest) (*SocketModeConnection, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ConsumeSocketModeConnection not implemented")
+}
+func (UnimplementedRTMServiceServer) RenewSocketModeConnection(context.Context, *SocketModeConnectionRenewalRequest) (*SocketModeConnection, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RenewSocketModeConnection not implemented")
+}
+func (UnimplementedRTMServiceServer) ReleaseSocketModeConnection(context.Context, *RTMConnectionIDRequest) (*SocketModeConnection, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseSocketModeConnection not implemented")
+}
+func (UnimplementedRTMServiceServer) CountSocketModeConnections(context.Context, *SocketModeCursorRequest) (*SocketModeConnectionCount, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method CountSocketModeConnections not implemented")
 }
 func (UnimplementedRTMServiceServer) GetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSocketModeCursor not implemented")
@@ -254,6 +302,60 @@ func _RTMService_ConsumeSocketModeConnection_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RTMService_RenewSocketModeConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeConnectionRenewalRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).RenewSocketModeConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_RenewSocketModeConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).RenewSocketModeConnection(ctx, req.(*SocketModeConnectionRenewalRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RTMService_ReleaseSocketModeConnection_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RTMConnectionIDRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).ReleaseSocketModeConnection(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_ReleaseSocketModeConnection_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).ReleaseSocketModeConnection(ctx, req.(*RTMConnectionIDRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RTMService_CountSocketModeConnections_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeCursorRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).CountSocketModeConnections(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_CountSocketModeConnections_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).CountSocketModeConnections(ctx, req.(*SocketModeCursorRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RTMService_GetSocketModeCursor_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(SocketModeCursorRequest)
 	if err := dec(in); err != nil {
@@ -330,6 +432,18 @@ var RTMService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ConsumeSocketModeConnection",
 			Handler:    _RTMService_ConsumeSocketModeConnection_Handler,
+		},
+		{
+			MethodName: "RenewSocketModeConnection",
+			Handler:    _RTMService_RenewSocketModeConnection_Handler,
+		},
+		{
+			MethodName: "ReleaseSocketModeConnection",
+			Handler:    _RTMService_ReleaseSocketModeConnection_Handler,
+		},
+		{
+			MethodName: "CountSocketModeConnections",
+			Handler:    _RTMService_CountSocketModeConnections_Handler,
 		},
 		{
 			MethodName: "GetSocketModeCursor",

@@ -130,9 +130,11 @@ its `envelope_id`. A missing envelope identifier closes the connection with a
 protocol error. Approved app installations identify the workspaces whose
 durable outbox events can be delivered. The last acknowledged event sequence
 is stored per app, so a replacement process resumes after the last confirmed
-event instead of depending on process memory. The implementation exposes one
-active connection per app and uses a bounded one-event-at-a-time delivery loop;
-the client must acknowledge an event before the next event is sent.
+event instead of depending on process memory. The implementation allows up to
+ten active connections per app. Each active connection renews its durable
+lease and releases it when the WebSocket closes. Each connection uses a
+bounded one-event-at-a-time delivery loop; the client must acknowledge an
+event before the next event is sent.
 
 Response payloads are accepted only for known event envelopes and must be
 valid JSON. The HTTP process records each response durably by app identifier

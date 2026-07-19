@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT 
 CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_responses (app_id TEXT NOT NULL, envelope_id TEXT NOT NULL, payload TEXT NOT NULL, received_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (app_id, envelope_id));
 CREATE TABLE IF NOT EXISTS conversation_prefs (
@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 62
+const schemaVersion = 63
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
 
@@ -968,6 +968,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate Socket Mode responses: %w", err)
 		}
 	}
+	if version < 63 {
+		columns, err := s.tableColumns(ctx, db, "socket_mode_connections")
+		if err != nil {
+			return fmt.Errorf("inspect Socket Mode connection state: %w", err)
+		}
+		if !columns["consumed_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE socket_mode_connections ADD COLUMN consumed_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate Socket Mode connection state: %w", err)
+			}
+		}
+	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record sqlite schema version: %w", err)
 	}
@@ -1040,7 +1051,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -3129,11 +3140,26 @@ func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.Soc
 	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
 		return errors.New("invalid Socket Mode connection")
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_connections(id, app_id, expires_at) VALUES (?, ?, ?)`, value.ID, value.AppID, value.ExpiresAt.UTC().UnixNano())
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var active int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, value.AppID, time.Now().UTC().UnixNano()).Scan(&active); err != nil {
+		return err
+	}
+	if active >= domain.SocketModeConnectionLimit {
+		return store.ErrSocketModeConnectionLimit
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO socket_mode_connections(id, app_id, expires_at) VALUES (?, ?, ?)`, value.ID, value.AppID, value.ExpiresAt.UTC().UnixNano())
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
 		return store.ErrAlreadyExists
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (domain.SocketModeConnection, error) {
@@ -3143,12 +3169,15 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	}
 	defer tx.Rollback()
 	var value domain.SocketModeConnection
-	var expiresAt int64
-	if err := tx.QueryRowContext(ctx, `SELECT id, app_id, expires_at FROM socket_mode_connections WHERE id = ?`, id).Scan(&value.ID, &value.AppID, &expiresAt); err != nil {
+	var expiresAt, consumedAt int64
+	if err := tx.QueryRowContext(ctx, `SELECT id, app_id, expires_at, consumed_at FROM socket_mode_connections WHERE id = ?`, id).Scan(&value.ID, &value.AppID, &expiresAt, &consumedAt); err != nil {
 		return domain.SocketModeConnection{}, translateNotFound(err)
 	}
 	value.ExpiresAt = time.Unix(0, expiresAt).UTC()
-	result, err := tx.ExecContext(ctx, `DELETE FROM socket_mode_connections WHERE id = ?`, id)
+	if consumedAt != 0 || !value.ExpiresAt.After(time.Now().UTC()) {
+		return domain.SocketModeConnection{}, store.ErrNotFound
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE socket_mode_connections SET consumed_at = ? WHERE id = ? AND consumed_at = 0`, time.Now().UTC().UnixNano(), id)
 	if err != nil {
 		return domain.SocketModeConnection{}, err
 	}
@@ -3156,18 +3185,55 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	if err != nil {
 		return domain.SocketModeConnection{}, err
 	}
-	if changed != 1 || !value.ExpiresAt.After(time.Now().UTC()) {
-		if changed == 1 {
-			if err := tx.Commit(); err != nil {
-				return domain.SocketModeConnection{}, err
-			}
-		}
+	if changed != 1 {
 		return domain.SocketModeConnection{}, store.ErrNotFound
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.SocketModeConnection{}, err
 	}
 	return value, nil
+}
+
+func (s *Store) RenewSocketModeConnection(ctx context.Context, id string, expiresAt time.Time) error {
+	if !expiresAt.After(time.Now().UTC()) {
+		return errors.New("invalid Socket Mode connection renewal")
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_connections SET expires_at = ? WHERE id = ? AND consumed_at > 0`, expiresAt.UTC().UnixNano(), id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) ReleaseSocketModeConnection(ctx context.Context, id string) error {
+	result, err := s.db.ExecContext(ctx, `DELETE FROM socket_mode_connections WHERE id = ? AND consumed_at > 0`, id)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) CountSocketModeConnections(ctx context.Context, appID domain.AppID) (int, error) {
+	if appID == "" {
+		return 0, store.ErrInvalidAppApproval
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, appID, time.Now().UTC().UnixNano()).Scan(&count)
+	return count, err
 }
 
 func (s *Store) RecordSocketModeResponse(ctx context.Context, value domain.SocketModeResponse) error {

@@ -556,6 +556,20 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if err != nil || consumed.AppID != connection.AppID || !consumed.ExpiresAt.Equal(connection.ExpiresAt.Truncate(time.Nanosecond)) {
 			t.Fatalf("Socket Mode connection=%+v err=%v", consumed, err)
 		}
+		active, err := repository.CountSocketModeConnections(ctx, connection.AppID)
+		if err != nil || active != 1 {
+			t.Fatalf("active Socket Mode connections=%d err=%v, want 1", active, err)
+		}
+		if err := repository.RenewSocketModeConnection(ctx, connection.ID, time.Now().UTC().Add(time.Minute)); err != nil {
+			t.Fatalf("renew Socket Mode connection error=%v", err)
+		}
+		if err := repository.ReleaseSocketModeConnection(ctx, connection.ID); err != nil {
+			t.Fatalf("release Socket Mode connection error=%v", err)
+		}
+		active, err = repository.CountSocketModeConnections(ctx, connection.AppID)
+		if err != nil || active != 0 {
+			t.Fatalf("active Socket Mode connections after release=%d err=%v, want 0", active, err)
+		}
 		if _, err := repository.ConsumeSocketModeConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("replayed Socket Mode connection error=%v, want ErrNotFound", err)
 		}

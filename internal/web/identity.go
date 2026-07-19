@@ -283,25 +283,8 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
 		return
 	}
-	var user domain.User
-	link, linkErr := h.service.GetExternalIdentity(r.Context(), h.workspace, name, identity.Subject)
-	if linkErr == nil {
-		user, err = h.service.UserInfo(r.Context(), h.workspace, h.lookupUser, link.UserID)
-	} else if errors.Is(linkErr, store.ErrNotFound) {
-		user, err = h.service.UserByEmail(r.Context(), h.workspace, h.lookupUser, identity.Email)
-		if err == nil && !user.Deleted {
-			linkErr = h.service.CreateExternalIdentity(r.Context(), domain.ExternalIdentity{WorkspaceID: h.workspace, Provider: name, Subject: identity.Subject, UserID: user.ID})
-			if errors.Is(linkErr, store.ErrAlreadyExists) {
-				link, linkErr = h.service.GetExternalIdentity(r.Context(), h.workspace, name, identity.Subject)
-				if linkErr == nil {
-					user, err = h.service.UserInfo(r.Context(), h.workspace, h.lookupUser, link.UserID)
-				}
-			}
-		}
-	} else {
-		err = linkErr
-	}
-	if err != nil || linkErr != nil || user.Deleted {
+	user, err := h.resolveIdentityUser(r.Context(), name, identity)
+	if err != nil || user.Deleted {
 		http.Error(w, "authorization identity is not provisioned", http.StatusForbidden)
 		return
 	}
@@ -319,7 +302,86 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
-type externalIdentity struct{ Subject, Email, Name string }
+func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, identity externalIdentity) (domain.User, error) {
+	link, err := h.service.GetExternalIdentity(ctx, h.workspace, provider, identity.Subject)
+	if err == nil {
+		user, lookupErr := h.service.UserInfo(ctx, h.workspace, h.lookupUser, link.UserID)
+		if lookupErr != nil {
+			return domain.User{}, lookupErr
+		}
+		return h.synchronizeOIDCRole(ctx, provider, identity.Role, user)
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return domain.User{}, err
+	}
+
+	user, err := h.service.UserByEmail(ctx, h.workspace, h.lookupUser, identity.Email)
+	if errors.Is(err, store.ErrNotFound) && provider == "oidc" {
+		role, roleErr := oidcWorkspaceRole(identity.Role)
+		if roleErr != nil {
+			return domain.User{}, roleErr
+		}
+		displayName := identity.Name
+		if displayName == "" {
+			displayName = identity.PreferredUsername
+		}
+		if displayName == "" {
+			displayName = identity.Email
+		}
+		user, err = h.service.AdminCreateUser(ctx, h.workspace, h.lookupUser, identity.Email, displayName, role)
+		if errors.Is(err, store.ErrAlreadyExists) {
+			user, err = h.service.UserByEmail(ctx, h.workspace, h.lookupUser, identity.Email)
+		}
+	}
+	if err != nil || user.Deleted {
+		return domain.User{}, err
+	}
+
+	err = h.service.CreateExternalIdentity(ctx, domain.ExternalIdentity{WorkspaceID: h.workspace, Provider: provider, Subject: identity.Subject, UserID: user.ID})
+	if errors.Is(err, store.ErrAlreadyExists) {
+		link, err = h.service.GetExternalIdentity(ctx, h.workspace, provider, identity.Subject)
+		if err == nil {
+			user, err = h.service.UserInfo(ctx, h.workspace, h.lookupUser, link.UserID)
+		}
+	}
+	if err != nil {
+		return domain.User{}, err
+	}
+	return h.synchronizeOIDCRole(ctx, provider, identity.Role, user)
+}
+
+func (h LoginHandler) synchronizeOIDCRole(ctx context.Context, provider, role string, user domain.User) (domain.User, error) {
+	if provider != "oidc" {
+		return user, nil
+	}
+	workspaceRole, err := oidcWorkspaceRole(role)
+	if err != nil {
+		return domain.User{}, err
+	}
+	if err := h.service.SetUserRole(ctx, h.workspace, h.lookupUser, user.ID, workspaceRole); err != nil {
+		return domain.User{}, err
+	}
+	return user, nil
+}
+
+func oidcWorkspaceRole(role string) (domain.WorkspaceRole, error) {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "developer":
+		return domain.WorkspaceRoleMember, nil
+	case "admin":
+		return domain.WorkspaceRoleAdmin, nil
+	default:
+		return "", errors.New("OpenID Connect identity has no supported access role")
+	}
+}
+
+type externalIdentity struct {
+	Subject           string
+	Email             string
+	Name              string
+	PreferredUsername string
+	Role              string
+}
 
 type tokenResponse struct {
 	AccessToken string `json:"access_token"`
@@ -373,11 +435,18 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 		Login             string `json:"login"`
 		Name              string `json:"name"`
 		PreferredUsername string `json:"preferred_username"`
+		Role              string `json:"role"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&value); err != nil {
 		return externalIdentity{}, err
 	}
-	identity := externalIdentity{Subject: value.Subject, Email: strings.ToLower(strings.TrimSpace(value.Email)), Name: value.Name}
+	identity := externalIdentity{
+		Subject:           value.Subject,
+		Email:             strings.ToLower(strings.TrimSpace(value.Email)),
+		Name:              strings.TrimSpace(value.Name),
+		PreferredUsername: strings.TrimSpace(value.PreferredUsername),
+		Role:              strings.ToLower(strings.TrimSpace(value.Role)),
+	}
 	if identity.Subject == "" && value.ID != nil {
 		identity.Subject = fmt.Sprint(value.ID)
 	}

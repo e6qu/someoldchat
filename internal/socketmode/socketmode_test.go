@@ -75,6 +75,45 @@ func TestConnectionIsSingleUseAndExpires(t *testing.T) {
 	}
 }
 
+func TestConnectionLimitAllowsReplacementAfterRelease(t *testing.T) {
+	connections := memory.New()
+	service := Service{Store: connections, Host: "example.test"}
+	ids := make([]string, 0, domain.SocketModeConnectionLimit)
+	for range domain.SocketModeConnectionLimit {
+		result, err := service.Open(context.Background(), "A123")
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := url.Parse(result.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connection, err := connections.ConsumeSocketModeConnection(context.Background(), parsed.Query().Get("connection_id"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, connection.ID)
+	}
+	if count, err := connections.CountSocketModeConnections(context.Background(), "A123"); err != nil || count != domain.SocketModeConnectionLimit {
+		t.Fatalf("active connection count=%d error=%v", count, err)
+	}
+	if _, err := service.Open(context.Background(), "A123"); err != ErrConnectionLimit {
+		t.Fatalf("connection beyond limit error=%v, want %v", err, ErrConnectionLimit)
+	}
+	if err := connections.RenewSocketModeConnection(context.Background(), ids[0], time.Now().UTC().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := connections.ReleaseSocketModeConnection(context.Background(), ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := connections.CountSocketModeConnections(context.Background(), "A123"); err != nil || count != domain.SocketModeConnectionLimit-1 {
+		t.Fatalf("active count after release=%d error=%v", count, err)
+	}
+	if _, err := service.Open(context.Background(), "A123"); err != nil {
+		t.Fatalf("replacement connection error=%v", err)
+	}
+}
+
 func TestHandlerSendsHelloAndAcknowledgesEnvelope(t *testing.T) {
 	connections := memory.New()
 	service := Service{Store: connections, Host: "example.test"}

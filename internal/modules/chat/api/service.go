@@ -76,6 +76,9 @@ type Service interface {
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error
 	ConsumeSocketModeConnection(context.Context, string) (domain.SocketModeConnection, error)
+	RenewSocketModeConnection(context.Context, string, time.Time) error
+	ReleaseSocketModeConnection(context.Context, string) error
+	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
 	AdminInviteConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID) (domain.Conversation, error)
 	AdminConvertConversationToPrivate(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Conversation, error)
