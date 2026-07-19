@@ -7,6 +7,7 @@ import (
 	"html"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -79,7 +80,12 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if canReadUsers {
-		page, pageErr := h.Login.service.AdminListUsers(r.Context(), h.Login.workspace, principal.UserID, domain.PageRequest{Limit: 50})
+		request, requestErr := decodeAdminPageRequest(r)
+		if requestErr != nil {
+			http.Error(w, requestErr.Error(), http.StatusBadRequest)
+			return
+		}
+		page, pageErr := h.Login.service.AdminListUsers(r.Context(), h.Login.workspace, principal.UserID, request)
 		if pageErr != nil {
 			http.Error(w, "users unavailable", http.StatusServiceUnavailable)
 			return
@@ -108,6 +114,9 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 			output.WriteString(`</td></tr>`)
 		}
 		output.WriteString(`</tbody></table>`)
+		if page.NextCursor != "" {
+			output.WriteString(`<p><a href="/app/admin/auth?limit=` + strconv.Itoa(request.Limit) + `&amp;cursor=` + url.QueryEscape(string(page.NextCursor)) + `">Next page</a></p>`)
+		}
 	}
 	if canWriteUsers {
 		output.WriteString(`<hr><h2>Manual user setup</h2><p>Create an active workspace member directly. External authorization still requires a matching verified email.</p><form method="post" action="/api/admin.auth.users.create"><input type="hidden" name="_csrf" value="` + html.EscapeString(csrfToken) + `"><label>Email <input name="email" type="email" maxlength="320" autocomplete="email" required></label> <label>Name <input name="real_name" maxlength="200" autocomplete="name" required></label> <label>Role <select name="role"><option value="member">Member</option><option value="admin">Administrator</option></select></label> <button class="toggle" type="submit">Create user</button></form>`)
