@@ -89,7 +89,9 @@ workflow-check: dependency-check
 container-check: dependency-check
 
 dependency-check:
-	GOCACHE=$(GOCACHE) go run ./cmd/dependencycheck
+	GOTOOLCHAIN=local GOCACHE=$(GOCACHE) go list -mod=readonly all >/dev/null
+	GOCACHE=$(GOCACHE) go mod verify
+	GOCACHE=$(GOCACHE) go run ./tests/dependency-admission
 
 contract-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck

@@ -184,7 +184,12 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:dqlite/dev
           sudo apt-get update
-          sudo apt-get install -y dqlite-tools-v3 libdqlite-dev
+          sudo apt-get install -y \
+            dqlite-tools-v3=3.0.4~noble1 \
+            libdqlite-dev=1.18.3~noble1 \
+            libdqlite1.18=1.18.7~noble1 \
+            libdqlite1.18-dev=1.18.7~noble1 \
+            libuv1-dev=1.48.0-1.1build1
 
       - name: Build dqlite binaries
         run: make build-dqlite

@@ -88,8 +88,12 @@ CI MUST fail closed when age or integrity evidence is unavailable.
 ## Automation
 
 The committed dependency admission inventory is the machine-readable record of
-the selected versions and their evidence. `make dependency-check` MUST run in
-local checks and pull-request continuous integration. It fails when an entry
+the selected direct inputs and their evidence. Every module declared in
+`go.mod`, including indirect requirements, must also have archive and `go.mod`
+checksums in `go.sum`; this is an integrity check, not a substitute for
+provenance evidence. `make dependency-check` MUST run `go list -mod=readonly`
+and `go mod verify` before its repository checks. It MUST run in local checks
+and pull-request continuous integration. It fails when an entry
 is incomplete, uses a mutable revision or checksum, lacks HTTPS evidence, uses
 a prerelease version, has a future publication time, or has not passed the
 publication quarantine. Pin syntax for workflow actions and container images
