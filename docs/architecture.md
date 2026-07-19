@@ -165,6 +165,14 @@ the scheduled record is acknowledged. A worker crash therefore leaves both
 committed events and scheduled records claimable after lease expiry rather
 than losing a process-local queue.
 
+The runnable `cmd/socketmode-worker` is a stateless Socket Mode response
+replica. It claims responses through the process-independent chat boundary and
+posts each response payload to an explicitly configured HTTP destination with
+the application identifier, envelope identifier, and idempotency key. A
+successful destination response acknowledges the durable record. A failed
+delivery releases it at the configured retry time, and a process crash leaves
+the lease available to another replica after expiry.
+
 The runnable `cmd/blobgc` is a separate stateless blob-cleanup replica. It
 claims only the durable `file.blob_delete` topic, uses the same lease/retry
 rules, and treats an already-missing object as an idempotent completed delete.
@@ -176,6 +184,7 @@ cmd/
   server/         web and Slack-compatible API process
   chatd/          separate chat gRPC process
   worker/         asynchronous work process
+  socketmode-worker/  Socket Mode response process
   blobgc/         blob cleanup process
   activator/      wake coordinator and reverse proxy
 internal/

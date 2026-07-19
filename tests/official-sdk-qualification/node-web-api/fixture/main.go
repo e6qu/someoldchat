@@ -16,6 +16,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -45,6 +46,7 @@ func main() {
 		}
 	}
 	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
+	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
 	if err := store.SeedSession(context.Background(), "qualification-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		panic(err)
 	}
@@ -74,6 +76,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	appAuthenticator, err := auth.NewAppStored(store)
+	if err != nil {
+		panic(err)
+	}
+	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	server := &http.Server{Addr: "127.0.0.1:18080", Handler: mux}
