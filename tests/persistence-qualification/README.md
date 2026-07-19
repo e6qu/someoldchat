@@ -24,7 +24,9 @@ Run the PostgreSQL contract with a reachable PostgreSQL server:
 SAMEOLDCHAT_POSTGRES_DSN='postgres://sameoldchat:sameoldchat@localhost:5432/sameoldchat?sslmode=disable' make test-postgres
 ```
 
-The contract currently covers normalized user lookup, seeded workspace and
-conversation state, message persistence, idempotent message replay, and
-bounded message listing. The package does not replace the broader SQLite
-repository tests or the selected dqlite cluster and snapshot tests.
+The shared contract covers normalized user lookup, seeded workspace and
+conversation state, message persistence, idempotent message replay, bounded
+message listing, search, presence, do-not-disturb state, stars, files, remote
+file sharing and updates, reminders, and scheduled-message claim and delivery.
+The package does not replace the broader SQLite repository tests or the
+selected dqlite cluster and snapshot tests.
