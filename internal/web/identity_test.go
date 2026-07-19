@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,13 +12,91 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
+
+func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keyID = "logout-key"
+	var issuer *httptest.Server
+	issuer = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]string{"issuer": issuer.URL, "authorization_endpoint": issuer.URL + "/oauth2/auth", "token_endpoint": issuer.URL + "/oauth2/token", "userinfo_endpoint": issuer.URL + "/userinfo", "jwks_uri": issuer.URL + "/.well-known/jwks.json"})
+		case "/.well-known/jwks.json":
+			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, KeyID: keyID, Algorithm: string(jose.RS256), Use: "sig"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer issuer.Close()
+
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "person@example.com", Name: "person"})
+	service := service.Messages{Store: store}
+	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "sha-subject", UserID: "U2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", Issuer: issuer.URL, ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: issuer.URL + "/oauth2/auth", TokenURL: issuer.URL + "/oauth2/token", UserInfoURL: issuer.URL + "/userinfo", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = issuer.Client()
+	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: key}, (&jose.SignerOptions{}).WithType("logout+jwt").WithHeader("kid", keyID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	raw, err := jwt.Signed(signer).Claims(map[string]any{
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-subject", "sid": "sha-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
+		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
+	}).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	form := url.Values{"logout_token": {raw}}
+	request := httptest.NewRequest(http.MethodPost, "/auth/oidc/backchannel-logout", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	handler.backchannelLogout(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	record, err := store.LookupSession(context.Background(), "browser-session")
+	if err != nil || !record.Revoked {
+		t.Fatalf("session=%+v err=%v", record, err)
+	}
+
+	invalid, err := jwt.Signed(signer).Claims(map[string]any{
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "sha-subject", "sid": "", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
+		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
+	}).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.verifyBackchannelLogout(context.Background(), invalid); err == nil {
+		t.Fatal("logout token without sid was accepted")
+	}
+}
 
 func TestNewLoginHandlerAcceptsSupportedAuthorizationProviders(t *testing.T) {
 	service := service.Messages{Store: memory.New()}
@@ -50,6 +130,7 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 			AuthorizationEndpoint: server.URL + "/authorize",
 			TokenEndpoint:         server.URL + "/token",
 			UserInfoEndpoint:      server.URL + "/userinfo",
+			JWKSURI:               server.URL + "/jwks",
 		}); err != nil {
 			t.Fatal(err)
 		}

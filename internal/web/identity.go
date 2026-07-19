@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
@@ -24,6 +25,7 @@ import (
 
 type ProviderConfig struct {
 	Name         string
+	Issuer       string
 	ClientID     string
 	ClientSecret string
 	AuthorizeURL string
@@ -31,6 +33,7 @@ type ProviderConfig struct {
 	UserInfoURL  string
 	EmailURL     string
 	Scopes       []string
+	verifier     *oidc.IDTokenVerifier
 }
 
 type OpenIDConfiguration struct {
@@ -38,6 +41,7 @@ type OpenIDConfiguration struct {
 	AuthorizationEndpoint string `json:"authorization_endpoint"`
 	TokenEndpoint         string `json:"token_endpoint"`
 	UserInfoEndpoint      string `json:"userinfo_endpoint"`
+	JWKSURI               string `json:"jwks_uri"`
 }
 
 type LoginHandler struct {
@@ -92,13 +96,15 @@ func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, iss
 	if strings.TrimRight(document.Issuer, "/") != issuer {
 		return ProviderConfig{}, errors.New("OpenID Connect discovery issuer does not match configured issuer")
 	}
-	for label, endpoint := range map[string]string{"authorization": document.AuthorizationEndpoint, "token": document.TokenEndpoint, "userinfo": document.UserInfoEndpoint} {
+	for label, endpoint := range map[string]string{"authorization": document.AuthorizationEndpoint, "token": document.TokenEndpoint, "userinfo": document.UserInfoEndpoint, "JSON Web Key Set": document.JWKSURI} {
 		parsedEndpoint, parseErr := url.Parse(strings.TrimSpace(endpoint))
 		if parseErr != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Host == "" {
 			return ProviderConfig{}, fmt.Errorf("OpenID Connect %s endpoint must be an absolute HTTPS URL", label)
 		}
 	}
-	return ProviderConfig{Name: "oidc", ClientID: clientID, ClientSecret: clientSecret, AuthorizeURL: document.AuthorizationEndpoint, TokenURL: document.TokenEndpoint, UserInfoURL: document.UserInfoEndpoint, Scopes: []string{"openid", "profile", "email"}}, nil
+	keySet := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, client), document.JWKSURI)
+	verifier := oidc.NewVerifier(issuer, keySet, &oidc.Config{ClientID: clientID})
+	return ProviderConfig{Name: "oidc", Issuer: issuer, ClientID: clientID, ClientSecret: clientSecret, AuthorizeURL: document.AuthorizationEndpoint, TokenURL: document.TokenEndpoint, UserInfoURL: document.UserInfoEndpoint, Scopes: []string{"openid", "profile", "email"}, verifier: verifier}, nil
 }
 
 func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, lookupUser domain.UserID, publicURL, cookieDomain string, stateKey []byte, providers []ProviderConfig) (LoginHandler, error) {
@@ -119,6 +125,7 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 	configured := make(map[string]ProviderConfig, len(providers))
 	for _, provider := range providers {
 		provider.Name = strings.ToLower(strings.TrimSpace(provider.Name))
+		provider.Issuer = strings.TrimRight(strings.TrimSpace(provider.Issuer), "/")
 		provider.ClientID = strings.TrimSpace(provider.ClientID)
 		provider.ClientSecret = strings.TrimSpace(provider.ClientSecret)
 		provider.AuthorizeURL = strings.TrimSpace(provider.AuthorizeURL)
@@ -177,6 +184,71 @@ func (h LoginHandler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("GET /auth/"+provider, func(w http.ResponseWriter, r *http.Request) { h.begin(w, r, provider) })
 		mux.HandleFunc("GET /auth/"+provider+"/callback", func(w http.ResponseWriter, r *http.Request) { h.callback(w, r, provider) })
 	}
+	if provider, ok := h.providers["oidc"]; ok && provider.Issuer != "" {
+		mux.HandleFunc("POST /auth/oidc/backchannel-logout", h.backchannelLogout)
+	}
+}
+
+const backchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
+
+type backchannelLogoutClaims struct {
+	Events   map[string]json.RawMessage `json:"events"`
+	IssuedAt int64                      `json:"iat"`
+	JWTID    string                     `json:"jti"`
+	Nonce    string                     `json:"nonce"`
+	SID      string                     `json:"sid"`
+}
+
+func (h LoginHandler) verifyBackchannelLogout(ctx context.Context, raw string) (*oidc.IDToken, error) {
+	providerConfig := h.providers["oidc"]
+	verifier := providerConfig.verifier
+	if verifier == nil {
+		ctx = oidc.ClientContext(ctx, h.client)
+		provider, err := oidc.NewProvider(ctx, providerConfig.Issuer)
+		if err != nil {
+			return nil, fmt.Errorf("discover OpenID Connect provider: %w", err)
+		}
+		verifier = provider.Verifier(&oidc.Config{ClientID: providerConfig.ClientID})
+	}
+	token, err := verifier.Verify(ctx, raw)
+	if err != nil {
+		return nil, fmt.Errorf("verify logout token: %w", err)
+	}
+	var claims backchannelLogoutClaims
+	if err := token.Claims(&claims); err != nil {
+		return nil, fmt.Errorf("decode logout token: %w", err)
+	}
+	_, eventPresent := claims.Events[backchannelLogoutEvent]
+	if token.Subject == "" || claims.SID == "" || claims.IssuedAt == 0 || claims.JWTID == "" || claims.Nonce != "" || !eventPresent {
+		return nil, errors.New("logout token claims are invalid")
+	}
+	return token, nil
+}
+
+func (h LoginHandler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "logout token is invalid", http.StatusBadRequest)
+		return
+	}
+	token, err := h.verifyBackchannelLogout(r.Context(), strings.TrimSpace(r.Form.Get("logout_token")))
+	if err != nil {
+		http.Error(w, "logout token is invalid", http.StatusBadRequest)
+		return
+	}
+	identity, err := h.service.GetExternalIdentity(r.Context(), h.workspace, "oidc", token.Subject)
+	if errors.Is(err, store.ErrNotFound) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if err != nil {
+		http.Error(w, "session revocation unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	if err := h.service.ResetUserSessions(r.Context(), h.workspace, h.lookupUser, identity.UserID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "session revocation unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h LoginHandler) login(w http.ResponseWriter, _ *http.Request) {

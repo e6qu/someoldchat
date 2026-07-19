@@ -59,19 +59,25 @@ workspace user with the same verified email.
 
 ## Single sign-on and logout
 
-All browser applications that should share one sign-in must use the same
-durable session store and the same `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` value. The
-value is a parent DNS hostname such as `example.com`, and the application URLs
-must be subdomains of it. The server then issues one secure, HTTP-only session
-cookie for that domain. An empty value deliberately scopes the cookie to the
-single host and does not provide cross-application single sign-on.
+Cross-application single sign-on comes from the configured OpenID Connect
+issuer session. Each relying application keeps its own host-scoped session;
+when a new application starts authorization, Shauth recognizes the existing
+identity session and completes the authorization-code flow without asking the
+user to authenticate again. `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` controls only the
+scope of SameOldChat's own secure, HTTP-only cookie. It is not the
+cross-application identity boundary.
 
-Each application validates the shared session against the durable session
-store. `POST /logout` and the existing application sign-out control revoke that
-session in the store and expire the shared cookie, so logout from any
-application signs the user out of all applications using that session. The
-application must use the same session store in monolith and separate modes;
-the gRPC session adapter is the authoritative path for separate mode.
+`POST /logout` revokes the current SameOldChat session and expires its cookie.
+Shauth also sends a signed OpenID Connect back-channel logout token to
+`POST /auth/oidc/backchannel-logout`. SameOldChat verifies the issuer, audience,
+signature, standard logout event, `sid`, `sub`, `iat`, and `jti`, rejects a
+token carrying `nonce`, resolves the verified issuer subject, and revokes every
+local session for that user. The Shauth client must register
+`https://chat.dev.e6qu.dev/auth/oidc/backchannel-logout` as its back-channel
+logout URI and `https://chat.dev.e6qu.dev/` as an allowed post-logout redirect
+URI. The application uses the same durable session store in monolith and
+separate modes; the gRPC session adapter remains the authoritative path for
+separate mode.
 
 Administrative user removal deactivates workspace membership and revokes every
 session and Slack-compatible token owned by that user in the same durable
