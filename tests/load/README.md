@@ -6,6 +6,9 @@ They also check that session creation has one winner and that revocation is
 visible through every replica using the shared store.
 The outbox recovery test models a crashed worker by abandoning its lease and
 checks that a replacement worker reclaims and acknowledges the event.
+The outbox competition test runs multiple stateless replicas concurrently and
+checks that durable claims partition the event stream without duplicate
+acknowledgement.
 The scheduled-message recovery test applies the same rule to delayed message
 execution and verifies that the idempotency key prevents a duplicate post.
 The activator forwarding test checks that concurrent durable requests reach the

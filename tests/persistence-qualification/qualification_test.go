@@ -531,3 +531,96 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		}
 	})
 }
+
+func TestDurableEventDeliveryRepositoryContract(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repository, closeRepository := openStore(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-events-" + suffix)
+	createdAt := time.Unix(1700000000, 123).UTC()
+	appendEvent := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: id, CreatedAt: createdAt}
+	}
+	for _, event := range []events.Event{
+		appendEvent("message", "message.created"),
+		appendEvent("blob", events.FileBlobDeleteTopic),
+		appendEvent("presence", "user.presence_changed"),
+	} {
+		if err := repository.AppendEvent(ctx, event); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	listed, err := repository.ListEventsAfter(ctx, workspaceID, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 2 || listed[0].Event.Topic != "message.created" || listed[1].Event.Topic != "user.presence_changed" {
+		t.Fatalf("listed events=%+v, want non-blob events in sequence order", listed)
+	}
+	if !listed[0].Event.CreatedAt.Equal(createdAt) {
+		t.Fatalf("event timestamp=%s, want %s", listed[0].Event.CreatedAt, createdAt)
+	}
+
+	claimed, err := repository.ClaimEvents(ctx, workspaceID, "worker-a", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 2 || claimed[0].Event.ID != listed[0].Event.ID || claimed[1].Event.ID != listed[1].Event.ID {
+		t.Fatalf("claimed events=%+v, want both normal events", claimed)
+	}
+	sequences := []uint64{claimed[0].Sequence, claimed[1].Sequence}
+	if next, err := repository.ClaimEvents(ctx, workspaceID, "worker-b", 10, time.Minute); err != nil {
+		t.Fatal(err)
+	} else if len(next) != 0 {
+		t.Fatalf("events claimed by a second worker while leased=%+v", next)
+	}
+	if err := repository.RenewEvents(ctx, "worker-a", sequences, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.ReleaseEvents(ctx, "worker-a", sequences[:1], time.Now().UTC().Add(40*time.Millisecond)); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := repository.ClaimEvents(ctx, workspaceID, "worker-b", 10, time.Minute); err != nil {
+		t.Fatal(err)
+	} else if len(next) != 0 {
+		t.Fatalf("released event became claimable before retry time=%+v", next)
+	}
+	time.Sleep(60 * time.Millisecond)
+	retried, err := repository.ClaimEvents(ctx, workspaceID, "worker-b", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried) != 1 || retried[0].Sequence != sequences[0] {
+		t.Fatalf("retried events=%+v, want released sequence %d", retried, sequences[0])
+	}
+	if err := repository.AckEvents(ctx, "worker-b", []uint64{retried[0].Sequence}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.AckEvents(ctx, "worker-a", []uint64{sequences[1]}); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := repository.ListEventsAfter(ctx, workspaceID, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(after) != 2 {
+		t.Fatalf("delivered events disappeared from journal=%+v", after)
+	}
+
+	blobs, err := repository.ClaimEventsForTopic(ctx, workspaceID, events.FileBlobDeleteTopic, "blob-worker", 1, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blobs) != 1 || blobs[0].Event.Topic != events.FileBlobDeleteTopic {
+		t.Fatalf("topic-specific claim=%+v", blobs)
+	}
+	if err := repository.AckEvents(ctx, "blob-worker", []uint64{blobs[0].Sequence}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.AckEvents(ctx, "blob-worker", []uint64{blobs[0].Sequence}); !errors.Is(err, store.ErrLeaseConflict) {
+		t.Fatalf("repeated acknowledgement error=%v, want ErrLeaseConflict", err)
+	}
+}

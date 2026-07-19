@@ -93,6 +93,10 @@ Spool rows are claimed with durable per-replica leases; only the lease owner
 may delete a delivered row, and lease expiry is the crash-recovery path for a
 replica that dies during replay.
 
+The shared SQLite, dqlite, and PostgreSQL qualification contract also verifies
+event replay order, topic-specific claims, lease renewal, delayed release, and
+acknowledgement ownership for durable outbox records.
+
 The standalone activator receives an explicit process context. Shutdown
 cancels wake and replay work owned by that process, while accepted spool rows
 remain durable for a replacement replica to reclaim after lease expiry. A
@@ -108,6 +112,13 @@ read limit to bound memory use at the transport edge. Endpoint discovery reads
 all paginated Amazon Elastic Container Service task results and batches task
 description requests at the service limit, so replica counts do not silently
 truncate the active endpoint set.
+
+The RTM WebSocket endpoint follows Slack's published legacy RTM protocol:
+successful ping messages return a `pong`, preserve scalar fields, and copy a
+positive client `id` into `reply_to`; nested ping fields fail as invalid input.
+The endpoint also rejects messages larger than 16 kilobytes at the WebSocket
+boundary. See [Slack's RTM protocol](https://api.slack.com/legacy/rtm) for the
+upstream wire contract.
 
 ## Snapshot retention and verification
 

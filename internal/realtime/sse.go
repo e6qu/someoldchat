@@ -21,11 +21,20 @@ type Handler struct {
 	Workspace      domain.WorkspaceID
 	Authenticator  auth.Authenticator
 	RTMConnections RTMConnectionSource
+	Messages       RTMMessageService
 }
 
 type RTMConnectionSource interface {
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 }
+
+type RTMMessageService interface {
+	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
+}
+
+const maxRTMMessageBytes = 16 << 10
+
+var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
 
 func NewHandler(source events.Source, workspace domain.WorkspaceID, authenticator auth.Authenticator) (Handler, error) {
 	if source == nil {
@@ -40,7 +49,7 @@ func NewHandler(source events.Source, workspace domain.WorkspaceID, authenticato
 	return Handler{Source: source, Workspace: workspace, Authenticator: authenticator}, nil
 }
 
-func NewRTMHandler(source events.Source, workspace domain.WorkspaceID, connections RTMConnectionSource) (Handler, error) {
+func NewRTMHandler(source events.Source, workspace domain.WorkspaceID, connections RTMConnectionSource, messages RTMMessageService) (Handler, error) {
 	if source == nil {
 		return Handler{}, errors.New("RTM requires an event source")
 	}
@@ -50,7 +59,10 @@ func NewRTMHandler(source events.Source, workspace domain.WorkspaceID, connectio
 	if connections == nil {
 		return Handler{}, errors.New("RTM requires a connection store")
 	}
-	return Handler{Source: source, Workspace: workspace, RTMConnections: connections}, nil
+	if messages == nil {
+		return Handler{}, errors.New("RTM requires a message service")
+	}
+	return Handler{Source: source, Workspace: workspace, RTMConnections: connections, Messages: messages}, nil
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
@@ -67,6 +79,7 @@ func (h Handler) events(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	request := conn.Request()
+	conn.MaxPayloadBytes = maxRTMMessageBytes
 	if h.RTMConnections == nil {
 		_ = websocket.Message.Send(conn, `{"type":"error","error":{"code":1,"msg":"invalid_auth"}}`)
 		return
@@ -130,7 +143,7 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 		case <-readerDone:
 			return
 		case message := <-commands:
-			if err := handleRTMCommand(conn, message); err != nil {
+			if err := handleRTMCommand(request.Context(), conn, connection, h.Messages, message); err != nil {
 				return
 			}
 		case <-ticker.C:
@@ -166,17 +179,141 @@ func encodeRTMEvent(record events.Record) ([]byte, error) {
 	return json.Marshal(map[string]string{"type": record.Event.Topic, "data": record.Event.Payload})
 }
 
-func handleRTMCommand(conn *websocket.Conn, message string) error {
+func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, raw string) error {
+	var command struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(raw), &command); err != nil || strings.TrimSpace(command.Type) == "" {
+		return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+	}
+	switch command.Type {
+	case "ping":
+		payload, err := encodeRTMPong(raw)
+		if err != nil {
+			return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+		}
+		return websocket.Message.Send(conn, string(payload))
+	case "message":
+		payload, err := encodeRTMMessage(ctx, connection, messages, raw)
+		if err != nil {
+			if commandID := rtmCommandID(raw); commandID > 0 {
+				message := err.Error()
+				if errors.Is(err, errRTMMessageFailed) {
+					message = "message_failed"
+				}
+				return sendRTMMessageError(conn, commandID, message)
+			}
+			if errors.Is(err, errRTMMessageFailed) {
+				return websocket.Message.Send(conn, `{"ok":false,"error":{"code":2,"msg":"message_failed"}}`)
+			}
+			return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+		}
+		return websocket.Message.Send(conn, string(payload))
+	default:
+		return websocket.Message.Send(conn, `{"type":"error","error":{"code":5,"msg":"unsupported_message"}}`)
+	}
+}
+
+var errRTMMessageFailed = errors.New("RTM message failed")
+
+func encodeRTMMessage(ctx context.Context, connection domain.RTMConnection, messages RTMMessageService, raw string) ([]byte, error) {
+	var command struct {
+		ID       int64  `json:"id"`
+		Type     string `json:"type"`
+		Channel  string `json:"channel"`
+		Text     string `json:"text"`
+		ThreadTS string `json:"thread_ts"`
+	}
+	if err := json.Unmarshal([]byte(raw), &command); err != nil || command.Type != "message" || command.ID <= 0 {
+		return nil, errors.New("invalid RTM message")
+	}
+	channel := strings.TrimSpace(command.Channel)
+	if channel == "" {
+		return nil, errors.New("message channel is missing")
+	}
+	if strings.TrimSpace(command.Text) == "" {
+		return nil, errors.New("message text is missing")
+	}
+	if messages == nil {
+		return nil, errors.New("message service is missing")
+	}
+	posted, err := messages.Post(ctx, connection.WorkspaceID, connection.UserID, domain.ConversationID(channel), command.Text, domain.MessageTimestamp(strings.TrimSpace(command.ThreadTS)), "")
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", errRTMMessageFailed, err)
+	}
+	return json.Marshal(map[string]any{
+		"ok":       true,
+		"reply_to": command.ID,
+		"ts":       domain.NewMessageTimestamp(posted.CreatedAt),
+		"text":     posted.Text,
+	})
+}
+
+func rtmCommandID(raw string) int64 {
+	var command struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(raw), &command); err != nil {
+		return 0
+	}
+	return command.ID
+}
+
+func sendRTMMessageError(conn *websocket.Conn, id int64, message string) error {
+	payload, err := json.Marshal(map[string]any{
+		"ok":       false,
+		"reply_to": id,
+		"error": map[string]any{
+			"code": 2,
+			"msg":  message,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	return websocket.Message.Send(conn, string(payload))
+}
+
+func encodeRTMPong(message string) ([]byte, error) {
 	var command struct {
 		Type string `json:"type"`
 	}
 	if err := json.Unmarshal([]byte(message), &command); err != nil || strings.TrimSpace(command.Type) == "" {
-		return websocket.Message.Send(conn, `{"type":"error","error":{"code":4,"msg":"invalid_message"}}`)
+		return nil, errors.New("invalid RTM command")
 	}
 	if command.Type != "ping" {
-		return websocket.Message.Send(conn, `{"type":"error","error":{"code":5,"msg":"unsupported_message"}}`)
+		return nil, errUnsupportedRTMCommand
 	}
-	return websocket.Message.Send(conn, `{"type":"pong"}`)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(message), &fields); err != nil {
+		return nil, errors.New("invalid RTM command")
+	}
+	pong := map[string]json.RawMessage{"type": json.RawMessage(`"pong"`)}
+	if rawID, exists := fields["id"]; exists {
+		var id int64
+		if err := json.Unmarshal(rawID, &id); err != nil || id <= 0 {
+			return nil, errors.New("RTM ping id must be a positive integer")
+		}
+		pong["reply_to"] = rawID
+	}
+	for name, raw := range fields {
+		if name == "type" || name == "id" {
+			continue
+		}
+		var value any
+		decoder := json.NewDecoder(strings.NewReader(string(raw)))
+		decoder.UseNumber()
+		if err := decoder.Decode(&value); err != nil {
+			return nil, errors.New("invalid RTM ping field")
+		}
+		switch value.(type) {
+		case string, bool, json.Number:
+			pong[name] = raw
+		default:
+			return nil, errors.New("RTM ping fields must be scalar")
+		}
+	}
+	return json.Marshal(pong)
 }
 
 func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope) {

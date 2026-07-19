@@ -242,7 +242,7 @@ func main() {
 		os.Exit(1)
 	}
 	sseHandler.Register(mux)
-	rtmHandler, err := realtime.NewRTMHandler(chatService, "Tdev", chatService)
+	rtmHandler, err := realtime.NewRTMHandler(chatService, "Tdev", chatService, chatService)
 	if err != nil {
 		logger.Error("configure RTM", "error", err)
 		os.Exit(1)

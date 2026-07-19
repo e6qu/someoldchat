@@ -30,6 +30,8 @@ message listing, search, presence, do-not-disturb state, stars, files, remote
 file sharing and updates, reminders, scheduled-message claim and delivery,
 workspace settings, user groups and their bindings, custom emoji, and the
 integration state used by OAuth, views, workflows, dialogs, app approvals,
-invites, conversation preferences, calls, and RTM connections.
+invites, conversation preferences, calls, and RTM connections. It also
+qualifies durable event replay, topic-specific claims, lease renewal, delayed
+release, acknowledgement, and duplicate-acknowledgement rejection.
 The package does not replace the broader SQLite repository tests or the
 selected dqlite cluster and snapshot tests.
