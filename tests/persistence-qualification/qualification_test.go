@@ -618,6 +618,9 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if err != nil || len(claimed) != 1 || claimed[0].EnvelopeID != queued.EnvelopeID {
 			t.Fatalf("claimed responses=%+v err=%v", claimed, err)
 		}
+		if err := repository.RenewSocketModeResponses(ctx, "qualification-worker", claimed, time.Minute); err != nil {
+			t.Fatalf("renew Socket Mode response error=%v", err)
+		}
 		if err := repository.AckSocketModeResponses(ctx, "qualification-worker", claimed); err != nil {
 			t.Fatal(err)
 		}

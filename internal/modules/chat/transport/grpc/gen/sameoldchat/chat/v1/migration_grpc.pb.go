@@ -48,14 +48,13 @@ func (c *migrationServiceClient) Exchange(ctx context.Context, in *MigrationExch
 }
 
 // MigrationServiceServer is the server API for MigrationService service.
-// All implementations must embed UnimplementedMigrationServiceServer
+// All implementations should embed UnimplementedMigrationServiceServer
 // for forward compatibility.
 type MigrationServiceServer interface {
 	Exchange(context.Context, *MigrationExchangeRequest) (*MigrationExchangeResponse, error)
-	mustEmbedUnimplementedMigrationServiceServer()
 }
 
-// UnimplementedMigrationServiceServer must be embedded to have
+// UnimplementedMigrationServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -65,8 +64,7 @@ type UnimplementedMigrationServiceServer struct{}
 func (UnimplementedMigrationServiceServer) Exchange(context.Context, *MigrationExchangeRequest) (*MigrationExchangeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Exchange not implemented")
 }
-func (UnimplementedMigrationServiceServer) mustEmbedUnimplementedMigrationServiceServer() {}
-func (UnimplementedMigrationServiceServer) testEmbeddedByValue()                          {}
+func (UnimplementedMigrationServiceServer) testEmbeddedByValue() {}
 
 // UnsafeMigrationServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to MigrationServiceServer will

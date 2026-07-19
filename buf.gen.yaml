@@ -9,3 +9,4 @@ plugins:
       out: internal/modules/chat/transport/grpc/gen
       opt:
         - paths=source_relative
+        - require_unimplemented_servers=false

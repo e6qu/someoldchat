@@ -157,13 +157,17 @@ reverse proxy. It requires its declared configuration and never becomes a no-op
 activator when lifecycle commands or snapshot credentials are absent.
 
 The runnable `cmd/worker` is a stateless outbox and scheduled-message replica.
-It requires an explicit state backend, workspace, unique owner, and HTTP
-delivery target; event delivery uses durable leases and the event ID as its
-idempotency key. Due scheduled messages are claimed with a separate durable
-lease and posted with the scheduled-message ID as their idempotency key before
-the scheduled record is acknowledged. A worker crash therefore leaves both
-committed events and scheduled records claimable after lease expiry rather
-than losing a process-local queue.
+It requires an explicit state backend, workspace, unique owner, HTTP delivery
+target, and delivery format. `record` sends the internal event record to an
+explicit integration; `slack-events` validates a Slack Events API envelope,
+adds the configured application ID and signing-secret headers when the durable
+payload is an inner event, and fails loudly for identifier-only domain events.
+Both formats use durable leases and the event ID as their idempotency key. Due
+scheduled messages are claimed with a separate durable lease and posted with
+the scheduled-message ID as their idempotency key before the scheduled record
+is acknowledged. A worker crash therefore leaves both committed events and
+scheduled records claimable after lease expiry rather than losing a
+process-local queue.
 
 The runnable `cmd/socketmode-worker` is a stateless Socket Mode response
 replica. It claims responses through the process-independent chat boundary and

@@ -60,15 +60,14 @@ func (c *enterpriseConversationsServiceClient) ListOriginalConnectedChannelInfo(
 }
 
 // EnterpriseConversationsServiceServer is the server API for EnterpriseConversationsService service.
-// All implementations must embed UnimplementedEnterpriseConversationsServiceServer
+// All implementations should embed UnimplementedEnterpriseConversationsServiceServer
 // for forward compatibility.
 type EnterpriseConversationsServiceServer interface {
 	DisconnectShared(context.Context, *DisconnectSharedConversationRequest) (*MutationResponse, error)
 	ListOriginalConnectedChannelInfo(context.Context, *ConnectedChannelInfoRequest) (*ConnectedChannelInfoResponse, error)
-	mustEmbedUnimplementedEnterpriseConversationsServiceServer()
 }
 
-// UnimplementedEnterpriseConversationsServiceServer must be embedded to have
+// UnimplementedEnterpriseConversationsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -80,8 +79,6 @@ func (UnimplementedEnterpriseConversationsServiceServer) DisconnectShared(contex
 }
 func (UnimplementedEnterpriseConversationsServiceServer) ListOriginalConnectedChannelInfo(context.Context, *ConnectedChannelInfoRequest) (*ConnectedChannelInfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListOriginalConnectedChannelInfo not implemented")
-}
-func (UnimplementedEnterpriseConversationsServiceServer) mustEmbedUnimplementedEnterpriseConversationsServiceServer() {
 }
 func (UnimplementedEnterpriseConversationsServiceServer) testEmbeddedByValue() {}
 

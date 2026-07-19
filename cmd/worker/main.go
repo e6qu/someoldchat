@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,14 +31,25 @@ func main() {
 	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name")
 	workspace := flag.String("workspace", "", "workspace ID (required)")
 	deliveryURL := flag.String("delivery-url", "", "HTTP event delivery URL (required)")
+	deliveryFormat := flag.String("delivery-format", "", "delivery format: record or slack-events (required)")
+	appID := flag.String("app-id", "", "Slack application ID (required for slack-events delivery)")
+	signingSecret := flag.String("signing-secret", "", "Slack signing secret (required for slack-events delivery)")
 	owner := flag.String("owner", "", "unique worker owner ID (required)")
 	limit := flag.Int("batch-size", 100, "bounded event batch size")
 	lease := flag.Duration("lease", 30*time.Second, "durable delivery lease")
 	poll := flag.Duration("poll", 250*time.Millisecond, "poll interval")
 	flag.Parse()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if *backend == "" || *workspace == "" || *deliveryURL == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 {
-		logger.Error("worker requires explicit store, workspace, delivery URL, owner, and positive limits")
+	if *backend == "" || *workspace == "" || *deliveryURL == "" || *deliveryFormat == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 {
+		logger.Error("worker requires explicit store, workspace, delivery URL, delivery format, owner, and positive limits")
+		os.Exit(2)
+	}
+	if *deliveryFormat != "record" && *deliveryFormat != "slack-events" {
+		logger.Error("worker delivery format is unsupported", "format", *deliveryFormat)
+		os.Exit(2)
+	}
+	if *deliveryFormat == "slack-events" && (*appID == "" || *signingSecret == "") {
+		logger.Error("slack-events delivery requires app ID and signing secret")
 		os.Exit(2)
 	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
@@ -51,7 +63,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer runtime.Closer.Close()
-	delivery, err := newHTTPDelivery(*deliveryURL)
+	var delivery outbox.Delivery
+	if *deliveryFormat == "record" {
+		delivery, err = newHTTPDelivery(*deliveryURL)
+	} else {
+		delivery, err = newSlackEventDelivery(*deliveryURL, *appID, *signingSecret)
+	}
 	if err != nil {
 		logger.Error("configure delivery", "error", err)
 		os.Exit(2)
@@ -88,14 +105,31 @@ func main() {
 }
 
 func newHTTPDelivery(target string) (outbox.Delivery, error) {
-	request, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(nil))
-	if err != nil {
-		return nil, fmt.Errorf("delivery URL is invalid: %w", err)
-	}
-	if request.URL.Scheme == "" || request.URL.Host == "" {
-		return nil, errors.New("delivery URL must be absolute")
+	if err := validateDeliveryTarget(target); err != nil {
+		return nil, err
 	}
 	return newHTTPDeliveryWithClient(target, &http.Client{Timeout: 30 * time.Second})
+}
+
+func newSlackEventDelivery(target, appID, signingSecret string) (outbox.Delivery, error) {
+	if err := validateDeliveryTarget(target); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(appID) == "" || strings.TrimSpace(signingSecret) == "" {
+		return nil, errors.New("Slack event delivery requires app ID and signing secret")
+	}
+	return newSlackEventDeliveryWithClient(target, appID, signingSecret, &http.Client{Timeout: 30 * time.Second})
+}
+
+func validateDeliveryTarget(target string) error {
+	request, err := http.NewRequest(http.MethodPost, target, bytes.NewReader(nil))
+	if err != nil {
+		return fmt.Errorf("delivery URL is invalid: %w", err)
+	}
+	if request.URL.Scheme == "" || request.URL.Host == "" {
+		return errors.New("delivery URL must be absolute")
+	}
+	return nil
 }
 
 type httpDoer interface {
@@ -124,6 +158,46 @@ func newHTTPDeliveryWithClient(target string, client httpDoer) (outbox.Delivery,
 		defer response.Body.Close()
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
 			return fmt.Errorf("delivery returned HTTP %d", response.StatusCode)
+		}
+		return nil
+	}, nil
+}
+
+func newSlackEventDeliveryWithClient(target, appID, signingSecret string, client httpDoer) (outbox.Delivery, error) {
+	if client == nil {
+		return nil, errors.New("delivery HTTP client is required")
+	}
+	if err := validateDeliveryTarget(target); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(appID) == "" || strings.TrimSpace(signingSecret) == "" {
+		return nil, errors.New("Slack event delivery requires app ID and signing secret")
+	}
+	return func(ctx context.Context, record events.Record) error {
+		body, err := events.SlackEventBody(record, appID)
+		if err != nil {
+			return err
+		}
+		timestamp := time.Now().UTC()
+		signature, err := events.SlackSignature(signingSecret, timestamp, body)
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Slack-Request-Timestamp", fmt.Sprint(timestamp.Unix()))
+		req.Header.Set("X-Slack-Signature", signature)
+		req.Header.Set("Idempotency-Key", string(record.Event.ID))
+		response, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return fmt.Errorf("Slack event delivery returned HTTP %d", response.StatusCode)
 		}
 		return nil
 	}, nil

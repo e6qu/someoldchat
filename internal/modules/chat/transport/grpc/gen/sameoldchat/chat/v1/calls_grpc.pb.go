@@ -108,7 +108,7 @@ func (c *callsServiceClient) RemoveCallParticipants(ctx context.Context, in *Cal
 }
 
 // CallsServiceServer is the server API for CallsService service.
-// All implementations must embed UnimplementedCallsServiceServer
+// All implementations should embed UnimplementedCallsServiceServer
 // for forward compatibility.
 type CallsServiceServer interface {
 	AddCall(context.Context, *AddCallRequest) (*Call, error)
@@ -117,10 +117,9 @@ type CallsServiceServer interface {
 	UpdateCall(context.Context, *UpdateCallRequest) (*Call, error)
 	AddCallParticipants(context.Context, *CallParticipantsRequest) (*MutationResponse, error)
 	RemoveCallParticipants(context.Context, *CallParticipantsRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedCallsServiceServer()
 }
 
-// UnimplementedCallsServiceServer must be embedded to have
+// UnimplementedCallsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -145,8 +144,7 @@ func (UnimplementedCallsServiceServer) AddCallParticipants(context.Context, *Cal
 func (UnimplementedCallsServiceServer) RemoveCallParticipants(context.Context, *CallParticipantsRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RemoveCallParticipants not implemented")
 }
-func (UnimplementedCallsServiceServer) mustEmbedUnimplementedCallsServiceServer() {}
-func (UnimplementedCallsServiceServer) testEmbeddedByValue()                      {}
+func (UnimplementedCallsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeCallsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to CallsServiceServer will

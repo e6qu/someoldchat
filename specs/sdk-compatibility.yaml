@@ -31,6 +31,28 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
+  - id: node-socket-mode
+    ecosystem: npm
+    package: '@slack/socket-mode'
+    upstream: https://github.com/slackapi/node-slack-sdk
+    release: 3.0.0
+    revision: 70e15b8442745d215f9ae259a2c970b306aff51a
+    artifact: socket-mode-3.0.0.tgz
+    sha256: 3d70683ca2872323150747e9611f4de35d9df333bdc6321bb4360c9f1d165fe6
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
+  - id: node-rtm-api
+    ecosystem: npm
+    package: '@slack/rtm-api'
+    upstream: https://github.com/slackapi/node-slack-sdk
+    release: 7.0.4
+    revision: 18c4af44866519ca2cfb9a12848dabfedd3ae1aa
+    artifact: slack-rtm-api-7.0.4.tgz
+    sha256: 59ace7f544d2f724f21239e19169976c619e89b397c3fc90cf7fb269f7f7dbe9
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/node-rtm-api/qualification.mjs
   - id: python-slack-sdk
     ecosystem: pypi
     package: slack-sdk
@@ -53,6 +75,17 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
+  - id: python-socket-mode
+    ecosystem: pypi
+    package: slack-sdk
+    upstream: https://github.com/slackapi/python-slack-sdk
+    release: 3.43.0
+    revision: 3a5cec2e79ebe58467c2c65781492a42938fdbfa
+    artifact: slack_sdk-3.43.0-py2.py3-none-any.whl
+    sha256: 4b6557c65577fc172f685af218b811f9f3b4909e24cddd839ada09565f10c585
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/python-socket-mode/qualification.py
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client
@@ -64,6 +97,17 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+  - id: java-socket-mode
+    ecosystem: maven
+    package: com.slack.api:slack-api-client
+    upstream: https://github.com/slackapi/java-slack-sdk
+    release: 1.49.0
+    revision: 06f512b9d2741ed38573915528c9f66cee90df48
+    artifact: slack-api-client-1.49.0.jar
+    sha256: eb671acc28b9618486f46f256b87235e8d358c6536cf56e6503abaec3881701f
+    license: MIT
+    suite: passed
+    suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/SocketModeQualification.java
   - id: deno-slack-runtime
     ecosystem: deno
     package: deno-slack-runtime

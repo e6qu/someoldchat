@@ -21,10 +21,12 @@ type Spool interface {
 	Enqueue(context.Context, *http.Request, []byte) (uint64, error)
 	List(context.Context, int) ([]SpooledRequest, error)
 	Claim(context.Context, string, int, time.Duration) ([]SpooledRequest, error)
+	Renew(context.Context, string, []uint64, time.Duration) error
 	Delete(context.Context, string, uint64) error
 }
 
 var ErrSpoolCapacity = errors.New("request spool capacity exceeded")
+var ErrSpoolLeaseLost = errors.New("request spool lease lost")
 
 type SpoolLimits struct {
 	MaxBodyBytes      int64
@@ -198,6 +200,38 @@ func (s *SQLiteSpool) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+func (s *SQLiteSpool) Renew(ctx context.Context, owner string, ids []uint64, lease time.Duration) error {
+	if s == nil || s.db == nil {
+		return errors.New("request spool is not initialized")
+	}
+	if strings.TrimSpace(owner) == "" || len(ids) == 0 || lease <= 0 {
+		return errors.New("spool renewal requires an owner, request IDs, and a positive lease")
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, 0, len(ids)+2)
+	args = append(args, time.Now().UTC().Add(lease).Format(time.RFC3339Nano), owner)
+	for index, id := range ids {
+		if id == 0 {
+			return errors.New("spool renewal requires positive request IDs")
+		}
+		placeholders[index] = "?"
+		args = append(args, id)
+	}
+	query := `UPDATE activator_request_spool SET lease_until = ? WHERE lease_owner = ? AND id IN (` + strings.Join(placeholders, ",") + `)`
+	result, err := s.db.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != int64(len(ids)) {
+		return ErrSpoolLeaseLost
+	}
+	return nil
 }
 
 func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body []byte) (uint64, error) {

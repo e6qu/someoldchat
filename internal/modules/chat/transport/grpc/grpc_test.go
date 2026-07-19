@@ -301,6 +301,20 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if _, err := remote.ConsumeSocketModeConnection(ctx, socketConnection.ID); err == nil {
 		t.Fatal("Socket Mode connection was replayed")
 	}
+	response := domain.SocketModeResponse{AppID: appToken.AppID, EnvelopeID: "response-grpc", Payload: `{}`, ReceivedAt: time.Now().UTC()}
+	if err := remote.RecordSocketModeResponse(ctx, response); err != nil {
+		t.Fatal(err)
+	}
+	claimedResponses, err := remote.ClaimSocketModeResponses(ctx, response.AppID, "worker-grpc", 1, time.Minute)
+	if err != nil || len(claimedResponses) != 1 {
+		t.Fatalf("claimed Socket Mode responses=%+v err=%v", claimedResponses, err)
+	}
+	if err := remote.RenewSocketModeResponses(ctx, "worker-grpc", claimedResponses, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.AckSocketModeResponses(ctx, "worker-grpc", claimedResponses); err != nil {
+		t.Fatal(err)
+	}
 	if err := remote.RevokeToken(ctx, "api-token"); err != nil {
 		t.Fatal(err)
 	}

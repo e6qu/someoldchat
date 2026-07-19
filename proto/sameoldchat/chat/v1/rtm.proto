@@ -93,6 +93,12 @@ message SocketModeResponseReleaseRequest {
   int64 retry_at_unix_nano = 3;
 }
 
+message SocketModeResponseRenewRequest {
+  string owner = 1;
+  repeated SocketModeResponseKey responses = 2;
+  int64 lease_nanos = 3;
+}
+
 service RTMService {
   rpc CreateConnection(RTMConnectionRequest) returns (RTMConnection);
   rpc ConsumeConnection(RTMConnectionIDRequest) returns (RTMConnection);
@@ -105,6 +111,7 @@ service RTMService {
   rpc SetSocketModeCursor(SocketModeCursorRequest) returns (SocketModeCursor);
   rpc RecordSocketModeResponse(SocketModeResponseRequest) returns (SocketModeResponse);
   rpc ClaimSocketModeResponses(SocketModeResponseLeaseRequest) returns (SocketModeResponseBatch);
+  rpc RenewSocketModeResponses(SocketModeResponseRenewRequest) returns (SocketModeResponseBatch);
   rpc AckSocketModeResponses(SocketModeResponseAckRequest) returns (SocketModeResponseBatch);
   rpc ReleaseSocketModeResponses(SocketModeResponseReleaseRequest) returns (SocketModeResponseBatch);
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -30,7 +31,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 	const keyID = "logout-key"
 	var issuer *httptest.Server
-	issuer = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	issuer = newIPv4TLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
@@ -119,7 +120,7 @@ func TestNewLoginHandlerAcceptsSupportedAuthorizationProviders(t *testing.T) {
 
 func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 	var server *httptest.Server
-	server = httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+	server = newIPv4TLSServer(t, http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path != "/.well-known/openid-configuration" {
 			http.NotFound(response, request)
 			return
@@ -147,6 +148,18 @@ func TestDiscoverOpenIDConnectProvider(t *testing.T) {
 	if got := strings.Join(provider.Scopes, " "); got != "openid profile email" {
 		t.Fatalf("scopes=%q", got)
 	}
+}
+
+func newIPv4TLSServer(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &httptest.Server{Listener: listener, Config: &http.Server{Handler: handler}}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	return server
 }
 
 func TestNewLoginHandlerRejectsUnsupportedOrIncompleteProviders(t *testing.T) {

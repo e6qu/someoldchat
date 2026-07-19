@@ -48,14 +48,13 @@ func (c *dialogsServiceClient) OpenDialog(ctx context.Context, in *OpenDialogReq
 }
 
 // DialogsServiceServer is the server API for DialogsService service.
-// All implementations must embed UnimplementedDialogsServiceServer
+// All implementations should embed UnimplementedDialogsServiceServer
 // for forward compatibility.
 type DialogsServiceServer interface {
 	OpenDialog(context.Context, *OpenDialogRequest) (*DialogMutationResponse, error)
-	mustEmbedUnimplementedDialogsServiceServer()
 }
 
-// UnimplementedDialogsServiceServer must be embedded to have
+// UnimplementedDialogsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -65,8 +64,7 @@ type UnimplementedDialogsServiceServer struct{}
 func (UnimplementedDialogsServiceServer) OpenDialog(context.Context, *OpenDialogRequest) (*DialogMutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method OpenDialog not implemented")
 }
-func (UnimplementedDialogsServiceServer) mustEmbedUnimplementedDialogsServiceServer() {}
-func (UnimplementedDialogsServiceServer) testEmbeddedByValue()                        {}
+func (UnimplementedDialogsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeDialogsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to DialogsServiceServer will

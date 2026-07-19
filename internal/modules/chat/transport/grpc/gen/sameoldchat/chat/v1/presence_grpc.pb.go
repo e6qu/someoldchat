@@ -132,7 +132,7 @@ func (c *presenceServiceClient) EndDND(ctx context.Context, in *DoNotDisturbRequ
 }
 
 // PresenceServiceServer is the server API for PresenceService service.
-// All implementations must embed UnimplementedPresenceServiceServer
+// All implementations should embed UnimplementedPresenceServiceServer
 // for forward compatibility.
 type PresenceServiceServer interface {
 	UserInfo(context.Context, *UserRequest) (*User, error)
@@ -143,10 +143,9 @@ type PresenceServiceServer interface {
 	SetSnooze(context.Context, *SetSnoozeRequest) (*DoNotDisturb, error)
 	EndSnooze(context.Context, *DoNotDisturbRequest) (*DoNotDisturb, error)
 	EndDND(context.Context, *DoNotDisturbRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedPresenceServiceServer()
 }
 
-// UnimplementedPresenceServiceServer must be embedded to have
+// UnimplementedPresenceServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -177,8 +176,7 @@ func (UnimplementedPresenceServiceServer) EndSnooze(context.Context, *DoNotDistu
 func (UnimplementedPresenceServiceServer) EndDND(context.Context, *DoNotDisturbRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method EndDND not implemented")
 }
-func (UnimplementedPresenceServiceServer) mustEmbedUnimplementedPresenceServiceServer() {}
-func (UnimplementedPresenceServiceServer) testEmbeddedByValue()                         {}
+func (UnimplementedPresenceServiceServer) testEmbeddedByValue() {}
 
 // UnsafePresenceServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to PresenceServiceServer will

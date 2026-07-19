@@ -48,14 +48,13 @@ func (c *eventsServiceClient) ListEventsAfter(ctx context.Context, in *EventsReq
 }
 
 // EventsServiceServer is the server API for EventsService service.
-// All implementations must embed UnimplementedEventsServiceServer
+// All implementations should embed UnimplementedEventsServiceServer
 // for forward compatibility.
 type EventsServiceServer interface {
 	ListEventsAfter(context.Context, *EventsRequest) (*EventsResponse, error)
-	mustEmbedUnimplementedEventsServiceServer()
 }
 
-// UnimplementedEventsServiceServer must be embedded to have
+// UnimplementedEventsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -65,8 +64,7 @@ type UnimplementedEventsServiceServer struct{}
 func (UnimplementedEventsServiceServer) ListEventsAfter(context.Context, *EventsRequest) (*EventsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListEventsAfter not implemented")
 }
-func (UnimplementedEventsServiceServer) mustEmbedUnimplementedEventsServiceServer() {}
-func (UnimplementedEventsServiceServer) testEmbeddedByValue()                       {}
+func (UnimplementedEventsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeEventsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to EventsServiceServer will

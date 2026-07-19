@@ -14,6 +14,10 @@ import (
 )
 
 func TestParseClusterNormalizesAndRejectsDuplicateAddresses(t *testing.T) {
+	empty, err := ParseCluster("")
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty cluster=%#v err=%v, want a non-nil empty list", empty, err)
+	}
 	cluster, err := ParseCluster(" node-a:1, node-b:2 ")
 	if err != nil || len(cluster) != 2 || cluster[0] != "node-a:1" || cluster[1] != "node-b:2" {
 		t.Fatalf("cluster=%v err=%v", cluster, err)

@@ -180,7 +180,7 @@ func (c *filesServiceClient) UpdateRemoteFile(ctx context.Context, in *UpdateRem
 }
 
 // FilesServiceServer is the server API for FilesService service.
-// All implementations must embed UnimplementedFilesServiceServer
+// All implementations should embed UnimplementedFilesServiceServer
 // for forward compatibility.
 type FilesServiceServer interface {
 	FileInfo(context.Context, *FileRequest) (*File, error)
@@ -195,10 +195,9 @@ type FilesServiceServer interface {
 	RemoveRemoteFile(context.Context, *RemoteFileRequest) (*DeleteFileResponse, error)
 	ShareRemoteFile(context.Context, *ShareRemoteFileRequest) (*RemoteFile, error)
 	UpdateRemoteFile(context.Context, *UpdateRemoteFileRequest) (*RemoteFile, error)
-	mustEmbedUnimplementedFilesServiceServer()
 }
 
-// UnimplementedFilesServiceServer must be embedded to have
+// UnimplementedFilesServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -241,8 +240,7 @@ func (UnimplementedFilesServiceServer) ShareRemoteFile(context.Context, *ShareRe
 func (UnimplementedFilesServiceServer) UpdateRemoteFile(context.Context, *UpdateRemoteFileRequest) (*RemoteFile, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateRemoteFile not implemented")
 }
-func (UnimplementedFilesServiceServer) mustEmbedUnimplementedFilesServiceServer() {}
-func (UnimplementedFilesServiceServer) testEmbeddedByValue()                      {}
+func (UnimplementedFilesServiceServer) testEmbeddedByValue() {}
 
 // UnsafeFilesServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to FilesServiceServer will
@@ -661,7 +659,7 @@ func (c *chatServiceClient) DeleteUserPhoto(ctx context.Context, in *UserPhotoDe
 }
 
 // ChatServiceServer is the server API for ChatService service.
-// All implementations must embed UnimplementedChatServiceServer
+// All implementations should embed UnimplementedChatServiceServer
 // for forward compatibility.
 type ChatServiceServer interface {
 	UploadFile(grpc.ClientStreamingServer[UploadFilePart, File]) error
@@ -670,10 +668,9 @@ type ChatServiceServer interface {
 	UploadUserPhoto(grpc.ClientStreamingServer[UserPhotoUploadPart, User]) error
 	DownloadUserPhoto(*UserPhotoDownloadRequest, grpc.ServerStreamingServer[UserPhotoDownloadPart]) error
 	DeleteUserPhoto(context.Context, *UserPhotoDeleteRequest) (*MutationResponse, error)
-	mustEmbedUnimplementedChatServiceServer()
 }
 
-// UnimplementedChatServiceServer must be embedded to have
+// UnimplementedChatServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -698,8 +695,7 @@ func (UnimplementedChatServiceServer) DownloadUserPhoto(*UserPhotoDownloadReques
 func (UnimplementedChatServiceServer) DeleteUserPhoto(context.Context, *UserPhotoDeleteRequest) (*MutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DeleteUserPhoto not implemented")
 }
-func (UnimplementedChatServiceServer) mustEmbedUnimplementedChatServiceServer() {}
-func (UnimplementedChatServiceServer) testEmbeddedByValue()                     {}
+func (UnimplementedChatServiceServer) testEmbeddedByValue() {}
 
 // UnsafeChatServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to ChatServiceServer will

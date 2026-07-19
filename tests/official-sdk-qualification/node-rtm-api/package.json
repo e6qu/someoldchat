@@ -1,0 +1,8 @@
+{
+  "name": "sameoldchat-node-rtm-api-qualification",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@slack/rtm-api": "7.0.4"
+  }
+}

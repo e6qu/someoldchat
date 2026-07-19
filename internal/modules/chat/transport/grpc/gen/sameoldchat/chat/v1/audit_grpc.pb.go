@@ -72,16 +72,15 @@ func (c *accessLogsServiceClient) IntegrationLogs(ctx context.Context, in *Integ
 }
 
 // AccessLogsServiceServer is the server API for AccessLogsService service.
-// All implementations must embed UnimplementedAccessLogsServiceServer
+// All implementations should embed UnimplementedAccessLogsServiceServer
 // for forward compatibility.
 type AccessLogsServiceServer interface {
 	RecordAccess(context.Context, *RecordAccessRequest) (*AccessMutationResponse, error)
 	AccessLogs(context.Context, *AccessLogsRequest) (*AccessLogsResponse, error)
 	IntegrationLogs(context.Context, *IntegrationLogsRequest) (*IntegrationLogsResponse, error)
-	mustEmbedUnimplementedAccessLogsServiceServer()
 }
 
-// UnimplementedAccessLogsServiceServer must be embedded to have
+// UnimplementedAccessLogsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -97,8 +96,7 @@ func (UnimplementedAccessLogsServiceServer) AccessLogs(context.Context, *AccessL
 func (UnimplementedAccessLogsServiceServer) IntegrationLogs(context.Context, *IntegrationLogsRequest) (*IntegrationLogsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method IntegrationLogs not implemented")
 }
-func (UnimplementedAccessLogsServiceServer) mustEmbedUnimplementedAccessLogsServiceServer() {}
-func (UnimplementedAccessLogsServiceServer) testEmbeddedByValue()                           {}
+func (UnimplementedAccessLogsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeAccessLogsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to AccessLogsServiceServer will

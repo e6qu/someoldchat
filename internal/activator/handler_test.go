@@ -366,6 +366,33 @@ func TestDurableForwardingSpoolsBeforeWakeAndDeletesAfterDelivery(t *testing.T) 
 	}
 }
 
+func TestDurableForwardingRenewsLeaseDuringSlowDelivery(t *testing.T) {
+	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	h, err := NewDurableForwardingHandler(context.Background(), lifecycle.New(lifecycle.StateActive), func(context.Context, uint64) error { return nil }, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusCreated)
+	}), spool, "slow-owner", 1024, 60*time.Millisecond, observability.NewRegistry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/message", strings.NewReader("slow body")))
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want created", response.Code)
+	}
+	remaining, err := spool.List(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("slow request remained in spool: %+v", remaining)
+	}
+}
+
 func TestDurableForwardingRejectsQueueOverflowWithRetryAfter(t *testing.T) {
 	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 8, MaxQueuedRequests: 1})
 	if err != nil {

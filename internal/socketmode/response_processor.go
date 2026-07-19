@@ -12,6 +12,7 @@ import (
 
 type ResponseQueue interface {
 	ClaimSocketModeResponses(context.Context, domain.AppID, string, int, time.Duration) ([]domain.SocketModeResponse, error)
+	RenewSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Duration) error
 	AckSocketModeResponses(context.Context, string, []domain.SocketModeResponse) error
 	ReleaseSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Time) error
 }
@@ -57,13 +58,20 @@ func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handl
 	if handle == nil {
 		return errors.New("Socket Mode response processor requires a handler")
 	}
-	values, err := p.Queue.ClaimSocketModeResponses(ctx, p.AppID, p.Owner, p.BatchSize, p.Lease)
-	if err != nil {
-		return err
-	}
-	for index, value := range values {
-		if err := handle(ctx, value); err != nil {
-			releaseErr := p.Queue.ReleaseSocketModeResponses(ctx, p.Owner, values[index:], now.Add(p.RetryDelay).UTC())
+	for processed := 0; processed < p.BatchSize; processed++ {
+		values, err := p.Queue.ClaimSocketModeResponses(ctx, p.AppID, p.Owner, 1, p.Lease)
+		if err != nil {
+			return err
+		}
+		if len(values) > 1 {
+			return errors.New("Socket Mode response queue returned more responses than requested")
+		}
+		if len(values) == 0 {
+			return nil
+		}
+		value := values[0]
+		if err := p.handleWithLease(ctx, value, handle); err != nil {
+			releaseErr := p.Queue.ReleaseSocketModeResponses(ctx, p.Owner, []domain.SocketModeResponse{value}, now.Add(p.RetryDelay).UTC())
 			if releaseErr != nil {
 				return errors.Join(fmt.Errorf("handle Socket Mode response %q: %w", value.EnvelopeID, err), fmt.Errorf("release Socket Mode responses after handler failure: %w", releaseErr))
 			}
@@ -74,4 +82,45 @@ func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handl
 		}
 	}
 	return nil
+}
+
+func (p ResponseProcessor) handleWithLease(ctx context.Context, value domain.SocketModeResponse, handle ResponseHandler) error {
+	deliveryContext, cancel := context.WithCancel(ctx)
+	defer cancel()
+	renewErrors := make(chan error, 1)
+	done := make(chan struct{})
+	renewDone := make(chan struct{})
+	interval := p.Lease / 3
+	if interval < time.Millisecond {
+		interval = time.Millisecond
+	}
+	go func() {
+		defer close(renewDone)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := p.Queue.RenewSocketModeResponses(deliveryContext, p.Owner, []domain.SocketModeResponse{value}, p.Lease); err != nil {
+					cancel()
+					renewErrors <- err
+					return
+				}
+			}
+		}
+	}()
+	handleErr := handle(deliveryContext, value)
+	cancel()
+	close(done)
+	<-renewDone
+	select {
+	case err := <-renewErrors:
+		if !errors.Is(err, context.Canceled) && (handleErr == nil || errors.Is(handleErr, context.Canceled)) {
+			return err
+		}
+	default:
+	}
+	return handleErr
 }

@@ -72,16 +72,15 @@ func (c *workflowsServiceClient) UpdateStep(ctx context.Context, in *WorkflowSte
 }
 
 // WorkflowsServiceServer is the server API for WorkflowsService service.
-// All implementations must embed UnimplementedWorkflowsServiceServer
+// All implementations should embed UnimplementedWorkflowsServiceServer
 // for forward compatibility.
 type WorkflowsServiceServer interface {
 	StepCompleted(context.Context, *WorkflowStepRequest) (*WorkflowStepMutationResponse, error)
 	StepFailed(context.Context, *WorkflowStepRequest) (*WorkflowStepMutationResponse, error)
 	UpdateStep(context.Context, *WorkflowStepUpdateRequest) (*WorkflowStepMutationResponse, error)
-	mustEmbedUnimplementedWorkflowsServiceServer()
 }
 
-// UnimplementedWorkflowsServiceServer must be embedded to have
+// UnimplementedWorkflowsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -97,8 +96,7 @@ func (UnimplementedWorkflowsServiceServer) StepFailed(context.Context, *Workflow
 func (UnimplementedWorkflowsServiceServer) UpdateStep(context.Context, *WorkflowStepUpdateRequest) (*WorkflowStepMutationResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateStep not implemented")
 }
-func (UnimplementedWorkflowsServiceServer) mustEmbedUnimplementedWorkflowsServiceServer() {}
-func (UnimplementedWorkflowsServiceServer) testEmbeddedByValue()                          {}
+func (UnimplementedWorkflowsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeWorkflowsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to WorkflowsServiceServer will

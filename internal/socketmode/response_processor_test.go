@@ -3,12 +3,24 @@ package socketmode
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
+
+type responseRenewalTrackingQueue struct {
+	*memory.Store
+	renewed chan struct{}
+	once    sync.Once
+}
+
+func (q *responseRenewalTrackingQueue) RenewSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, lease time.Duration) error {
+	q.once.Do(func() { close(q.renewed) })
+	return q.Store.RenewSocketModeResponses(ctx, owner, values, lease)
+}
 
 func TestResponseProcessorAcknowledgesSuccessfulResponses(t *testing.T) {
 	ctx := context.Background()
@@ -56,5 +68,40 @@ func TestResponseProcessorReleasesUnprocessedResponses(t *testing.T) {
 	claimed, err := queue.ClaimSocketModeResponses(ctx, "A1", "worker-2", 10, time.Minute)
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("claimed before retry deadline=%+v err=%v", claimed, err)
+	}
+}
+
+func TestResponseProcessorRenewsLeaseDuringSlowHandler(t *testing.T) {
+	ctx := context.Background()
+	queue := &responseRenewalTrackingQueue{Store: memory.New(), renewed: make(chan struct{})}
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	response := domain.SocketModeResponse{AppID: "A1", EnvelopeID: "slow", Payload: `{}`, ReceivedAt: now}
+	if err := queue.RecordSocketModeResponse(ctx, response); err != nil {
+		t.Fatal(err)
+	}
+	processor := ResponseProcessor{Queue: queue, AppID: "A1", Owner: "worker-1", BatchSize: 1, Lease: 60 * time.Millisecond, RetryDelay: time.Second}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		result <- processor.ProcessOnce(ctx, now, func(_ context.Context, _ domain.SocketModeResponse) error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	select {
+	case <-queue.renewed:
+	case <-time.After(time.Second):
+		t.Fatal("response processor did not renew the slow handler lease")
+	}
+	close(release)
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := queue.ClaimSocketModeResponses(ctx, "A1", "worker-2", 1, time.Minute)
+	if err != nil || len(claimed) != 0 {
+		t.Fatalf("slow response was not acknowledged: claimed=%+v err=%v", claimed, err)
 	}
 }

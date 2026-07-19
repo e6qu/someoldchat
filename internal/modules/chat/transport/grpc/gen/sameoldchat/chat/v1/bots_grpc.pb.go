@@ -48,14 +48,13 @@ func (c *botsServiceClient) BotInfo(ctx context.Context, in *BotInfoRequest, opt
 }
 
 // BotsServiceServer is the server API for BotsService service.
-// All implementations must embed UnimplementedBotsServiceServer
+// All implementations should embed UnimplementedBotsServiceServer
 // for forward compatibility.
 type BotsServiceServer interface {
 	BotInfo(context.Context, *BotInfoRequest) (*Bot, error)
-	mustEmbedUnimplementedBotsServiceServer()
 }
 
-// UnimplementedBotsServiceServer must be embedded to have
+// UnimplementedBotsServiceServer should be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
@@ -65,8 +64,7 @@ type UnimplementedBotsServiceServer struct{}
 func (UnimplementedBotsServiceServer) BotInfo(context.Context, *BotInfoRequest) (*Bot, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BotInfo not implemented")
 }
-func (UnimplementedBotsServiceServer) mustEmbedUnimplementedBotsServiceServer() {}
-func (UnimplementedBotsServiceServer) testEmbeddedByValue()                     {}
+func (UnimplementedBotsServiceServer) testEmbeddedByValue() {}
 
 // UnsafeBotsServiceServer may be embedded to opt out of forward compatibility for this service.
 // Use of this interface is not recommended, as added methods to BotsServiceServer will

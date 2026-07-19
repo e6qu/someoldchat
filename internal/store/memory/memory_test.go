@@ -73,6 +73,28 @@ func TestSocketModeResponseQueueLeasesAndRecovers(t *testing.T) {
 	}
 }
 
+func TestSocketModeResponseRenewalKeepsSlowLeaseOwned(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	now := time.Now().UTC()
+	response := domain.SocketModeResponse{AppID: "A1", EnvelopeID: "slow", Payload: `{}`, ReceivedAt: now}
+	if err := s.RecordSocketModeResponse(ctx, response); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-1", 1, 30*time.Millisecond)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := s.RenewSocketModeResponses(ctx, "worker-1", claimed, 100*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if replacement, err := s.ClaimSocketModeResponses(ctx, response.AppID, "worker-2", 1, time.Minute); err != nil || len(replacement) != 0 {
+		t.Fatalf("renewed response was reclaimed=%+v err=%v", replacement, err)
+	}
+}
+
 func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	ctx := context.Background()
 	s := New()

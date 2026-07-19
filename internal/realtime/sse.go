@@ -70,7 +70,12 @@ func (h Handler) Register(mux *http.ServeMux) {
 }
 
 func (h Handler) RegisterRTM(mux *http.ServeMux) {
-	mux.Handle("/rtm", websocket.Handler(h.rtmWebSocket))
+	mux.Handle("/rtm", websocket.Server{
+		Handler: websocket.Handler(h.rtmWebSocket),
+		Handshake: func(*websocket.Config, *http.Request) error {
+			return nil
+		},
+	})
 }
 
 func (h Handler) events(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +138,11 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 				}
 			}
 			payload, encodeErr := encodeRTMEvent(record)
-			if encodeErr != nil || websocket.Message.Send(conn, string(payload)) != nil {
+			if encodeErr != nil {
+				// The durable stream also carries internal records whose payloads are not Slack events.
+				continue
+			}
+			if websocket.Message.Send(conn, string(payload)) != nil {
 				return
 			}
 		}
@@ -166,17 +175,17 @@ func eventRecipient(payload string, recipient domain.UserID) (bool, error) {
 
 func encodeRTMEvent(record events.Record) ([]byte, error) {
 	var object map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(record.Event.Payload), &object); err == nil && object != nil {
-		if _, exists := object["type"]; !exists {
-			encodedType, encodeErr := json.Marshal(record.Event.Topic)
-			if encodeErr != nil {
-				return nil, encodeErr
-			}
-			object["type"] = encodedType
-		}
-		return json.Marshal(object)
+	if err := json.Unmarshal([]byte(record.Event.Payload), &object); err != nil {
+		return nil, fmt.Errorf("RTM event payload is not JSON: %w", err)
 	}
-	return json.Marshal(map[string]string{"type": record.Event.Topic, "data": record.Event.Payload})
+	if object == nil {
+		return nil, errors.New("RTM event payload must be a JSON object")
+	}
+	var eventType string
+	if err := json.Unmarshal(object["type"], &eventType); err != nil || strings.TrimSpace(eventType) == "" {
+		return nil, errors.New("RTM event payload requires a non-empty type")
+	}
+	return json.Marshal(object)
 }
 
 func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, raw string) error {

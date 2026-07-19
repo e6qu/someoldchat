@@ -150,9 +150,17 @@ fallback. The reusable response processor claims records with an owner and a
 lease, invokes an explicitly supplied handler, acknowledges each successful
 record, and releases failed records at an explicit retry time. A crash before
 acknowledgement leaves the record reclaimable after the lease expires. The
-processor does not guess application-specific response semantics or run an
+processor claims one response at a time and renews its lease while the handler
+runs. It does not guess application-specific response semantics or run an
 unbounded retry loop. See this section and the compatibility ledger for the
 supported wire contract.
+
+The scale-to-zero activator applies the same lease rule to buffered HTTP
+requests. It claims one request at a time and renews that request's lease while
+the selected application handler is running. A slow handler therefore does not
+look like a crashed replica, while a process crash leaves the request
+reclaimable after the last durable lease expires. The activator does not retain
+an unbounded in-memory batch.
 
 The `cmd/socketmode-worker` process supplies the explicit HTTP handler for
 deployments that forward Socket Mode responses to another application. Run one
@@ -164,11 +172,25 @@ The worker continues after a handler delivery failure because it has released
 the records at an explicit retry time. It exits on claim, release, or
 acknowledgement failure so the deployment platform can restart it.
 
-The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/)
+The outbox worker requires `--delivery-format`. Use `record` only for an
+integration that explicitly accepts the internal `events.Record` JSON shape.
+Use `slack-events` with `--app-id` and `--signing-secret` for a Slack Events
+API request URL. That mode requires each delivered payload to be a JSON Slack
+inner event or a validated complete `event_callback` envelope. It does not
+turn an identifier-only domain event into a guessed Slack event. The request
+includes `X-Slack-Request-Timestamp`, `X-Slack-Signature`, and the durable event
+ID as `Idempotency-Key`.
+
+The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
+[Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),
 and [the `apps.connections.open` method reference](https://docs.slack.dev/reference/methods/apps.connections.open/).
 Socket Mode is available in both local composition and distributed composition:
 the HTTP process calls the repository directly in local composition and uses
 the generated gRPC boundary in distributed composition.
+Malformed Socket Mode event payloads are closed as protocol errors; the server
+does not synthesize a replacement payload from an internal topic and string.
+The Real Time Messaging event stream applies the same rule and rejects invalid
+or type-less JSON event payloads.
 
 ## Snapshot retention and verification
 

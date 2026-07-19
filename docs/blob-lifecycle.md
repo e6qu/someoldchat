@@ -4,8 +4,11 @@ SameOldChat stores file and user-photo bytes outside the state store. The state
 store remains authoritative for which objects are live. A successful mutation
 first writes the bounded object and then commits metadata and a durable cleanup
 event when the previous object must be removed. The cleanup worker claims those
-events with a lease, deletes the object, and acknowledges the event. An expired
-lease makes the work visible to another replica after a crash.
+events with a lease, deletes the object, and acknowledges the event. It renews
+the event lease while the object store operation is running, claims at most the
+configured worker limit one event at a time, and does not retain an unbounded
+batch. An expired lease makes the work visible to another replica after a
+crash.
 
 The `sameoldchat-blobgc` binary also supports a bounded reconciliation audit.
 It streams live file and user-photo references from the selected state store
