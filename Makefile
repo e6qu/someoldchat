@@ -6,7 +6,7 @@ PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
 proto-tools:
 	mkdir -p $(PROTO_BIN)
 	if test ! -x $(PROTO_BIN)/protoc-gen-go; then GOCACHE=$(GOCACHE) go build -trimpath -o $(PROTO_BIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go; fi
-	if test ! -x $(PROTO_BIN)/protoc-gen-go-grpc; then GOBIN=$(PROTO_BIN) GOCACHE=$(GOCACHE) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2; fi
+	if test "$$($(PROTO_BIN)/protoc-gen-go-grpc --version 2>/dev/null)" != "protoc-gen-go-grpc 1.6.2"; then GOBIN=$(PROTO_BIN) GOCACHE=$(GOCACHE) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2; fi
 
 all: check build
 
