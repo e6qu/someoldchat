@@ -158,6 +158,18 @@ func TestNormalizeSearchControlFailsLoudlyOnTemplateDrift(t *testing.T) {
 	}
 }
 
+func TestProgressiveEnhancementHandlesRedirectResponses(t *testing.T) {
+	if !strings.Contains(progressiveEnhancementScript, "document.addEventListener('submit'") {
+		t.Fatal("progressive enhancement does not delegate form handling")
+	}
+	if !strings.Contains(progressiveEnhancementScript, "response.headers.get('HX-Redirect')") {
+		t.Fatal("progressive enhancement does not handle HX-Redirect")
+	}
+	if !strings.Contains(progressiveEnhancementScript, "if(response.status===204)return null") {
+		t.Fatal("progressive enhancement does not handle empty 204 responses")
+	}
+}
+
 func TestWebFormRejectsRepeatedFields(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
