@@ -43,7 +43,10 @@ def running_tasks():
     arns = [arn for page in pages for arn in page.get("taskArns", [])]
     if not arns:
         return []
-    return ecs.describe_tasks(cluster=CLUSTER, tasks=arns).get("tasks", [])
+    tasks = []
+    for start in range(0, len(arns), 100):
+        tasks.extend(ecs.describe_tasks(cluster=CLUSTER, tasks=arns[start:start + 100]).get("tasks", []))
+    return tasks
 
 
 def task_ip(task):

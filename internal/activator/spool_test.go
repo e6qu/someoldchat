@@ -2,6 +2,7 @@ package activator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -87,7 +88,7 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	claimed, err := spool.Claim(context.Background(), "crashed-owner", 1, 100*time.Millisecond)
+	claimed, err := spool.Claim(context.Background(), "crashed-owner", 1, 250*time.Millisecond)
 	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
 		t.Fatalf("initial claim=%+v err=%v", claimed, err)
 	}
@@ -95,7 +96,7 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("unexpired lease was not exclusive: %+v err=%v", claimed, err)
 	}
-	time.Sleep(150 * time.Millisecond)
+	time.Sleep(300 * time.Millisecond)
 	claimed, err = spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
 	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
 		t.Fatalf("expired lease was not reclaimable: %+v err=%v", claimed, err)
@@ -149,6 +150,33 @@ func TestSQLiteSpoolRenewRequiresOwnership(t *testing.T) {
 	}
 	if err := spool.Renew(context.Background(), "owner-b", []uint64{id}, time.Minute); !errors.Is(err, ErrSpoolLeaseLost) {
 		t.Fatalf("renewal error=%v, want ErrSpoolLeaseLost", err)
+	}
+}
+
+func TestSQLiteSpoolExpiredOwnerCannotRenewOrDelete(t *testing.T) {
+	spool, err := OpenSQLiteSpool(filepath.Join(t.TempDir(), "control.db"), []byte("01234567890123456789012345678901"), SpoolLimits{MaxBodyBytes: 1024, MaxQueuedBytes: 4096, MaxQueuedRequests: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer spool.Close()
+	request := httptest.NewRequest(http.MethodPost, "/api/message", nil)
+	id, err := spool.Enqueue(context.Background(), request, []byte("expired"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := spool.Claim(context.Background(), "expired-owner", 1, 100*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(150 * time.Millisecond)
+	if err := spool.Renew(context.Background(), "expired-owner", []uint64{id}, time.Minute); !errors.Is(err, ErrSpoolLeaseLost) {
+		t.Fatalf("expired renewal error=%v, want ErrSpoolLeaseLost", err)
+	}
+	if err := spool.Delete(context.Background(), "expired-owner", id); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("expired deletion error=%v, want sql.ErrNoRows", err)
+	}
+	claimed, err := spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
+	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
+		t.Fatalf("expired request was not recoverable: claimed=%+v err=%v", claimed, err)
 	}
 }
 

@@ -2808,19 +2808,24 @@ func (s *Store) ClaimScheduledMessages(_ context.Context, workspace domain.Works
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	values := make([]domain.ScheduledMessage, 0, limit)
+	values := make([]domain.ScheduledMessage, 0, len(s.scheduled))
 	for _, value := range s.scheduled {
-		if len(values) == limit || value.WorkspaceID != workspace || value.PostAt.After(now) || s.scheduledDelivered[value.ID] || s.scheduledNextAttempt[value.ID].After(now) {
+		if value.WorkspaceID != workspace || value.PostAt.After(now) || s.scheduledDelivered[value.ID] || s.scheduledNextAttempt[value.ID].After(now) {
 			continue
 		}
 		active, exists := s.scheduledLeases[value.ID]
 		if exists && active.Expires.After(now) {
 			continue
 		}
-		s.scheduledLeases[value.ID] = memoryLease{Owner: owner, Expires: now.Add(lease)}
 		values = append(values, value)
 	}
 	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	for _, value := range values {
+		s.scheduledLeases[value.ID] = memoryLease{Owner: owner, Expires: now.Add(lease)}
+	}
 	return values, nil
 }
 

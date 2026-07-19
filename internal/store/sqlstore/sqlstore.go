@@ -4552,6 +4552,14 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 	return tx.Commit()
 }
 
+func scheduledUnixSecondCeil(value time.Time) int64 {
+	seconds := value.UTC().Unix()
+	if value.UTC().Nanosecond() != 0 {
+		return seconds + 1
+	}
+	return seconds
+}
+
 func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	if request.Limit <= 0 {
 		return domain.ScheduledMessagePage{}, errors.New("page limit must be positive")
@@ -4616,7 +4624,8 @@ func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.Wor
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, user, channel, time.Now().UTC().Unix())
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND author_id = ? AND channel_id = ? AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, user, channel, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -4665,7 +4674,7 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	if err := rows.Close(); err != nil {
 		return nil, err
 	}
-	expires := now.Add(lease).Unix()
+	expires := scheduledUnixSecondCeil(now.Add(lease))
 	for _, value := range values {
 		result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET lease_owner = ?, lease_until = ? WHERE id = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, owner, expires, value.ID, now.Unix())
 		if err != nil {
@@ -4686,7 +4695,8 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 }
 
 func (s *Store) RenewScheduledMessage(ctx context.Context, owner string, id domain.ScheduledMessageID, lease time.Duration) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET lease_until = ? WHERE id = ? AND lease_owner = ? AND delivered = 0 AND lease_until > ?`, time.Now().UTC().Add(lease).Unix(), id, owner, time.Now().UTC().Unix())
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET lease_until = ? WHERE id = ? AND lease_owner = ? AND delivered = 0 AND lease_until > ?`, scheduledUnixSecondCeil(now.Add(lease)), id, owner, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -4716,7 +4726,8 @@ func (s *Store) MarkScheduledMessageDelivered(ctx context.Context, owner string,
 }
 
 func (s *Store) ReleaseScheduledMessage(ctx context.Context, owner string, id domain.ScheduledMessageID, next time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET lease_owner = '', lease_until = 0, next_attempt_at = ? WHERE id = ? AND lease_owner = ? AND delivered = 0 AND lease_until > ?`, next.UTC().Unix(), id, owner, time.Now().UTC().Unix())
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET lease_owner = '', lease_until = 0, next_attempt_at = ? WHERE id = ? AND lease_owner = ? AND delivered = 0 AND lease_until > ?`, scheduledUnixSecondCeil(next), id, owner, now.Unix())
 	if err != nil {
 		return err
 	}

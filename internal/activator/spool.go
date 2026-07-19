@@ -210,8 +210,9 @@ func (s *SQLiteSpool) Renew(ctx context.Context, owner string, ids []uint64, lea
 		return errors.New("spool renewal requires an owner, request IDs, and a positive lease")
 	}
 	placeholders := make([]string, len(ids))
-	args := make([]any, 0, len(ids)+2)
-	args = append(args, time.Now().UTC().Add(lease).Format(time.RFC3339Nano), owner)
+	now := time.Now().UTC()
+	args := make([]any, 0, len(ids)+3)
+	args = append(args, now.Add(lease).Format(time.RFC3339Nano), owner, now.Format(time.RFC3339Nano))
 	for index, id := range ids {
 		if id == 0 {
 			return errors.New("spool renewal requires positive request IDs")
@@ -219,7 +220,7 @@ func (s *SQLiteSpool) Renew(ctx context.Context, owner string, ids []uint64, lea
 		placeholders[index] = "?"
 		args = append(args, id)
 	}
-	query := `UPDATE activator_request_spool SET lease_until = ? WHERE lease_owner = ? AND id IN (` + strings.Join(placeholders, ",") + `)`
+	query := `UPDATE activator_request_spool SET lease_until = ? WHERE lease_owner = ? AND lease_until > ? AND id IN (` + strings.Join(placeholders, ",") + `)`
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -308,7 +309,7 @@ func (s *SQLiteSpool) Delete(ctx context.Context, owner string, id uint64) error
 	if strings.TrimSpace(owner) == "" {
 		return errors.New("request spool delete requires an owner")
 	}
-	result, err := s.db.ExecContext(ctx, `DELETE FROM activator_request_spool WHERE id = ? AND lease_owner = ?`, id, owner)
+	result, err := s.db.ExecContext(ctx, `DELETE FROM activator_request_spool WHERE id = ? AND lease_owner = ? AND lease_until > ?`, id, owner, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
