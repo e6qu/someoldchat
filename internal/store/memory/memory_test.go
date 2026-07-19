@@ -39,6 +39,40 @@ func TestCreateUserRequiresWorkspaceAndRejectsDuplicateEmail(t *testing.T) {
 	}
 }
 
+func TestSocketModeResponseQueueLeasesAndRecovers(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	first := domain.SocketModeResponse{AppID: "A1", EnvelopeID: "b", Payload: `{}`, ReceivedAt: now}
+	second := domain.SocketModeResponse{AppID: "A1", EnvelopeID: "a", Payload: `{}`, ReceivedAt: now}
+	if err := s.RecordSocketModeResponse(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RecordSocketModeResponse(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := s.ClaimSocketModeResponses(ctx, "A1", "worker-1", 2, time.Minute)
+	if err != nil || len(claimed) != 2 || claimed[0].EnvelopeID != "a" || claimed[1].EnvelopeID != "b" {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	if claimedAgain, err := s.ClaimSocketModeResponses(ctx, "A1", "worker-2", 2, time.Minute); err != nil || len(claimedAgain) != 0 {
+		t.Fatalf("claimed again=%+v err=%v", claimedAgain, err)
+	}
+	if err := s.ReleaseSocketModeResponses(ctx, "worker-1", claimed[1:], now.Add(-time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AckSocketModeResponses(ctx, "worker-1", claimed[:1]); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := s.ClaimSocketModeResponses(ctx, "A1", "worker-2", 2, now.Add(time.Minute).Sub(now))
+	if err != nil || len(reclaimed) != 1 || reclaimed[0].EnvelopeID != "b" {
+		t.Fatalf("reclaimed=%+v err=%v", reclaimed, err)
+	}
+	if err := s.AckSocketModeResponses(ctx, "worker-2", reclaimed); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListUsersAndConversationsAreBoundedAndAuthorized(t *testing.T) {
 	ctx := context.Background()
 	s := New()

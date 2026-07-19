@@ -3261,6 +3261,115 @@ func (s *Store) RecordSocketModeResponse(ctx context.Context, value domain.Socke
 	return nil
 }
 
+func (s *Store) ClaimSocketModeResponses(ctx context.Context, appID domain.AppID, owner string, limit int, lease time.Duration) ([]domain.SocketModeResponse, error) {
+	if appID == "" || strings.TrimSpace(owner) == "" || limit < 1 || limit > 1000 || lease <= 0 {
+		return nil, errors.New("invalid Socket Mode response lease")
+	}
+	now := time.Now().UTC()
+	rows, err := s.db.QueryContext(ctx, `SELECT app_id, envelope_id, payload, received_at, lease_owner, lease_expires_at, acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND acknowledged_at = 0 AND lease_expires_at <= ? ORDER BY received_at, envelope_id LIMIT ?`, appID, now.UnixNano(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var candidates []domain.SocketModeResponse
+	for rows.Next() {
+		var value domain.SocketModeResponse
+		var receivedAt, leaseExpiresAt, acknowledgedAt int64
+		if err := rows.Scan(&value.AppID, &value.EnvelopeID, &value.Payload, &receivedAt, &value.LeaseOwner, &leaseExpiresAt, &acknowledgedAt); err != nil {
+			return nil, err
+		}
+		value.ReceivedAt = time.Unix(0, receivedAt).UTC()
+		value.LeaseExpiresAt = time.Unix(0, leaseExpiresAt).UTC()
+		if acknowledgedAt != 0 {
+			value.AcknowledgedAt = time.Unix(0, acknowledgedAt).UTC()
+		}
+		candidates = append(candidates, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	expiresAt := now.Add(lease)
+	claimed := make([]domain.SocketModeResponse, 0, len(candidates))
+	for _, value := range candidates {
+		result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_responses SET lease_owner = ?, lease_expires_at = ? WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_expires_at <= ?`, owner, expiresAt.UnixNano(), value.AppID, value.EnvelopeID, now.UnixNano())
+		if err != nil {
+			return nil, err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if changed == 1 {
+			value.LeaseOwner = owner
+			value.LeaseExpiresAt = expiresAt
+			claimed = append(claimed, value)
+		}
+	}
+	return claimed, nil
+}
+
+func (s *Store) AckSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse) error {
+	if strings.TrimSpace(owner) == "" || len(values) == 0 {
+		return errors.New("invalid Socket Mode response acknowledgement")
+	}
+	now := time.Now().UTC().UnixNano()
+	for _, value := range values {
+		if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" {
+			return errors.New("invalid Socket Mode response key")
+		}
+		result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_responses SET acknowledged_at = ?, lease_owner = '', lease_expires_at = 0 WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`, now, value.AppID, value.EnvelopeID, owner, now)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 1 {
+			continue
+		}
+		var acknowledgedAt int64
+		if err := s.db.QueryRowContext(ctx, `SELECT acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&acknowledgedAt); err != nil {
+			return translateNotFound(err)
+		}
+		if acknowledgedAt == 0 {
+			return store.ErrConflict
+		}
+	}
+	return nil
+}
+
+func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
+	if strings.TrimSpace(owner) == "" || len(values) == 0 || retryAt.IsZero() {
+		return errors.New("invalid Socket Mode response release")
+	}
+	for _, value := range values {
+		if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" {
+			return errors.New("invalid Socket Mode response key")
+		}
+		result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_responses SET lease_owner = '', lease_expires_at = ? WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ?`, retryAt.UTC().UnixNano(), value.AppID, value.EnvelopeID, owner)
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed == 1 {
+			continue
+		}
+		var acknowledgedAt int64
+		if err := s.db.QueryRowContext(ctx, `SELECT acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&acknowledgedAt); err != nil {
+			return translateNotFound(err)
+		}
+		if acknowledgedAt != 0 {
+			continue
+		}
+		return store.ErrConflict
+	}
+	return nil
+}
+
 func (s *Store) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
 	if appID == "" {
 		return 0, store.ErrInvalidAppApproval

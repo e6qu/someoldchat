@@ -106,6 +106,9 @@ type Store interface {
 	ReleaseSocketModeConnection(context.Context, string) error
 	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
+	ClaimSocketModeResponses(context.Context, domain.AppID, string, int, time.Duration) ([]domain.SocketModeResponse, error)
+	AckSocketModeResponses(context.Context, string, []domain.SocketModeResponse) error
+	ReleaseSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Time) error
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)

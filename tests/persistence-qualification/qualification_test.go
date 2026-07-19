@@ -610,6 +610,36 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if err := repository.RecordSocketModeResponse(ctx, conflict); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("conflicting response replay error=%v, want ErrConflict", err)
 		}
+		queued := domain.SocketModeResponse{AppID: "A-queue-qualification", EnvelopeID: "event-5", Payload: `{"ok":true}`, ReceivedAt: time.Now().UTC()}
+		if err := repository.RecordSocketModeResponse(ctx, queued); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err := repository.ClaimSocketModeResponses(ctx, queued.AppID, "qualification-worker", 10, time.Minute)
+		if err != nil || len(claimed) != 1 || claimed[0].EnvelopeID != queued.EnvelopeID {
+			t.Fatalf("claimed responses=%+v err=%v", claimed, err)
+		}
+		if err := repository.AckSocketModeResponses(ctx, "qualification-worker", claimed); err != nil {
+			t.Fatal(err)
+		}
+		if claimed, err := repository.ClaimSocketModeResponses(ctx, queued.AppID, "other-worker", 10, time.Minute); err != nil || len(claimed) != 0 {
+			t.Fatalf("acknowledged responses reclaimed=%+v err=%v", claimed, err)
+		}
+		retry := queued
+		retry.EnvelopeID = "event-6"
+		if err := repository.RecordSocketModeResponse(ctx, retry); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err = repository.ClaimSocketModeResponses(ctx, retry.AppID, "qualification-worker", 10, time.Minute)
+		if err != nil || len(claimed) != 1 {
+			t.Fatalf("retry response claim=%+v err=%v", claimed, err)
+		}
+		if err := repository.ReleaseSocketModeResponses(ctx, "qualification-worker", claimed, time.Now().UTC().Add(-time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		claimed, err = repository.ClaimSocketModeResponses(ctx, retry.AppID, "other-worker", 10, time.Minute)
+		if err != nil || len(claimed) != 1 || claimed[0].EnvelopeID != retry.EnvelopeID {
+			t.Fatalf("released response claim=%+v err=%v", claimed, err)
+		}
 	})
 }
 

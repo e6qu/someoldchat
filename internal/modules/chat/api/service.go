@@ -80,6 +80,9 @@ type Service interface {
 	ReleaseSocketModeConnection(context.Context, string) error
 	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
+	ClaimSocketModeResponses(context.Context, domain.AppID, string, int, time.Duration) ([]domain.SocketModeResponse, error)
+	AckSocketModeResponses(context.Context, string, []domain.SocketModeResponse) error
+	ReleaseSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Time) error
 	AdminInviteConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID) (domain.Conversation, error)
 	AdminConvertConversationToPrivate(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Conversation, error)
 	AdminGetConversationPrefs(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ConversationPrefs, error)

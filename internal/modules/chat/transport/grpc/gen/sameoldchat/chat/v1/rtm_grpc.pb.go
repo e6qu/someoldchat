@@ -29,6 +29,9 @@ const (
 	RTMService_GetSocketModeCursor_FullMethodName         = "/sameoldchat.chat.v1.RTMService/GetSocketModeCursor"
 	RTMService_SetSocketModeCursor_FullMethodName         = "/sameoldchat.chat.v1.RTMService/SetSocketModeCursor"
 	RTMService_RecordSocketModeResponse_FullMethodName    = "/sameoldchat.chat.v1.RTMService/RecordSocketModeResponse"
+	RTMService_ClaimSocketModeResponses_FullMethodName    = "/sameoldchat.chat.v1.RTMService/ClaimSocketModeResponses"
+	RTMService_AckSocketModeResponses_FullMethodName      = "/sameoldchat.chat.v1.RTMService/AckSocketModeResponses"
+	RTMService_ReleaseSocketModeResponses_FullMethodName  = "/sameoldchat.chat.v1.RTMService/ReleaseSocketModeResponses"
 )
 
 // RTMServiceClient is the client API for RTMService service.
@@ -45,6 +48,9 @@ type RTMServiceClient interface {
 	GetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error)
 	SetSocketModeCursor(ctx context.Context, in *SocketModeCursorRequest, opts ...grpc.CallOption) (*SocketModeCursor, error)
 	RecordSocketModeResponse(ctx context.Context, in *SocketModeResponseRequest, opts ...grpc.CallOption) (*SocketModeResponse, error)
+	ClaimSocketModeResponses(ctx context.Context, in *SocketModeResponseLeaseRequest, opts ...grpc.CallOption) (*SocketModeResponseBatch, error)
+	AckSocketModeResponses(ctx context.Context, in *SocketModeResponseAckRequest, opts ...grpc.CallOption) (*SocketModeResponseBatch, error)
+	ReleaseSocketModeResponses(ctx context.Context, in *SocketModeResponseReleaseRequest, opts ...grpc.CallOption) (*SocketModeResponseBatch, error)
 }
 
 type rTMServiceClient struct {
@@ -155,6 +161,36 @@ func (c *rTMServiceClient) RecordSocketModeResponse(ctx context.Context, in *Soc
 	return out, nil
 }
 
+func (c *rTMServiceClient) ClaimSocketModeResponses(ctx context.Context, in *SocketModeResponseLeaseRequest, opts ...grpc.CallOption) (*SocketModeResponseBatch, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeResponseBatch)
+	err := c.cc.Invoke(ctx, RTMService_ClaimSocketModeResponses_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rTMServiceClient) AckSocketModeResponses(ctx context.Context, in *SocketModeResponseAckRequest, opts ...grpc.CallOption) (*SocketModeResponseBatch, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeResponseBatch)
+	err := c.cc.Invoke(ctx, RTMService_AckSocketModeResponses_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *rTMServiceClient) ReleaseSocketModeResponses(ctx context.Context, in *SocketModeResponseReleaseRequest, opts ...grpc.CallOption) (*SocketModeResponseBatch, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeResponseBatch)
+	err := c.cc.Invoke(ctx, RTMService_ReleaseSocketModeResponses_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RTMServiceServer is the server API for RTMService service.
 // All implementations must embed UnimplementedRTMServiceServer
 // for forward compatibility.
@@ -169,6 +205,9 @@ type RTMServiceServer interface {
 	GetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error)
 	SetSocketModeCursor(context.Context, *SocketModeCursorRequest) (*SocketModeCursor, error)
 	RecordSocketModeResponse(context.Context, *SocketModeResponseRequest) (*SocketModeResponse, error)
+	ClaimSocketModeResponses(context.Context, *SocketModeResponseLeaseRequest) (*SocketModeResponseBatch, error)
+	AckSocketModeResponses(context.Context, *SocketModeResponseAckRequest) (*SocketModeResponseBatch, error)
+	ReleaseSocketModeResponses(context.Context, *SocketModeResponseReleaseRequest) (*SocketModeResponseBatch, error)
 	mustEmbedUnimplementedRTMServiceServer()
 }
 
@@ -208,6 +247,15 @@ func (UnimplementedRTMServiceServer) SetSocketModeCursor(context.Context, *Socke
 }
 func (UnimplementedRTMServiceServer) RecordSocketModeResponse(context.Context, *SocketModeResponseRequest) (*SocketModeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RecordSocketModeResponse not implemented")
+}
+func (UnimplementedRTMServiceServer) ClaimSocketModeResponses(context.Context, *SocketModeResponseLeaseRequest) (*SocketModeResponseBatch, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ClaimSocketModeResponses not implemented")
+}
+func (UnimplementedRTMServiceServer) AckSocketModeResponses(context.Context, *SocketModeResponseAckRequest) (*SocketModeResponseBatch, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AckSocketModeResponses not implemented")
+}
+func (UnimplementedRTMServiceServer) ReleaseSocketModeResponses(context.Context, *SocketModeResponseReleaseRequest) (*SocketModeResponseBatch, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseSocketModeResponses not implemented")
 }
 func (UnimplementedRTMServiceServer) mustEmbedUnimplementedRTMServiceServer() {}
 func (UnimplementedRTMServiceServer) testEmbeddedByValue()                    {}
@@ -410,6 +458,60 @@ func _RTMService_RecordSocketModeResponse_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RTMService_ClaimSocketModeResponses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeResponseLeaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).ClaimSocketModeResponses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_ClaimSocketModeResponses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).ClaimSocketModeResponses(ctx, req.(*SocketModeResponseLeaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RTMService_AckSocketModeResponses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeResponseAckRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).AckSocketModeResponses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_AckSocketModeResponses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).AckSocketModeResponses(ctx, req.(*SocketModeResponseAckRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RTMService_ReleaseSocketModeResponses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeResponseReleaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RTMServiceServer).ReleaseSocketModeResponses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RTMService_ReleaseSocketModeResponses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RTMServiceServer).ReleaseSocketModeResponses(ctx, req.(*SocketModeResponseReleaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RTMService_ServiceDesc is the grpc.ServiceDesc for RTMService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -456,6 +558,18 @@ var RTMService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RecordSocketModeResponse",
 			Handler:    _RTMService_RecordSocketModeResponse_Handler,
+		},
+		{
+			MethodName: "ClaimSocketModeResponses",
+			Handler:    _RTMService_ClaimSocketModeResponses_Handler,
+		},
+		{
+			MethodName: "AckSocketModeResponses",
+			Handler:    _RTMService_AckSocketModeResponses_Handler,
+		},
+		{
+			MethodName: "ReleaseSocketModeResponses",
+			Handler:    _RTMService_ReleaseSocketModeResponses_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
