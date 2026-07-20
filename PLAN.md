@@ -232,16 +232,18 @@ for Go modules, GitHub Actions, and container inputs.
 The container publication gate emitted immutable 12-character commit tags,
 direct Linux amd64 and Linux arm64 image manifests, and a generic index made
 from exactly those two manifests. It generated an SPDX SBOM from the exact
-architecture image, attached signed provenance and SBOM attestations to the
-architecture digest without changing the direct tag's media type, and read the
-published references back from GitHub Container Registry. It retained at most
+architecture image, attached GitHub's native signed SLSA provenance and a
+signed SBOM attestation to the architecture digest without changing the direct
+tag's media type, and read the published references back from GitHub Container
+Registry. It retained at most
 the newest 20 complete three-version release groups and removed incomplete,
 mixed-tag, untagged, and older package versions. Every remaining root was
 verified to have exactly one direct amd64 and one direct arm64 sibling, while
 signed attestation records remained outside the container package versions.
-BuildKit identified each provenance predicate with the originating GitHub
-Actions run URL, and the release gate rejected provenance whose builder
-identity or required SLSA v1 fields were absent before requesting a signature.
+The release gate used the official GitHub attestation action's native SLSA
+generator instead of submitting BuildKit extension fields to GitHub's stricter
+SLSA decoder, and it rejected malformed BuildKit SPDX documents before
+requesting an SBOM signature.
 
 ## Initial milestone
 
