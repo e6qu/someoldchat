@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -143,6 +144,86 @@ func TestAdminCreateUserNormalizesAndPersistsMembership(t *testing.T) {
 	}
 	if err != nil || len(page.Users) != 2 || !foundAdmin {
 		t.Fatalf("administrator users=%+v err=%v", page, err)
+	}
+}
+
+func TestListsLifecycleNormalizesCellsAndStreamsCopies(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	messages := Messages{Store: s}
+
+	source, err := messages.CreateList(ctx, "T1", "U1", "Source", " [{\"type\":\"rich_text\"}] ", "", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 101; i++ {
+		if _, err := messages.CreateListItem(ctx, "T1", "U1", source.ID, "", fmt.Sprintf(`[{"column_id":"title","value":"row-%03d"}]`, i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := messages.ListItems(ctx, "T1", "U1", source.ID, domain.PageRequest{Limit: 100}, false)
+	if err != nil || len(page.Items) != 100 || !page.HasMore {
+		t.Fatalf("source page=%+v err=%v", page, err)
+	}
+
+	copy, err := messages.CreateList(ctx, "T1", "U1", "Copy", "", "", source.ID, true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	copy, err = messages.UpdateList(ctx, "T1", "U1", copy.ID, "Renamed", "", false, false)
+	if err != nil || copy.Name != "Renamed" || !copy.TodoMode {
+		t.Fatalf("updated list=%+v err=%v", copy, err)
+	}
+	page, err = messages.ListItems(ctx, "T1", "U1", copy.ID, domain.PageRequest{Limit: 200}, false)
+	if err != nil || len(page.Items) != 101 || page.HasMore {
+		t.Fatalf("copy page=%+v err=%v", page, err)
+	}
+
+	item := page.Items[0]
+	updated, err := messages.UpdateListCells(ctx, "T1", "U1", copy.ID, fmt.Sprintf(`[{"row_id":%q,"column_id":"title","value":"updated"},{"row_id":%q,"column_id":"status","value":"open"}]`, item.ID, item.ID))
+	if err != nil || len(updated) != 1 {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	if !strings.Contains(updated[0].Fields, `"value":"updated"`) || !strings.Contains(updated[0].Fields, `"column_id":"status"`) {
+		t.Fatalf("cells were not merged: %s", updated[0].Fields)
+	}
+	archivedItem, err := messages.UpdateListItem(ctx, "T1", "U1", copy.ID, item.ID, "", true)
+	if err != nil || !archivedItem.Archived {
+		t.Fatalf("archived item=%+v err=%v", archivedItem, err)
+	}
+	visible, err := messages.ListItems(ctx, "T1", "U1", copy.ID, domain.PageRequest{Limit: 200}, false)
+	if err != nil || len(visible.Items) != 100 {
+		t.Fatalf("visible items=%d err=%v", len(visible.Items), err)
+	}
+	allItems, err := messages.ListItems(ctx, "T1", "U1", copy.ID, domain.PageRequest{Limit: 200}, true)
+	if err != nil || len(allItems.Items) != 101 {
+		t.Fatalf("all items=%d err=%v", len(allItems.Items), err)
+	}
+	if _, err := messages.GetListItem(ctx, "T1", "U1", copy.ID, item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetListAccess(ctx, "T1", "U1", copy.ID, "read", []domain.ConversationID{"C1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.SetListAccess(ctx, "T1", "U1", copy.ID, "owner", nil, []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DeleteListAccess(ctx, "T1", "U1", copy.ID, []domain.ConversationID{"C1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	download, err := messages.StartListDownload(ctx, "T1", "U1", copy.ID, true)
+	if err != nil || download.Status != "COMPLETED" || download.URL == "" || !download.IncludeArchived {
+		t.Fatalf("download=%+v err=%v", download, err)
+	}
+	if _, err := messages.GetListDownload(ctx, "T1", "U1", download.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DeleteListItems(ctx, "T1", "U1", copy.ID, []domain.ListItemID{item.ID}); err != nil {
+		t.Fatal(err)
 	}
 }
 

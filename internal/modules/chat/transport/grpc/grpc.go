@@ -26,6 +26,7 @@ type Remote struct {
 	directory     chatv1.DirectoryServiceClient
 	events        chatv1.EventsServiceClient
 	files         chatv1.FilesServiceClient
+	lists         chatv1.ListsServiceClient
 	interactions  chatv1.InteractionsServiceClient
 	messages      chatv1.MessagesServiceClient
 	mutations     chatv1.ConversationMutationsServiceClient
@@ -134,6 +135,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		directory:     chatv1.NewDirectoryServiceClient(conn),
 		events:        chatv1.NewEventsServiceClient(conn),
 		files:         chatv1.NewFilesServiceClient(conn),
+		lists:         chatv1.NewListsServiceClient(conn),
 		interactions:  chatv1.NewInteractionsServiceClient(conn),
 		messages:      chatv1.NewMessagesServiceClient(conn),
 		mutations:     chatv1.NewConversationMutationsServiceClient(conn),
@@ -941,6 +943,110 @@ func (r *remoteUserPhotoReader) Close() error {
 	r.closed = true
 	r.cancel()
 	return nil
+}
+
+func (r Remote) CreateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, descriptionBlocks, schema string, copyFrom domain.ListID, includeCopiedRecords, todoMode bool) (domain.List, error) {
+	out, err := r.lists.CreateList(ctx, &chatv1.CreateListRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, DescriptionBlocks: descriptionBlocks, Schema: schema, CopyFromListId: string(copyFrom), IncludeCopiedRecords: includeCopiedRecords, TodoMode: todoMode})
+	if err != nil {
+		return domain.List{}, err
+	}
+	return decodeProtoList(out.GetList())
+}
+
+func (r Remote) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name, descriptionBlocks string, todoMode, todoModeSet bool) (domain.List, error) {
+	out, err := r.lists.UpdateList(ctx, &chatv1.UpdateListRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(id), Name: name, DescriptionBlocks: descriptionBlocks, TodoMode: todoMode, TodoModeSet: todoModeSet})
+	if err != nil {
+		return domain.List{}, err
+	}
+	return decodeProtoList(out.GetList())
+}
+
+func (r Remote) CreateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, parentItemID domain.ListItemID, fields string) (domain.ListItem, error) {
+	out, err := r.lists.CreateListItem(ctx, &chatv1.CreateListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ParentItemId: string(parentItemID), Fields: fields})
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	return decodeProtoListItem(out.GetItem())
+}
+
+func (r Remote) GetListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID) (domain.ListItem, error) {
+	out, err := r.lists.GetListItem(ctx, &chatv1.ListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID)})
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	return decodeProtoListItem(out.GetItem())
+}
+
+func (r Remote) ListItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, request domain.PageRequest, archived bool) (domain.ListItemPage, error) {
+	out, err := r.lists.ListItems(ctx, &chatv1.ListItemsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Archived: archived})
+	if err != nil {
+		return domain.ListItemPage{}, err
+	}
+	return decodeProtoListItemPage(out.GetPage())
+}
+
+func (r Remote) UpdateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, fields string, archived bool) (domain.ListItem, error) {
+	out, err := r.lists.UpdateListItem(ctx, &chatv1.UpdateListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemId: string(itemID), Fields: fields, Archived: archived})
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	return decodeProtoListItem(out.GetItem())
+}
+
+func (r Remote) UpdateListCells(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, cells string) ([]domain.ListItem, error) {
+	out, err := r.lists.UpdateListCells(ctx, &chatv1.UpdateListItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Fields: cells})
+	if err != nil {
+		return nil, err
+	}
+	page, err := decodeProtoListItemPage(out.GetPage())
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+
+func (r Remote) DeleteListItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemIDs []domain.ListItemID) error {
+	ids := make([]string, 0, len(itemIDs))
+	for _, itemID := range itemIDs {
+		ids = append(ids, string(itemID))
+	}
+	out, err := r.lists.DeleteListItems(ctx, &chatv1.DeleteListItemsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ItemIds: ids})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "list item deletion")
+}
+
+func (r Remote) SetListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	out, err := r.lists.SetListAccess(ctx, &chatv1.ListAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), Access: access, ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "list access set")
+}
+
+func (r Remote) DeleteListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	out, err := r.lists.DeleteListAccess(ctx, &chatv1.ListAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "list access deletion")
+}
+
+func (r Remote) StartListDownload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, includeArchived bool) (domain.ListDownload, error) {
+	out, err := r.lists.StartListDownload(ctx, &chatv1.ListDownloadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ListId: string(listID), IncludeArchived: includeArchived})
+	if err != nil {
+		return domain.ListDownload{}, err
+	}
+	return decodeProtoListDownload(out.GetDownload())
+}
+
+func (r Remote) GetListDownload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, jobID domain.ListDownloadID) (domain.ListDownload, error) {
+	out, err := r.lists.GetListDownload(ctx, &chatv1.ListDownloadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), JobId: string(jobID)})
+	if err != nil {
+		return domain.ListDownload{}, err
+	}
+	return decodeProtoListDownload(out.GetDownload())
 }
 
 func (r Remote) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID) error {
@@ -2214,6 +2320,7 @@ var (
 	_ chatv1.DirectoryServiceServer               = (*Server)(nil)
 	_ chatv1.EventsServiceServer                  = (*Server)(nil)
 	_ chatv1.FilesServiceServer                   = (*Server)(nil)
+	_ chatv1.ListsServiceServer                   = (*Server)(nil)
 	_ chatv1.InteractionsServiceServer            = (*Server)(nil)
 	_ chatv1.MessagesServiceServer                = (*Server)(nil)
 	_ chatv1.PresenceServiceServer                = (*Server)(nil)
@@ -2266,6 +2373,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterDirectoryServiceServer(registrar, server)
 	chatv1.RegisterConversationsServiceServer(registrar, server)
 	chatv1.RegisterFilesServiceServer(registrar, server)
+	chatv1.RegisterListsServiceServer(registrar, server)
 	chatv1.RegisterConversationMutationsServiceServer(registrar, server)
 	chatv1.RegisterInteractionsServiceServer(registrar, server)
 	chatv1.RegisterAuthServiceServer(registrar, server)
@@ -3530,6 +3638,107 @@ func (s *Server) Replies(ctx context.Context, input *chatv1.RepliesRequest) (*ch
 
 func (s *Server) Search(ctx context.Context, input *chatv1.SearchRequest) (*chatv1.MessagePage, error) {
 	return s.searchProto(ctx, input)
+}
+
+func (s *Server) CreateList(ctx context.Context, input *chatv1.CreateListRequest) (*chatv1.ListResponse, error) {
+	value, err := s.implementation.CreateList(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetDescriptionBlocks(), input.GetSchema(), domain.ListID(input.GetCopyFromListId()), input.GetIncludeCopiedRecords(), input.GetTodoMode())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListResponse{Ok: true, List: encodeProtoList(value)}, nil
+}
+
+func (s *Server) UpdateList(ctx context.Context, input *chatv1.UpdateListRequest) (*chatv1.ListResponse, error) {
+	value, err := s.implementation.UpdateList(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetName(), input.GetDescriptionBlocks(), input.GetTodoMode(), input.GetTodoModeSet())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListResponse{Ok: true, List: encodeProtoList(value)}, nil
+}
+
+func (s *Server) CreateListItem(ctx context.Context, input *chatv1.CreateListItemRequest) (*chatv1.ListItemResponse, error) {
+	value, err := s.implementation.CreateListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetParentItemId()), input.GetFields())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListItemResponse{Ok: true, Item: encodeProtoListItem(value)}, nil
+}
+
+func (s *Server) GetListItem(ctx context.Context, input *chatv1.ListItemRequest) (*chatv1.ListItemResponse, error) {
+	value, err := s.implementation.GetListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListItemResponse{Ok: true, Item: encodeProtoListItem(value)}, nil
+}
+
+func (s *Server) ListItems(ctx context.Context, input *chatv1.ListItemsRequest) (*chatv1.ListItemsResponse, error) {
+	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, err.Error())
+	}
+	value, err := s.implementation.ListItems(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), request, input.GetArchived())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListItemsResponse{Ok: true, Page: encodeProtoListItemPage(value)}, nil
+}
+
+func (s *Server) UpdateListItem(ctx context.Context, input *chatv1.UpdateListItemRequest) (*chatv1.ListItemResponse, error) {
+	value, err := s.implementation.UpdateListItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), domain.ListItemID(input.GetItemId()), input.GetFields(), input.GetArchived())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListItemResponse{Ok: true, Item: encodeProtoListItem(value)}, nil
+}
+
+func (s *Server) UpdateListCells(ctx context.Context, input *chatv1.UpdateListItemRequest) (*chatv1.ListItemsResponse, error) {
+	values, err := s.implementation.UpdateListCells(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetFields())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListItemsResponse{Ok: true, Page: encodeProtoListItemPage(domain.ListItemPage{Items: values})}, nil
+}
+
+func (s *Server) DeleteListItems(ctx context.Context, input *chatv1.DeleteListItemsRequest) (*chatv1.ListOKResponse, error) {
+	ids := make([]domain.ListItemID, 0, len(input.GetItemIds()))
+	for _, id := range input.GetItemIds() {
+		ids = append(ids, domain.ListItemID(id))
+	}
+	if err := s.implementation.DeleteListItems(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), ids); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListOKResponse{Ok: true}, nil
+}
+
+func (s *Server) SetListAccess(ctx context.Context, input *chatv1.ListAccessRequest) (*chatv1.ListOKResponse, error) {
+	if err := s.implementation.SetListAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetAccess(), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListOKResponse{Ok: true}, nil
+}
+
+func (s *Server) DeleteListAccess(ctx context.Context, input *chatv1.ListAccessRequest) (*chatv1.ListOKResponse, error) {
+	if err := s.implementation.DeleteListAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListOKResponse{Ok: true}, nil
+}
+
+func (s *Server) StartListDownload(ctx context.Context, input *chatv1.ListDownloadRequest) (*chatv1.ListDownloadResponse, error) {
+	value, err := s.implementation.StartListDownload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), input.GetIncludeArchived())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListDownloadResponse{Ok: true, Download: encodeProtoListDownload(value)}, nil
+}
+
+func (s *Server) GetListDownload(ctx context.Context, input *chatv1.ListDownloadRequest) (*chatv1.ListDownloadResponse, error) {
+	value, err := s.implementation.GetListDownload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListDownloadID(input.GetJobId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ListDownloadResponse{Ok: true, Download: encodeProtoListDownload(value)}, nil
 }
 
 func (s *Server) FileInfo(ctx context.Context, input *chatv1.FileRequest) (*chatv1.File, error) {
@@ -5001,6 +5210,82 @@ func decodeProtoConversationPrefsValue(value *chatv1.ConversationPrefs) domain.C
 		}
 	}
 	return result
+}
+
+func encodeProtoList(value domain.List) *chatv1.List {
+	return &chatv1.List{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, DescriptionBlocks: value.DescriptionBlocks, Schema: value.Schema, TodoMode: value.TodoMode, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano)}
+}
+
+func decodeProtoList(value *chatv1.List) (domain.List, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetOwnerId() == "" || value.GetName() == "" {
+		return domain.List{}, errors.New("typed list response is incomplete")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return domain.List{}, err
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, value.GetUpdatedAt())
+	if err != nil {
+		return domain.List{}, err
+	}
+	return domain.List{ID: domain.ListID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), DescriptionBlocks: value.GetDescriptionBlocks(), Schema: value.GetSchema(), TodoMode: value.GetTodoMode(), CreatedAt: createdAt, UpdatedAt: updatedAt}, nil
+}
+
+func encodeProtoListItem(value domain.ListItem) *chatv1.ListItem {
+	return &chatv1.ListItem{Id: string(value.ID), ListId: string(value.ListID), ParentItemId: string(value.ParentItemID), WorkspaceId: string(value.WorkspaceID), Fields: value.Fields, CreatedBy: string(value.CreatedBy), UpdatedBy: string(value.UpdatedBy), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Archived: value.Archived}
+}
+
+func decodeProtoListItem(value *chatv1.ListItem) (domain.ListItem, error) {
+	if value == nil || value.GetId() == "" || value.GetListId() == "" || value.GetWorkspaceId() == "" || value.GetCreatedBy() == "" || value.GetUpdatedBy() == "" {
+		return domain.ListItem{}, errors.New("typed list item response is incomplete")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, value.GetUpdatedAt())
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	return domain.ListItem{ID: domain.ListItemID(value.GetId()), ListID: domain.ListID(value.GetListId()), ParentItemID: domain.ListItemID(value.GetParentItemId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Fields: value.GetFields(), CreatedBy: domain.UserID(value.GetCreatedBy()), UpdatedBy: domain.UserID(value.GetUpdatedBy()), CreatedAt: createdAt, UpdatedAt: updatedAt, Archived: value.GetArchived()}, nil
+}
+
+func encodeProtoListItemPage(value domain.ListItemPage) *chatv1.ListItemPage {
+	items := make([]*chatv1.ListItem, 0, len(value.Items))
+	for _, item := range value.Items {
+		items = append(items, encodeProtoListItem(item))
+	}
+	return &chatv1.ListItemPage{Items: items, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoListItemPage(value *chatv1.ListItemPage) (domain.ListItemPage, error) {
+	if value == nil {
+		return domain.ListItemPage{}, errors.New("typed list item page is required")
+	}
+	items := make([]domain.ListItem, 0, len(value.GetItems()))
+	for _, item := range value.GetItems() {
+		decoded, err := decodeProtoListItem(item)
+		if err != nil {
+			return domain.ListItemPage{}, err
+		}
+		items = append(items, decoded)
+	}
+	return domain.ListItemPage{Items: items, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
+
+func encodeProtoListDownload(value domain.ListDownload) *chatv1.ListDownload {
+	return &chatv1.ListDownload{Id: string(value.ID), ListId: string(value.ListID), WorkspaceId: string(value.WorkspaceID), Status: value.Status, Url: value.URL, IncludeArchived: value.IncludeArchived, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano)}
+}
+
+func decodeProtoListDownload(value *chatv1.ListDownload) (domain.ListDownload, error) {
+	if value == nil || value.GetId() == "" || value.GetListId() == "" || value.GetWorkspaceId() == "" || value.GetStatus() == "" {
+		return domain.ListDownload{}, errors.New("typed list download response is incomplete")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return domain.ListDownload{}, err
+	}
+	return domain.ListDownload{ID: domain.ListDownloadID(value.GetId()), ListID: domain.ListID(value.GetListId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Status: value.GetStatus(), URL: value.GetUrl(), IncludeArchived: value.GetIncludeArchived(), CreatedAt: createdAt}, nil
 }
 
 func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {

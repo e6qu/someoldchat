@@ -76,6 +76,10 @@ type Store struct {
 	canvasAccess           map[string]domain.CanvasAccess
 	accessLogs             []domain.AccessLog
 	eventSequence          uint64
+	lists                  map[domain.ListID]domain.List
+	listItems              map[domain.ListID]map[domain.ListItemID]domain.ListItem
+	listAccess             map[string]domain.ListAccess
+	listDownloads          map[domain.ListDownloadID]domain.ListDownload
 }
 
 var _ store.Store = (*Store)(nil)
@@ -3887,4 +3891,239 @@ func threadMessageBeforeOrEqual(message domain.Message, cursorTime time.Time, cu
 		cursor.ThreadTimestamp = ""
 	}
 	return !threadMessageBefore(cursor, message, rootTimestamp)
+}
+
+func listAccessKey(value domain.ListAccess) string {
+	return string(value.ListID) + "\x00" + value.EntityType + "\x00" + value.EntityID
+}
+
+func (s *Store) ensureListsLocked() {
+	if s.lists == nil {
+		s.lists = make(map[domain.ListID]domain.List)
+	}
+	if s.listItems == nil {
+		s.listItems = make(map[domain.ListID]map[domain.ListItemID]domain.ListItem)
+	}
+	if s.listAccess == nil {
+		s.listAccess = make(map[string]domain.ListAccess)
+	}
+	if s.listDownloads == nil {
+		s.listDownloads = make(map[domain.ListDownloadID]domain.ListDownload)
+	}
+}
+
+func (s *Store) CreateList(_ context.Context, value domain.List, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	if _, exists := s.lists[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.lists[value.ID] = value
+	s.listItems[value.ID] = make(map[domain.ListItemID]domain.ListItem)
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) GetList(_ context.Context, workspace domain.WorkspaceID, id domain.ListID) (domain.List, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.lists[id]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.List{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) UpdateList(_ context.Context, value domain.List, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	previous, exists := s.lists[value.ID]
+	if !exists || previous.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	value.CreatedAt = previous.CreatedAt
+	s.lists[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) CreateListItem(_ context.Context, value domain.ListItem, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	list, exists := s.lists[value.ListID]
+	if !exists || list.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if value.ParentItemID != "" {
+		if _, exists := s.listItems[value.ListID][value.ParentItemID]; !exists {
+			return store.ErrNotFound
+		}
+	}
+	if _, exists := s.listItems[value.ListID][value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.listItems[value.ListID][value.ID] = value
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) GetListItem(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID) (domain.ListItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list, exists := s.lists[listID]
+	if !exists || list.WorkspaceID != workspace {
+		return domain.ListItem{}, store.ErrNotFound
+	}
+	value, exists := s.listItems[listID][id]
+	if !exists {
+		return domain.ListItem{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ListItems(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, request domain.PageRequest, archived bool) (domain.ListItemPage, error) {
+	if request.Limit <= 0 {
+		return domain.ListItemPage{}, errors.New("page limit must be positive")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListItemPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list, exists := s.lists[listID]
+	if !exists || list.WorkspaceID != workspace {
+		return domain.ListItemPage{}, store.ErrNotFound
+	}
+	values := make([]domain.ListItem, 0, request.Limit+1)
+	for _, value := range s.listItems[listID] {
+		if !archived && value.Archived || (after != "" && string(value.ID) <= after) {
+			continue
+		}
+		values = append(values, value)
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ListItemPage{Items: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		if err != nil {
+			return domain.ListItemPage{}, err
+		}
+	}
+	return page, nil
+}
+
+func (s *Store) UpdateListItem(_ context.Context, value domain.ListItem, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	list, exists := s.lists[value.ListID]
+	if !exists || list.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	previous, exists := s.listItems[value.ListID][value.ID]
+	if !exists {
+		return store.ErrNotFound
+	}
+	value.CreatedAt = previous.CreatedAt
+	value.CreatedBy = previous.CreatedBy
+	s.listItems[value.ListID][value.ID] = value
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) DeleteListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID, event events.Event) error {
+	return s.DeleteListItems(ctx, workspace, listID, []domain.ListItemID{id}, event)
+}
+
+func (s *Store) DeleteListItems(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, ids []domain.ListItemID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	list, exists := s.lists[listID]
+	if !exists || list.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	if len(ids) == 0 {
+		return errors.New("list item IDs are required")
+	}
+	for _, id := range ids {
+		if _, exists := s.listItems[listID][id]; !exists {
+			return store.ErrNotFound
+		}
+	}
+	for _, id := range ids {
+		delete(s.listItems[listID], id)
+	}
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) SetListAccess(_ context.Context, value domain.ListAccess, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	if _, exists := s.lists[value.ListID]; !exists {
+		return store.ErrNotFound
+	}
+	s.listAccess[listAccessKey(value)] = value
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) DeleteListAccess(_ context.Context, value domain.ListAccess, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	if _, exists := s.lists[value.ListID]; !exists {
+		return store.ErrNotFound
+	}
+	key := listAccessKey(value)
+	if _, exists := s.listAccess[key]; !exists {
+		return store.ErrNotFound
+	}
+	delete(s.listAccess, key)
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) CreateListDownload(_ context.Context, value domain.ListDownload, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ensureListsLocked()
+	list, exists := s.lists[value.ListID]
+	if !exists || list.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.listDownloads[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.listDownloads[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) GetListDownload(_ context.Context, workspace domain.WorkspaceID, id domain.ListDownloadID) (domain.ListDownload, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.listDownloads[id]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.ListDownload{}, store.ErrNotFound
+	}
+	return value, nil
 }

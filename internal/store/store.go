@@ -208,4 +208,17 @@ type Store interface {
 	SetCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
 	DeleteCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
+	CreateList(context.Context, domain.List, events.Event) error
+	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
+	UpdateList(context.Context, domain.List, events.Event) error
+	CreateListItem(context.Context, domain.ListItem, events.Event) error
+	GetListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID) (domain.ListItem, error)
+	ListItems(context.Context, domain.WorkspaceID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)
+	UpdateListItem(context.Context, domain.ListItem, events.Event) error
+	DeleteListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID, events.Event) error
+	DeleteListItems(context.Context, domain.WorkspaceID, domain.ListID, []domain.ListItemID, events.Event) error
+	SetListAccess(context.Context, domain.ListAccess, events.Event) error
+	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
+	CreateListDownload(context.Context, domain.ListDownload, events.Event) error
+	GetListDownload(context.Context, domain.WorkspaceID, domain.ListDownloadID) (domain.ListDownload, error)
 }

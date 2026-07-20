@@ -90,6 +90,52 @@ func TestRemoteRequiresMutualTLS(t *testing.T) {
 	}
 }
 
+func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	local := service.Messages{Store: store}
+	server := grpc.NewServer()
+	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
+		t.Fatal(err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	ctx := context.Background()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	remote, err := chatgrpc.NewRemote(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := remote.CreateList(ctx, "T1", "U1", "Remote list", "[]", "", "", false, false)
+	if err != nil || list.ID == "" {
+		t.Fatalf("list=%+v err=%v", list, err)
+	}
+	item, err := remote.CreateListItem(ctx, "T1", "U1", list.ID, "", `[{"column_id":"title","value":"before"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.UpdateListCells(ctx, "T1", "U1", list.ID, fmt.Sprintf(`[{"row_id":%q,"column_id":"title","value":"after"}]`, item.ID)); err != nil {
+		t.Fatal(err)
+	}
+	page, err := remote.ListItems(ctx, "T1", "U1", list.ID, domain.PageRequest{Limit: 10}, false)
+	if err != nil || len(page.Items) != 1 || !strings.Contains(page.Items[0].Fields, "after") {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	download, err := remote.StartListDownload(ctx, "T1", "U1", list.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded, err := remote.GetListDownload(ctx, "T1", "U1", download.ID); err != nil || loaded.Status != "COMPLETED" || !loaded.IncludeArchived {
+		t.Fatalf("download=%+v err=%v", loaded, err)
+	}
+}
+
 func testCA(t *testing.T) ([]byte, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

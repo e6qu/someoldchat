@@ -18,6 +18,44 @@ const identity = await client.auth.test();
 assert.equal(identity.ok, true);
 assert.equal(identity.team_id, "T1");
 assert.equal(identity.user_id, "U1");
+const createdList = await client.apiCall("slackLists.create", {
+	name: "SDK qualification list",
+	description_blocks: [{ type: "rich_text", elements: [] }],
+	schema: [{ key: "title", name: "Title", type: "text", is_primary_column: true }],
+});
+assert.equal(createdList.ok, true);
+assert.match(createdList.list.id, /^F/);
+const createdListItem = await client.apiCall("slackLists.items.create", {
+	list_id: createdList.list.id,
+	initial_fields: [{ column_id: "title", value: "first row" }],
+});
+assert.equal(createdListItem.ok, true);
+assert.match(createdListItem.item.id, /^Rec/);
+const listedItems = await client.apiCall("slackLists.items.list", { list_id: createdList.list.id, limit: 10 });
+assert.equal(listedItems.ok, true);
+assert.equal(listedItems.items.length, 1);
+assert.equal((await client.apiCall("slackLists.items.update", {
+	list_id: createdList.list.id,
+	cells: [{ row_id: createdListItem.item.id, column_id: "title", value: "updated row" }],
+})).ok, true);
+assert.equal((await client.apiCall("slackLists.access.set", {
+	list_id: createdList.list.id,
+	access_level: "read",
+	channel_ids: ["C1"],
+})).ok, true);
+const startedListDownload = await client.apiCall("slackLists.download.start", { list_id: createdList.list.id, include_archived: true });
+assert.equal(startedListDownload.ok, true);
+const listDownload = await client.apiCall("slackLists.download.get", {
+	list_id: createdList.list.id,
+	job_id: startedListDownload.job_id,
+});
+assert.equal(listDownload.ok, true);
+assert.equal(listDownload.status, "COMPLETED");
+assert.equal(listDownload.download_url.includes("/internal/slack-lists/download.csv"), true);
+assert.equal((await client.apiCall("slackLists.items.delete", {
+	list_id: createdList.list.id,
+	id: createdListItem.item.id,
+})).ok, true);
 const bot = await client.bots.info({ bot: "B1" });
 assert.equal(bot.ok, true);
 assert.equal(bot.bot.id, "B1");

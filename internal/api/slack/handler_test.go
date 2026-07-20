@@ -98,7 +98,7 @@ func testHandlerWithStore() (http.Handler, *memory.Store) {
 		panic(err)
 	}
 	s.SeedFileComment(domain.FileComment{ID: "FC1", File: "F1", WorkspaceID: "T1", UserID: "U1", Text: "comment", CreatedAt: time.Now().UTC()})
-	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChatWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeRTMStream: {}, auth.ScopeUsersRead: {}, auth.ScopeUsersReadEmail: {}, auth.ScopeUsersWrite: {}, auth.ScopeUsersProfileWrite: {}, auth.ScopeChannelsRead: {}, auth.ScopeChannelsManage: {}, auth.ScopeReactionsWrite: {}, auth.ScopeReactionsRead: {}, auth.ScopePinsWrite: {}, auth.ScopePinsRead: {}, auth.ScopeBookmarksRead: {}, auth.ScopeBookmarksWrite: {}, auth.ScopeSearchRead: {}, auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeRemoteFilesRead: {}, auth.ScopeRemoteFilesWrite: {}, auth.ScopeRemoteFilesShare: {}, auth.ScopeTeamRead: {}, auth.ScopeEmojiRead: {}, auth.ScopeIdentityBasic: {}, auth.ScopeDNDRead: {}, auth.ScopeDNDWrite: {}, auth.ScopeRemindersRead: {}, auth.ScopeRemindersWrite: {}, auth.ScopeUserGroupsRead: {}, auth.ScopeUserGroupsWrite: {}, auth.ScopeCallsRead: {}, auth.ScopeCallsWrite: {}, auth.ScopeWorkflowStepsExecute: {}, auth.ScopeTokensBasic: {}, auth.ScopeAdmin: {}, auth.ScopeAdminUsersRead: {}, auth.ScopeAdminUsersWrite: {}, auth.ScopeAdminInvitesRead: {}, auth.ScopeAdminInvitesWrite: {}, auth.ScopeAdminConversationsRead: {}, auth.ScopeAdminConversationsWrite: {}, auth.ScopeAdminEmojiWrite: {}, auth.ScopeAdminUserGroupsRead: {}, auth.ScopeAdminUserGroupsWrite: {}, auth.ScopeAdminTeamsRead: {}, auth.ScopeAdminTeamsWrite: {}, auth.ScopeAdminAppsRead: {}, auth.ScopeAdminAppsWrite: {}}})
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChatWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeRTMStream: {}, auth.ScopeUsersRead: {}, auth.ScopeUsersReadEmail: {}, auth.ScopeUsersWrite: {}, auth.ScopeUsersProfileWrite: {}, auth.ScopeChannelsRead: {}, auth.ScopeChannelsManage: {}, auth.ScopeReactionsWrite: {}, auth.ScopeReactionsRead: {}, auth.ScopePinsWrite: {}, auth.ScopePinsRead: {}, auth.ScopeBookmarksRead: {}, auth.ScopeBookmarksWrite: {}, auth.ScopeSearchRead: {}, auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeRemoteFilesRead: {}, auth.ScopeRemoteFilesWrite: {}, auth.ScopeRemoteFilesShare: {}, auth.ScopeTeamRead: {}, auth.ScopeEmojiRead: {}, auth.ScopeIdentityBasic: {}, auth.ScopeDNDRead: {}, auth.ScopeDNDWrite: {}, auth.ScopeRemindersRead: {}, auth.ScopeRemindersWrite: {}, auth.ScopeUserGroupsRead: {}, auth.ScopeUserGroupsWrite: {}, auth.ScopeCallsRead: {}, auth.ScopeCallsWrite: {}, auth.ScopeWorkflowStepsExecute: {}, auth.ScopeTokensBasic: {}, auth.ScopeAdmin: {}, auth.ScopeAdminUsersRead: {}, auth.ScopeAdminUsersWrite: {}, auth.ScopeAdminInvitesRead: {}, auth.ScopeAdminInvitesWrite: {}, auth.ScopeAdminConversationsRead: {}, auth.ScopeAdminConversationsWrite: {}, auth.ScopeAdminEmojiWrite: {}, auth.ScopeAdminUserGroupsRead: {}, auth.ScopeAdminUserGroupsWrite: {}, auth.ScopeAdminTeamsRead: {}, auth.ScopeAdminTeamsWrite: {}, auth.ScopeAdminAppsRead: {}, auth.ScopeAdminAppsWrite: {}, auth.ScopeListsRead: {}, auth.ScopeListsWrite: {}}})
 	if err != nil {
 		panic(err)
 	}
@@ -109,6 +109,43 @@ func testHandlerWithStore() (http.Handler, *memory.Store) {
 	mux := http.NewServeMux()
 	h.Register(mux)
 	return mux, s
+}
+
+func TestListDownloadStreamsCSVAndPreservesArchiveOption(t *testing.T) {
+	handler := testHandler()
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	var created struct {
+		OK   bool `json:"ok"`
+		List struct {
+			ID string `json:"id"`
+		} `json:"list"`
+	}
+	if result := post("/api/slackLists.create", "name=csv-list"); result.Code != http.StatusOK || json.NewDecoder(result.Body).Decode(&created) != nil || !created.OK {
+		t.Fatalf("create status=%d body=%s", result.Code, result.Body)
+	}
+	if result := post("/api/slackLists.items.create", "list_id="+url.QueryEscape(created.List.ID)+"&initial_fields=%5B%7B%22column_id%22%3A%22title%22%2C%22value%22%3A%22row%22%7D%5D"); result.Code != http.StatusOK {
+		t.Fatalf("item status=%d body=%s", result.Code, result.Body)
+	}
+	var started struct {
+		JobID string `json:"job_id"`
+	}
+	if result := post("/api/slackLists.download.start", "list_id="+url.QueryEscape(created.List.ID)+"&include_archived=true"); result.Code != http.StatusOK || json.NewDecoder(result.Body).Decode(&started) != nil || started.JobID == "" {
+		t.Fatalf("start status=%d body=%s", result.Code, result.Body)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/internal/slack-lists/download.csv?list_id="+url.QueryEscape(created.List.ID)+"&job_id="+url.QueryEscape(started.JobID), nil)
+	req.Header.Set("Authorization", "Bearer token")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, req)
+	if result.Code != http.StatusOK || !strings.HasPrefix(result.Header().Get("Content-Type"), "text/csv") || !strings.Contains(result.Body.String(), "item_id,fields") || !strings.Contains(result.Body.String(), "row") {
+		t.Fatalf("download status=%d headers=%v body=%s", result.Code, result.Header(), result.Body)
+	}
 }
 
 func TestAdminInviteRequestLifecycle(t *testing.T) {

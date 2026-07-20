@@ -2,9 +2,18 @@ package slack
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
+	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/socketmode"
+	"github.com/sameoldchat/sameoldchat/internal/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -15,15 +24,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/sameoldchat/sameoldchat/internal/auth"
-	"github.com/sameoldchat/sameoldchat/internal/domain"
-	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/service"
-	"github.com/sameoldchat/sameoldchat/internal/socketmode"
-	"github.com/sameoldchat/sameoldchat/internal/store"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type Handler struct {
@@ -256,6 +256,19 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/canvases.access.set", h.setCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
 	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
+	mux.HandleFunc("POST /api/slackLists.create", h.createList)
+	mux.HandleFunc("POST /api/slackLists.update", h.updateList)
+	mux.HandleFunc("POST /api/slackLists.items.create", h.createListItem)
+	mux.HandleFunc("POST /api/slackLists.items.info", h.listItemInfo)
+	mux.HandleFunc("POST /api/slackLists.items.list", h.listItems)
+	mux.HandleFunc("POST /api/slackLists.items.update", h.updateListItem)
+	mux.HandleFunc("POST /api/slackLists.items.delete", h.deleteListItem)
+	mux.HandleFunc("POST /api/slackLists.items.deleteMultiple", h.deleteListItems)
+	mux.HandleFunc("POST /api/slackLists.access.set", h.setListAccess)
+	mux.HandleFunc("POST /api/slackLists.access.delete", h.deleteListAccess)
+	mux.HandleFunc("POST /api/slackLists.download.start", h.startListDownload)
+	mux.HandleFunc("POST /api/slackLists.download.get", h.getListDownload)
+	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
@@ -5710,4 +5723,386 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	includeCopied, err := parseListBoolean(fields, "include_copied_list_records")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	todoMode, err := parseListBoolean(fields, "todo_mode")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.CreateList(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], fields["description_blocks"], fields["schema"], domain.ListID(strings.TrimSpace(fields["copy_from_list_id"])), includeCopied, todoMode)
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "list": listResponse(value)})
+}
+
+func (h Handler) updateList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	todoMode, err := parseListBoolean(fields, "todo_mode")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.UpdateList(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["id"])), fields["name"], fields["description_blocks"], todoMode, strings.TrimSpace(fields["todo_mode"]) != "")
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "list": listResponse(value)})
+}
+
+func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["parent_item_id"])), fields["initial_fields"])
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": listItemResponse(value)})
+}
+
+func (h Handler) listItemInfo(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.GetListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["id"])))
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": listItemResponse(value)})
+}
+
+func (h Handler) listItems(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	request, err := pageRequest(fields["limit"], fields["cursor"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	archived, err := parseListBoolean(fields, "archived")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	page, err := h.Messages.ListItems(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), request, archived)
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	items := make([]map[string]any, 0, len(page.Items))
+	for _, value := range page.Items {
+		items = append(items, listItemResponse(value))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
+}
+
+func (h Handler) updateListItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["cells"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	values, err := h.Messages.UpdateListCells(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), fields["cells"])
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	items := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		items = append(items, listItemResponse(value))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items})
+}
+
+func (h Handler) deleteListItem(w http.ResponseWriter, r *http.Request) {
+	h.deleteListItemsWithScope(w, r, auth.ScopeListsWrite, false)
+}
+
+func (h Handler) deleteListItems(w http.ResponseWriter, r *http.Request) {
+	h.deleteListItemsWithScope(w, r, auth.ScopeListsWrite, true)
+}
+
+func (h Handler) deleteListItemsWithScope(w http.ResponseWriter, r *http.Request, scope auth.Scope, multiple bool) {
+	principal, err := h.authenticate(r, scope)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	ids := parseListItemIDs(fields["id"])
+	if multiple {
+		ids = parseListItemIDs(fields["ids"])
+	}
+	if len(ids) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.DeleteListItems(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), ids); err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) setListAccess(w http.ResponseWriter, r *http.Request) {
+	h.changeListAccess(w, r, true)
+}
+
+func (h Handler) deleteListAccess(w http.ResponseWriter, r *http.Request) {
+	h.changeListAccess(w, r, false)
+}
+
+func (h Handler) changeListAccess(w http.ResponseWriter, r *http.Request, set bool) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	channels := parseListConversationIDs(fields["channel_ids"])
+	users := parseListUserIDs(fields["user_ids"])
+	if set {
+		err = h.Messages.SetListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), fields["access_level"], channels, users)
+	} else {
+		err = h.Messages.DeleteListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), channels, users)
+	}
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) startListDownload(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	includeArchived, err := parseListBoolean(fields, "include_archived")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.StartListDownload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), includeArchived)
+	if err != nil {
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "job_id": value.ID})
+}
+
+func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	listID := domain.ListID(strings.TrimSpace(r.URL.Query().Get("list_id")))
+	jobID := domain.ListDownloadID(strings.TrimSpace(r.URL.Query().Get("job_id")))
+	if listID == "" || jobID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	download, err := h.Messages.GetListDownload(r.Context(), principal.WorkspaceID, principal.UserID, jobID)
+	if err != nil || download.ListID != listID {
+		if err == nil {
+			err = store.ErrNotFound
+		}
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.csv", listID))
+	writer := csv.NewWriter(w)
+	if err := writer.Write([]string{"item_id", "fields"}); err != nil {
+		return
+	}
+	cursor := domain.Cursor("")
+	for {
+		page, err := h.Messages.ListItems(r.Context(), principal.WorkspaceID, principal.UserID, listID, domain.PageRequest{Limit: 100, Cursor: cursor}, download.IncludeArchived)
+		if err != nil {
+			return
+		}
+		for _, item := range page.Items {
+			if err := writer.Write([]string{string(item.ID), item.Fields}); err != nil {
+				return
+			}
+		}
+		writer.Flush()
+		if err := writer.Error(); err != nil || !page.HasMore {
+			return
+		}
+		cursor = page.NextCursor
+	}
+}
+
+func (h Handler) getListDownload(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["job_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	value, err := h.Messages.GetListDownload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListDownloadID(strings.TrimSpace(fields["job_id"])))
+	if err != nil || value.ListID != domain.ListID(strings.TrimSpace(fields["list_id"])) {
+		if err == nil {
+			err = store.ErrNotFound
+		}
+		code, reason := mapServiceError(err, "list_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": value.Status, "download_url": value.URL})
+}
+
+func listResponse(value domain.List) map[string]any {
+	return map[string]any{"id": value.ID, "name": value.Name, "description_blocks": json.RawMessage(value.DescriptionBlocks), "schema": json.RawMessage(value.Schema), "todo_mode": value.TodoMode, "date_created": value.CreatedAt.Unix()}
+}
+
+func listItemResponse(value domain.ListItem) map[string]any {
+	return map[string]any{"id": value.ID, "list_id": value.ListID, "fields": json.RawMessage(value.Fields), "date_created": value.CreatedAt.Unix(), "created_by": value.CreatedBy, "updated_by": value.UpdatedBy, "archived": value.Archived}
+}
+
+func parseListBoolean(fields map[string]string, name string) (bool, error) {
+	value := strings.TrimSpace(fields[name])
+	if value == "" {
+		return false, nil
+	}
+	if value == "1" || strings.EqualFold(value, "true") {
+		return true, nil
+	}
+	if value == "0" || strings.EqualFold(value, "false") {
+		return false, nil
+	}
+	return false, errors.New("invalid boolean")
+}
+
+func pageRequest(limit, cursor string) (domain.PageRequest, error) {
+	if strings.TrimSpace(limit) == "" {
+		return domain.PageRequest{Limit: 100, Cursor: domain.Cursor(cursor)}, nil
+	}
+	value, err := strconv.Atoi(limit)
+	if err != nil || value <= 0 || value > 1000 {
+		return domain.PageRequest{}, err
+	}
+	return domain.PageRequest{Limit: value, Cursor: domain.Cursor(cursor)}, nil
+}
+
+func parseListItemIDs(raw string) []domain.ListItemID {
+	parts := strings.Split(raw, ",")
+	result := make([]domain.ListItemID, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, domain.ListItemID(value))
+		}
+	}
+	return result
+}
+
+func parseListConversationIDs(raw string) []domain.ConversationID {
+	parts := strings.Split(raw, ",")
+	result := make([]domain.ConversationID, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, domain.ConversationID(value))
+		}
+	}
+	return result
+}
+
+func parseListUserIDs(raw string) []domain.UserID {
+	parts := strings.Split(raw, ",")
+	result := make([]domain.UserID, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, domain.UserID(value))
+		}
+	}
+	return result
 }
