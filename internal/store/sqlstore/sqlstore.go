@@ -516,11 +516,6 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("initialize lifecycle state: %w", err)
 		}
 	}
-	if version < 73 {
-		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS external_uploads (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, uploaded_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '')`); err != nil {
-			return fmt.Errorf("migrate external uploads: %w", err)
-		}
-	}
 	if version < 4 {
 		columns, err := s.messageColumns(ctx, db)
 		if err != nil {
@@ -709,17 +704,6 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN `+column+` `+definition); err != nil {
 				return fmt.Errorf("migrate scheduled message %s: %w", column, err)
-			}
-		}
-	}
-	if version < 71 {
-		columns, err := s.tableColumns(ctx, db, "scheduled_messages")
-		if err != nil {
-			return err
-		}
-		if !columns["blocks"] {
-			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN blocks TEXT NOT NULL DEFAULT ''`); err != nil {
-				return fmt.Errorf("migrate scheduled message blocks: %w", err)
 			}
 		}
 	}
