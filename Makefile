@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check rebase-audit check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -103,6 +103,11 @@ compatibility-report:
 contract-ratchet:
 	test -n "$(BASE_REF)"
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -ratchet-base "$(BASE_REF)"
+
+rebase-audit:
+	test -n "$(PARENT)"
+	test -n "$(BRANCH)"
+	GOCACHE=$(GOCACHE) go run ./cmd/rebaseaudit -parent "$(PARENT)" -branch "$(BRANCH)" -target "$(or $(TARGET),HEAD)"
 
 sdk-inventory-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/sdkcheck -require-qualified
