@@ -53,6 +53,11 @@ sameoldchat -chat-mode grpc -chat-address chatd:9443 \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
 
+The HTTP process does not open a local database in `grpc` mode. A
+`SAMEOLDCHAT_DATABASE_URL` environment value is used only by the `local` mode;
+an explicit `-db` value in `grpc` mode is rejected as contradictory
+configuration.
+
 The separate example permits independent HTTP and chat replica counts behind
 their respective load balancers. The manifest also includes replicated targets
 (`monolith-replicated` and `separate-chat-replicated`) to validate that replica
@@ -92,3 +97,7 @@ The transport source schema lives under [`proto/`](../proto/). Generated
 protobuf messages and service adapters are checked into the module transport
 package and regenerated through `go generate`; the dynamic envelope is not
 part of the transport contract.
+
+Incoming Webhook delivery follows the same module boundary. See
+[Incoming Webhooks](incoming-webhooks.md) for its endpoint, administrative
+lifecycle, storage rules, and current payload compatibility boundary.

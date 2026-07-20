@@ -32,6 +32,7 @@ type ViewID string
 type WorkflowStepID string
 type DialogID string
 type BotID string
+type IncomingWebhookID string
 type MessageTimestamp string
 
 func NewMessageTimestamp(value time.Time) MessageTimestamp {
@@ -117,6 +118,10 @@ func NewUserGroupID() (UserGroupID, error) {
 }
 
 func NewCallID() (CallID, error) { value, err := PublicID("call_"); return CallID(value), err }
+func NewIncomingWebhookID() (IncomingWebhookID, error) {
+	value, err := PublicID("wh_")
+	return IncomingWebhookID(value), err
+}
 func NewWorkspaceID() (WorkspaceID, error) {
 	value, err := PublicID("T")
 	return WorkspaceID(value), err

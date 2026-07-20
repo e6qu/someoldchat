@@ -3381,6 +3381,71 @@ func (m Messages) Post(ctx context.Context, workspaceID domain.WorkspaceID, auth
 	return message, nil
 }
 
+func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, botUserID domain.UserID) (domain.IncomingWebhook, string, error) {
+	if strings.TrimSpace(string(appID)) == "" {
+		return domain.IncomingWebhook{}, "", ErrInvalidMessage
+	}
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	if err := m.authorizeConversation(ctx, workspaceID, actorID, conversationID); err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	installations, err := m.Store.ListAppInstallations(ctx, appID)
+	if err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	installed := false
+	for _, installation := range installations {
+		if installation.WorkspaceID == workspaceID && installation.Enabled {
+			installed = true
+			break
+		}
+	}
+	if !installed {
+		return domain.IncomingWebhook{}, "", store.ErrNotFound
+	}
+	bot, err := m.Store.GetUser(ctx, botUserID)
+	if err != nil || bot.WorkspaceID != workspaceID || bot.Deleted {
+		return domain.IncomingWebhook{}, "", store.ErrNotFound
+	}
+	if err := m.authorizeConversation(ctx, workspaceID, botUserID, conversationID); err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	secret, err := domain.PublicID("whsec_")
+	if err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	id, err := domain.NewIncomingWebhookID()
+	if err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	value := domain.IncomingWebhook{ID: id, WorkspaceID: workspaceID, AppID: appID, ConversationID: conversationID, UserID: botUserID, SecretHash: domain.HashToken(secret), Enabled: true, CreatedAt: time.Now().UTC()}
+	if err := m.Store.CreateIncomingWebhook(ctx, value); err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	return value, secret, nil
+}
+
+func (m Messages) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, webhookID domain.IncomingWebhookID, enabled bool) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+		return err
+	}
+	event, err := mutationEvent(workspaceID, "incoming_webhook.enabled", domain.MessageID(webhookID))
+	if err != nil {
+		return err
+	}
+	return m.Store.SetIncomingWebhookEnabled(ctx, workspaceID, webhookID, enabled, event)
+}
+
+func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	value, err := m.Store.LookupIncomingWebhook(ctx, workspaceID, appID, secret)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return m.Post(ctx, workspaceID, value.UserID, value.ConversationID, text, threadTimestamp, idempotencyKey)
+}
+
 func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
 	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
 	if err != nil {

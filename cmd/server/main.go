@@ -5,11 +5,14 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,7 +33,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	chatMode := flag.String("chat-mode", "", "chat composition: local or grpc (required)")
 	storeName := flag.String("store", "", "local storage backend: memory, sqlite, postgresql, or dqlite")
-	dsn := flag.String("db", databaseDSNDefault(), "SQLite or PostgreSQL DSN; required for sqlite and postgresql storage")
+	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql storage")
 	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory; required for local dqlite storage")
 	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
 	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
@@ -67,11 +70,16 @@ func main() {
 	oidcClientID := flag.String("oidc-client-id", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_ID"), "OpenID Connect client ID")
 	oidcClientSecret := flag.String("oidc-client-secret", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_SECRET"), "OpenID Connect client secret")
 	flag.Parse()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	resolvedDSN, err := resolveDatabaseDSN(*chatMode, *dsn)
+	if err != nil {
+		logger.Error("resolve database configuration", "error", err)
+		os.Exit(2)
+	}
 	if *socketHost == "" {
 		*socketHost = "localhost:8080"
 	}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	mux := http.NewServeMux()
 	if *chatMode != "local" && *chatMode != "grpc" {
 		logger.Error("invalid chat composition", "mode", *chatMode, "allowed", "local, grpc")
@@ -98,7 +106,7 @@ func main() {
 			logger.Error("parse dqlite cluster", "error", err)
 			os.Exit(2)
 		}
-		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail})
+		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: resolvedDSN, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail})
 		if err != nil {
 			logger.Error("open local chat", "error", err)
 			os.Exit(1)
@@ -166,7 +174,7 @@ func main() {
 			logger.Error("grpc chat requires address, server CA/name, and client certificate/key")
 			os.Exit(2)
 		}
-		if *storeName != "" || *dsn != "" || *dqliteDirectory != "" || *dqliteAddress != "" || *dqliteCluster != "" || *dqliteDatabase != "" || *blobDirectory != "" || *blobS3Bucket != "" || *blobS3Prefix != "" {
+		if *storeName != "" || resolvedDSN != "" || *dqliteDirectory != "" || *dqliteAddress != "" || *dqliteCluster != "" || *dqliteDatabase != "" || *blobDirectory != "" || *blobS3Bucket != "" || *blobS3Prefix != "" {
 			logger.Error("local storage settings supplied for grpc composition")
 			os.Exit(2)
 		}
@@ -341,6 +349,24 @@ func main() {
 
 func databaseDSNDefault() string {
 	return os.Getenv("SAMEOLDCHAT_DATABASE_URL")
+}
+
+func resolveDatabaseDSN(chatMode, explicitDSN string) (string, error) {
+	explicitDSN = strings.TrimSpace(explicitDSN)
+	switch chatMode {
+	case "local":
+		if explicitDSN != "" {
+			return explicitDSN, nil
+		}
+		return databaseDSNDefault(), nil
+	case "grpc":
+		if explicitDSN != "" {
+			return "", errors.New("distributed chat mode cannot use a local database DSN")
+		}
+		return "", nil
+	default:
+		return "", fmt.Errorf("unsupported chat mode %q", chatMode)
+	}
 }
 
 func applicationRootHandler(w http.ResponseWriter, r *http.Request) {

@@ -76,6 +76,9 @@ type Store interface {
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	CreateIncomingWebhook(context.Context, domain.IncomingWebhook) error
+	LookupIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.IncomingWebhook, error)
+	SetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.IncomingWebhookID, bool, events.Event) error
 	CreateAppPermissionRequest(context.Context, domain.AppPermissionRequest, events.Event) error
 	CreateView(context.Context, domain.View, events.Event) error
 	GetView(context.Context, domain.WorkspaceID, domain.ViewID) (domain.View, error)

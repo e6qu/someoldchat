@@ -39,6 +39,27 @@ func TestCreateUserRequiresWorkspaceAndRejectsDuplicateEmail(t *testing.T) {
 	}
 }
 
+func TestIncomingWebhookSecretIsHashedAndRevocable(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	value := domain.IncomingWebhook{ID: "wh_1", WorkspaceID: "T1", AppID: "A1", ConversationID: "C1", UserID: "U1", SecretHash: domain.HashToken("secret"), Enabled: true, CreatedAt: time.Unix(100, 0).UTC()}
+	if err := s.CreateIncomingWebhook(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.LookupIncomingWebhook(ctx, "T1", "A1", "secret"); err != nil || got.ID != value.ID || got.SecretHash == "secret" {
+		t.Fatalf("lookup=%+v err=%v", got, err)
+	}
+	if _, err := s.LookupIncomingWebhook(ctx, "T1", "A1", "wrong"); err != store.ErrNotFound {
+		t.Fatalf("wrong secret error=%v", err)
+	}
+	if err := s.SetIncomingWebhookEnabled(ctx, "T1", value.ID, false, events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "incoming_webhook.disabled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupIncomingWebhook(ctx, "T1", "A1", "secret"); err != store.ErrNotFound {
+		t.Fatalf("disabled webhook error=%v", err)
+	}
+}
+
 func TestSocketModeResponseQueueLeasesAndRecovers(t *testing.T) {
 	ctx := context.Background()
 	s := New()

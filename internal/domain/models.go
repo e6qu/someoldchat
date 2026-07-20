@@ -645,6 +645,17 @@ type AppInstallation struct {
 	CreatedAt   time.Time
 }
 
+type IncomingWebhook struct {
+	ID             IncomingWebhookID
+	WorkspaceID    WorkspaceID
+	AppID          AppID
+	ConversationID ConversationID
+	UserID         UserID
+	SecretHash     string
+	Enabled        bool
+	CreatedAt      time.Time
+}
+
 type AppPermissionRequest struct {
 	ID           AppRequestID
 	WorkspaceID  WorkspaceID
