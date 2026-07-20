@@ -19,7 +19,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OAuthService_ExchangeOAuth_FullMethodName = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuth"
+	OAuthService_ExchangeOAuth_FullMethodName         = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuth"
+	OAuthService_OpenIDConnectToken_FullMethodName    = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectToken"
+	OAuthService_OpenIDConnectUserInfo_FullMethodName = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectUserInfo"
 )
 
 // OAuthServiceClient is the client API for OAuthService service.
@@ -27,6 +29,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type OAuthServiceClient interface {
 	ExchangeOAuth(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
+	OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error)
+	OpenIDConnectUserInfo(ctx context.Context, in *OpenIDConnectUserInfoRequest, opts ...grpc.CallOption) (*OpenIDConnectUserInfoResponse, error)
 }
 
 type oAuthServiceClient struct {
@@ -47,11 +51,33 @@ func (c *oAuthServiceClient) ExchangeOAuth(ctx context.Context, in *OAuthExchang
 	return out, nil
 }
 
+func (c *oAuthServiceClient) OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OpenIDConnectTokenResponse)
+	err := c.cc.Invoke(ctx, OAuthService_OpenIDConnectToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *oAuthServiceClient) OpenIDConnectUserInfo(ctx context.Context, in *OpenIDConnectUserInfoRequest, opts ...grpc.CallOption) (*OpenIDConnectUserInfoResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OpenIDConnectUserInfoResponse)
+	err := c.cc.Invoke(ctx, OAuthService_OpenIDConnectUserInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OAuthServiceServer is the server API for OAuthService service.
 // All implementations should embed UnimplementedOAuthServiceServer
 // for forward compatibility.
 type OAuthServiceServer interface {
 	ExchangeOAuth(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
+	OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error)
+	OpenIDConnectUserInfo(context.Context, *OpenIDConnectUserInfoRequest) (*OpenIDConnectUserInfoResponse, error)
 }
 
 // UnimplementedOAuthServiceServer should be embedded to have
@@ -63,6 +89,12 @@ type UnimplementedOAuthServiceServer struct{}
 
 func (UnimplementedOAuthServiceServer) ExchangeOAuth(context.Context, *OAuthExchangeRequest) (*OAuthToken, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExchangeOAuth not implemented")
+}
+func (UnimplementedOAuthServiceServer) OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenIDConnectToken not implemented")
+}
+func (UnimplementedOAuthServiceServer) OpenIDConnectUserInfo(context.Context, *OpenIDConnectUserInfoRequest) (*OpenIDConnectUserInfoResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenIDConnectUserInfo not implemented")
 }
 func (UnimplementedOAuthServiceServer) testEmbeddedByValue() {}
 
@@ -102,6 +134,42 @@ func _OAuthService_ExchangeOAuth_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OAuthService_OpenIDConnectToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OpenIDConnectTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).OpenIDConnectToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_OpenIDConnectToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).OpenIDConnectToken(ctx, req.(*OpenIDConnectTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OAuthService_OpenIDConnectUserInfo_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OpenIDConnectUserInfoRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).OpenIDConnectUserInfo(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_OpenIDConnectUserInfo_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).OpenIDConnectUserInfo(ctx, req.(*OpenIDConnectUserInfoRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OAuthService_ServiceDesc is the grpc.ServiceDesc for OAuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -112,6 +180,14 @@ var OAuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExchangeOAuth",
 			Handler:    _OAuthService_ExchangeOAuth_Handler,
+		},
+		{
+			MethodName: "OpenIDConnectToken",
+			Handler:    _OAuthService_OpenIDConnectToken_Handler,
+		},
+		{
+			MethodName: "OpenIDConnectUserInfo",
+			Handler:    _OAuthService_OpenIDConnectUserInfo_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

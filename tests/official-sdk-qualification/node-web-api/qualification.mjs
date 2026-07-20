@@ -113,6 +113,29 @@ const oauthToken = await client.apiCall("oauth.token", {
 });
 assert.equal(oauthToken.ok, true);
 assert.equal(typeof oauthToken.access_token, "string");
+const openidToken = await client.apiCall("openid.connect.token", {
+	client_id: "qualification-client",
+	client_secret: "qualification-secret",
+	code: "qualification-openid-code",
+	redirect_uri: "https://example.com/oauth",
+	grant_type: "authorization_code",
+});
+assert.equal(openidToken.ok, true);
+assert.equal(openidToken.token_type, "Bearer");
+assert.equal(typeof openidToken.id_token, "string");
+assert.equal(typeof openidToken.refresh_token, "string");
+const openidInfo = await client.apiCall("openid.connect.userInfo", { token: openidToken.access_token });
+assert.equal(openidInfo.ok, true);
+assert.equal(openidInfo.sub, "U1");
+assert.equal(openidInfo["https://slack.com/team_id"], "T1");
+const refreshedOpenIDToken = await client.apiCall("openid.connect.token", {
+	client_id: "qualification-client",
+	client_secret: "qualification-secret",
+	grant_type: "refresh_token",
+	refresh_token: openidToken.refresh_token,
+});
+assert.equal(refreshedOpenIDToken.ok, true);
+assert.notEqual(refreshedOpenIDToken.access_token, openidToken.access_token);
 const authorizations = await client.apps.event.authorizations.list({ event_context: "qualification-event" });
 assert.equal(authorizations.ok, true);
 assert.equal(authorizations.authorizations[0].team_id, "T1");

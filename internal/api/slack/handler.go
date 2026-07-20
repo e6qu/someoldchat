@@ -340,6 +340,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/files/{file}", h.downloadFile)
 	mux.HandleFunc("GET /files/public/{token}", h.downloadPublicFile)
 	mux.HandleFunc("GET /users/{workspace}/{user}/photo/{token}", h.downloadUserPhoto)
+	mux.HandleFunc("GET /api/openid.connect.token", h.openIDConnectToken)
+	mux.HandleFunc("POST /api/openid.connect.token", h.openIDConnectToken)
+	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
+	mux.HandleFunc("POST /api/openid.connect.userInfo", h.openIDConnectUserInfo)
 }
 
 func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
@@ -6183,4 +6187,67 @@ func (h Handler) acknowledgeEntityCommentAction(w http.ResponseWriter, r *http.R
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) openIDConnectToken(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		return
+	}
+	clientID, clientSecret := strings.TrimSpace(fields["client_id"]), strings.TrimSpace(fields["client_secret"])
+	if basicID, basicSecret, ok := r.BasicAuth(); ok {
+		if clientID != "" && clientID != basicID || clientSecret != "" && clientSecret != basicSecret {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_client"})
+			return
+		}
+		if clientID == "" {
+			clientID = basicID
+		}
+		if clientSecret == "" {
+			clientSecret = basicSecret
+		}
+	}
+	token, err := h.Messages.OpenIDConnectToken(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"], fields["grant_type"], fields["refresh_token"], fields["code_verifier"])
+	if err != nil {
+		reason := "invalid_grant"
+		if errors.Is(err, service.ErrInvalidOAuthClient) {
+			reason = "invalid_client"
+		} else if strings.TrimSpace(fields["grant_type"]) != "" && strings.TrimSpace(fields["grant_type"]) != "authorization_code" && strings.TrimSpace(fields["grant_type"]) != "refresh_token" {
+			reason = "unsupported_grant_type"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "access_token": token.AccessToken, "token_type": token.TokenType, "id_token": token.IDToken, "refresh_token": token.RefreshToken})
+}
+
+func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		return
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	if token == "" {
+		token = strings.TrimSpace(fields["token"])
+	}
+	if token == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid_auth"})
+		return
+	}
+	value, err := h.Messages.OpenIDConnectUserInfo(r.Context(), token)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid_auth"})
+		return
+	}
+	response := map[string]any{"ok": true, "sub": value.Subject, "https://slack.com/user_id": value.UserID, "https://slack.com/team_id": value.WorkspaceID, "email": value.Email, "email_verified": value.EmailVerified, "name": value.Name, "given_name": value.GivenName, "family_name": value.FamilyName, "locale": value.Locale, "picture": value.Picture, "https://slack.com/team_name": value.TeamName, "https://slack.com/team_domain": value.TeamDomain, "https://slack.com/team_image_default": value.TeamImageDefault}
+	if value.DateEmailVerified != 0 {
+		response["date_email_verified"] = value.DateEmailVerified
+	}
+	for size, image := range value.UserImages {
+		response["https://slack.com/user_image_"+size] = image
+	}
+	for size, image := range value.TeamImages {
+		response["https://slack.com/team_image_"+size] = image
+	}
+	writeJSON(w, http.StatusOK, response)
 }

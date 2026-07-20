@@ -1403,6 +1403,10 @@ func (m Messages) MigrationExchange(ctx context.Context, workspaceID domain.Work
 }
 
 func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI string) (domain.OAuthToken, error) {
+	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "")
+}
+
+func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string) (domain.OAuthToken, error) {
 	clientID = strings.TrimSpace(clientID)
 	clientSecret = strings.TrimSpace(clientSecret)
 	code = strings.TrimSpace(code)
@@ -1423,7 +1427,7 @@ func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, cod
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
-	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, domain.OAuthToken{TokenType: "user"})
+	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, domain.OAuthToken{TokenType: "user", CodeVerifier: codeVerifier})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return domain.OAuthToken{}, ErrInvalidOAuth

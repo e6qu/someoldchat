@@ -145,6 +145,43 @@ func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
 	}
 }
 
+func TestRemoteOpenIDConnectUsesTheProcessIndependentContract(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com"})
+	ctx := context.Background()
+	if err := store.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: append(auth.AllScopes(), "openid"), RedirectURI: "https://callback"}); err != nil {
+		t.Fatal(err)
+	}
+	server := grpc.NewServer()
+	if err := chatgrpc.RegisterServer(server, service.Messages{Store: store}, store, store, store); err != nil {
+		t.Fatal(err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	remote, err := chatgrpc.NewRemote(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := remote.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "")
+	if err != nil || token.AccessToken == "" || token.IDToken == "" || token.RefreshToken == "" {
+		t.Fatalf("token=%+v err=%v", token, err)
+	}
+	info, err := remote.OpenIDConnectUserInfo(ctx, token.AccessToken)
+	if err != nil || info.Subject != "U1" || info.WorkspaceID != "T1" {
+		t.Fatalf("userinfo=%+v err=%v", info, err)
+	}
+}
+
 func testCA(t *testing.T) ([]byte, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

@@ -60,8 +60,12 @@ func main() {
 	if err := store.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "qualification-client", SecretHash: domain.HashToken("qualification-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
-	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-token-code"} {
-		if err := store.CreateOAuthCode(context.Background(), domain.OAuthCode{Code: code, ClientID: "qualification-client", WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), RedirectURI: "https://example.com/oauth"}); err != nil {
+	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-token-code", "qualification-openid-code"} {
+		scopes := auth.AllScopes()
+		if code == "qualification-openid-code" {
+			scopes = append(scopes, "openid")
+		}
+		if err := store.CreateOAuthCode(context.Background(), domain.OAuthCode{Code: code, ClientID: "qualification-client", WorkspaceID: "T1", UserID: "U1", Scopes: scopes, RedirectURI: "https://example.com/oauth"}); err != nil {
 			panic(err)
 		}
 	}

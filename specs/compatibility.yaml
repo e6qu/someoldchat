@@ -665,6 +665,14 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/entity.presentDetails/
+  - method: openid.connect.token
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/openid.connect.token/
+  - method: openid.connect.userInfo
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/openid.connect.userInfo/
 
 decisions:
   - method: apps.connections.open
@@ -682,3 +690,6 @@ decisions:
   - method: entity
     evidence: https://docs.slack.dev/reference/methods/entity.presentDetails/
     decision: The current official method reference defines the entity Work Objects methods, while the pinned Web API OpenAPI snapshot predates them. Track these stateless response methods against the official references until the vendored snapshot is refreshed.
+  - method: openid
+    evidence: https://docs.slack.dev/reference/methods/openid.connect.token/
+    decision: The current official method reference defines the Sign in with Slack OpenID Connect token and user-info methods, while the pinned Web API OpenAPI snapshot predates them. Track the methods against the official references and SDK qualifications until the vendored snapshot is refreshed.

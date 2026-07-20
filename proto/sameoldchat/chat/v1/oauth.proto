@@ -21,6 +21,47 @@ message OAuthToken {
   string token_type = 7;
 }
 
+message OpenIDConnectTokenRequest {
+  string client_id = 1;
+  string client_secret = 2;
+  string code = 3;
+  string redirect_uri = 4;
+  string grant_type = 5;
+  string refresh_token = 6;
+  string code_verifier = 7;
+}
+
+message OpenIDConnectTokenResponse {
+  OAuthToken oauth_token = 1;
+  string id_token = 2;
+  string refresh_token = 3;
+}
+
+message OpenIDConnectUserInfoRequest {
+  string token = 1;
+}
+
+message OpenIDConnectUserInfoResponse {
+  string subject = 1;
+  string user_id = 2;
+  string workspace_id = 3;
+  string email = 4;
+  bool email_verified = 5;
+  int64 date_email_verified = 6;
+  string name = 7;
+  string given_name = 8;
+  string family_name = 9;
+  string locale = 10;
+  string picture = 11;
+  string team_name = 12;
+  string team_domain = 13;
+  map<string, string> user_images = 14;
+  map<string, string> team_images = 15;
+  bool team_image_default = 16;
+}
+
 service OAuthService {
   rpc ExchangeOAuth(OAuthExchangeRequest) returns (OAuthToken);
+  rpc OpenIDConnectToken(OpenIDConnectTokenRequest) returns (OpenIDConnectTokenResponse);
+  rpc OpenIDConnectUserInfo(OpenIDConnectUserInfoRequest) returns (OpenIDConnectUserInfoResponse);
 }

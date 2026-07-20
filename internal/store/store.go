@@ -99,6 +99,8 @@ type Store interface {
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)
 	CreateOAuthCode(context.Context, domain.OAuthCode) error
 	ExchangeOAuthCode(context.Context, string, string, string, string, string, domain.OAuthToken) (domain.OAuthToken, error)
+	CreateOpenIDRefreshToken(context.Context, domain.OpenIDRefreshToken) error
+	ExchangeOpenIDRefreshToken(context.Context, string, string, string, string, domain.OpenIDToken) (domain.OpenIDToken, error)
 	CreateRTMConnection(context.Context, domain.RTMConnection) error
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error

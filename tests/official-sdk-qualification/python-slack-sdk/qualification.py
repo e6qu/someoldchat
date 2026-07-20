@@ -128,6 +128,35 @@ oauth_token = client.api_call(
 )
 assert oauth_token["ok"] is True
 assert isinstance(oauth_token["access_token"], str)
+openid_token = client.api_call(
+    "openid.connect.token",
+    params={
+        "client_id": "qualification-client",
+        "client_secret": "qualification-secret",
+        "code": "qualification-openid-code",
+        "redirect_uri": "https://example.com/oauth",
+        "grant_type": "authorization_code",
+    },
+)
+assert openid_token["ok"] is True
+assert openid_token["token_type"] == "Bearer"
+assert isinstance(openid_token["id_token"], str)
+assert isinstance(openid_token["refresh_token"], str)
+openid_info = client.api_call("openid.connect.userInfo", params={"token": openid_token["access_token"]})
+assert openid_info["ok"] is True
+assert openid_info["sub"] == "U1"
+assert openid_info["https://slack.com/team_id"] == "T1"
+refreshed_openid_token = client.api_call(
+    "openid.connect.token",
+    params={
+        "client_id": "qualification-client",
+        "client_secret": "qualification-secret",
+        "grant_type": "refresh_token",
+        "refresh_token": openid_token["refresh_token"],
+    },
+)
+assert refreshed_openid_token["ok"] is True
+assert refreshed_openid_token["access_token"] != openid_token["access_token"]
 authorizations = client.apps_event_authorizations_list(event_context="qualification-event")
 assert authorizations["ok"] is True
 assert authorizations["authorizations"][0]["team_id"] == "T1"

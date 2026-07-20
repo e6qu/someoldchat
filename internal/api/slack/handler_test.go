@@ -68,6 +68,61 @@ func TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection(t *testing
 	}
 }
 
+func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "test.example"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com"})
+	ctx := context.Background()
+	if err := store.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateOAuthCode(ctx, domain.OAuthCode{Code: "openid-code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: append(auth.AllScopes(), "openid"), RedirectURI: "https://callback"}); err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	request := httptest.NewRequest(http.MethodPost, "/api/openid.connect.token", strings.NewReader("client_id=client&client_secret=secret&code=openid-code&redirect_uri=https%3A%2F%2Fcallback&grant_type=authorization_code"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("token status=%d body=%s", response.Code, response.Body)
+	}
+	var token struct {
+		OK           bool   `json:"ok"`
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&token); err != nil {
+		t.Fatal(err)
+	}
+	if !token.OK || token.AccessToken == "" || token.RefreshToken == "" {
+		t.Fatalf("token=%+v", token)
+	}
+	request = httptest.NewRequest(http.MethodPost, "/api/openid.connect.userInfo", strings.NewReader("token="+url.QueryEscape(token.AccessToken)))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response = httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("userinfo status=%d body=%s", response.Code, response.Body)
+	}
+	var info map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&info); err != nil {
+		t.Fatal(err)
+	}
+	if info["ok"] != true || info["sub"] != "U1" || info["https://slack.com/team_id"] != "T1" {
+		t.Fatalf("userinfo=%v", info)
+	}
+}
+
 func testHandlerWithStore() (http.Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

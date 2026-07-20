@@ -181,6 +181,366 @@ func (x *OAuthToken) GetTokenType() string {
 	return ""
 }
 
+type OpenIDConnectTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ClientId      string                 `protobuf:"bytes,1,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientSecret  string                 `protobuf:"bytes,2,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
+	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
+	RedirectUri   string                 `protobuf:"bytes,4,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	GrantType     string                 `protobuf:"bytes,5,opt,name=grant_type,json=grantType,proto3" json:"grant_type,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,6,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	CodeVerifier  string                 `protobuf:"bytes,7,opt,name=code_verifier,json=codeVerifier,proto3" json:"code_verifier,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenIDConnectTokenRequest) Reset() {
+	*x = OpenIDConnectTokenRequest{}
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenIDConnectTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenIDConnectTokenRequest) ProtoMessage() {}
+
+func (x *OpenIDConnectTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenIDConnectTokenRequest.ProtoReflect.Descriptor instead.
+func (*OpenIDConnectTokenRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *OpenIDConnectTokenRequest) GetClientId() string {
+	if x != nil {
+		return x.ClientId
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenRequest) GetClientSecret() string {
+	if x != nil {
+		return x.ClientSecret
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenRequest) GetRedirectUri() string {
+	if x != nil {
+		return x.RedirectUri
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenRequest) GetGrantType() string {
+	if x != nil {
+		return x.GrantType
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenRequest) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenRequest) GetCodeVerifier() string {
+	if x != nil {
+		return x.CodeVerifier
+	}
+	return ""
+}
+
+type OpenIDConnectTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OauthToken    *OAuthToken            `protobuf:"bytes,1,opt,name=oauth_token,json=oauthToken,proto3" json:"oauth_token,omitempty"`
+	IdToken       string                 `protobuf:"bytes,2,opt,name=id_token,json=idToken,proto3" json:"id_token,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenIDConnectTokenResponse) Reset() {
+	*x = OpenIDConnectTokenResponse{}
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenIDConnectTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenIDConnectTokenResponse) ProtoMessage() {}
+
+func (x *OpenIDConnectTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenIDConnectTokenResponse.ProtoReflect.Descriptor instead.
+func (*OpenIDConnectTokenResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *OpenIDConnectTokenResponse) GetOauthToken() *OAuthToken {
+	if x != nil {
+		return x.OauthToken
+	}
+	return nil
+}
+
+func (x *OpenIDConnectTokenResponse) GetIdToken() string {
+	if x != nil {
+		return x.IdToken
+	}
+	return ""
+}
+
+func (x *OpenIDConnectTokenResponse) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
+}
+
+type OpenIDConnectUserInfoRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OpenIDConnectUserInfoRequest) Reset() {
+	*x = OpenIDConnectUserInfoRequest{}
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenIDConnectUserInfoRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenIDConnectUserInfoRequest) ProtoMessage() {}
+
+func (x *OpenIDConnectUserInfoRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenIDConnectUserInfoRequest.ProtoReflect.Descriptor instead.
+func (*OpenIDConnectUserInfoRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *OpenIDConnectUserInfoRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+type OpenIDConnectUserInfoResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Subject           string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Email             string                 `protobuf:"bytes,4,opt,name=email,proto3" json:"email,omitempty"`
+	EmailVerified     bool                   `protobuf:"varint,5,opt,name=email_verified,json=emailVerified,proto3" json:"email_verified,omitempty"`
+	DateEmailVerified int64                  `protobuf:"varint,6,opt,name=date_email_verified,json=dateEmailVerified,proto3" json:"date_email_verified,omitempty"`
+	Name              string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
+	GivenName         string                 `protobuf:"bytes,8,opt,name=given_name,json=givenName,proto3" json:"given_name,omitempty"`
+	FamilyName        string                 `protobuf:"bytes,9,opt,name=family_name,json=familyName,proto3" json:"family_name,omitempty"`
+	Locale            string                 `protobuf:"bytes,10,opt,name=locale,proto3" json:"locale,omitempty"`
+	Picture           string                 `protobuf:"bytes,11,opt,name=picture,proto3" json:"picture,omitempty"`
+	TeamName          string                 `protobuf:"bytes,12,opt,name=team_name,json=teamName,proto3" json:"team_name,omitempty"`
+	TeamDomain        string                 `protobuf:"bytes,13,opt,name=team_domain,json=teamDomain,proto3" json:"team_domain,omitempty"`
+	UserImages        map[string]string      `protobuf:"bytes,14,rep,name=user_images,json=userImages,proto3" json:"user_images,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	TeamImages        map[string]string      `protobuf:"bytes,15,rep,name=team_images,json=teamImages,proto3" json:"team_images,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	TeamImageDefault  bool                   `protobuf:"varint,16,opt,name=team_image_default,json=teamImageDefault,proto3" json:"team_image_default,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *OpenIDConnectUserInfoResponse) Reset() {
+	*x = OpenIDConnectUserInfoResponse{}
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OpenIDConnectUserInfoResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OpenIDConnectUserInfoResponse) ProtoMessage() {}
+
+func (x *OpenIDConnectUserInfoResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_oauth_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OpenIDConnectUserInfoResponse.ProtoReflect.Descriptor instead.
+func (*OpenIDConnectUserInfoResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetEmail() string {
+	if x != nil {
+		return x.Email
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetEmailVerified() bool {
+	if x != nil {
+		return x.EmailVerified
+	}
+	return false
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetDateEmailVerified() int64 {
+	if x != nil {
+		return x.DateEmailVerified
+	}
+	return 0
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetGivenName() string {
+	if x != nil {
+		return x.GivenName
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetFamilyName() string {
+	if x != nil {
+		return x.FamilyName
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetLocale() string {
+	if x != nil {
+		return x.Locale
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetPicture() string {
+	if x != nil {
+		return x.Picture
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetTeamName() string {
+	if x != nil {
+		return x.TeamName
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetTeamDomain() string {
+	if x != nil {
+		return x.TeamDomain
+	}
+	return ""
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetUserImages() map[string]string {
+	if x != nil {
+		return x.UserImages
+	}
+	return nil
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetTeamImages() map[string]string {
+	if x != nil {
+		return x.TeamImages
+	}
+	return nil
+}
+
+func (x *OpenIDConnectUserInfoResponse) GetTeamImageDefault() bool {
+	if x != nil {
+		return x.TeamImageDefault
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_oauth_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
@@ -200,9 +560,56 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\auser_id\x18\x05 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06scopes\x18\x06 \x03(\tR\x06scopes\x12\x1d\n" +
 	"\n" +
-	"token_type\x18\a \x01(\tR\ttokenType2k\n" +
+	"token_type\x18\a \x01(\tR\ttokenType\"\xfd\x01\n" +
+	"\x19OpenIDConnectTokenRequest\x12\x1b\n" +
+	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
+	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12\x12\n" +
+	"\x04code\x18\x03 \x01(\tR\x04code\x12!\n" +
+	"\fredirect_uri\x18\x04 \x01(\tR\vredirectUri\x12\x1d\n" +
+	"\n" +
+	"grant_type\x18\x05 \x01(\tR\tgrantType\x12#\n" +
+	"\rrefresh_token\x18\x06 \x01(\tR\frefreshToken\x12#\n" +
+	"\rcode_verifier\x18\a \x01(\tR\fcodeVerifier\"\x9e\x01\n" +
+	"\x1aOpenIDConnectTokenResponse\x12@\n" +
+	"\voauth_token\x18\x01 \x01(\v2\x1f.sameoldchat.chat.v1.OAuthTokenR\n" +
+	"oauthToken\x12\x19\n" +
+	"\bid_token\x18\x02 \x01(\tR\aidToken\x12#\n" +
+	"\rrefresh_token\x18\x03 \x01(\tR\frefreshToken\"4\n" +
+	"\x1cOpenIDConnectUserInfoRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\"\x9c\x06\n" +
+	"\x1dOpenIDConnectUserInfoResponse\x12\x18\n" +
+	"\asubject\x18\x01 \x01(\tR\asubject\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12\x14\n" +
+	"\x05email\x18\x04 \x01(\tR\x05email\x12%\n" +
+	"\x0eemail_verified\x18\x05 \x01(\bR\remailVerified\x12.\n" +
+	"\x13date_email_verified\x18\x06 \x01(\x03R\x11dateEmailVerified\x12\x12\n" +
+	"\x04name\x18\a \x01(\tR\x04name\x12\x1d\n" +
+	"\n" +
+	"given_name\x18\b \x01(\tR\tgivenName\x12\x1f\n" +
+	"\vfamily_name\x18\t \x01(\tR\n" +
+	"familyName\x12\x16\n" +
+	"\x06locale\x18\n" +
+	" \x01(\tR\x06locale\x12\x18\n" +
+	"\apicture\x18\v \x01(\tR\apicture\x12\x1b\n" +
+	"\tteam_name\x18\f \x01(\tR\bteamName\x12\x1f\n" +
+	"\vteam_domain\x18\r \x01(\tR\n" +
+	"teamDomain\x12c\n" +
+	"\vuser_images\x18\x0e \x03(\v2B.sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntryR\n" +
+	"userImages\x12c\n" +
+	"\vteam_images\x18\x0f \x03(\v2B.sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntryR\n" +
+	"teamImages\x12,\n" +
+	"\x12team_image_default\x18\x10 \x01(\bR\x10teamImageDefault\x1a=\n" +
+	"\x0fUserImagesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a=\n" +
+	"\x0fTeamImagesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xe2\x02\n" +
 	"\fOAuthService\x12[\n" +
-	"\rExchangeOAuth\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthTokenBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\rExchangeOAuth\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12u\n" +
+	"\x12OpenIDConnectToken\x12..sameoldchat.chat.v1.OpenIDConnectTokenRequest\x1a/.sameoldchat.chat.v1.OpenIDConnectTokenResponse\x12~\n" +
+	"\x15OpenIDConnectUserInfo\x121.sameoldchat.chat.v1.OpenIDConnectUserInfoRequest\x1a2.sameoldchat.chat.v1.OpenIDConnectUserInfoResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_oauth_proto_rawDescOnce sync.Once
@@ -216,19 +623,32 @@ func file_sameoldchat_chat_v1_oauth_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_oauth_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_oauth_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_sameoldchat_chat_v1_oauth_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_sameoldchat_chat_v1_oauth_proto_goTypes = []any{
-	(*OAuthExchangeRequest)(nil), // 0: sameoldchat.chat.v1.OAuthExchangeRequest
-	(*OAuthToken)(nil),           // 1: sameoldchat.chat.v1.OAuthToken
+	(*OAuthExchangeRequest)(nil),          // 0: sameoldchat.chat.v1.OAuthExchangeRequest
+	(*OAuthToken)(nil),                    // 1: sameoldchat.chat.v1.OAuthToken
+	(*OpenIDConnectTokenRequest)(nil),     // 2: sameoldchat.chat.v1.OpenIDConnectTokenRequest
+	(*OpenIDConnectTokenResponse)(nil),    // 3: sameoldchat.chat.v1.OpenIDConnectTokenResponse
+	(*OpenIDConnectUserInfoRequest)(nil),  // 4: sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
+	(*OpenIDConnectUserInfoResponse)(nil), // 5: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
+	nil,                                   // 6: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
+	nil,                                   // 7: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
 }
 var file_sameoldchat_chat_v1_oauth_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
-	1, // 1: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:output_type -> sameoldchat.chat.v1.OAuthToken
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: sameoldchat.chat.v1.OpenIDConnectTokenResponse.oauth_token:type_name -> sameoldchat.chat.v1.OAuthToken
+	6, // 1: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.user_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
+	7, // 2: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.team_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
+	0, // 3: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
+	2, // 4: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:input_type -> sameoldchat.chat.v1.OpenIDConnectTokenRequest
+	4, // 5: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:input_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
+	1, // 6: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:output_type -> sameoldchat.chat.v1.OAuthToken
+	3, // 7: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:output_type -> sameoldchat.chat.v1.OpenIDConnectTokenResponse
+	5, // 8: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:output_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
+	6, // [6:9] is the sub-list for method output_type
+	3, // [3:6] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_oauth_proto_init() }
@@ -242,7 +662,7 @@ func file_sameoldchat_chat_v1_oauth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_oauth_proto_rawDesc), len(file_sameoldchat_chat_v1_oauth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
