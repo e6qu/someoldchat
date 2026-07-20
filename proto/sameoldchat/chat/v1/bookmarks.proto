@@ -1,0 +1,70 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+message Bookmark {
+  string id = 1;
+  string workspace_id = 2;
+  string conversation_id = 3;
+  string title = 4;
+  string type = 5;
+  string link = 6;
+  string emoji = 7;
+  string entity_id = 8;
+  string access_level = 9;
+  string parent_id = 10;
+  int64 created_at = 11;
+  int64 updated_at = 12;
+  string updated_by = 13;
+}
+
+message AddBookmarkRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string title = 4;
+  string type = 5;
+  string link = 6;
+  string emoji = 7;
+  string entity_id = 8;
+  string access_level = 9;
+  string parent_id = 10;
+}
+
+message EditBookmarkRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string bookmark_id = 4;
+  string title = 5;
+  string link = 6;
+  string emoji = 7;
+}
+
+message BookmarkRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string bookmark_id = 4;
+}
+
+message BookmarksRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message BookmarksResponse {
+  repeated Bookmark bookmarks = 1;
+}
+
+service BookmarksService {
+  rpc AddBookmark(AddBookmarkRequest) returns (Bookmark);
+  rpc EditBookmark(EditBookmarkRequest) returns (Bookmark);
+  rpc ListBookmarks(BookmarksRequest) returns (BookmarksResponse);
+  rpc RemoveBookmark(BookmarkRequest) returns (MutationResponse);
+}

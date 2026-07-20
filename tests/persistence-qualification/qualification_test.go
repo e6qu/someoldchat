@@ -170,6 +170,27 @@ func TestPublishedWaveOneRepositoryContract(t *testing.T) {
 		t.Fatalf("stars after remove=%+v err=%v", stars, err)
 	}
 
+	bookmark := domain.Bookmark{ID: domain.BookmarkID("B-wave-one-" + suffix), WorkspaceID: workspaceID, Conversation: conversationID, Title: "Project link", Type: "link", Link: "https://example.com/project", CreatedAt: now, UpdatedAt: now, UpdatedBy: userID}
+	if err := repository.CreateBookmark(ctx, bookmark, event("bookmark", "bookmark.created", string(bookmark.ID))); err != nil {
+		t.Fatal(err)
+	}
+	bookmarks, err := repository.ListBookmarks(ctx, workspaceID, conversationID)
+	if err != nil || len(bookmarks) != 1 || bookmarks[0].ID != bookmark.ID {
+		t.Fatalf("bookmarks=%+v err=%v", bookmarks, err)
+	}
+	bookmark.Title = "Updated project link"
+	bookmark.UpdatedAt = now.Add(time.Minute)
+	updatedBookmark, err := repository.UpdateBookmark(ctx, bookmark, event("bookmark-update", "bookmark.updated", string(bookmark.ID)))
+	if err != nil || updatedBookmark.Title != bookmark.Title {
+		t.Fatalf("updated bookmark=%+v err=%v", updatedBookmark, err)
+	}
+	if err := repository.DeleteBookmark(ctx, workspaceID, conversationID, bookmark.ID, event("bookmark-delete", "bookmark.removed", string(bookmark.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetBookmark(ctx, workspaceID, conversationID, bookmark.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted bookmark err=%v", err)
+	}
+
 	file := domain.File{ID: domain.FileID("F-wave-one-" + suffix), WorkspaceID: workspaceID, Uploader: userID, Name: "notes.txt", Title: "Notes", MIMEType: "text/plain", BlobKey: string(workspaceID) + "/notes", Size: 7, CreatedAt: now}
 	if err := repository.CreateFile(ctx, file, event("file", "file.created", string(file.ID))); err != nil {
 		t.Fatal(err)

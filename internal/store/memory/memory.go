@@ -63,6 +63,7 @@ type Store struct {
 	remoteFileShares       map[domain.FileID][]domain.ConversationID
 	dnd                    map[domain.UserID]domain.DoNotDisturb
 	stars                  map[domain.UserID]map[domain.MessageID]domain.Star
+	bookmarks              map[domain.BookmarkID]domain.Bookmark
 	reminders              map[domain.ReminderID]domain.Reminder
 	scheduled              map[domain.ScheduledMessageID]domain.ScheduledMessage
 	scheduledLeases        map[domain.ScheduledMessageID]memoryLease
@@ -131,7 +132,9 @@ type memoryLease struct {
 }
 
 func New() *Store {
-	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
+	s := &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
+	s.bookmarks = make(map[domain.BookmarkID]domain.Bookmark)
+	return s
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -2640,6 +2643,94 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 		}
 	}
 	return values, next, hasMore, nil
+}
+
+func (s *Store) CreateBookmark(_ context.Context, bookmark domain.Bookmark, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.conversations[bookmark.Conversation]; !ok {
+		return store.ErrNotFound
+	}
+	if _, ok := s.users[bookmark.UpdatedBy]; !ok {
+		return store.ErrNotFound
+	}
+	if _, exists := s.bookmarks[bookmark.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	count := 0
+	for _, existing := range s.bookmarks {
+		if existing.WorkspaceID == bookmark.WorkspaceID && existing.Conversation == bookmark.Conversation {
+			count++
+		}
+	}
+	if count >= domain.MaxBookmarksPerConversation {
+		return store.ErrBookmarkLimit
+	}
+	s.bookmarks[bookmark.ID] = bookmark
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) GetBookmark(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID) (domain.Bookmark, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bookmark, ok := s.bookmarks[id]
+	if !ok || bookmark.WorkspaceID != workspace || bookmark.Conversation != conversation {
+		return domain.Bookmark{}, store.ErrNotFound
+	}
+	return bookmark, nil
+}
+
+func (s *Store) ListBookmarks(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) ([]domain.Bookmark, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Bookmark, 0)
+	for _, bookmark := range s.bookmarks {
+		if bookmark.WorkspaceID == workspace && bookmark.Conversation == conversation {
+			values = append(values, bookmark)
+		}
+	}
+	slices.SortFunc(values, func(left, right domain.Bookmark) int {
+		if left.CreatedAt.Before(right.CreatedAt) {
+			return -1
+		}
+		if left.CreatedAt.After(right.CreatedAt) {
+			return 1
+		}
+		return strings.Compare(string(left.ID), string(right.ID))
+	})
+	if len(values) > domain.MaxBookmarksPerConversation {
+		values = values[:domain.MaxBookmarksPerConversation]
+	}
+	return values, nil
+}
+
+func (s *Store) UpdateBookmark(_ context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.bookmarks[bookmark.ID]
+	if !ok || current.WorkspaceID != bookmark.WorkspaceID || current.Conversation != bookmark.Conversation {
+		return domain.Bookmark{}, store.ErrNotFound
+	}
+	bookmark.CreatedAt = current.CreatedAt
+	s.bookmarks[bookmark.ID] = bookmark
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return bookmark, nil
+}
+
+func (s *Store) DeleteBookmark(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bookmark, ok := s.bookmarks[id]
+	if !ok || bookmark.WorkspaceID != workspace || bookmark.Conversation != conversation {
+		return store.ErrNotFound
+	}
+	delete(s.bookmarks, id)
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
 }
 
 func (s *Store) CreateReminder(_ context.Context, reminder domain.Reminder, event events.Event) error {

@@ -457,6 +457,21 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.RemoveStar(ctx, "T1", "U1", "C1", starTimestamp); err != nil {
 		t.Fatalf("remove star: %v", err)
 	}
+	bookmark, err := remote.AddBookmark(ctx, "T1", "U1", "C1", "Remote bookmark", "link", "https://example.com/remote", ":link:", "", "", "")
+	if err != nil || bookmark.ID == "" || bookmark.Title != "Remote bookmark" {
+		t.Fatalf("bookmark=%+v err=%v", bookmark, err)
+	}
+	bookmarks, err := remote.Bookmarks(ctx, "T1", "U1", "C1")
+	if err != nil || len(bookmarks) != 1 || bookmarks[0].ID != bookmark.ID {
+		t.Fatalf("bookmarks=%+v err=%v", bookmarks, err)
+	}
+	bookmark, err = remote.EditBookmark(ctx, "T1", "U1", "C1", bookmark.ID, "Updated remote bookmark", "", "")
+	if err != nil || bookmark.Title != "Updated remote bookmark" {
+		t.Fatalf("edited bookmark=%+v err=%v", bookmark, err)
+	}
+	if err := remote.RemoveBookmark(ctx, "T1", "U1", "C1", bookmark.ID); err != nil {
+		t.Fatalf("remove bookmark: %v", err)
+	}
 	reminder, err := remote.AddReminder(ctx, "T1", "U1", "", "remote reminder", time.Now().UTC().Add(time.Hour))
 	if err != nil || reminder.ID == "" || reminder.Text != "remote reminder" {
 		t.Fatalf("reminder=%+v err=%v", reminder, err)

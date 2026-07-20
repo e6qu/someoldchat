@@ -33,9 +33,26 @@ sources:
 operations:
   - method: api.test
     status: behavior-compatible
+  - method: bookmarks.add
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/bookmarks.add/
+  - method: bookmarks.edit
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/bookmarks.edit/
+  - method: bookmarks.list
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/bookmarks.list/
+  - method: bookmarks.remove
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/bookmarks.remove/
   - method: apps.connections.open
     status: behavior-compatible
     provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.connections.open/
   - method: auth.revoke
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -439,9 +456,11 @@ operations:
   - method: functions.completeSuccess
     status: behavior-compatible
     provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.completeSuccess/
   - method: functions.completeError
     status: behavior-compatible
     provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.completeError/
   - method: files.remote.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi

@@ -150,6 +150,13 @@ CREATE TABLE IF NOT EXISTS stars (
  PRIMARY KEY (user_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS stars_user_created ON stars(user_id, created_at, message_id);
+CREATE TABLE IF NOT EXISTS bookmarks (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ title TEXT NOT NULL, type TEXT NOT NULL, link TEXT NOT NULL DEFAULT '', emoji TEXT NOT NULL DEFAULT '', entity_id TEXT NOT NULL DEFAULT '',
+ access_level TEXT NOT NULL DEFAULT '', parent_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ updated_by TEXT NOT NULL REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS bookmarks_conversation_rank ON bookmarks(workspace_id, conversation_id, created_at, id);
 CREATE TABLE IF NOT EXISTS reminders (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
  user_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, due_at INTEGER NOT NULL, complete_at INTEGER NOT NULL DEFAULT 0,
@@ -191,14 +198,19 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 64
+const schemaVersion = 65
 
-const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read search:read files:write files:read team:read"
+const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read team:read"
 
 type queryExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func insertOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	return err
 }
 
 type Store struct {
@@ -999,6 +1011,14 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 					return fmt.Errorf("migrate session %s: %w", column, err)
 				}
 			}
+		}
+	}
+	if version < 65 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS bookmarks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), title TEXT NOT NULL, type TEXT NOT NULL, link TEXT NOT NULL DEFAULT '', emoji TEXT NOT NULL DEFAULT '', entity_id TEXT NOT NULL DEFAULT '', access_level TEXT NOT NULL DEFAULT '', parent_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL REFERENCES users(id))`); err != nil {
+			return fmt.Errorf("migrate bookmarks: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS bookmarks_conversation_rank ON bookmarks(workspace_id, conversation_id, created_at, id)`); err != nil {
+			return fmt.Errorf("index bookmarks: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -4426,6 +4446,116 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 		}
 	}
 	return values, next, hasMore, nil
+}
+
+func (s *Store) CreateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM bookmarks WHERE workspace_id = ? AND conversation_id = ?`, bookmark.WorkspaceID, bookmark.Conversation).Scan(&count); err != nil {
+		return err
+	}
+	if count >= domain.MaxBookmarksPerConversation {
+		return store.ErrBookmarkLimit
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO bookmarks (id, workspace_id, conversation_id, title, type, link, emoji, entity_id, access_level, parent_id, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, bookmark.ID, bookmark.WorkspaceID, bookmark.Conversation, bookmark.Title, bookmark.Type, bookmark.Link, bookmark.Emoji, bookmark.EntityID, bookmark.AccessLevel, bookmark.ParentID, bookmark.CreatedAt.UTC().Unix(), bookmark.UpdatedAt.UTC().Unix(), bookmark.UpdatedBy)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrAlreadyExists
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetBookmark(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID) (domain.Bookmark, error) {
+	var bookmark domain.Bookmark
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation_id, title, type, link, emoji, entity_id, access_level, parent_id, created_at, updated_at, updated_by FROM bookmarks WHERE id = ? AND workspace_id = ? AND conversation_id = ?`, id, workspace, conversation).Scan(&bookmark.ID, &bookmark.WorkspaceID, &bookmark.Conversation, &bookmark.Title, &bookmark.Type, &bookmark.Link, &bookmark.Emoji, &bookmark.EntityID, &bookmark.AccessLevel, &bookmark.ParentID, &created, &updated, &bookmark.UpdatedBy)
+	if err := translateNotFound(err); err != nil {
+		return domain.Bookmark{}, err
+	}
+	bookmark.CreatedAt = time.Unix(created, 0).UTC()
+	bookmark.UpdatedAt = time.Unix(updated, 0).UTC()
+	return bookmark, nil
+}
+
+func (s *Store) ListBookmarks(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID) ([]domain.Bookmark, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, conversation_id, title, type, link, emoji, entity_id, access_level, parent_id, created_at, updated_at, updated_by FROM bookmarks WHERE workspace_id = ? AND conversation_id = ? ORDER BY created_at, id LIMIT ?`, workspace, conversation, domain.MaxBookmarksPerConversation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.Bookmark, 0)
+	for rows.Next() {
+		var bookmark domain.Bookmark
+		var created, updated int64
+		if err := rows.Scan(&bookmark.ID, &bookmark.WorkspaceID, &bookmark.Conversation, &bookmark.Title, &bookmark.Type, &bookmark.Link, &bookmark.Emoji, &bookmark.EntityID, &bookmark.AccessLevel, &bookmark.ParentID, &created, &updated, &bookmark.UpdatedBy); err != nil {
+			return nil, err
+		}
+		bookmark.CreatedAt = time.Unix(created, 0).UTC()
+		bookmark.UpdatedAt = time.Unix(updated, 0).UTC()
+		values = append(values, bookmark)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) UpdateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE bookmarks SET title = ?, link = ?, emoji = ?, entity_id = ?, access_level = ?, parent_id = ?, updated_at = ?, updated_by = ? WHERE id = ? AND workspace_id = ? AND conversation_id = ?`, bookmark.Title, bookmark.Link, bookmark.Emoji, bookmark.EntityID, bookmark.AccessLevel, bookmark.ParentID, bookmark.UpdatedAt.UTC().Unix(), bookmark.UpdatedBy, bookmark.ID, bookmark.WorkspaceID, bookmark.Conversation)
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	if changed != 1 {
+		return domain.Bookmark{}, store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.Bookmark{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Bookmark{}, err
+	}
+	return s.GetBookmark(ctx, bookmark.WorkspaceID, bookmark.Conversation, bookmark.ID)
+}
+
+func (s *Store) DeleteBookmark(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM bookmarks WHERE id = ? AND workspace_id = ? AND conversation_id = ?`, id, workspace, conversation)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, event events.Event) error {
