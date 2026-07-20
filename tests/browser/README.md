@@ -5,7 +5,8 @@ browser journey that server-side tests cannot observe: session-authenticated
 workspace entry, message posting, workspace search, theme switching, and
 navigation to workspace members. It also signs out through the application UI,
 asserts the application-owned signed-out destination remains terminal across a
-reload, and verifies the revoked session cannot reopen a protected page.
+reload, exposes an explicit **Sign in with Shauth** control, and verifies the
+revoked session cannot reopen a protected page.
 
 Run it from the repository root:
 

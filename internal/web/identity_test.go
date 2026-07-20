@@ -344,7 +344,7 @@ func TestSignedOutPageStaysOnApplicationOriginAndDoesNotRestartSSO(t *testing.T)
 		t.Fatalf("status=%d location=%q headers=%v", response.Code, response.Header().Get("Location"), response.Header())
 	}
 	body := response.Body.String()
-	if !strings.Contains(body, "You’re signed out") || !strings.Contains(body, `href="/login"`) || strings.Contains(body, `http-equiv="refresh"`) {
+	if !strings.Contains(body, "You’re signed out") || !strings.Contains(body, `href="/auth/oidc">Sign in with Shauth</a>`) || strings.Contains(body, `http-equiv="refresh"`) {
 		t.Fatalf("signed-out page=%s", body)
 	}
 	failure := httptest.NewRecorder()
