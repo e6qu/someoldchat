@@ -44,6 +44,12 @@ if ((release_count > keep)); then
 	exit 1
 fi
 
+version_count="$(jq 'length' "$remaining_file")"
+if ((version_count > keep * 3)); then
+	echo "$package retained $version_count package versions; expected at most $((keep * 3))" >&2
+	exit 1
+fi
+
 invalid_tags="$(jq -r '
   [.[].metadata.container.tags[]? | select(test("^[0-9a-f]{12}$"))] as $roots
   | ($roots | map(., . + "-amd64", . + "-arm64") | unique) as $allowed
@@ -65,4 +71,4 @@ for expected_tag in "$current_tag" "$current_tag-amd64" "$current_tag-arm64"; do
 	fi
 done
 
-echo "$package retained $release_count valid immutable release group(s)"
+echo "$package retained $release_count valid immutable release group(s) in $version_count package version(s)"

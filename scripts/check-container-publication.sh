@@ -23,7 +23,15 @@ expect_count 1 '  IMAGE: ghcr.io/e6qu/someoldchat'
 expect_count 3 "        run: echo \"short_sha=${gha}{GITHUB_SHA:0:12}\" >> \"${gha}GITHUB_OUTPUT\""
 expect_count 1 "          tags: ${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-${gha}{{ matrix.arch.suffix }}"
 expect_count 1 '          provenance: false'
+expect_count 1 '          provenance: mode=max'
 expect_count 1 '          sbom: false'
+expect_count 1 '          sbom: true'
+expect_count 2 '        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0'
+expect_count 2 "          subject-digest: ${gha}{{ steps.push.outputs.digest }}"
+expect_count 1 '          predicate-type: https://slsa.dev/provenance/v1'
+expect_count 1 "          predicate-path: ${gha}{{ runner.temp }}/someoldchat-${gha}{{ matrix.arch.suffix }}.provenance.json"
+expect_count 1 "          sbom-path: ${gha}{{ runner.temp }}/someoldchat-${gha}{{ matrix.arch.suffix }}.spdx.json"
+expect_count 2 "          ./scripts/extract-buildkit-attestation.sh ${continuation}"
 expect_count 1 "            --tag \"${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}\" ${continuation}"
 expect_count 1 "            \"${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-amd64\" ${continuation}"
 expect_count 1 "            \"${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-arm64\""
@@ -52,10 +60,8 @@ if grep -E '(tags:|--tag).*GITHUB_SHA' "$workflow"; then
 	exit 1
 fi
 
-if grep -Fq 'actions/attest' "$workflow" || grep -Eq 'provenance:[[:space:]]*(true|mode=)' "$workflow" || grep -Eq 'sbom:[[:space:]]*true' "$workflow"; then
-	echo 'publication workflow must keep architecture tags as direct image manifests' >&2
-	exit 1
-fi
+expect_count 1 '          push: true'
+expect_count 1 '          push: false'
 
 fixture="$(mktemp)"
 trap 'rm -f "$fixture"' EXIT
@@ -79,9 +85,11 @@ jq -n '[
 ]' >"$fixture"
 
 selected="$(jq -r --argjson keep 20 -f "$root/scripts/select-obsolete-container-versions.jq" "$fixture" | sort -n | paste -sd, -)"
-if [[ "$selected" != '0,1,2,10,11,12,999,1000' ]]; then
+if [[ "$selected" != '0,1,2,10,11,12,999,1000,1001' ]]; then
 	echo "retention selector chose unexpected package versions: $selected" >&2
 	exit 1
 fi
+
+"$root/scripts/test-extract-buildkit-sbom.sh"
 
 echo 'container publication contract passed'

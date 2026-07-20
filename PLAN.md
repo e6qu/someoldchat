@@ -217,10 +217,11 @@ for Go modules, GitHub Actions, and container inputs.
 
 The container publication gate emitted immutable 12-character commit tags,
 direct Linux amd64 and Linux arm64 image manifests, and a generic index made
-from exactly those two manifests. It read the published references back from
-GitHub Container Registry, rejected provenance or software-bill-of-materials
-children in architecture tags, and retained at most the newest 20 complete
-release groups.
+from exactly those two manifests. It generated an SPDX SBOM from the exact
+architecture image, attached signed provenance and SBOM attestations to the
+architecture digest without changing the direct tag's media type, and read the
+published references back from GitHub Container Registry. It retained at most
+the newest 20 complete release groups and removed all other package versions.
 
 ## Initial milestone
 
