@@ -4958,6 +4958,12 @@ func mapError(err error) error {
 		service.ErrInvalidOAuthClient, service.ErrInvalidIntegrationLogs,
 		store.ErrInvalidConversationType, store.ErrInvalidInviteRequest,
 		store.ErrInvalidAppApproval, domain.ErrInvalidCursor,
+		service.ErrInvalidList,
+		service.ErrInvalidEntity,
+		service.ErrInvalidBookmark,
+		service.ErrInvalidCanvas,
+		service.ErrInvalidExternalUpload,
+		store.ErrInvalidArgument,
 	) {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
@@ -4970,7 +4976,7 @@ func mapError(err error) error {
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return status.Error(codes.AlreadyExists, err.Error())
 	}
-	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, store.ErrInvalidArgument) {
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) {
 		return status.Error(codes.Aborted, err.Error())
 	}
 	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
