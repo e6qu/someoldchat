@@ -134,6 +134,15 @@ func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
 	if loaded, err := remote.GetListDownload(ctx, "T1", "U1", download.ID); err != nil || loaded.Status != "COMPLETED" || !loaded.IncludeArchived {
 		t.Fatalf("download=%+v err=%v", loaded, err)
 	}
+	if err := remote.PresentEntityDetails(ctx, "T1", "U1", "entity-details", `{"entity_type":"slack#/entities/file"}`, true, "https://example.test/login", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.PresentEntityComments(ctx, "T1", "U1", "entity-comments", `[{"id":"comment-1","can_delete":true}]`, "", false, "delete-comment", false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.AcknowledgeEntityCommentAction(ctx, "T1", "U1", "entity-ack", `{"id":"comment-1","value":"saved"}`, ""); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testCA(t *testing.T) ([]byte, *ecdsa.PrivateKey) {

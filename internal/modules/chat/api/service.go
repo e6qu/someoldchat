@@ -202,5 +202,8 @@ type Service interface {
 	DeleteListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, []domain.ConversationID, []domain.UserID) error
 	StartListDownload(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, bool) (domain.ListDownload, error)
 	GetListDownload(context.Context, domain.WorkspaceID, domain.UserID, domain.ListDownloadID) (domain.ListDownload, error)
+	PresentEntityDetails(context.Context, domain.WorkspaceID, domain.UserID, string, string, bool, string, string) error
+	PresentEntityComments(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool, string, bool, string, string) error
+	AcknowledgeEntityCommentAction(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) error
 	events.Source
 }

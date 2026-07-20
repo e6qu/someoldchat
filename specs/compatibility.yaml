@@ -653,6 +653,18 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/slackLists.update/
+  - method: entity.acknowledgeCommentAction
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/entity.acknowledgeCommentAction/
+  - method: entity.presentComments
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/entity.presentComments/
+  - method: entity.presentDetails
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/entity.presentDetails/
 
 decisions:
   - method: apps.connections.open
@@ -667,3 +679,6 @@ decisions:
   - method: slackLists
     evidence: https://docs.slack.dev/reference/methods/
     decision: The current official method reference defines the slackLists family, while the pinned Web API OpenAPI snapshot predates these methods. Track the family against the official reference until the vendored snapshot is refreshed.
+  - method: entity
+    evidence: https://docs.slack.dev/reference/methods/entity.presentDetails/
+    decision: The current official method reference defines the entity Work Objects methods, while the pinned Web API OpenAPI snapshot predates them. Track these stateless response methods against the official references until the vendored snapshot is refreshed.

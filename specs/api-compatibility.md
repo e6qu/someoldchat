@@ -103,6 +103,10 @@ family. These methods are tracked as supplemental reference-backed contracts
 because the pinned OpenAPI snapshot predates them. Their request and response
 behavior must remain aligned with the individual official method references.
 
+The same reference defines the `entity` Work Objects methods. They are
+stateless response acknowledgements and are tracked separately from the
+pinned OpenAPI snapshot for the same reason.
+
 ## HTTP behavior
 
 - Web API methods MUST be served beneath `/api/{method}`.

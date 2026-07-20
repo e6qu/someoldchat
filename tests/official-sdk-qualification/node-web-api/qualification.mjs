@@ -18,6 +18,21 @@ const identity = await client.auth.test();
 assert.equal(identity.ok, true);
 assert.equal(identity.team_id, "T1");
 assert.equal(identity.user_id, "U1");
+assert.equal((await client.apiCall("entity.presentDetails", {
+	trigger_id: "entity-details-trigger",
+	metadata: { entity_type: "slack#/entities/file" },
+	user_auth_required: true,
+	user_auth_url: "https://example.com/login",
+})).ok, true);
+assert.equal((await client.apiCall("entity.presentComments", {
+	trigger_id: "entity-comments-trigger",
+	comments: [{ id: "comment-1", can_delete: true }],
+	delete_action_id: "delete-comment",
+})).ok, true);
+assert.equal((await client.apiCall("entity.acknowledgeCommentAction", {
+	trigger_id: "entity-ack-trigger",
+	comment: { id: "comment-1", value: "saved" },
+})).ok, true);
 const createdList = await client.apiCall("slackLists.create", {
 	name: "SDK qualification list",
 	description_blocks: [{ type: "rich_text", elements: [] }],

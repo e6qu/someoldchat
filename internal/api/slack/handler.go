@@ -268,6 +268,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/slackLists.access.delete", h.deleteListAccess)
 	mux.HandleFunc("POST /api/slackLists.download.start", h.startListDownload)
 	mux.HandleFunc("POST /api/slackLists.download.get", h.getListDownload)
+	mux.HandleFunc("POST /api/entity.presentDetails", h.presentEntityDetails)
+	mux.HandleFunc("POST /api/entity.presentComments", h.presentEntityComments)
+	mux.HandleFunc("POST /api/entity.acknowledgeCommentAction", h.acknowledgeEntityCommentAction)
 	mux.HandleFunc("GET /internal/slack-lists/download.csv", h.downloadListCSV)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
@@ -6105,4 +6108,79 @@ func parseListUserIDs(raw string) []domain.UserID {
 		}
 	}
 	return result
+}
+
+func (h Handler) presentEntityDetails(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["trigger_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	userAuthRequired, err := parseListBoolean(fields, "user_auth_required")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	err = h.Messages.PresentEntityDetails(r.Context(), principal.WorkspaceID, principal.UserID, fields["trigger_id"], fields["metadata"], userAuthRequired, fields["user_auth_url"], fields["error"])
+	if err != nil {
+		code, reason := mapServiceError(err, "invalid_arguments")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) presentEntityComments(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["trigger_id"]) == "" || strings.TrimSpace(fields["comments"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	canPostComment, err := parseListBoolean(fields, "can_post_comment")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	userAuthRequired, err := parseListBoolean(fields, "user_auth_required")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	err = h.Messages.PresentEntityComments(r.Context(), principal.WorkspaceID, principal.UserID, fields["trigger_id"], fields["comments"], fields["cursor"], canPostComment, fields["delete_action_id"], userAuthRequired, fields["user_auth_url"], fields["error"])
+	if err != nil {
+		code, reason := mapServiceError(err, "invalid_arguments")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) acknowledgeEntityCommentAction(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || strings.TrimSpace(fields["trigger_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	err = h.Messages.AcknowledgeEntityCommentAction(r.Context(), principal.WorkspaceID, principal.UserID, fields["trigger_id"], fields["comment"], fields["error"])
+	if err != nil {
+		code, reason := mapServiceError(err, "invalid_arguments")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

@@ -16,6 +16,27 @@ assert client.api_test()["ok"] is True
 identity = client.auth_test()
 assert identity["team_id"] == "T1"
 assert identity["user_id"] == "U1"
+assert client.api_call(
+    "entity.presentDetails",
+    params={
+        "trigger_id": "entity-details-trigger",
+        "metadata": json.dumps({"entity_type": "slack#/entities/file"}),
+        "user_auth_required": "true",
+        "user_auth_url": "https://example.com/login",
+    },
+)["ok"] is True
+assert client.api_call(
+    "entity.presentComments",
+    params={
+        "trigger_id": "entity-comments-trigger",
+        "comments": json.dumps([{"id": "comment-1", "can_delete": True}]),
+        "delete_action_id": "delete-comment",
+    },
+)["ok"] is True
+assert client.api_call(
+    "entity.acknowledgeCommentAction",
+    params={"trigger_id": "entity-ack-trigger", "comment": json.dumps({"id": "comment-1", "value": "saved"})},
+)["ok"] is True
 created_list = client.api_call(
     "slackLists.create",
     params={
