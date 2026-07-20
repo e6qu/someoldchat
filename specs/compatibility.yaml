@@ -605,6 +605,54 @@ operations:
   - method: workflows.updateStep
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+  - method: slackLists.access.delete
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.access.delete/
+  - method: slackLists.access.set
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.access.set/
+  - method: slackLists.create
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.create/
+  - method: slackLists.download.get
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.download.get/
+  - method: slackLists.download.start
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.download.start/
+  - method: slackLists.items.create
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.items.create/
+  - method: slackLists.items.delete
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.items.delete/
+  - method: slackLists.items.deleteMultiple
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.items.deleteMultiple/
+  - method: slackLists.items.info
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.items.info/
+  - method: slackLists.items.list
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.items.list/
+  - method: slackLists.items.update
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.items.update/
+  - method: slackLists.update
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/slackLists.update/
 
 decisions:
   - method: apps.connections.open
@@ -616,3 +664,6 @@ decisions:
   - method: functions.completeError
     evidence: https://docs.slack.dev/reference/methods/functions.completeError/
     decision: The current official method reference defines this POST method, but the pinned OpenAPI snapshot does not contain it. Track it as a supplemental Slack method until the vendored snapshot is refreshed.
+  - method: slackLists
+    evidence: https://docs.slack.dev/reference/methods/
+    decision: The current official method reference defines the slackLists family, while the pinned Web API OpenAPI snapshot predates these methods. Track the family against the official reference until the vendored snapshot is refreshed.

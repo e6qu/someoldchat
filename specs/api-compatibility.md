@@ -98,6 +98,11 @@ SDK convenience behavior MUST be distinguished from server obligations. A
 client-side retry loop, for example, implies required server status/headers but
 is not server logic to reproduce.
 
+The current official Slack method reference also defines the `slackLists`
+family. These methods are tracked as supplemental reference-backed contracts
+because the pinned OpenAPI snapshot predates them. Their request and response
+behavior must remain aligned with the individual official method references.
+
 ## HTTP behavior
 
 - Web API methods MUST be served beneath `/api/{method}`.

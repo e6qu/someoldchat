@@ -629,6 +629,54 @@ type RemoteFilePage struct {
 	HasMore    bool
 }
 
+type List struct {
+	ID                ListID
+	WorkspaceID       WorkspaceID
+	OwnerID           UserID
+	Name              string
+	DescriptionBlocks string
+	Schema            string
+	TodoMode          bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type ListItem struct {
+	ID           ListItemID
+	ListID       ListID
+	ParentItemID ListItemID
+	WorkspaceID  WorkspaceID
+	Fields       string
+	CreatedBy    UserID
+	UpdatedBy    UserID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Archived     bool
+}
+
+type ListItemPage struct {
+	Items      []ListItem
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type ListAccess struct {
+	ListID     ListID
+	EntityType string
+	EntityID   string
+	Access     string
+}
+
+type ListDownload struct {
+	ID              ListDownloadID
+	ListID          ListID
+	WorkspaceID     WorkspaceID
+	Status          string
+	URL             string
+	IncludeArchived bool
+	CreatedAt       time.Time
+}
+
 type RemoteFileLookup struct {
 	ID         FileID
 	ExternalID string

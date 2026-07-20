@@ -1,0 +1,163 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message List {
+  string id = 1;
+  string workspace_id = 2;
+  string owner_id = 3;
+  string name = 4;
+  string description_blocks = 5;
+  string schema = 6;
+  bool todo_mode = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message ListItem {
+  string id = 1;
+  string list_id = 2;
+  string parent_item_id = 3;
+  string workspace_id = 4;
+  string fields = 5;
+  string created_by = 6;
+  string updated_by = 7;
+  string created_at = 8;
+  string updated_at = 9;
+  bool archived = 10;
+}
+
+message ListItemPage {
+  repeated ListItem items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message ListDownload {
+  string id = 1;
+  string list_id = 2;
+  string workspace_id = 3;
+  string status = 4;
+  string url = 5;
+  string created_at = 6;
+  bool include_archived = 7;
+}
+
+message CreateListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string description_blocks = 4;
+  string schema = 5;
+  string copy_from_list_id = 6;
+  bool include_copied_records = 7;
+  bool todo_mode = 8;
+}
+
+message UpdateListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string name = 4;
+  string description_blocks = 5;
+  bool todo_mode = 6;
+  bool todo_mode_set = 7;
+}
+
+message ListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+}
+
+message CreateListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string parent_item_id = 4;
+  string fields = 5;
+}
+
+message ListItemsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  bool archived = 6;
+}
+
+message UpdateListItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string item_id = 4;
+  string fields = 5;
+  bool archived = 6;
+}
+
+message DeleteListItemsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  repeated string item_ids = 4;
+}
+
+message ListAccessRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string access = 4;
+  repeated string channel_ids = 5;
+  repeated string user_ids = 6;
+}
+
+message ListDownloadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string list_id = 3;
+  string job_id = 4;
+  bool include_archived = 5;
+}
+
+message ListResponse {
+  bool ok = 1;
+  List list = 2;
+}
+
+message ListItemResponse {
+  bool ok = 1;
+  ListItem item = 2;
+}
+
+message ListItemsResponse {
+  bool ok = 1;
+  ListItemPage page = 2;
+}
+
+message ListDownloadResponse {
+  bool ok = 1;
+  ListDownload download = 2;
+}
+
+message ListOKResponse {
+  bool ok = 1;
+}
+
+service ListsService {
+  rpc CreateList(CreateListRequest) returns (ListResponse);
+  rpc UpdateList(UpdateListRequest) returns (ListResponse);
+  rpc CreateListItem(CreateListItemRequest) returns (ListItemResponse);
+  rpc GetListItem(ListItemRequest) returns (ListItemResponse);
+  rpc ListItems(ListItemsRequest) returns (ListItemsResponse);
+  rpc UpdateListItem(UpdateListItemRequest) returns (ListItemResponse);
+  rpc UpdateListCells(UpdateListItemRequest) returns (ListItemsResponse);
+  rpc DeleteListItems(DeleteListItemsRequest) returns (ListOKResponse);
+  rpc SetListAccess(ListAccessRequest) returns (ListOKResponse);
+  rpc DeleteListAccess(ListAccessRequest) returns (ListOKResponse);
+  rpc StartListDownload(ListDownloadRequest) returns (ListDownloadResponse);
+  rpc GetListDownload(ListDownloadRequest) returns (ListDownloadResponse);
+}

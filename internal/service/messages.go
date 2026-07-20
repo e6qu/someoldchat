@@ -45,6 +45,7 @@ var (
 	ErrInvalidInviteRequest     = errors.New("invite request is invalid")
 	ErrInvalidAppApproval       = errors.New("app approval is invalid")
 	ErrInvalidView              = errors.New("view payload is invalid")
+	ErrInvalidList              = errors.New("list payload is invalid")
 	ErrInvalidWorkflowStep      = errors.New("workflow step payload is invalid")
 	ErrInvalidDialog            = errors.New("dialog payload is invalid")
 	ErrInvalidBot               = errors.New("bot identifier is required")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,72 @@ func TestCoreRepositoryContract(t *testing.T) {
 		t.Fatalf("message page=%+v, want one bounded item", page)
 	}
 	if _, err := repository.GetIdempotentMessage(ctx, workspace.ID, user.ID, idempotencyKey); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListsRepositoryContract(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := openStore(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-lists-" + suffix)
+	userID := domain.UserID("U-lists-" + suffix)
+	conversationID := domain.ConversationID("C-lists-" + suffix)
+	now := time.Unix(1700000000, 0).UTC()
+	event := func(id, topic, payload string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspaceID, Topic: topic, Payload: payload, CreatedAt: now}
+	}
+	for _, seed := range []func() error{
+		func() error { return repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Lists"}) },
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Name: "lists-user"})
+		},
+		func() error {
+			return repository.SeedConversation(ctx, domain.Conversation{ID: conversationID, WorkspaceID: workspaceID, Name: "lists-channel"})
+		},
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := domain.List{ID: domain.ListID("F-lists-" + suffix), WorkspaceID: workspaceID, OwnerID: userID, Name: "Lists", DescriptionBlocks: "[]", Schema: `[{"key":"title"}]`, CreatedAt: now, UpdatedAt: now}
+	if err := repository.CreateList(ctx, list, event("list-create", "list.created", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	item := domain.ListItem{ID: domain.ListItemID("Rec-lists-" + suffix), ListID: list.ID, WorkspaceID: workspaceID, Fields: `[{"column_id":"title","value":"before"}]`, CreatedBy: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now}
+	if err := repository.CreateListItem(ctx, item, event("item-create", "list.item.created", string(item.ID))); err != nil {
+		t.Fatal(err)
+	}
+	page, err := repository.ListItems(ctx, workspaceID, list.ID, domain.PageRequest{Limit: 1}, false)
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != item.ID || page.HasMore {
+		t.Fatalf("list items=%+v err=%v", page, err)
+	}
+	item.Fields = `[{"column_id":"title","value":"after"}]`
+	item.UpdatedAt = now.Add(time.Minute)
+	item.UpdatedBy = userID
+	if err := repository.UpdateListItem(ctx, item, event("item-update", "list.item.updated", string(item.ID))); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := repository.GetListItem(ctx, workspaceID, list.ID, item.ID)
+	if err != nil || !strings.Contains(loaded.Fields, "after") {
+		t.Fatalf("loaded item=%+v err=%v", loaded, err)
+	}
+	if err := repository.SetListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "channel", EntityID: string(conversationID), Access: "read"}, event("access-set", "list.access.set", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "channel", EntityID: string(conversationID)}, event("access-delete", "list.access.deleted", string(list.ID))); err != nil {
+		t.Fatal(err)
+	}
+	download := domain.ListDownload{ID: domain.ListDownloadID("export_" + suffix), ListID: list.ID, WorkspaceID: workspaceID, Status: "COMPLETED", URL: "https://example.invalid/export", IncludeArchived: true, CreatedAt: now}
+	if err := repository.CreateListDownload(ctx, download, event("download", "list.download.started", string(download.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if loadedDownload, err := repository.GetListDownload(ctx, workspaceID, download.ID); err != nil || loadedDownload.URL != download.URL || !loadedDownload.IncludeArchived {
+		t.Fatalf("download=%+v err=%v", loadedDownload, err)
+	}
+	if err := repository.DeleteListItem(ctx, workspaceID, list.ID, item.ID, event("item-delete", "list.items.deleted", string(item.ID))); err != nil {
 		t.Fatal(err)
 	}
 }

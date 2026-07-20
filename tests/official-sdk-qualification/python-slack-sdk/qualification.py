@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import time
 
@@ -15,6 +16,52 @@ assert client.api_test()["ok"] is True
 identity = client.auth_test()
 assert identity["team_id"] == "T1"
 assert identity["user_id"] == "U1"
+created_list = client.api_call(
+    "slackLists.create",
+    params={
+        "name": "SDK qualification list",
+        "description_blocks": json.dumps([{"type": "rich_text", "elements": []}]),
+        "schema": json.dumps([{"key": "title", "name": "Title", "type": "text", "is_primary_column": True}]),
+    },
+)
+assert created_list["ok"] is True
+assert created_list["list"]["id"].startswith("F")
+created_list_item = client.api_call(
+    "slackLists.items.create",
+    params={
+        "list_id": created_list["list"]["id"],
+        "initial_fields": json.dumps([{"column_id": "title", "value": "first row"}]),
+    },
+)
+assert created_list_item["ok"] is True
+assert created_list_item["item"]["id"].startswith("Rec")
+listed_items = client.api_call("slackLists.items.list", params={"list_id": created_list["list"]["id"], "limit": 10})
+assert listed_items["ok"] is True
+assert len(listed_items["items"]) == 1
+assert client.api_call(
+    "slackLists.items.update",
+    params={
+        "list_id": created_list["list"]["id"],
+        "cells": json.dumps([{"row_id": created_list_item["item"]["id"], "column_id": "title", "value": "updated row"}]),
+    },
+)["ok"] is True
+assert client.api_call(
+    "slackLists.access.set",
+    params={"list_id": created_list["list"]["id"], "access_level": "read", "channel_ids": json.dumps(["C1"])},
+)["ok"] is True
+started_list_download = client.api_call("slackLists.download.start", params={"list_id": created_list["list"]["id"], "include_archived": "true"})
+assert started_list_download["ok"] is True
+list_download = client.api_call(
+    "slackLists.download.get",
+    params={"list_id": created_list["list"]["id"], "job_id": started_list_download["job_id"]},
+)
+assert list_download["ok"] is True
+assert list_download["status"] == "COMPLETED"
+assert "/internal/slack-lists/download.csv" in list_download["download_url"]
+assert client.api_call(
+    "slackLists.items.delete",
+    params={"list_id": created_list["list"]["id"], "id": created_list_item["item"]["id"]},
+)["ok"] is True
 bot = client.bots_info(bot="B1")
 assert bot["ok"] is True
 assert bot["bot"]["id"] == "B1"

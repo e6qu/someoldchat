@@ -196,11 +196,30 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', alias_for TEXT NOT NULL DEFAULT '',
  PRIMARY KEY (workspace_id, name)
 );
+CREATE TABLE IF NOT EXISTS lists (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
+ name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0,
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS list_items (
+ id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id);
+CREATE TABLE IF NOT EXISTS list_access (
+ list_id TEXT NOT NULL REFERENCES lists(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL,
+ PRIMARY KEY (list_id, entity_type, entity_id)
+);
+CREATE TABLE IF NOT EXISTS list_downloads (
+ id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ status TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', include_archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
+);
 `
 
-const schemaVersion = 66
+const schemaVersion = 68
 
-const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write team:read"
+const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
 type queryExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -1032,6 +1051,30 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate canvas index: %w", err)
 		}
 	}
+	if version < 67 {
+		for _, statement := range []string{
+			`CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS list_items (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)`,
+			`CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id)`,
+			`CREATE TABLE IF NOT EXISTS list_access (list_id TEXT NOT NULL REFERENCES lists(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (list_id, entity_type, entity_id))`,
+			`CREATE TABLE IF NOT EXISTS list_downloads (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', include_archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
+		} {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("migrate Lists: %w", err)
+			}
+		}
+	}
+	if version < 68 {
+		columns, err := s.tableColumns(ctx, db, "list_downloads")
+		if err != nil {
+			return fmt.Errorf("inspect List downloads: %w", err)
+		}
+		if !columns["include_archived"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE list_downloads ADD COLUMN include_archived INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate List download archive option: %w", err)
+			}
+		}
+	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
@@ -1104,7 +1147,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -6223,6 +6266,293 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		}
 	}
 	return page, nil
+}
+
+func insertListOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
+	_, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Store) CreateList(ctx context.Context, value domain.List, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.CreatedAt.UTC().Format(time.RFC3339Nano), value.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrAlreadyExists
+		}
+		return err
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id domain.ListID) (domain.List, error) {
+	var value domain.List
+	var createdAt, updatedAt string
+	var todoMode int
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at FROM lists WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todoMode, &createdAt, &updatedAt)
+	if err != nil {
+		return domain.List{}, translateNotFound(err)
+	}
+	value.TodoMode = todoMode != 0
+	value.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return domain.List{}, err
+	}
+	value.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+	if err != nil {
+		return domain.List{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.UpdatedAt.UTC().Format(time.RFC3339Nano), value.ID, value.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		return store.ErrNotFound
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if value.ParentItemID != "" {
+		var parent string
+		if err := tx.QueryRowContext(ctx, `SELECT id FROM list_items WHERE id = ? AND list_id = ?`, value.ParentItemID, value.ListID).Scan(&parent); err != nil {
+			return translateNotFound(err)
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, value.CreatedAt.UTC().Format(time.RFC3339Nano), value.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(value.Archived))
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrAlreadyExists
+		}
+		return err
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, error) {
+	var value domain.ListItem
+	var createdAt, updatedAt string
+	var archived int
+	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived); err != nil {
+		return domain.ListItem{}, err
+	}
+	var err error
+	value.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	value.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+	if err != nil {
+		return domain.ListItem{}, err
+	}
+	value.Archived = archived != 0
+	return value, nil
+}
+
+func (s *Store) GetListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID) (domain.ListItem, error) {
+	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
+	if err != nil {
+		return domain.ListItem{}, translateNotFound(err)
+	}
+	return value, nil
+}
+
+func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, request domain.PageRequest, archived bool) (domain.ListItemPage, error) {
+	if request.Limit <= 0 {
+		return domain.ListItemPage{}, errors.New("page limit must be positive")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListItemPage{}, err
+	}
+	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
+	args := []any{listID, workspace, after}
+	if !archived {
+		query += ` AND archived = 0`
+	}
+	query += ` ORDER BY id LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.ListItemPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.ListItem, 0, request.Limit+1)
+	for rows.Next() {
+		value, err := scanListItem(rows)
+		if err != nil {
+			return domain.ListItemPage{}, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ListItemPage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ListItemPage{Items: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+		if err != nil {
+			return domain.ListItemPage{}, err
+		}
+	}
+	return page, nil
+}
+
+func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ? WHERE id = ? AND list_id = ? AND workspace_id = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, value.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(value.Archived), value.ID, value.ListID, value.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		return store.ErrNotFound
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID, event events.Event) error {
+	return s.DeleteListItems(ctx, workspace, listID, []domain.ListItemID{id}, event)
+}
+
+func (s *Store) DeleteListItems(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, ids []domain.ListItemID, event events.Event) error {
+	if len(ids) == 0 {
+		return errors.New("list item IDs are required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, id := range ids {
+		result, err := tx.ExecContext(ctx, `DELETE FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return store.ErrNotFound
+		}
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SetListAccess(ctx context.Context, value domain.ListAccess, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_access(list_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?) ON CONFLICT(list_id, entity_type, entity_id) DO UPDATE SET access_level = excluded.access_level`, value.ListID, value.EntityType, value.EntityID, value.Access); err != nil {
+		return translateNotFound(err)
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteListAccess(ctx context.Context, value domain.ListAccess, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM list_access WHERE list_id = ? AND entity_type = ? AND entity_id = ?`, value.ListID, value.EntityType, value.EntityID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateListDownload(ctx context.Context, value domain.ListDownload, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_downloads(id, list_id, workspace_id, status, url, include_archived, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.WorkspaceID, value.Status, value.URL, boolInt(value.IncludeArchived), value.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if err := insertListOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetListDownload(ctx context.Context, workspace domain.WorkspaceID, id domain.ListDownloadID) (domain.ListDownload, error) {
+	var value domain.ListDownload
+	var createdAt string
+	var includeArchived int
+	err := s.db.QueryRowContext(ctx, `SELECT id, list_id, workspace_id, status, url, include_archived, created_at FROM list_downloads WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.ListID, &value.WorkspaceID, &value.Status, &value.URL, &includeArchived, &createdAt)
+	if err != nil {
+		return domain.ListDownload{}, translateNotFound(err)
+	}
+	value.IncludeArchived = includeArchived != 0
+	value.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	if err != nil {
+		return domain.ListDownload{}, err
+	}
+	return value, nil
 }
 
 func escapeLikeTerm(term string) string {
