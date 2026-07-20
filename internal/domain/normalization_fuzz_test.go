@@ -7,6 +7,18 @@ import (
 	"testing"
 )
 
+func TestNormalizeBlocksCompactsObjectsAndRejectsScalars(t *testing.T) {
+	got, err := NormalizeBlocks([]byte(` [ { "type": "section", "text": {"type":"plain_text","text":"hello"} } ] `))
+	if err != nil || got != `[{"type":"section","text":{"type":"plain_text","text":"hello"}}]` {
+		t.Fatalf("blocks=%q err=%v", got, err)
+	}
+	for _, raw := range []string{`{}`, `null`, `["not an object"]`} {
+		if _, err := NormalizeBlocks([]byte(raw)); err == nil {
+			t.Fatalf("invalid blocks %s were accepted", raw)
+		}
+	}
+}
+
 func FuzzNormalizeScopes(f *testing.F) {
 	f.Add(" chat:write \x00chat:write\x00\x00 channels:read ")
 	f.Add("users:read\x00users:read\x00  \x00chat:write")

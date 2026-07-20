@@ -769,10 +769,36 @@ type Message struct {
 	Conversation    ConversationID
 	AuthorID        UserID
 	Text            string
+	Blocks          string
 	ThreadTimestamp MessageTimestamp
 	CreatedAt       time.Time
 	Deleted         bool
 	Unfurls         map[string]string
+}
+
+func NormalizeBlocks(raw []byte) (string, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return "", nil
+	}
+	var blocks []json.RawMessage
+	if err := json.Unmarshal(raw, &blocks); err != nil || blocks == nil {
+		return "", errors.New("blocks must be a JSON array")
+	}
+	if len(blocks) > 100 {
+		return "", errors.New("blocks exceed the maximum count")
+	}
+	for _, block := range blocks {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(block, &object); err != nil || object == nil {
+			return "", errors.New("each block must be a JSON object")
+		}
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return "", err
+	}
+	return compact.String(), nil
 }
 
 func NormalizeUnfurls(values map[string]string) (map[string]string, error) {

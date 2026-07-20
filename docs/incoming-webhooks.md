@@ -25,6 +25,10 @@ payloads. Requests containing `blocks` therefore receive `invalid_payload`
 instead of being silently discarded or partially stored. This is an explicit
 compatibility boundary. Block Kit support requires a versioned message-model
 change across all storage backends, gRPC, and the browser representation.
+The message model stores Block Kit payloads as normalized JSON arrays. The
+payload travels through the direct service boundary or generated gRPC and is
+persisted by every storage backend. Invalid block arrays receive
+`invalid_payload`; the implementation does not silently discard them.
 
 For upstream behavior, see [Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)
 and the [`incoming-webhook` scope](https://docs.slack.dev/reference/scopes/incoming-webhook/).

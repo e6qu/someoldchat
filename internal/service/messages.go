@@ -3581,3 +3581,86 @@ func (m Messages) authorizeWorkspace(ctx context.Context, workspaceID domain.Wor
 	}
 	return nil
 }
+
+func (m Messages) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	return m.post(ctx, workspaceID, authorID, conversation, text, blocks, threadTimestamp, idempotencyKey)
+}
+
+func (m Messages) post(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	if idempotencyKey != "" {
+		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+		if err == nil {
+			return cached, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return domain.Message{}, err
+		}
+	}
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	if err != nil || strings.TrimSpace(string(conversation)) == "" || (strings.TrimSpace(text) == "" && normalizedBlocks == "") {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
+		return domain.Message{}, err
+	}
+	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
+		return domain.Message{}, err
+	}
+	threadTimestampValue := domain.MessageTimestamp("")
+	if threadTimestamp != "" {
+		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
+		if err != nil {
+			return domain.Message{}, ErrInvalidTimestamp
+		}
+		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+		if err != nil || parent.WorkspaceID != workspaceID {
+			return domain.Message{}, store.ErrNotFound
+		}
+		threadTimestampValue = threadTimestamp
+	}
+	id, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}
+	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
+		if errors.Is(err, store.ErrIdempotencyConflict) {
+			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+		}
+		return domain.Message{}, err
+	}
+	return message, nil
+}
+
+func (m Messages) UpdateWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
+	return m.update(ctx, workspaceID, userID, conversation, timestamp, text, blocks)
+}
+
+func (m Messages) update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	if strings.TrimSpace(text) == "" && normalizedBlocks == "" {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if message.Deleted {
+		return domain.Message{}, ErrMessageAlreadyDeleted
+	}
+	message.Text = text
+	message.Blocks = normalizedBlocks
+	event, err := mutationEvent(workspaceID, "message.changed", message.ID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
+		return domain.Message{}, err
+	}
+	return message, nil
+}
