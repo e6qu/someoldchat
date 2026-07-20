@@ -242,6 +242,10 @@ The dependency-admission gate verified exact direct npm lockfile versions and
 Subresource Integrity checksums against the same aged evidence inventory used
 for Go modules, GitHub Actions, and container inputs.
 
+The official SDK qualification script cleared `CDPATH` with a portable empty
+assignment, so its repository-root discovery passed ShellCheck on Linux and
+macOS shells without inheriting caller-specific directory search behavior.
+
 The container publication gate emitted immutable 12-character commit tags,
 direct Linux amd64 and Linux arm64 image manifests, and a generic index made
 from exactly those two manifests. It generated an SPDX SBOM from the exact
