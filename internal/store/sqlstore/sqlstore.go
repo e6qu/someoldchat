@@ -3492,6 +3492,17 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	if consumedAt != 0 || !value.ExpiresAt.After(time.Now().UTC()) {
 		return domain.SocketModeConnection{}, store.ErrNotFound
 	}
+	// Consumption is what makes a connection active, so it is the only place
+	// the concurrent-connection limit can be enforced. Checking it when the
+	// ticket is issued counts nothing, because a ticket is inactive until it is
+	// dialled: an app could take unbounded tickets first and dial them all.
+	var active int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, value.AppID, time.Now().UTC().UnixNano()).Scan(&active); err != nil {
+		return domain.SocketModeConnection{}, err
+	}
+	if active >= domain.SocketModeConnectionLimit {
+		return domain.SocketModeConnection{}, store.ErrSocketModeConnectionLimit
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE socket_mode_connections SET consumed_at = ? WHERE id = ? AND consumed_at = 0`, time.Now().UTC().UnixNano(), id)
 	if err != nil {
 		return domain.SocketModeConnection{}, err

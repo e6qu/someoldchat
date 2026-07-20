@@ -737,6 +737,38 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 		if _, err := repository.ConsumeSocketModeConnection(ctx, connection.ID); !errors.Is(err, store.ErrNotFound) {
 			t.Fatalf("replayed Socket Mode connection error=%v, want ErrNotFound", err)
 		}
+		// A ticket is inactive until it is dialled, so the concurrent-connection
+		// limit has to hold at consumption. Taking more tickets than the limit
+		// and dialling them all is how an app would otherwise exceed it.
+		limitTickets := make([]string, 0, domain.SocketModeConnectionLimit+3)
+		for index := 0; index <= domain.SocketModeConnectionLimit+2; index++ {
+			ticket := domain.SocketModeConnection{ID: fmt.Sprintf("socket-limit-%s-%d", suffix, index), AppID: token.AppID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
+			if err := repository.CreateSocketModeConnection(ctx, ticket); err != nil {
+				t.Fatalf("issue Socket Mode ticket %d: %v", index, err)
+			}
+			limitTickets = append(limitTickets, ticket.ID)
+		}
+		dialled := 0
+		for _, ticket := range limitTickets {
+			if _, err := repository.ConsumeSocketModeConnection(ctx, ticket); err == nil {
+				dialled++
+				continue
+			} else if !errors.Is(err, store.ErrSocketModeConnectionLimit) {
+				t.Fatalf("dial Socket Mode ticket %s: %v", ticket, err)
+			}
+		}
+		if dialled != domain.SocketModeConnectionLimit {
+			t.Fatalf("dialled %d Socket Mode connections, want the limit of %d", dialled, domain.SocketModeConnectionLimit)
+		}
+		active, err = repository.CountSocketModeConnections(ctx, token.AppID)
+		if err != nil || active != domain.SocketModeConnectionLimit {
+			t.Fatalf("active Socket Mode connections=%d err=%v, want %d", active, err, domain.SocketModeConnectionLimit)
+		}
+		for _, ticket := range limitTickets {
+			if err := repository.ReleaseSocketModeConnection(ctx, ticket); err != nil && !errors.Is(err, store.ErrNotFound) {
+				t.Fatalf("release Socket Mode ticket %s: %v", ticket, err)
+			}
+		}
 		before, err := repository.ListAppEventsAfter(ctx, appID, 0, 100)
 		if err != nil {
 			t.Fatal(err)
