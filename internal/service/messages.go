@@ -2885,27 +2885,7 @@ func (m Messages) DeleteReminder(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
-		return domain.ScheduledMessage{}, err
-	}
-	text = strings.TrimSpace(text)
-	if text == "" || len(text) > 40000 || postAt.IsZero() || !postAt.After(time.Now().UTC()) {
-		return domain.ScheduledMessage{}, ErrInvalidMessage
-	}
-	id, err := domain.NewScheduledMessageID()
-	if err != nil {
-		return domain.ScheduledMessage{}, err
-	}
-	now := time.Now().UTC()
-	value := domain.ScheduledMessage{WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID, Text: text, PostAt: postAt.UTC(), CreatedAt: now}
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return domain.ScheduledMessage{}, err
-	}
-	if err := m.Store.CreateScheduledMessage(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.scheduled", Payload: string(id), CreatedAt: now}); err != nil {
-		return domain.ScheduledMessage{}, err
-	}
-	return value, nil
+	return m.ScheduleMessageWithBlocks(ctx, workspaceID, userID, channel, text, "", postAt)
 }
 
 func (m Messages) ScheduledMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
@@ -3332,53 +3312,7 @@ func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) Post(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	if idempotencyKey != "" {
-		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
-		if err == nil {
-			return cached, nil
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return domain.Message{}, err
-		}
-	}
-	if strings.TrimSpace(string(conversation)) == "" || strings.TrimSpace(text) == "" {
-		return domain.Message{}, ErrInvalidMessage
-	}
-	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
-		return domain.Message{}, err
-	}
-	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
-		return domain.Message{}, err
-	}
-	threadTimestampValue := domain.MessageTimestamp("")
-	if threadTimestamp != "" {
-		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
-		if err != nil {
-			return domain.Message{}, ErrInvalidTimestamp
-		}
-		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
-		if err != nil || parent.WorkspaceID != workspaceID {
-			return domain.Message{}, store.ErrNotFound
-		}
-		threadTimestampValue = threadTimestamp
-	}
-	id, err := domain.NewMessageID()
-	if err != nil {
-		return domain.Message{}, err
-	}
-	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return domain.Message{}, err
-	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}
-	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
-		if errors.Is(err, store.ErrIdempotencyConflict) {
-			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
-		}
-		return domain.Message{}, err
-	}
-	return message, nil
+	return m.post(ctx, workspaceID, authorID, conversation, text, "", threadTimestamp, idempotencyKey)
 }
 
 func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, botUserID domain.UserID) (domain.IncomingWebhook, string, error) {
@@ -3470,25 +3404,7 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 }
 
 func (m Messages) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
-	if strings.TrimSpace(text) == "" {
-		return domain.Message{}, ErrInvalidMessage
-	}
-	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if message.Deleted {
-		return domain.Message{}, ErrMessageAlreadyDeleted
-	}
-	message.Text = text
-	event, err := mutationEvent(workspaceID, "message.changed", message.ID)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
-		return domain.Message{}, err
-	}
-	return message, nil
+	return m.update(ctx, workspaceID, userID, conversation, timestamp, text, "")
 }
 
 func (m Messages) Delete(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {
@@ -3663,4 +3579,29 @@ func (m Messages) update(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	text = strings.TrimSpace(text)
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	if err != nil || (text == "" && normalizedBlocks == "") || len(text) > 40000 || postAt.IsZero() || !postAt.After(time.Now().UTC()) {
+		return domain.ScheduledMessage{}, ErrInvalidMessage
+	}
+	id, err := domain.NewScheduledMessageID()
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	now := time.Now().UTC()
+	value := domain.ScheduledMessage{WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID, Text: text, Blocks: normalizedBlocks, PostAt: postAt.UTC(), CreatedAt: now}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if err := m.Store.CreateScheduledMessage(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.scheduled", Payload: string(id), CreatedAt: now}); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	return value, nil
 }

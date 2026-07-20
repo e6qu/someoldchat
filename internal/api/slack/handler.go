@@ -4562,12 +4562,17 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fields map[string]string) (domain.Message, error) {
-	return h.Messages.Post(
+	blocks, err := domain.NormalizeBlocks([]byte(fields["blocks"]))
+	if err != nil {
+		return domain.Message{}, service.ErrInvalidMessage
+	}
+	return h.Messages.PostWithBlocks(
 		r.Context(),
 		principal.WorkspaceID,
 		principal.UserID,
 		domain.ConversationID(strings.TrimSpace(fields["channel"])),
 		fields["text"],
+		blocks,
 		domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 	)
@@ -4596,11 +4601,12 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversation, timestamp, text := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"]), fields["text"]
-	if conversation == "" || timestamp == "" || strings.TrimSpace(text) == "" {
+	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
+	if conversation == "" || timestamp == "" || (strings.TrimSpace(text) == "" && blocks == "") || blockErr != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	message, err := h.Messages.Update(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), text)
+	message, err := h.Messages.UpdateWithBlocks(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), text, blocks)
 	if err != nil {
 		code, reason := mapServiceError(err, "message_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
@@ -4636,7 +4642,11 @@ func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func scheduledMessageResponse(value domain.ScheduledMessage) map[string]any {
-	return map[string]any{"id": value.ID, "channel_id": value.Channel, "post_at": value.PostAt.Unix(), "date_created": value.CreatedAt.Unix(), "text": value.Text}
+	response := map[string]any{"id": value.ID, "channel_id": value.Channel, "post_at": value.PostAt.Unix(), "date_created": value.CreatedAt.Unix(), "text": value.Text}
+	if value.Blocks != "" {
+		response["blocks"] = json.RawMessage(value.Blocks)
+	}
+	return response
 }
 
 func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
@@ -4652,6 +4662,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	textValue := strings.TrimSpace(fields["text"])
+	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	postAt, err := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
 	unsupportedBoolean := func(name string) bool {
 		raw := strings.TrimSpace(fields[name])
@@ -4661,18 +4672,18 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		value, parseErr := parseBoolField(raw)
 		return parseErr != nil || value
 	}
-	unsupported := fields["attachments"] != "" || fields["blocks"] != "" || fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
-	if channel == "" || textValue == "" || err != nil || postAt <= 0 || unsupported {
+	unsupported := fields["attachments"] != "" || fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
+	if channel == "" || (textValue == "" && blocks == "") || blockErr != nil || err != nil || postAt <= 0 || unsupported {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	value, err := h.Messages.ScheduleMessage(r.Context(), principal.WorkspaceID, principal.UserID, channel, textValue, time.Unix(postAt, 0).UTC())
+	value, err := h.Messages.ScheduleMessageWithBlocks(r.Context(), principal.WorkspaceID, principal.UserID, channel, textValue, blocks, time.Unix(postAt, 0).UTC())
 	if err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": value.Channel, "post_at": value.PostAt.Unix(), "scheduled_message_id": value.ID, "message": map[string]any{"type": "message", "text": value.Text, "user": principal.UserID, "team": principal.WorkspaceID}})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": value.Channel, "post_at": value.PostAt.Unix(), "scheduled_message_id": value.ID, "message": scheduledMessageResponse(value)})
 }
 
 func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
@@ -5411,6 +5422,9 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 
 func messageResponse(message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt), "thread_ts": message.ThreadTimestamp}
+	if message.Blocks != "" {
+		result["blocks"] = json.RawMessage(message.Blocks)
+	}
 	if len(message.Unfurls) > 0 {
 		unfurls := make(map[string]json.RawMessage, len(message.Unfurls))
 		for key, raw := range message.Unfurls {
@@ -5425,7 +5439,7 @@ func mapServiceError(err error, notFoundReason string) (int, string) {
 	if errors.Is(err, store.ErrNotFound) || status.Code(err) == codes.NotFound {
 		return http.StatusNotFound, notFoundReason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) {
 		return http.StatusBadRequest, "invalid_arguments"
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) || status.Code(err) == codes.AlreadyExists {
@@ -5633,10 +5647,10 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 	if isListField(name) {
 		return normalizeJSONListField(value)
 	}
-	if name != "profile" && name != "unfurls" && name != "metadata" && name != "user_auth_blocks" && name != "view" && name != "outputs" && name != "error" && name != "inputs" && name != "dialog" && name != "prefs" && name != "document_content" && name != "changes" && name != "criteria" {
+	if name != "profile" && name != "unfurls" && name != "metadata" && name != "user_auth_blocks" && name != "view" && name != "outputs" && name != "error" && name != "inputs" && name != "dialog" && name != "prefs" && name != "document_content" && name != "changes" && name != "criteria" && name != "description_blocks" && name != "schema" && name != "initial_fields" && name != "cells" && name != "comments" && name != "comment" {
 		return normalizeJSONScalar(value)
 	}
-	if name == "unfurls" || name == "metadata" || name == "user_auth_blocks" || name == "view" || name == "outputs" || name == "error" || name == "inputs" || name == "dialog" || name == "prefs" || name == "document_content" || name == "changes" || name == "criteria" {
+	if name == "unfurls" || name == "metadata" || name == "user_auth_blocks" || name == "view" || name == "outputs" || name == "error" || name == "inputs" || name == "dialog" || name == "prefs" || name == "document_content" || name == "changes" || name == "criteria" || name == "description_blocks" || name == "schema" || name == "initial_fields" || name == "cells" || name == "comments" || name == "comment" {
 		var structured any
 		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
 			return "", fmt.Errorf("%s must be structured JSON", name)
@@ -5660,7 +5674,7 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 
 func isListField(name string) bool {
 	switch name {
-	case "channel_ids", "leaving_team_ids", "target_team_ids", "team_ids", "user_ids":
+	case "channel_ids", "leaving_team_ids", "target_team_ids", "team_ids", "user_ids", "ids":
 		return true
 	default:
 		return false

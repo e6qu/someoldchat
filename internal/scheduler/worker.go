@@ -84,7 +84,7 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 			}
 		}
 	}()
-	_, postErr := w.Poster.Post(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, "", string(item.ID))
+	_, postErr := w.Poster.PostWithBlocks(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, "", string(item.ID))
 	cancel()
 	close(done)
 	<-renewDone

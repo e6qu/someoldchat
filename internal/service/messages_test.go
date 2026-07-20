@@ -1281,3 +1281,21 @@ func TestSetUserProfileNormalizesAndPersists(t *testing.T) {
 		t.Fatalf("oversized profile err=%v", err)
 	}
 }
+
+func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	value, err := (Messages{Store: s}).ScheduleMessageWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [{"type":"divider"}] `, time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Text != "" || value.Blocks != `[{"type":"divider"}]` {
+		t.Fatalf("scheduled=%+v", value)
+	}
+	page, err := (Messages{Store: s}).ScheduledMessages(context.Background(), "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Blocks != value.Blocks {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+}
