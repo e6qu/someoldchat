@@ -34,6 +34,7 @@ type Service interface {
 	PostWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	Unfurl(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, map[string]string) (domain.Message, error)
 	PostEphemeral(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string) (domain.EphemeralMessage, error)
+	PostEphemeralWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string) (domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)

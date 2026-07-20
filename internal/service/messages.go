@@ -3258,35 +3258,7 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
-		return domain.EphemeralMessage{}, err
-	}
-	text = strings.TrimSpace(text)
-	if conversation == "" || recipientID == "" || text == "" || len(text) > 40000 {
-		return domain.EphemeralMessage{}, ErrInvalidEphemeral
-	}
-	recipient, err := m.Store.GetUser(ctx, recipientID)
-	if err != nil || recipient.WorkspaceID != workspaceID || recipient.Deleted {
-		return domain.EphemeralMessage{}, store.ErrNotFound
-	}
-	isMember, err := m.Store.IsConversationMember(ctx, conversation, recipientID)
-	if err != nil || !isMember {
-		return domain.EphemeralMessage{}, store.ErrNotFound
-	}
-	now := time.Now().UTC()
-	value := domain.EphemeralMessage{WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, RecipientID: recipientID, Text: text, Timestamp: domain.NewMessageTimestamp(now)}
-	payload, err := json.Marshal(map[string]string{"workspace_id": string(value.WorkspaceID), "channel_id": string(value.Conversation), "author_id": string(value.AuthorID), "user_id": string(value.RecipientID), "text": value.Text, "ts": string(value.Timestamp)})
-	if err != nil {
-		return domain.EphemeralMessage{}, err
-	}
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return domain.EphemeralMessage{}, err
-	}
-	if err := m.Store.AppendEvent(ctx, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: events.EphemeralMessageTopic, Payload: string(payload), CreatedAt: now}); err != nil {
-		return domain.EphemeralMessage{}, err
-	}
-	return value, nil
+	return m.PostEphemeralWithBlocks(ctx, workspaceID, authorID, conversation, recipientID, text, "")
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -3602,6 +3574,39 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 	}
 	if err := m.Store.CreateScheduledMessage(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.scheduled", Payload: string(id), CreatedAt: now}); err != nil {
 		return domain.ScheduledMessage{}, err
+	}
+	return value, nil
+}
+
+func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	text = strings.TrimSpace(text)
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	if conversation == "" || recipientID == "" || (text == "" && normalizedBlocks == "") || len(text) > 40000 || err != nil {
+		return domain.EphemeralMessage{}, ErrInvalidEphemeral
+	}
+	recipient, err := m.Store.GetUser(ctx, recipientID)
+	if err != nil || recipient.WorkspaceID != workspaceID || recipient.Deleted {
+		return domain.EphemeralMessage{}, store.ErrNotFound
+	}
+	isMember, err := m.Store.IsConversationMember(ctx, conversation, recipientID)
+	if err != nil || !isMember {
+		return domain.EphemeralMessage{}, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	value := domain.EphemeralMessage{WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Timestamp: domain.NewMessageTimestamp(now)}
+	payload, err := json.Marshal(map[string]string{"workspace_id": string(value.WorkspaceID), "channel_id": string(value.Conversation), "author_id": string(value.AuthorID), "user_id": string(value.RecipientID), "text": value.Text, "blocks": value.Blocks, "ts": string(value.Timestamp)})
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	if err := m.Store.AppendEvent(ctx, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: events.EphemeralMessageTopic, Payload: string(payload), CreatedAt: now}); err != nil {
+		return domain.EphemeralMessage{}, err
 	}
 	return value, nil
 }

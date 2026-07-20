@@ -4548,17 +4548,22 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
 		return
 	}
-	if strings.TrimSpace(fields["attachments"]) != "" || strings.TrimSpace(fields["blocks"]) != "" || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || strings.TrimSpace(fields["text"]) == "" {
+	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
+	if strings.TrimSpace(fields["attachments"]) != "" || blockErr != nil || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || (strings.TrimSpace(fields["text"]) == "" && blocks == "") {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	value, err := h.Messages.PostEphemeral(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"])
+	value, err := h.Messages.PostEphemeralWithBlocks(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks)
 	if err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message_ts": value.Timestamp})
+	response := map[string]any{"ok": true, "message_ts": value.Timestamp}
+	if value.Blocks != "" {
+		response["message"] = map[string]any{"text": value.Text, "blocks": json.RawMessage(value.Blocks)}
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fields map[string]string) (domain.Message, error) {

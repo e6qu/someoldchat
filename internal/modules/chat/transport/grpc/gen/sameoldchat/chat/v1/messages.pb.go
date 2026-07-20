@@ -321,6 +321,7 @@ type EphemeralMessage struct {
 	RecipientId    string                 `protobuf:"bytes,4,opt,name=recipient_id,json=recipientId,proto3" json:"recipient_id,omitempty"`
 	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
 	Timestamp      string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Blocks         string                 `protobuf:"bytes,7,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -397,6 +398,13 @@ func (x *EphemeralMessage) GetTimestamp() string {
 	return ""
 }
 
+func (x *EphemeralMessage) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
 type PostEphemeralRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -404,6 +412,7 @@ type PostEphemeralRequest struct {
 	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	RecipientId    string                 `protobuf:"bytes,4,opt,name=recipient_id,json=recipientId,proto3" json:"recipient_id,omitempty"`
 	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -469,6 +478,13 @@ func (x *PostEphemeralRequest) GetRecipientId() string {
 func (x *PostEphemeralRequest) GetText() string {
 	if x != nil {
 		return x.Text
+	}
+	return ""
+}
+
+func (x *PostEphemeralRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
 	}
 	return ""
 }
@@ -1644,20 +1660,22 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12\x16\n" +
 	"\x06blocks\x18\x05 \x01(\tR\x06blocks\x12)\n" +
 	"\x10thread_timestamp\x18\x06 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\"\xd0\x01\n" +
+	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\"\xe8\x01\n" +
 	"\x10EphemeralMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12\x1b\n" +
 	"\tauthor_id\x18\x03 \x01(\tR\bauthorId\x12!\n" +
 	"\frecipient_id\x18\x04 \x01(\tR\vrecipientId\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x1c\n" +
-	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\"\xb2\x01\n" +
+	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12\x16\n" +
+	"\x06blocks\x18\a \x01(\tR\x06blocks\"\xca\x01\n" +
 	"\x14PostEphemeralRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12!\n" +
 	"\frecipient_id\x18\x04 \x01(\tR\vrecipientId\x12\x12\n" +
-	"\x04text\x18\x05 \x01(\tR\x04text\"\xa6\x01\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12\x16\n" +
+	"\x06blocks\x18\x06 \x01(\tR\x06blocks\"\xa6\x01\n" +
 	"\rUpdateRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +

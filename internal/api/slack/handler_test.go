@@ -2604,3 +2604,14 @@ func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
+
+func TestPostEphemeralAcceptsBlocksWithoutFallbackText(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat.postEphemeral", strings.NewReader("channel=C1&user=U2&blocks=%5B%7B%22type%22%3A%22divider%22%7D%5D"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	testHandler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}

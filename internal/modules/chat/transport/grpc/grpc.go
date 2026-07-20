@@ -359,11 +359,7 @@ func (r Remote) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, user
 }
 
 func (r Remote) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text})
-	if err != nil {
-		return domain.EphemeralMessage{}, err
-	}
-	return decodeProtoEphemeralMessage(out)
+	return r.PostEphemeralWithBlocks(ctx, workspaceID, userID, conversationID, recipientID, text, "")
 }
 
 func (r Remote) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -3406,7 +3402,7 @@ func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chat
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeral(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText())
+	value, err := s.implementation.PostEphemeralWithBlocks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -5367,16 +5363,16 @@ func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection 
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {
-	return &chatv1.EphemeralMessage{WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), RecipientId: string(value.RecipientID), Text: value.Text, Timestamp: string(value.Timestamp)}
+	return &chatv1.EphemeralMessage{WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Timestamp: string(value.Timestamp)}
 }
 func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.EphemeralMessage, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || value.GetText() == "" || value.GetTimestamp() == "" {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || (value.GetText() == "" && value.GetBlocks() == "") || value.GetTimestamp() == "" {
 		return domain.EphemeralMessage{}, errors.New("typed ephemeral message is incomplete")
 	}
 	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(value.GetTimestamp())); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	return domain.EphemeralMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Timestamp: domain.MessageTimestamp(value.GetTimestamp())}, nil
+	return domain.EphemeralMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Timestamp: domain.MessageTimestamp(value.GetTimestamp())}, nil
 }
 
 func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
@@ -6138,4 +6134,12 @@ func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domai
 		return domain.ScheduledMessage{}, err
 	}
 	return decodeProtoScheduledMessage(out)
+}
+
+func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks})
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	return decodeProtoEphemeralMessage(out)
 }

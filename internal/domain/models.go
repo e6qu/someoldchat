@@ -825,6 +825,7 @@ type EphemeralMessage struct {
 	AuthorID     UserID
 	RecipientID  UserID
 	Text         string
+	Blocks       string
 	Timestamp    MessageTimestamp
 }
 
