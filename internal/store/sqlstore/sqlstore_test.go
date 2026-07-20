@@ -981,7 +981,7 @@ func TestSQLiteSessionScopeMigrationPreservesLegacyAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	record, err := selected.LookupSession(ctx, "legacy")
-	if err != nil || len(record.Scopes) != 17 || !containsScope(record.Scopes, "chat:write") || !containsScope(record.Scopes, "bookmarks:read") || !containsScope(record.Scopes, "bookmarks:write") {
+	if err != nil || len(record.Scopes) != 19 || !containsScope(record.Scopes, "chat:write") || !containsScope(record.Scopes, "bookmarks:read") || !containsScope(record.Scopes, "bookmarks:write") || !containsScope(record.Scopes, "canvases:read") || !containsScope(record.Scopes, "canvases:write") {
 		t.Fatalf("legacy session=%+v err=%v", record, err)
 	}
 	membership, err := selected.GetWorkspaceMembership(ctx, "T1", "U1")

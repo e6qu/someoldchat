@@ -53,6 +53,7 @@ var (
 	ErrInvalidOAuthClient       = errors.New("oauth client is invalid")
 	ErrInvalidIntegrationLogs   = errors.New("integration log arguments are invalid")
 	ErrInvalidBookmark          = errors.New("bookmark title, type, and link are invalid")
+	ErrInvalidCanvas            = errors.New("canvas content or access arguments are invalid")
 )
 
 type Messages struct {

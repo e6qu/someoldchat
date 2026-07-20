@@ -191,6 +191,32 @@ func TestPublishedWaveOneRepositoryContract(t *testing.T) {
 		t.Fatalf("deleted bookmark err=%v", err)
 	}
 
+	canvas := domain.Canvas{ID: domain.CanvasID("F-wave-one-" + suffix), WorkspaceID: workspaceID, OwnerID: userID, Title: "Qualification canvas", DocumentContent: `{"sections":[{"id":"section-1","type":"h1","text":"Durable canvas"}]}`, CreatedAt: now, UpdatedAt: now}
+	if err := repository.CreateCanvas(ctx, canvas, event("canvas", "canvas.created", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	storedCanvas, err := repository.GetCanvas(ctx, workspaceID, canvas.ID)
+	if err != nil || storedCanvas.DocumentContent != canvas.DocumentContent {
+		t.Fatalf("canvas=%+v err=%v", storedCanvas, err)
+	}
+	canvas.Title = "Updated qualification canvas"
+	canvas.UpdatedAt = now.Add(time.Minute)
+	if err := repository.UpdateCanvas(ctx, canvas, event("canvas-update", "canvas.updated", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(userID), Access: "write"}, event("canvas-access", "canvas.access_set", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "user", EntityID: string(userID)}, event("canvas-access-delete", "canvas.access_deleted", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteCanvas(ctx, workspaceID, canvas.ID, event("canvas-delete", "canvas.deleted", string(canvas.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetCanvas(ctx, workspaceID, canvas.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted canvas err=%v", err)
+	}
+
 	file := domain.File{ID: domain.FileID("F-wave-one-" + suffix), WorkspaceID: workspaceID, Uploader: userID, Name: "notes.txt", Title: "Notes", MIMEType: "text/plain", BlobKey: string(workspaceID) + "/notes", Size: 7, CreatedAt: now}
 	if err := repository.CreateFile(ctx, file, event("file", "file.created", string(file.ID))); err != nil {
 		t.Fatal(err)

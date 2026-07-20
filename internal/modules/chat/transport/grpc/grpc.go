@@ -45,6 +45,7 @@ type Remote struct {
 	bookmarks     chatv1.BookmarksServiceClient
 	oauth         chatv1.OAuthServiceClient
 	rtm           chatv1.RTMServiceClient
+	canvases      chatv1.CanvasesServiceClient
 }
 
 // mappedClientConn preserves the domain error contract when an implementation
@@ -152,6 +153,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		bookmarks:     chatv1.NewBookmarksServiceClient(conn),
 		oauth:         chatv1.NewOAuthServiceClient(conn),
 		rtm:           chatv1.NewRTMServiceClient(conn),
+		canvases:      chatv1.NewCanvasesServiceClient(conn),
 	}, nil
 }
 
@@ -1018,6 +1020,74 @@ func (r Remote) ShareRemoteFile(ctx context.Context, workspaceID domain.Workspac
 		return domain.RemoteFile{}, err
 	}
 	return decodeProtoRemoteFile(out)
+}
+
+func (r Remote) CreateCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, title, documentContent string, channelID domain.ConversationID) (domain.Canvas, error) {
+	out, err := r.canvases.CreateCanvas(ctx, &chatv1.CreateCanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Title: title, DocumentContent: documentContent, ChannelId: string(channelID)})
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	return decodeProtoCanvas(out)
+}
+
+func (r Remote) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
+	out, err := r.canvases.EditCanvas(ctx, &chatv1.EditCanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Changes: changes})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "canvas edit")
+}
+
+func (r Remote) DeleteCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) error {
+	out, err := r.canvases.DeleteCanvas(ctx, &chatv1.CanvasRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "canvas delete")
+}
+
+func (r Remote) SetCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	out, err := r.canvases.SetCanvasAccess(ctx, &chatv1.CanvasAccessRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), AccessLevel: access, ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "canvas access set")
+}
+
+func (r Remote) DeleteCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
+	out, err := r.canvases.DeleteCanvasAccess(ctx, &chatv1.CanvasAccessDeleteRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), ChannelIds: conversationStrings(channelIDs), UserIds: userStrings(userIDs)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "canvas access delete")
+}
+
+func (r Remote) LookupCanvasSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, criteria string) ([]domain.CanvasSection, error) {
+	out, err := r.canvases.LookupCanvasSections(ctx, &chatv1.CanvasSectionsLookupRequest{WorkspaceId: string(workspaceID), UserId: string(userID), CanvasId: string(id), Criteria: criteria})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.CanvasSection, 0, len(out.GetSections()))
+	for _, section := range out.GetSections() {
+		result = append(result, domain.CanvasSection{ID: section.GetId(), Type: section.GetType(), Text: section.GetText()})
+	}
+	return result, nil
+}
+
+func conversationStrings(values []domain.ConversationID) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, string(value))
+	}
+	return result
+}
+
+func userStrings(values []domain.UserID) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, string(value))
+	}
+	return result
 }
 
 func (r Remote) UpdateRemoteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, update domain.RemoteFileUpdate) (domain.RemoteFile, error) {
@@ -2160,6 +2230,7 @@ var (
 	_ chatv1.EnterpriseConversationsServiceServer = (*Server)(nil)
 	_ chatv1.OAuthServiceServer                   = (*Server)(nil)
 	_ chatv1.RTMServiceServer                     = (*Server)(nil)
+	_ chatv1.CanvasesServiceServer                = (*Server)(nil)
 )
 
 func NewServer(implementation chatapi.Service, tokens auth.TokenStore, sessions auth.SessionStore, revoker auth.SessionRevoker) (*Server, error) {
@@ -2215,7 +2286,114 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterEnterpriseConversationsServiceServer(registrar, server)
 	chatv1.RegisterOAuthServiceServer(registrar, server)
 	chatv1.RegisterRTMServiceServer(registrar, server)
+	chatv1.RegisterCanvasesServiceServer(registrar, server)
 	return nil
+}
+
+func (s *Server) CreateCanvas(ctx context.Context, input *chatv1.CreateCanvasRequest) (*chatv1.Canvas, error) {
+	return s.createCanvasProto(ctx, input)
+}
+
+func (s *Server) EditCanvas(ctx context.Context, input *chatv1.EditCanvasRequest) (*chatv1.MutationResponse, error) {
+	return s.editCanvasProto(ctx, input)
+}
+
+func (s *Server) DeleteCanvas(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {
+	return s.deleteCanvasProto(ctx, input)
+}
+
+func (s *Server) SetCanvasAccess(ctx context.Context, input *chatv1.CanvasAccessRequest) (*chatv1.MutationResponse, error) {
+	return s.setCanvasAccessProto(ctx, input)
+}
+
+func (s *Server) DeleteCanvasAccess(ctx context.Context, input *chatv1.CanvasAccessDeleteRequest) (*chatv1.MutationResponse, error) {
+	return s.deleteCanvasAccessProto(ctx, input)
+}
+
+func (s *Server) LookupCanvasSections(ctx context.Context, input *chatv1.CanvasSectionsLookupRequest) (*chatv1.CanvasSectionsResponse, error) {
+	return s.lookupCanvasSectionsProto(ctx, input)
+}
+
+func (s *Server) createCanvasProto(ctx context.Context, input *chatv1.CreateCanvasRequest) (*chatv1.Canvas, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+	}
+	canvas, err := s.implementation.CreateCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTitle(), input.GetDocumentContent(), domain.ConversationID(input.GetChannelId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoCanvas(canvas), nil
+}
+
+func (s *Server) editCanvasProto(ctx context.Context, input *chatv1.EditCanvasRequest) (*chatv1.MutationResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" || input.GetChanges() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, canvas_id, and changes are required")
+	}
+	if err := s.implementation.EditCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetChanges()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) deleteCanvasProto(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and canvas_id are required")
+	}
+	if err := s.implementation.DeleteCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) setCanvasAccessProto(ctx context.Context, input *chatv1.CanvasAccessRequest) (*chatv1.MutationResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" || input.GetAccessLevel() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, canvas_id, and access_level are required")
+	}
+	if err := s.implementation.SetCanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetAccessLevel(), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) deleteCanvasAccessProto(ctx context.Context, input *chatv1.CanvasAccessDeleteRequest) (*chatv1.MutationResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and canvas_id are required")
+	}
+	if err := s.implementation.DeleteCanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) lookupCanvasSectionsProto(ctx context.Context, input *chatv1.CanvasSectionsLookupRequest) (*chatv1.CanvasSectionsResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" || input.GetCriteria() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, canvas_id, and criteria are required")
+	}
+	sections, err := s.implementation.LookupCanvasSections(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetCriteria())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.CanvasSection, 0, len(sections))
+	for _, section := range sections {
+		result = append(result, &chatv1.CanvasSection{Id: section.ID, Type: section.Type, Text: section.Text})
+	}
+	return &chatv1.CanvasSectionsResponse{Sections: result}, nil
+}
+
+func conversationIDs(values []string) []domain.ConversationID {
+	result := make([]domain.ConversationID, 0, len(values))
+	for _, value := range values {
+		result = append(result, domain.ConversationID(value))
+	}
+	return result
+}
+
+func userIDs(values []string) []domain.UserID {
+	result := make([]domain.UserID, 0, len(values))
+	for _, value := range values {
+		result = append(result, domain.UserID(value))
+	}
+	return result
 }
 
 func (s *Server) postProto(ctx context.Context, input *chatv1.PostRequest) (*chatv1.Message, error) {
@@ -4947,6 +5125,17 @@ func decodeProtoMessagePage(value *chatv1.MessagePage) (domain.MessagePage, erro
 		messages = append(messages, message)
 	}
 	return domain.MessagePage{Messages: messages, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
+
+func encodeProtoCanvas(value domain.Canvas) *chatv1.Canvas {
+	return &chatv1.Canvas{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), OwnerId: string(value.OwnerID), Title: value.Title, DocumentContent: value.DocumentContent, CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix()}
+}
+
+func decodeProtoCanvas(value *chatv1.Canvas) (domain.Canvas, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetOwnerId() == "" {
+		return domain.Canvas{}, errors.New("invalid canvas response")
+	}
+	return domain.Canvas{ID: domain.CanvasID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Title: value.GetTitle(), DocumentContent: value.GetDocumentContent(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC()}, nil
 }
 
 func encodeProtoFile(value domain.File) *chatv1.File {

@@ -39,6 +39,12 @@ existing claim. A current official method that is absent from the pinned
 OpenAPI snapshot may enter the ledger with `provenance: slack-reference` only
 when its official method reference and an executable qualification are recorded.
 
+The current official Slack method reference documents the `canvases` method
+family separately from the pinned OpenAPI snapshot. The six canvases methods are
+therefore tracked as supplemental reference-backed operations in the ledger and
+are exercised by the local Web API qualification suites. This does not claim
+that the vendored OpenAPI snapshot contains those methods.
+
 Run `make compatibility-report` to print the current operation count and the
 number at or above each evidence level. The implementation target is
 `verified-against-slack` for every operation; the report does not treat a

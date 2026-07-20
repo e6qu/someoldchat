@@ -444,6 +444,29 @@ type File struct {
 	Deleted     bool
 }
 
+type Canvas struct {
+	ID              CanvasID
+	WorkspaceID     WorkspaceID
+	OwnerID         UserID
+	Title           string
+	DocumentContent string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type CanvasAccess struct {
+	CanvasID   CanvasID
+	EntityType string
+	EntityID   string
+	Access     string
+}
+
+type CanvasSection struct {
+	ID   string
+	Type string
+	Text string
+}
+
 type FileComment struct {
 	ID          FileCommentID
 	File        FileID

@@ -15,6 +15,7 @@ type ConversationID string
 type MessageID string
 type EventID string
 type FileID string
+type CanvasID string
 type FileCommentID string
 type ReminderID string
 type ScheduledMessageID string
@@ -67,6 +68,7 @@ func IsPublicID(value, prefix string) bool {
 func NewMessageID() (MessageID, error) { value, err := PublicID("msg_"); return MessageID(value), err }
 func NewEventID() (EventID, error)     { value, err := PublicID("evt_"); return EventID(value), err }
 func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return FileID(value), err }
+func NewCanvasID() (CanvasID, error)   { value, err := PublicID("F"); return CanvasID(value), err }
 func NewUserID() (UserID, error)       { value, err := PublicID("U"); return UserID(value), err }
 func NewReminderID() (ReminderID, error) {
 	value, err := PublicID("Rm")
