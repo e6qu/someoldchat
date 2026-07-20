@@ -283,9 +283,9 @@ type EditBookmarkRequest struct {
 	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	BookmarkId     string                 `protobuf:"bytes,4,opt,name=bookmark_id,json=bookmarkId,proto3" json:"bookmark_id,omitempty"`
-	Title          string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
-	Link           string                 `protobuf:"bytes,6,opt,name=link,proto3" json:"link,omitempty"`
-	Emoji          string                 `protobuf:"bytes,7,opt,name=emoji,proto3" json:"emoji,omitempty"`
+	Title          *string                `protobuf:"bytes,5,opt,name=title,proto3,oneof" json:"title,omitempty"`
+	Link           *string                `protobuf:"bytes,6,opt,name=link,proto3,oneof" json:"link,omitempty"`
+	Emoji          *string                `protobuf:"bytes,7,opt,name=emoji,proto3,oneof" json:"emoji,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -349,22 +349,22 @@ func (x *EditBookmarkRequest) GetBookmarkId() string {
 }
 
 func (x *EditBookmarkRequest) GetTitle() string {
-	if x != nil {
-		return x.Title
+	if x != nil && x.Title != nil {
+		return *x.Title
 	}
 	return ""
 }
 
 func (x *EditBookmarkRequest) GetLink() string {
-	if x != nil {
-		return x.Link
+	if x != nil && x.Link != nil {
+		return *x.Link
 	}
 	return ""
 }
 
 func (x *EditBookmarkRequest) GetEmoji() string {
-	if x != nil {
-		return x.Emoji
+	if x != nil && x.Emoji != nil {
+		return *x.Emoji
 	}
 	return ""
 }
@@ -575,16 +575,19 @@ const file_sameoldchat_chat_v1_bookmarks_proto_rawDesc = "" +
 	"\tentity_id\x18\b \x01(\tR\bentityId\x12!\n" +
 	"\faccess_level\x18\t \x01(\tR\vaccessLevel\x12\x1b\n" +
 	"\tparent_id\x18\n" +
-	" \x01(\tR\bparentId\"\xdb\x01\n" +
+	" \x01(\tR\bparentId\"\x87\x02\n" +
 	"\x13EditBookmarkRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1f\n" +
 	"\vbookmark_id\x18\x04 \x01(\tR\n" +
-	"bookmarkId\x12\x14\n" +
-	"\x05title\x18\x05 \x01(\tR\x05title\x12\x12\n" +
-	"\x04link\x18\x06 \x01(\tR\x04link\x12\x14\n" +
-	"\x05emoji\x18\a \x01(\tR\x05emoji\"\x97\x01\n" +
+	"bookmarkId\x12\x19\n" +
+	"\x05title\x18\x05 \x01(\tH\x00R\x05title\x88\x01\x01\x12\x17\n" +
+	"\x04link\x18\x06 \x01(\tH\x01R\x04link\x88\x01\x01\x12\x19\n" +
+	"\x05emoji\x18\a \x01(\tH\x02R\x05emoji\x88\x01\x01B\b\n" +
+	"\x06_titleB\a\n" +
+	"\x05_linkB\b\n" +
+	"\x06_emoji\"\x97\x01\n" +
 	"\x0fBookmarkRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -648,6 +651,7 @@ func file_sameoldchat_chat_v1_bookmarks_proto_init() {
 		return
 	}
 	file_sameoldchat_chat_v1_conversation_mutations_proto_init()
+	file_sameoldchat_chat_v1_bookmarks_proto_msgTypes[2].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

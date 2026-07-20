@@ -145,7 +145,7 @@ type Service interface {
 	RemoveStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
 	AddBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, string, string, string, string) (domain.Bookmark, error)
-	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, string, string, string) (domain.Bookmark, error)
+	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, domain.BookmarkUpdate) (domain.Bookmark, error)
 	Bookmarks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.Bookmark, error)
 	RemoveBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID) error
 	AddReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, string, time.Time) (domain.Reminder, error)

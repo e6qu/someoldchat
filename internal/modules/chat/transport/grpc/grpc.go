@@ -1979,8 +1979,18 @@ func (r Remote) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID,
 	return decodeProtoBookmark(out)
 }
 
-func (r Remote) EditBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID, title, link, emoji string) (domain.Bookmark, error) {
-	out, err := r.bookmarks.EditBookmark(ctx, &chatv1.EditBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), BookmarkId: string(id), Title: title, Link: link, Emoji: emoji})
+func (r Remote) EditBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID, update domain.BookmarkUpdate) (domain.Bookmark, error) {
+	input := &chatv1.EditBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), BookmarkId: string(id)}
+	if update.SetTitle {
+		input.Title = &update.Title
+	}
+	if update.SetLink {
+		input.Link = &update.Link
+	}
+	if update.SetEmoji {
+		input.Emoji = &update.Emoji
+	}
+	out, err := r.bookmarks.EditBookmark(ctx, input)
 	if err != nil {
 		return domain.Bookmark{}, err
 	}
@@ -4388,7 +4398,7 @@ func (s *Server) editBookmarkProto(ctx context.Context, input *chatv1.EditBookma
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetBookmarkId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and bookmark_id are required")
 	}
-	bookmark, err := s.implementation.EditBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.BookmarkID(input.GetBookmarkId()), input.GetTitle(), input.GetLink(), input.GetEmoji())
+	bookmark, err := s.implementation.EditBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.BookmarkID(input.GetBookmarkId()), domain.BookmarkUpdate{Title: input.GetTitle(), Link: input.GetLink(), Emoji: input.GetEmoji(), SetTitle: input.Title != nil, SetLink: input.Link != nil, SetEmoji: input.Emoji != nil})
 	if err != nil {
 		return nil, mapError(err)
 	}

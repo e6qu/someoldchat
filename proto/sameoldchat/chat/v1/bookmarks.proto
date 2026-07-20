@@ -40,9 +40,9 @@ message EditBookmarkRequest {
   string user_id = 2;
   string conversation_id = 3;
   string bookmark_id = 4;
-  string title = 5;
-  string link = 6;
-  string emoji = 7;
+  optional string title = 5;
+  optional string link = 6;
+  optional string emoji = 7;
 }
 
 message BookmarkRequest {

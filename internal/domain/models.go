@@ -419,6 +419,15 @@ type Bookmark struct {
 	UpdatedBy    UserID
 }
 
+type BookmarkUpdate struct {
+	Title    string
+	Link     string
+	Emoji    string
+	SetTitle bool
+	SetLink  bool
+	SetEmoji bool
+}
+
 const MaxBookmarksPerConversation = 100
 
 type File struct {

@@ -3247,7 +3247,10 @@ func (h Handler) editBookmark(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	bookmark, err := h.Messages.EditBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, id, fields["title"], fields["link"], fields["emoji"])
+	_, titleSet := fields["title"]
+	_, linkSet := fields["link"]
+	_, emojiSet := fields["emoji"]
+	bookmark, err := h.Messages.EditBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, id, domain.BookmarkUpdate{Title: fields["title"], Link: fields["link"], Emoji: fields["emoji"], SetTitle: titleSet, SetLink: linkSet, SetEmoji: emojiSet})
 	if err != nil {
 		code, reason := mapServiceError(err, "bookmark_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})

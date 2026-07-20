@@ -465,7 +465,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil || len(bookmarks) != 1 || bookmarks[0].ID != bookmark.ID {
 		t.Fatalf("bookmarks=%+v err=%v", bookmarks, err)
 	}
-	bookmark, err = remote.EditBookmark(ctx, "T1", "U1", "C1", bookmark.ID, "Updated remote bookmark", "", "")
+	bookmark, err = remote.EditBookmark(ctx, "T1", "U1", "C1", bookmark.ID, domain.BookmarkUpdate{Title: "Updated remote bookmark", SetTitle: true})
 	if err != nil || bookmark.Title != "Updated remote bookmark" {
 		t.Fatalf("edited bookmark=%+v err=%v", bookmark, err)
 	}

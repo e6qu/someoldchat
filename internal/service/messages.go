@@ -2760,7 +2760,7 @@ func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceI
 	return bookmark, nil
 }
 
-func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID, title, link, emoji string) (domain.Bookmark, error) {
+func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID, update domain.BookmarkUpdate) (domain.Bookmark, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Bookmark{}, err
 	}
@@ -2768,14 +2768,14 @@ func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.Workspace
 	if err != nil {
 		return domain.Bookmark{}, err
 	}
-	if title != "" {
-		bookmark.Title = strings.TrimSpace(title)
+	if update.SetTitle {
+		bookmark.Title = strings.TrimSpace(update.Title)
 	}
-	if link != "" {
-		bookmark.Link = strings.TrimSpace(link)
+	if update.SetLink {
+		bookmark.Link = strings.TrimSpace(update.Link)
 	}
-	if emoji != "" {
-		bookmark.Emoji = strings.TrimSpace(emoji)
+	if update.SetEmoji {
+		bookmark.Emoji = strings.TrimSpace(update.Emoji)
 	}
 	if bookmark.Title == "" || len(bookmark.Title) > 255 || bookmark.Type != "link" || bookmark.Link == "" {
 		return domain.Bookmark{}, ErrInvalidBookmark

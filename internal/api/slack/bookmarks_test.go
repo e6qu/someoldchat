@@ -49,6 +49,10 @@ func TestBookmarkLifecycleUsesChannelIDAndDurableResponse(t *testing.T) {
 	if edited["bookmark"].(map[string]any)["title"] != "Updated" {
 		t.Fatalf("edited=%v", edited)
 	}
+	cleared := request(http.MethodPost, "/api/bookmarks.edit", "channel_id=C1&bookmark_id="+id+"&emoji=")
+	if cleared["bookmark"].(map[string]any)["emoji"] != "" {
+		t.Fatalf("cleared=%v", cleared)
+	}
 	request(http.MethodPost, "/api/bookmarks.remove", "channel_id=C1&bookmark_id="+id)
 	if items := request(http.MethodGet, "/api/bookmarks.list?channel_id=C1", "")["bookmarks"].([]any); len(items) != 0 {
 		t.Fatalf("bookmarks after removal=%v", items)
