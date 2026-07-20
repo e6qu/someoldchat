@@ -29,6 +29,11 @@ The message model stores Block Kit payloads as normalized JSON arrays. The
 payload travels through the direct service boundary or generated gRPC and is
 persisted by every storage backend. Invalid block arrays receive
 `invalid_payload`; the implementation does not silently discard them.
+The message model stores Block Kit and legacy attachment payloads as normalized
+JSON arrays. The payload travels through the direct service boundary or
+generated gRPC and is persisted by every storage backend. Each array accepts at
+most 100 JSON objects. Invalid arrays receive `invalid_payload`; the
+implementation does not silently discard them.
 
 For upstream behavior, see [Sending messages using incoming webhooks](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks)
 and the [`incoming-webhook` scope](https://docs.slack.dev/reference/scopes/incoming-webhook/).

@@ -64,3 +64,15 @@ func FuzzNormalizeConversationTypes(f *testing.F) {
 		}
 	})
 }
+
+func TestNormalizeAttachmentsCompactsObjectsAndEnforcesCount(t *testing.T) {
+	got, err := NormalizeAttachments([]byte(` [ { "text": "hello" } ] `))
+	if err != nil || got != `[{"text":"hello"}]` {
+		t.Fatalf("attachments=%q err=%v", got, err)
+	}
+	for _, raw := range []string{`{}`, `null`, `["not an object"]`} {
+		if _, err := NormalizeAttachments([]byte(raw)); err == nil {
+			t.Fatalf("invalid attachments %s were accepted", raw)
+		}
+	}
+}

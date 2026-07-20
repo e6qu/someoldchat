@@ -2885,7 +2885,7 @@ func (m Messages) DeleteReminder(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
-	return m.ScheduleMessageWithBlocks(ctx, workspaceID, userID, channel, text, "", postAt)
+	return m.ScheduleMessageWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, "", "", postAt)
 }
 
 func (m Messages) ScheduledMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
@@ -3258,7 +3258,7 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocks(ctx, workspaceID, authorID, conversation, recipientID, text, "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "")
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -3284,7 +3284,7 @@ func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) Post(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return m.post(ctx, workspaceID, authorID, conversation, text, "", threadTimestamp, idempotencyKey)
+	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, "", "", threadTimestamp, idempotencyKey)
 }
 
 func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, botUserID domain.UserID) (domain.IncomingWebhook, string, error) {
@@ -3344,12 +3344,8 @@ func (m Messages) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceI
 	return m.Store.SetIncomingWebhookEnabled(ctx, workspaceID, webhookID, enabled, event)
 }
 
-func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	value, err := m.Store.LookupIncomingWebhook(ctx, workspaceID, appID, secret)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	return m.Post(ctx, workspaceID, value.UserID, value.ConversationID, text, threadTimestamp, idempotencyKey)
+func (m Messages) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	return m.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
 func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, unfurls map[string]string) (domain.Message, error) {
@@ -3376,7 +3372,7 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 }
 
 func (m Messages) Update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text string) (domain.Message, error) {
-	return m.update(ctx, workspaceID, userID, conversation, timestamp, text, "")
+	return m.UpdateWithBlocksAndAttachments(ctx, workspaceID, userID, conversation, timestamp, text, "", "")
 }
 
 func (m Messages) Delete(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp) (domain.Message, error) {
@@ -3471,7 +3467,7 @@ func (m Messages) authorizeWorkspace(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return m.post(ctx, workspaceID, authorID, conversation, text, blocks, threadTimestamp, idempotencyKey)
+	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
 func (m Messages) post(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
@@ -3526,7 +3522,7 @@ func (m Messages) post(ctx context.Context, workspaceID domain.WorkspaceID, auth
 }
 
 func (m Messages) UpdateWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
-	return m.update(ctx, workspaceID, userID, conversation, timestamp, text, blocks)
+	return m.UpdateWithBlocksAndAttachments(ctx, workspaceID, userID, conversation, timestamp, text, blocks, "")
 }
 
 func (m Messages) update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
@@ -3554,12 +3550,21 @@ func (m Messages) update(ctx context.Context, workspaceID domain.WorkspaceID, us
 }
 
 func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
+	return m.ScheduleMessageWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", postAt)
+}
+
+func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "")
+}
+
+func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
 	text = strings.TrimSpace(text)
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	if err != nil || (text == "" && normalizedBlocks == "") || len(text) > 40000 || postAt.IsZero() || !postAt.After(time.Now().UTC()) {
+	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
+	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || len(text) > 40000 || postAt.IsZero() || !postAt.After(time.Now().UTC()) {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
 	id, err := domain.NewScheduledMessageID()
@@ -3567,7 +3572,7 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 		return domain.ScheduledMessage{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.ScheduledMessage{WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID, Text: text, Blocks: normalizedBlocks, PostAt: postAt.UTC(), CreatedAt: now}
+	value := domain.ScheduledMessage{WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, PostAt: postAt.UTC(), CreatedAt: now}
 	eventID, err := domain.NewEventID()
 	if err != nil {
 		return domain.ScheduledMessage{}, err
@@ -3578,13 +3583,14 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 	return value, nil
 }
 
-func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
+func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string) (domain.EphemeralMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
 	text = strings.TrimSpace(text)
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	if conversation == "" || recipientID == "" || (text == "" && normalizedBlocks == "") || len(text) > 40000 || err != nil {
+	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
+	if conversation == "" || recipientID == "" || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || len(text) > 40000 || err != nil || attachmentErr != nil {
 		return domain.EphemeralMessage{}, ErrInvalidEphemeral
 	}
 	recipient, err := m.Store.GetUser(ctx, recipientID)
@@ -3596,8 +3602,8 @@ func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domai
 		return domain.EphemeralMessage{}, store.ErrNotFound
 	}
 	now := time.Now().UTC()
-	value := domain.EphemeralMessage{WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Timestamp: domain.NewMessageTimestamp(now)}
-	payload, err := json.Marshal(map[string]string{"workspace_id": string(value.WorkspaceID), "channel_id": string(value.Conversation), "author_id": string(value.AuthorID), "user_id": string(value.RecipientID), "text": value.Text, "blocks": value.Blocks, "ts": string(value.Timestamp)})
+	value := domain.EphemeralMessage{WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now)}
+	payload, err := json.Marshal(map[string]string{"workspace_id": string(value.WorkspaceID), "channel_id": string(value.Conversation), "author_id": string(value.AuthorID), "user_id": string(value.RecipientID), "text": value.Text, "blocks": value.Blocks, "attachments": value.Attachments, "ts": string(value.Timestamp)})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
@@ -3609,4 +3615,90 @@ func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domai
 		return domain.EphemeralMessage{}, err
 	}
 	return value, nil
+}
+
+func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	if idempotencyKey != "" {
+		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+		if err == nil {
+			return cached, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return domain.Message{}, err
+		}
+	}
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
+	if err != nil || attachmentErr != nil || strings.TrimSpace(string(conversation)) == "" || (strings.TrimSpace(text) == "" && normalizedBlocks == "" && normalizedAttachments == "") {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
+		return domain.Message{}, err
+	}
+	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
+		return domain.Message{}, err
+	}
+	threadTimestampValue := domain.MessageTimestamp("")
+	if threadTimestamp != "" {
+		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
+		if err != nil {
+			return domain.Message{}, ErrInvalidTimestamp
+		}
+		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+		if err != nil || parent.WorkspaceID != workspaceID {
+			return domain.Message{}, store.ErrNotFound
+		}
+		threadTimestampValue = threadTimestamp
+	}
+	id, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}
+	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
+		if errors.Is(err, store.ErrIdempotencyConflict) {
+			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+		}
+		return domain.Message{}, err
+	}
+	return message, nil
+}
+
+func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	value, err := m.Store.LookupIncomingWebhook(ctx, workspaceID, appID, secret)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return m.PostWithBlocksAndAttachments(ctx, workspaceID, value.UserID, value.ConversationID, text, blocks, attachments, threadTimestamp, idempotencyKey)
+}
+
+func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
+	if err != nil || attachmentErr != nil || (strings.TrimSpace(text) == "" && normalizedBlocks == "" && normalizedAttachments == "") {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if message.Deleted {
+		return domain.Message{}, ErrMessageAlreadyDeleted
+	}
+	message.Text = text
+	message.Blocks = normalizedBlocks
+	message.Attachments = normalizedAttachments
+	event, err := mutationEvent(workspaceID, "message.changed", message.ID)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
+		return domain.Message{}, err
+	}
+	return message, nil
 }

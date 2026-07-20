@@ -4549,11 +4549,12 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
-	if strings.TrimSpace(fields["attachments"]) != "" || blockErr != nil || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || (strings.TrimSpace(fields["text"]) == "" && blocks == "") {
+	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
+	if blockErr != nil || attachmentErr != nil || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || (strings.TrimSpace(fields["text"]) == "" && blocks == "" && attachments == "") {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	value, err := h.Messages.PostEphemeralWithBlocks(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks)
+	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments)
 	if err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
@@ -4563,6 +4564,12 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	if value.Blocks != "" {
 		response["message"] = map[string]any{"text": value.Text, "blocks": json.RawMessage(value.Blocks)}
 	}
+	if value.Attachments != "" && value.Attachments != "[]" {
+		if response["message"] == nil {
+			response["message"] = map[string]any{"text": value.Text}
+		}
+		response["message"].(map[string]any)["attachments"] = json.RawMessage(value.Attachments)
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -4571,13 +4578,18 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	if err != nil {
 		return domain.Message{}, service.ErrInvalidMessage
 	}
-	return h.Messages.PostWithBlocks(
+	attachments, err := domain.NormalizeAttachments([]byte(fields["attachments"]))
+	if err != nil {
+		return domain.Message{}, service.ErrInvalidMessage
+	}
+	return h.Messages.PostWithBlocksAndAttachments(
 		r.Context(),
 		principal.WorkspaceID,
 		principal.UserID,
 		domain.ConversationID(strings.TrimSpace(fields["channel"])),
 		fields["text"],
 		blocks,
+		attachments,
 		domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 	)
@@ -4607,11 +4619,12 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, timestamp, text := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"]), fields["text"]
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
-	if conversation == "" || timestamp == "" || (strings.TrimSpace(text) == "" && blocks == "") || blockErr != nil {
+	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
+	if conversation == "" || timestamp == "" || (strings.TrimSpace(text) == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	message, err := h.Messages.UpdateWithBlocks(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), text, blocks)
+	message, err := h.Messages.UpdateWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), text, blocks, attachments)
 	if err != nil {
 		code, reason := mapServiceError(err, "message_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
@@ -4651,6 +4664,9 @@ func scheduledMessageResponse(value domain.ScheduledMessage) map[string]any {
 	if value.Blocks != "" {
 		response["blocks"] = json.RawMessage(value.Blocks)
 	}
+	if value.Attachments != "" && value.Attachments != "[]" {
+		response["attachments"] = json.RawMessage(value.Attachments)
+	}
 	return response
 }
 
@@ -4668,6 +4684,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	textValue := strings.TrimSpace(fields["text"])
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
+	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	postAt, err := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
 	unsupportedBoolean := func(name string) bool {
 		raw := strings.TrimSpace(fields[name])
@@ -4677,12 +4694,12 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		value, parseErr := parseBoolField(raw)
 		return parseErr != nil || value
 	}
-	unsupported := fields["attachments"] != "" || fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
-	if channel == "" || (textValue == "" && blocks == "") || blockErr != nil || err != nil || postAt <= 0 || unsupported {
+	unsupported := fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
+	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 || unsupported {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	value, err := h.Messages.ScheduleMessageWithBlocks(r.Context(), principal.WorkspaceID, principal.UserID, channel, textValue, blocks, time.Unix(postAt, 0).UTC())
+	value, err := h.Messages.ScheduleMessageWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, channel, textValue, blocks, attachments, time.Unix(postAt, 0).UTC())
 	if err != nil {
 		code, reason := mapServiceError(err, "channel_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
@@ -5436,6 +5453,9 @@ func messageResponse(message domain.Message) map[string]any {
 			unfurls[key] = json.RawMessage(raw)
 		}
 		result["unfurls"] = unfurls
+	}
+	if message.Attachments != "" && message.Attachments != "[]" {
+		result["attachments"] = json.RawMessage(message.Attachments)
 	}
 	return result
 }
@@ -6275,9 +6295,10 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 type incomingWebhookPayload struct {
-	Text     string          `json:"text"`
-	ThreadTS string          `json:"thread_ts"`
-	Blocks   json.RawMessage `json:"blocks"`
+	Text        string          `json:"text"`
+	ThreadTS    string          `json:"thread_ts"`
+	Blocks      json.RawMessage `json:"blocks"`
+	Attachments json.RawMessage `json:"attachments"`
 }
 
 func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
@@ -6286,15 +6307,21 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	secret := r.PathValue("secret")
 	var payload incomingWebhookPayload
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
-	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0) || len(payload.Blocks) > 0 && !json.Valid(payload.Blocks) {
+	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
 		writePlain(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
-	if len(payload.Blocks) > 0 {
-		writePlain(w, http.StatusBadRequest, "invalid_payload: blocks are not supported by the message storage contract")
+	blocks, err := domain.NormalizeBlocks(payload.Blocks)
+	if err != nil {
+		writePlain(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
-	message, err := h.Messages.PostIncomingWebhook(r.Context(), workspaceID, appID, secret, payload.Text, domain.MessageTimestamp(payload.ThreadTS), r.Header.Get("Idempotency-Key"))
+	attachments, err := domain.NormalizeAttachments(payload.Attachments)
+	if err != nil {
+		writePlain(w, http.StatusBadRequest, "invalid_payload")
+		return
+	}
+	message, err := h.Messages.PostIncomingWebhookWithAttachments(r.Context(), workspaceID, appID, secret, payload.Text, blocks, attachments, domain.MessageTimestamp(payload.ThreadTS), r.Header.Get("Idempotency-Key"))
 	if err != nil {
 		code, reason := mapServiceError(err, "no_team")
 		if code == http.StatusBadRequest {

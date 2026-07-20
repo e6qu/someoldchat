@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -554,6 +555,7 @@ type ScheduledMessage struct {
 	Author      UserID
 	Text        string
 	Blocks      string
+	Attachments string
 	PostAt      time.Time
 	CreatedAt   time.Time
 }
@@ -772,6 +774,7 @@ type Message struct {
 	AuthorID        UserID
 	Text            string
 	Blocks          string
+	Attachments     string
 	ThreadTimestamp MessageTimestamp
 	CreatedAt       time.Time
 	Deleted         bool
@@ -779,21 +782,29 @@ type Message struct {
 }
 
 func NormalizeBlocks(raw []byte) (string, error) {
+	return normalizeJSONArrayObjects(raw, "blocks")
+}
+
+func NormalizeAttachments(raw []byte) (string, error) {
+	return normalizeJSONArrayObjects(raw, "attachments")
+}
+
+func normalizeJSONArrayObjects(raw []byte, name string) (string, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 {
 		return "", nil
 	}
 	var blocks []json.RawMessage
 	if err := json.Unmarshal(raw, &blocks); err != nil || blocks == nil {
-		return "", errors.New("blocks must be a JSON array")
+		return "", fmt.Errorf("%s must be a JSON array", name)
 	}
 	if len(blocks) > 100 {
-		return "", errors.New("blocks exceed the maximum count")
+		return "", fmt.Errorf("%s exceed the maximum count", name)
 	}
 	for _, block := range blocks {
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(block, &object); err != nil || object == nil {
-			return "", errors.New("each block must be a JSON object")
+			return "", fmt.Errorf("each %s item must be a JSON object", name)
 		}
 	}
 	var compact bytes.Buffer
@@ -826,6 +837,7 @@ type EphemeralMessage struct {
 	RecipientID  UserID
 	Text         string
 	Blocks       string
+	Attachments  string
 	Timestamp    MessageTimestamp
 }
 

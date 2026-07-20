@@ -1320,3 +1320,30 @@ func TestPostEphemeralWithBlocksPersistsNormalizedEvent(t *testing.T) {
 		t.Fatalf("events=%+v err=%v", records, err)
 	}
 }
+
+func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	attachments := ` [{"text":"attachment"}] `
+	message, err := (Messages{Store: s}).PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", "", attachments, "", "")
+	if err != nil || message.Attachments != `[{"text":"attachment"}]` {
+		t.Fatalf("message=%+v err=%v", message, err)
+	}
+	updated, err := (Messages{Store: s}).UpdateWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "", "", `[{"text":"updated"}]`)
+	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments)
+	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
+		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
+	}
+	scheduled, err := (Messages{Store: s}).ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", "", attachments, time.Now().UTC().Add(time.Hour))
+	if err != nil || scheduled.Attachments != `[{"text":"attachment"}]` {
+		t.Fatalf("scheduled=%+v err=%v", scheduled, err)
+	}
+}

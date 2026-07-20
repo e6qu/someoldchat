@@ -2615,3 +2615,37 @@ func TestPostEphemeralAcceptsBlocksWithoutFallbackText(t *testing.T) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
+
+func TestPostMessageAcceptsAttachmentsWithoutFallbackText(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&attachments=%5B%7B%22text%22%3A%22attachment%22%7D%5D"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	testHandler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"attachments":[{"text":"attachment"}]`) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestUpdateMessageAcceptsAttachmentsWithoutFallbackText(t *testing.T) {
+	handler := testHandler()
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=before"))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Authorization", "Bearer token")
+	posted := httptest.NewRecorder()
+	handler.ServeHTTP(posted, post)
+	var created struct {
+		TS string `json:"ts"`
+	}
+	if err := json.NewDecoder(posted.Body).Decode(&created); err != nil || created.TS == "" {
+		t.Fatalf("post body=%s err=%v", posted.Body, err)
+	}
+	update := httptest.NewRequest(http.MethodPost, "/api/chat.update", strings.NewReader("channel=C1&ts="+created.TS+"&attachments=%5B%7B%22text%22%3A%22updated%22%7D%5D"))
+	update.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	update.Header.Set("Authorization", "Bearer token")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, update)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"attachments":[{"text":"updated"}]`) {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
