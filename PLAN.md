@@ -225,6 +225,19 @@ Fuzz smoke gates requested a fixed 25,000-execution budget per target under an
 explicit two-minute process timeout, so successful completion did not depend
 on a wall-clock fuzz deadline while hung inputs still failed the gate.
 
+Dqlite qualification clusters retained their kernel-assigned TCP listeners for
+the complete test lifetime and passed those real connections through
+Canonical's external-connection interface. The adapter used the same dialer
+for cluster health probes. Accepted upgrades remained queued until each
+Canonical dqlite application had constructed its local engine, and restarted
+applications received a distinct transport session on the same retained
+listener. Stores deactivated and drained their external accept loop before
+closing the local engine; the drain barrier completed Canonical's real dqlite
+wire handshake after all routed connections. Peer dials therefore could not
+reach an obsolete session during node loss or restart. Cluster creation and
+restart tests had neither a released-port bind window nor an external-accept
+lifecycle race and required neither retries nor sleeps.
+
 The dependency-admission gate verified exact direct npm lockfile versions and
 Subresource Integrity checksums against the same aged evidence inventory used
 for Go modules, GitHub Actions, and container inputs.
