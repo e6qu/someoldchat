@@ -68,6 +68,10 @@ test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeBlocksIsSafeAndIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeAttachmentsIsSafeAndIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeUnfurlsIsSafeAndIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestDecodingNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestVerificationRejectsForeignSignatures -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestVerificationRejectsTamperedFields -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/lifecycle -run '^$$' -fuzz FuzzManifestVerificationRejectsForeignKeyIDs -fuzztime=25000x -parallel=1 -timeout=2m
 
 generate:
 	$(MAKE) proto-tools
