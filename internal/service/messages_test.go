@@ -1347,3 +1347,33 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 		t.Fatalf("scheduled=%+v err=%v", scheduled, err)
 	}
 }
+
+func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	ctx := context.Background()
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.UploadExternalFile(ctx, upload.ID, 7, bytes.NewReader([]byte("content"))); err != nil {
+		t.Fatal(err)
+	}
+	file, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes")
+	if err != nil || file.BlobKey != upload.BlobKey {
+		t.Fatalf("file=%+v err=%v", file, err)
+	}
+	if _, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second completion error=%v, want conflict", err)
+	}
+	stored, err := s.GetExternalUpload(ctx, upload.ID)
+	if err != nil || stored.Status != domain.ExternalUploadCompleted {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}

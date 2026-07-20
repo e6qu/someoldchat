@@ -102,6 +102,11 @@ CREATE TABLE IF NOT EXISTS files (
  name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE,
  size INTEGER NOT NULL, created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, public_token TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS external_uploads (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id),
+ name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL,
+ status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, uploaded_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT ''
+);
 CREATE TABLE IF NOT EXISTS file_comments (
  id TEXT PRIMARY KEY, file_id TEXT NOT NULL REFERENCES files(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  user_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at INTEGER NOT NULL, deleted INTEGER NOT NULL DEFAULT 0
@@ -220,7 +225,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 74
+const schemaVersion = 75
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -509,6 +514,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 	if version < 3 {
 		if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO lifecycle_state(id, state, generation) VALUES (1, 'hibernated', 0)`); err != nil {
 			return fmt.Errorf("initialize lifecycle state: %w", err)
+		}
+	}
+	if version < 73 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS external_uploads (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, uploaded_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '')`); err != nil {
+			return fmt.Errorf("migrate external uploads: %w", err)
 		}
 	}
 	if version < 4 {
@@ -1155,6 +1165,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`); err != nil {
 				return fmt.Errorf("migrate scheduled message attachments: %w", err)
 			}
+		}
+	}
+	if version < 75 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS external_uploads (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, uploaded_at TEXT NOT NULL DEFAULT '', completed_at TEXT NOT NULL DEFAULT '')`); err != nil {
+			return fmt.Errorf("migrate external uploads: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -5675,6 +5690,76 @@ func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.E
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateExternalUpload(ctx context.Context, value domain.ExternalUpload) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.Size, value.Status, value.CreatedAt.UTC().Format(time.RFC3339Nano), value.ExpiresAt.UTC().Format(time.RFC3339Nano))
+	return err
+}
+
+func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadID) (domain.ExternalUpload, error) {
+	var value domain.ExternalUpload
+	var created, expires, uploaded, completed string
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, status, created_at, expires_at, uploaded_at, completed_at FROM external_uploads WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Uploader, &value.Name, &value.Title, &value.MIMEType, &value.BlobKey, &value.Size, &value.Status, &created, &expires, &uploaded, &completed)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ExternalUpload{}, store.ErrNotFound
+	}
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	for field, target := range map[string]*time.Time{"created_at": &value.CreatedAt, "expires_at": &value.ExpiresAt, "uploaded_at": &value.UploadedAt, "completed_at": &value.CompletedAt} {
+		text := map[string]string{"created_at": created, "expires_at": expires, "uploaded_at": uploaded, "completed_at": completed}[field]
+		if text == "" {
+			continue
+		}
+		parsed, parseErr := time.Parse(time.RFC3339Nano, text)
+		if parseErr != nil {
+			return domain.ExternalUpload{}, fmt.Errorf("parse external upload %s: %w", field, parseErr)
+		}
+		*target = parsed
+	}
+	return value, nil
+}
+
+func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.ExternalUploadID, uploadedAt time.Time) error {
+	result, err := s.db.ExecContext(ctx, `UPDATE external_uploads SET status = ?, uploaded_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadUploaded, uploadedAt.UTC().Format(time.RFC3339Nano), id, domain.ExternalUploadPending, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrConflict
+	}
+	return nil
+}
+
+func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, file.CreatedAt.UTC().Format(time.RFC3339Nano), id, domain.ExternalUploadUploaded, time.Now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrConflict
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
 	}

@@ -20,6 +20,7 @@ type ListID string
 type ListItemID string
 type ListDownloadID string
 type FileCommentID string
+type ExternalUploadID string
 type ReminderID string
 type ScheduledMessageID string
 type UserGroupID string
@@ -75,6 +76,10 @@ func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return
 func NewCanvasID() (CanvasID, error)   { value, err := PublicID("F"); return CanvasID(value), err }
 func NewUserID() (UserID, error)       { value, err := PublicID("U"); return UserID(value), err }
 func NewListID() (ListID, error)       { value, err := PublicID("F"); return ListID(value), err }
+func NewExternalUploadID() (ExternalUploadID, error) {
+	value, err := PublicID("upload_")
+	return ExternalUploadID(value), err
+}
 func NewListItemID() (ListItemID, error) {
 	value, err := PublicID("Rec")
 	return ListItemID(value), err

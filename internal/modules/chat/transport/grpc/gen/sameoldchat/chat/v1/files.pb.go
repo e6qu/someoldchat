@@ -197,6 +197,380 @@ func (x *FilePage) GetHasMore() bool {
 	return false
 }
 
+type ExternalUpload struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Uploader      string                 `protobuf:"bytes,3,opt,name=uploader,proto3" json:"uploader,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Title         string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	MimeType      string                 `protobuf:"bytes,6,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	Size          int64                  `protobuf:"varint,7,opt,name=size,proto3" json:"size,omitempty"`
+	Status        string                 `protobuf:"bytes,8,opt,name=status,proto3" json:"status,omitempty"`
+	CreatedAt     string                 `protobuf:"bytes,9,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	ExpiresAt     string                 `protobuf:"bytes,10,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	UploadedAt    string                 `protobuf:"bytes,11,opt,name=uploaded_at,json=uploadedAt,proto3" json:"uploaded_at,omitempty"`
+	CompletedAt   string                 `protobuf:"bytes,12,opt,name=completed_at,json=completedAt,proto3" json:"completed_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalUpload) Reset() {
+	*x = ExternalUpload{}
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalUpload) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalUpload) ProtoMessage() {}
+
+func (x *ExternalUpload) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalUpload.ProtoReflect.Descriptor instead.
+func (*ExternalUpload) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *ExternalUpload) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetUploader() string {
+	if x != nil {
+		return x.Uploader
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetMimeType() string {
+	if x != nil {
+		return x.MimeType
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *ExternalUpload) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetCreatedAt() string {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetUploadedAt() string {
+	if x != nil {
+		return x.UploadedAt
+	}
+	return ""
+}
+
+func (x *ExternalUpload) GetCompletedAt() string {
+	if x != nil {
+		return x.CompletedAt
+	}
+	return ""
+}
+
+type ExternalUploadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
+	MimeType      string                 `protobuf:"bytes,4,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	Size          int64                  `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
+	TtlSeconds    int64                  `protobuf:"varint,6,opt,name=ttl_seconds,json=ttlSeconds,proto3" json:"ttl_seconds,omitempty"`
+	UploadId      string                 `protobuf:"bytes,7,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalUploadRequest) Reset() {
+	*x = ExternalUploadRequest{}
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalUploadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalUploadRequest) ProtoMessage() {}
+
+func (x *ExternalUploadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalUploadRequest.ProtoReflect.Descriptor instead.
+func (*ExternalUploadRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *ExternalUploadRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ExternalUploadRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ExternalUploadRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExternalUploadRequest) GetMimeType() string {
+	if x != nil {
+		return x.MimeType
+	}
+	return ""
+}
+
+func (x *ExternalUploadRequest) GetSize() int64 {
+	if x != nil {
+		return x.Size
+	}
+	return 0
+}
+
+func (x *ExternalUploadRequest) GetTtlSeconds() int64 {
+	if x != nil {
+		return x.TtlSeconds
+	}
+	return 0
+}
+
+func (x *ExternalUploadRequest) GetUploadId() string {
+	if x != nil {
+		return x.UploadId
+	}
+	return ""
+}
+
+type ExternalUploadPart struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Part:
+	//
+	//	*ExternalUploadPart_Metadata
+	//	*ExternalUploadPart_Chunk
+	Part          isExternalUploadPart_Part `protobuf_oneof:"part"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExternalUploadPart) Reset() {
+	*x = ExternalUploadPart{}
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExternalUploadPart) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExternalUploadPart) ProtoMessage() {}
+
+func (x *ExternalUploadPart) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExternalUploadPart.ProtoReflect.Descriptor instead.
+func (*ExternalUploadPart) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ExternalUploadPart) GetPart() isExternalUploadPart_Part {
+	if x != nil {
+		return x.Part
+	}
+	return nil
+}
+
+func (x *ExternalUploadPart) GetMetadata() *ExternalUploadRequest {
+	if x != nil {
+		if x, ok := x.Part.(*ExternalUploadPart_Metadata); ok {
+			return x.Metadata
+		}
+	}
+	return nil
+}
+
+func (x *ExternalUploadPart) GetChunk() []byte {
+	if x != nil {
+		if x, ok := x.Part.(*ExternalUploadPart_Chunk); ok {
+			return x.Chunk
+		}
+	}
+	return nil
+}
+
+type isExternalUploadPart_Part interface {
+	isExternalUploadPart_Part()
+}
+
+type ExternalUploadPart_Metadata struct {
+	Metadata *ExternalUploadRequest `protobuf:"bytes,1,opt,name=metadata,proto3,oneof"`
+}
+
+type ExternalUploadPart_Chunk struct {
+	Chunk []byte `protobuf:"bytes,2,opt,name=chunk,proto3,oneof"`
+}
+
+func (*ExternalUploadPart_Metadata) isExternalUploadPart_Part() {}
+
+func (*ExternalUploadPart_Chunk) isExternalUploadPart_Part() {}
+
+type CompleteExternalUploadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UploadId      string                 `protobuf:"bytes,3,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompleteExternalUploadRequest) Reset() {
+	*x = CompleteExternalUploadRequest{}
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompleteExternalUploadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompleteExternalUploadRequest) ProtoMessage() {}
+
+func (x *CompleteExternalUploadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompleteExternalUploadRequest.ProtoReflect.Descriptor instead.
+func (*CompleteExternalUploadRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CompleteExternalUploadRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CompleteExternalUploadRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CompleteExternalUploadRequest) GetUploadId() string {
+	if x != nil {
+		return x.UploadId
+	}
+	return ""
+}
+
+func (x *CompleteExternalUploadRequest) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
 type RemoteFile struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -216,7 +590,7 @@ type RemoteFile struct {
 
 func (x *RemoteFile) Reset() {
 	*x = RemoteFile{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -228,7 +602,7 @@ func (x *RemoteFile) String() string {
 func (*RemoteFile) ProtoMessage() {}
 
 func (x *RemoteFile) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -241,7 +615,7 @@ func (x *RemoteFile) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteFile.ProtoReflect.Descriptor instead.
 func (*RemoteFile) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *RemoteFile) GetId() string {
@@ -332,7 +706,7 @@ type RemoteFilePage struct {
 
 func (x *RemoteFilePage) Reset() {
 	*x = RemoteFilePage{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -344,7 +718,7 @@ func (x *RemoteFilePage) String() string {
 func (*RemoteFilePage) ProtoMessage() {}
 
 func (x *RemoteFilePage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -357,7 +731,7 @@ func (x *RemoteFilePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteFilePage.ProtoReflect.Descriptor instead.
 func (*RemoteFilePage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *RemoteFilePage) GetFiles() []*RemoteFile {
@@ -393,7 +767,7 @@ type RemoteFileRequest struct {
 
 func (x *RemoteFileRequest) Reset() {
 	*x = RemoteFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -405,7 +779,7 @@ func (x *RemoteFileRequest) String() string {
 func (*RemoteFileRequest) ProtoMessage() {}
 
 func (x *RemoteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -418,7 +792,7 @@ func (x *RemoteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteFileRequest.ProtoReflect.Descriptor instead.
 func (*RemoteFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RemoteFileRequest) GetWorkspaceId() string {
@@ -465,7 +839,7 @@ type AddRemoteFileRequest struct {
 
 func (x *AddRemoteFileRequest) Reset() {
 	*x = AddRemoteFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -477,7 +851,7 @@ func (x *AddRemoteFileRequest) String() string {
 func (*AddRemoteFileRequest) ProtoMessage() {}
 
 func (x *AddRemoteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -490,7 +864,7 @@ func (x *AddRemoteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddRemoteFileRequest.ProtoReflect.Descriptor instead.
 func (*AddRemoteFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *AddRemoteFileRequest) GetWorkspaceId() string {
@@ -561,7 +935,7 @@ type RemoteFilesRequest struct {
 
 func (x *RemoteFilesRequest) Reset() {
 	*x = RemoteFilesRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -573,7 +947,7 @@ func (x *RemoteFilesRequest) String() string {
 func (*RemoteFilesRequest) ProtoMessage() {}
 
 func (x *RemoteFilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -586,7 +960,7 @@ func (x *RemoteFilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoteFilesRequest.ProtoReflect.Descriptor instead.
 func (*RemoteFilesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *RemoteFilesRequest) GetWorkspaceId() string {
@@ -630,7 +1004,7 @@ type ShareRemoteFileRequest struct {
 
 func (x *ShareRemoteFileRequest) Reset() {
 	*x = ShareRemoteFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -642,7 +1016,7 @@ func (x *ShareRemoteFileRequest) String() string {
 func (*ShareRemoteFileRequest) ProtoMessage() {}
 
 func (x *ShareRemoteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -655,7 +1029,7 @@ func (x *ShareRemoteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShareRemoteFileRequest.ProtoReflect.Descriptor instead.
 func (*ShareRemoteFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ShareRemoteFileRequest) GetWorkspaceId() string {
@@ -711,7 +1085,7 @@ type UpdateRemoteFileRequest struct {
 
 func (x *UpdateRemoteFileRequest) Reset() {
 	*x = UpdateRemoteFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +1097,7 @@ func (x *UpdateRemoteFileRequest) String() string {
 func (*UpdateRemoteFileRequest) ProtoMessage() {}
 
 func (x *UpdateRemoteFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +1110,7 @@ func (x *UpdateRemoteFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateRemoteFileRequest.ProtoReflect.Descriptor instead.
 func (*UpdateRemoteFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UpdateRemoteFileRequest) GetWorkspaceId() string {
@@ -820,7 +1194,7 @@ type FileRequest struct {
 
 func (x *FileRequest) Reset() {
 	*x = FileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +1206,7 @@ func (x *FileRequest) String() string {
 func (*FileRequest) ProtoMessage() {}
 
 func (x *FileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,7 +1219,7 @@ func (x *FileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileRequest.ProtoReflect.Descriptor instead.
 func (*FileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *FileRequest) GetWorkspaceId() string {
@@ -881,7 +1255,7 @@ type FileCommentDeleteRequest struct {
 
 func (x *FileCommentDeleteRequest) Reset() {
 	*x = FileCommentDeleteRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -893,7 +1267,7 @@ func (x *FileCommentDeleteRequest) String() string {
 func (*FileCommentDeleteRequest) ProtoMessage() {}
 
 func (x *FileCommentDeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -906,7 +1280,7 @@ func (x *FileCommentDeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileCommentDeleteRequest.ProtoReflect.Descriptor instead.
 func (*FileCommentDeleteRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *FileCommentDeleteRequest) GetWorkspaceId() string {
@@ -949,7 +1323,7 @@ type FilesRequest struct {
 
 func (x *FilesRequest) Reset() {
 	*x = FilesRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -961,7 +1335,7 @@ func (x *FilesRequest) String() string {
 func (*FilesRequest) ProtoMessage() {}
 
 func (x *FilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -974,7 +1348,7 @@ func (x *FilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FilesRequest.ProtoReflect.Descriptor instead.
 func (*FilesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FilesRequest) GetWorkspaceId() string {
@@ -1014,7 +1388,7 @@ type DeleteFileResponse struct {
 
 func (x *DeleteFileResponse) Reset() {
 	*x = DeleteFileResponse{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1026,7 +1400,7 @@ func (x *DeleteFileResponse) String() string {
 func (*DeleteFileResponse) ProtoMessage() {}
 
 func (x *DeleteFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1039,7 +1413,7 @@ func (x *DeleteFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteFileResponse.ProtoReflect.Descriptor instead.
 func (*DeleteFileResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *DeleteFileResponse) GetOk() bool {
@@ -1063,7 +1437,7 @@ type UploadFileRequest struct {
 
 func (x *UploadFileRequest) Reset() {
 	*x = UploadFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1075,7 +1449,7 @@ func (x *UploadFileRequest) String() string {
 func (*UploadFileRequest) ProtoMessage() {}
 
 func (x *UploadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1088,7 +1462,7 @@ func (x *UploadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadFileRequest.ProtoReflect.Descriptor instead.
 func (*UploadFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UploadFileRequest) GetWorkspaceId() string {
@@ -1144,7 +1518,7 @@ type DownloadFileRequest struct {
 
 func (x *DownloadFileRequest) Reset() {
 	*x = DownloadFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1156,7 +1530,7 @@ func (x *DownloadFileRequest) String() string {
 func (*DownloadFileRequest) ProtoMessage() {}
 
 func (x *DownloadFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1169,7 +1543,7 @@ func (x *DownloadFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadFileRequest.ProtoReflect.Descriptor instead.
 func (*DownloadFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *DownloadFileRequest) GetWorkspaceId() string {
@@ -1204,7 +1578,7 @@ type PublicFileRequest struct {
 
 func (x *PublicFileRequest) Reset() {
 	*x = PublicFileRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1216,7 +1590,7 @@ func (x *PublicFileRequest) String() string {
 func (*PublicFileRequest) ProtoMessage() {}
 
 func (x *PublicFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1229,7 +1603,7 @@ func (x *PublicFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublicFileRequest.ProtoReflect.Descriptor instead.
 func (*PublicFileRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{15}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *PublicFileRequest) GetWorkspaceId() string {
@@ -1262,7 +1636,7 @@ type PublicFileTokenRequest struct {
 
 func (x *PublicFileTokenRequest) Reset() {
 	*x = PublicFileTokenRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1274,7 +1648,7 @@ func (x *PublicFileTokenRequest) String() string {
 func (*PublicFileTokenRequest) ProtoMessage() {}
 
 func (x *PublicFileTokenRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1287,7 +1661,7 @@ func (x *PublicFileTokenRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PublicFileTokenRequest.ProtoReflect.Descriptor instead.
 func (*PublicFileTokenRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{16}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *PublicFileTokenRequest) GetToken() string {
@@ -1310,7 +1684,7 @@ type UploadFilePart struct {
 
 func (x *UploadFilePart) Reset() {
 	*x = UploadFilePart{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1322,7 +1696,7 @@ func (x *UploadFilePart) String() string {
 func (*UploadFilePart) ProtoMessage() {}
 
 func (x *UploadFilePart) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1335,7 +1709,7 @@ func (x *UploadFilePart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UploadFilePart.ProtoReflect.Descriptor instead.
 func (*UploadFilePart) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{17}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *UploadFilePart) GetPart() isUploadFilePart_Part {
@@ -1392,7 +1766,7 @@ type DownloadFilePart struct {
 
 func (x *DownloadFilePart) Reset() {
 	*x = DownloadFilePart{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1404,7 +1778,7 @@ func (x *DownloadFilePart) String() string {
 func (*DownloadFilePart) ProtoMessage() {}
 
 func (x *DownloadFilePart) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1417,7 +1791,7 @@ func (x *DownloadFilePart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownloadFilePart.ProtoReflect.Descriptor instead.
 func (*DownloadFilePart) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{18}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *DownloadFilePart) GetPart() isDownloadFilePart_Part {
@@ -1473,7 +1847,7 @@ type UserPhotoUploadRequest struct {
 
 func (x *UserPhotoUploadRequest) Reset() {
 	*x = UserPhotoUploadRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[19]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1485,7 +1859,7 @@ func (x *UserPhotoUploadRequest) String() string {
 func (*UserPhotoUploadRequest) ProtoMessage() {}
 
 func (x *UserPhotoUploadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[19]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1498,7 +1872,7 @@ func (x *UserPhotoUploadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPhotoUploadRequest.ProtoReflect.Descriptor instead.
 func (*UserPhotoUploadRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{19}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *UserPhotoUploadRequest) GetWorkspaceId() string {
@@ -1542,7 +1916,7 @@ type UserPhotoUploadPart struct {
 
 func (x *UserPhotoUploadPart) Reset() {
 	*x = UserPhotoUploadPart{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[20]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1554,7 +1928,7 @@ func (x *UserPhotoUploadPart) String() string {
 func (*UserPhotoUploadPart) ProtoMessage() {}
 
 func (x *UserPhotoUploadPart) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[20]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1567,7 +1941,7 @@ func (x *UserPhotoUploadPart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPhotoUploadPart.ProtoReflect.Descriptor instead.
 func (*UserPhotoUploadPart) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{20}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *UserPhotoUploadPart) GetPart() isUserPhotoUploadPart_Part {
@@ -1622,7 +1996,7 @@ type UserPhotoDownloadRequest struct {
 
 func (x *UserPhotoDownloadRequest) Reset() {
 	*x = UserPhotoDownloadRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1634,7 +2008,7 @@ func (x *UserPhotoDownloadRequest) String() string {
 func (*UserPhotoDownloadRequest) ProtoMessage() {}
 
 func (x *UserPhotoDownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[21]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1647,7 +2021,7 @@ func (x *UserPhotoDownloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPhotoDownloadRequest.ProtoReflect.Descriptor instead.
 func (*UserPhotoDownloadRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{21}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *UserPhotoDownloadRequest) GetWorkspaceId() string {
@@ -1682,7 +2056,7 @@ type UserPhotoMetadata struct {
 
 func (x *UserPhotoMetadata) Reset() {
 	*x = UserPhotoMetadata{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1694,7 +2068,7 @@ func (x *UserPhotoMetadata) String() string {
 func (*UserPhotoMetadata) ProtoMessage() {}
 
 func (x *UserPhotoMetadata) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[22]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1707,7 +2081,7 @@ func (x *UserPhotoMetadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPhotoMetadata.ProtoReflect.Descriptor instead.
 func (*UserPhotoMetadata) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{22}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *UserPhotoMetadata) GetMimeType() string {
@@ -1744,7 +2118,7 @@ type UserPhotoDownloadPart struct {
 
 func (x *UserPhotoDownloadPart) Reset() {
 	*x = UserPhotoDownloadPart{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1756,7 +2130,7 @@ func (x *UserPhotoDownloadPart) String() string {
 func (*UserPhotoDownloadPart) ProtoMessage() {}
 
 func (x *UserPhotoDownloadPart) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[23]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1769,7 +2143,7 @@ func (x *UserPhotoDownloadPart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPhotoDownloadPart.ProtoReflect.Descriptor instead.
 func (*UserPhotoDownloadPart) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{23}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *UserPhotoDownloadPart) GetPart() isUserPhotoDownloadPart_Part {
@@ -1823,7 +2197,7 @@ type UserPhotoDeleteRequest struct {
 
 func (x *UserPhotoDeleteRequest) Reset() {
 	*x = UserPhotoDeleteRequest{}
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1835,7 +2209,7 @@ func (x *UserPhotoDeleteRequest) String() string {
 func (*UserPhotoDeleteRequest) ProtoMessage() {}
 
 func (x *UserPhotoDeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[24]
+	mi := &file_sameoldchat_chat_v1_files_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1848,7 +2222,7 @@ func (x *UserPhotoDeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UserPhotoDeleteRequest.ProtoReflect.Descriptor instead.
 func (*UserPhotoDeleteRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{24}
+	return file_sameoldchat_chat_v1_files_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *UserPhotoDeleteRequest) GetWorkspaceId() string {
@@ -1887,7 +2261,42 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x05files\x18\x01 \x03(\v2\x19.sameoldchat.chat.v1.FileR\x05files\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xec\x02\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xd4\x02\n" +
+	"\x0eExternalUpload\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1a\n" +
+	"\buploader\x18\x03 \x01(\tR\buploader\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x14\n" +
+	"\x05title\x18\x05 \x01(\tR\x05title\x12\x1b\n" +
+	"\tmime_type\x18\x06 \x01(\tR\bmimeType\x12\x12\n" +
+	"\x04size\x18\a \x01(\x03R\x04size\x12\x16\n" +
+	"\x06status\x18\b \x01(\tR\x06status\x12\x1d\n" +
+	"\n" +
+	"created_at\x18\t \x01(\tR\tcreatedAt\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\n" +
+	" \x01(\tR\texpiresAt\x12\x1f\n" +
+	"\vuploaded_at\x18\v \x01(\tR\n" +
+	"uploadedAt\x12!\n" +
+	"\fcompleted_at\x18\f \x01(\tR\vcompletedAt\"\xd6\x01\n" +
+	"\x15ExternalUploadRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x1b\n" +
+	"\tmime_type\x18\x04 \x01(\tR\bmimeType\x12\x12\n" +
+	"\x04size\x18\x05 \x01(\x03R\x04size\x12\x1f\n" +
+	"\vttl_seconds\x18\x06 \x01(\x03R\n" +
+	"ttlSeconds\x12\x1b\n" +
+	"\tupload_id\x18\a \x01(\tR\buploadId\"~\n" +
+	"\x12ExternalUploadPart\x12H\n" +
+	"\bmetadata\x18\x01 \x01(\v2*.sameoldchat.chat.v1.ExternalUploadRequestH\x00R\bmetadata\x12\x16\n" +
+	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
+	"\x04part\"\x8e\x01\n" +
+	"\x1dCompleteExternalUploadRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +
+	"\tupload_id\x18\x03 \x01(\tR\buploadId\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\"\xec\x02\n" +
 	"\n" +
 	"RemoteFile\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
@@ -2015,8 +2424,11 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x04part\"T\n" +
 	"\x16UserPhotoDeleteRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId2\xd1\b\n" +
-	"\fFilesService\x12G\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId2\x8b\v\n" +
+	"\fFilesService\x12g\n" +
+	"\x14CreateExternalUpload\x12*.sameoldchat.chat.v1.ExternalUploadRequest\x1a#.sameoldchat.chat.v1.ExternalUpload\x12f\n" +
+	"\x12UploadExternalFile\x12'.sameoldchat.chat.v1.ExternalUploadPart\x1a%.sameoldchat.chat.v1.MutationResponse(\x01\x12g\n" +
+	"\x16CompleteExternalUpload\x122.sameoldchat.chat.v1.CompleteExternalUploadRequest\x1a\x19.sameoldchat.chat.v1.File\x12G\n" +
 	"\bFileInfo\x12 .sameoldchat.chat.v1.FileRequest\x1a\x19.sameoldchat.chat.v1.File\x12W\n" +
 	"\n" +
 	"DeleteFile\x12 .sameoldchat.chat.v1.FileRequest\x1a'.sameoldchat.chat.v1.DeleteFileResponse\x12k\n" +
@@ -2051,84 +2463,95 @@ func file_sameoldchat_chat_v1_files_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_files_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_files_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
+var file_sameoldchat_chat_v1_files_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_sameoldchat_chat_v1_files_proto_goTypes = []any{
-	(*File)(nil),                     // 0: sameoldchat.chat.v1.File
-	(*FilePage)(nil),                 // 1: sameoldchat.chat.v1.FilePage
-	(*RemoteFile)(nil),               // 2: sameoldchat.chat.v1.RemoteFile
-	(*RemoteFilePage)(nil),           // 3: sameoldchat.chat.v1.RemoteFilePage
-	(*RemoteFileRequest)(nil),        // 4: sameoldchat.chat.v1.RemoteFileRequest
-	(*AddRemoteFileRequest)(nil),     // 5: sameoldchat.chat.v1.AddRemoteFileRequest
-	(*RemoteFilesRequest)(nil),       // 6: sameoldchat.chat.v1.RemoteFilesRequest
-	(*ShareRemoteFileRequest)(nil),   // 7: sameoldchat.chat.v1.ShareRemoteFileRequest
-	(*UpdateRemoteFileRequest)(nil),  // 8: sameoldchat.chat.v1.UpdateRemoteFileRequest
-	(*FileRequest)(nil),              // 9: sameoldchat.chat.v1.FileRequest
-	(*FileCommentDeleteRequest)(nil), // 10: sameoldchat.chat.v1.FileCommentDeleteRequest
-	(*FilesRequest)(nil),             // 11: sameoldchat.chat.v1.FilesRequest
-	(*DeleteFileResponse)(nil),       // 12: sameoldchat.chat.v1.DeleteFileResponse
-	(*UploadFileRequest)(nil),        // 13: sameoldchat.chat.v1.UploadFileRequest
-	(*DownloadFileRequest)(nil),      // 14: sameoldchat.chat.v1.DownloadFileRequest
-	(*PublicFileRequest)(nil),        // 15: sameoldchat.chat.v1.PublicFileRequest
-	(*PublicFileTokenRequest)(nil),   // 16: sameoldchat.chat.v1.PublicFileTokenRequest
-	(*UploadFilePart)(nil),           // 17: sameoldchat.chat.v1.UploadFilePart
-	(*DownloadFilePart)(nil),         // 18: sameoldchat.chat.v1.DownloadFilePart
-	(*UserPhotoUploadRequest)(nil),   // 19: sameoldchat.chat.v1.UserPhotoUploadRequest
-	(*UserPhotoUploadPart)(nil),      // 20: sameoldchat.chat.v1.UserPhotoUploadPart
-	(*UserPhotoDownloadRequest)(nil), // 21: sameoldchat.chat.v1.UserPhotoDownloadRequest
-	(*UserPhotoMetadata)(nil),        // 22: sameoldchat.chat.v1.UserPhotoMetadata
-	(*UserPhotoDownloadPart)(nil),    // 23: sameoldchat.chat.v1.UserPhotoDownloadPart
-	(*UserPhotoDeleteRequest)(nil),   // 24: sameoldchat.chat.v1.UserPhotoDeleteRequest
-	(*User)(nil),                     // 25: sameoldchat.chat.v1.User
-	(*MutationResponse)(nil),         // 26: sameoldchat.chat.v1.MutationResponse
+	(*File)(nil),                          // 0: sameoldchat.chat.v1.File
+	(*FilePage)(nil),                      // 1: sameoldchat.chat.v1.FilePage
+	(*ExternalUpload)(nil),                // 2: sameoldchat.chat.v1.ExternalUpload
+	(*ExternalUploadRequest)(nil),         // 3: sameoldchat.chat.v1.ExternalUploadRequest
+	(*ExternalUploadPart)(nil),            // 4: sameoldchat.chat.v1.ExternalUploadPart
+	(*CompleteExternalUploadRequest)(nil), // 5: sameoldchat.chat.v1.CompleteExternalUploadRequest
+	(*RemoteFile)(nil),                    // 6: sameoldchat.chat.v1.RemoteFile
+	(*RemoteFilePage)(nil),                // 7: sameoldchat.chat.v1.RemoteFilePage
+	(*RemoteFileRequest)(nil),             // 8: sameoldchat.chat.v1.RemoteFileRequest
+	(*AddRemoteFileRequest)(nil),          // 9: sameoldchat.chat.v1.AddRemoteFileRequest
+	(*RemoteFilesRequest)(nil),            // 10: sameoldchat.chat.v1.RemoteFilesRequest
+	(*ShareRemoteFileRequest)(nil),        // 11: sameoldchat.chat.v1.ShareRemoteFileRequest
+	(*UpdateRemoteFileRequest)(nil),       // 12: sameoldchat.chat.v1.UpdateRemoteFileRequest
+	(*FileRequest)(nil),                   // 13: sameoldchat.chat.v1.FileRequest
+	(*FileCommentDeleteRequest)(nil),      // 14: sameoldchat.chat.v1.FileCommentDeleteRequest
+	(*FilesRequest)(nil),                  // 15: sameoldchat.chat.v1.FilesRequest
+	(*DeleteFileResponse)(nil),            // 16: sameoldchat.chat.v1.DeleteFileResponse
+	(*UploadFileRequest)(nil),             // 17: sameoldchat.chat.v1.UploadFileRequest
+	(*DownloadFileRequest)(nil),           // 18: sameoldchat.chat.v1.DownloadFileRequest
+	(*PublicFileRequest)(nil),             // 19: sameoldchat.chat.v1.PublicFileRequest
+	(*PublicFileTokenRequest)(nil),        // 20: sameoldchat.chat.v1.PublicFileTokenRequest
+	(*UploadFilePart)(nil),                // 21: sameoldchat.chat.v1.UploadFilePart
+	(*DownloadFilePart)(nil),              // 22: sameoldchat.chat.v1.DownloadFilePart
+	(*UserPhotoUploadRequest)(nil),        // 23: sameoldchat.chat.v1.UserPhotoUploadRequest
+	(*UserPhotoUploadPart)(nil),           // 24: sameoldchat.chat.v1.UserPhotoUploadPart
+	(*UserPhotoDownloadRequest)(nil),      // 25: sameoldchat.chat.v1.UserPhotoDownloadRequest
+	(*UserPhotoMetadata)(nil),             // 26: sameoldchat.chat.v1.UserPhotoMetadata
+	(*UserPhotoDownloadPart)(nil),         // 27: sameoldchat.chat.v1.UserPhotoDownloadPart
+	(*UserPhotoDeleteRequest)(nil),        // 28: sameoldchat.chat.v1.UserPhotoDeleteRequest
+	(*MutationResponse)(nil),              // 29: sameoldchat.chat.v1.MutationResponse
+	(*User)(nil),                          // 30: sameoldchat.chat.v1.User
 }
 var file_sameoldchat_chat_v1_files_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.FilePage.files:type_name -> sameoldchat.chat.v1.File
-	2,  // 1: sameoldchat.chat.v1.RemoteFilePage.files:type_name -> sameoldchat.chat.v1.RemoteFile
-	13, // 2: sameoldchat.chat.v1.UploadFilePart.metadata:type_name -> sameoldchat.chat.v1.UploadFileRequest
-	0,  // 3: sameoldchat.chat.v1.DownloadFilePart.metadata:type_name -> sameoldchat.chat.v1.File
-	19, // 4: sameoldchat.chat.v1.UserPhotoUploadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoUploadRequest
-	22, // 5: sameoldchat.chat.v1.UserPhotoDownloadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoMetadata
-	9,  // 6: sameoldchat.chat.v1.FilesService.FileInfo:input_type -> sameoldchat.chat.v1.FileRequest
-	9,  // 7: sameoldchat.chat.v1.FilesService.DeleteFile:input_type -> sameoldchat.chat.v1.FileRequest
-	10, // 8: sameoldchat.chat.v1.FilesService.DeleteFileComment:input_type -> sameoldchat.chat.v1.FileCommentDeleteRequest
-	11, // 9: sameoldchat.chat.v1.FilesService.Files:input_type -> sameoldchat.chat.v1.FilesRequest
-	15, // 10: sameoldchat.chat.v1.FilesService.SharePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
-	15, // 11: sameoldchat.chat.v1.FilesService.RevokePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
-	5,  // 12: sameoldchat.chat.v1.FilesService.AddRemoteFile:input_type -> sameoldchat.chat.v1.AddRemoteFileRequest
-	4,  // 13: sameoldchat.chat.v1.FilesService.RemoteFileInfo:input_type -> sameoldchat.chat.v1.RemoteFileRequest
-	6,  // 14: sameoldchat.chat.v1.FilesService.RemoteFiles:input_type -> sameoldchat.chat.v1.RemoteFilesRequest
-	4,  // 15: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:input_type -> sameoldchat.chat.v1.RemoteFileRequest
-	7,  // 16: sameoldchat.chat.v1.FilesService.ShareRemoteFile:input_type -> sameoldchat.chat.v1.ShareRemoteFileRequest
-	8,  // 17: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:input_type -> sameoldchat.chat.v1.UpdateRemoteFileRequest
-	17, // 18: sameoldchat.chat.v1.ChatService.UploadFile:input_type -> sameoldchat.chat.v1.UploadFilePart
-	14, // 19: sameoldchat.chat.v1.ChatService.DownloadFile:input_type -> sameoldchat.chat.v1.DownloadFileRequest
-	16, // 20: sameoldchat.chat.v1.ChatService.DownloadPublicFile:input_type -> sameoldchat.chat.v1.PublicFileTokenRequest
-	20, // 21: sameoldchat.chat.v1.ChatService.UploadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoUploadPart
-	21, // 22: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDownloadRequest
-	24, // 23: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDeleteRequest
-	0,  // 24: sameoldchat.chat.v1.FilesService.FileInfo:output_type -> sameoldchat.chat.v1.File
-	12, // 25: sameoldchat.chat.v1.FilesService.DeleteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
-	12, // 26: sameoldchat.chat.v1.FilesService.DeleteFileComment:output_type -> sameoldchat.chat.v1.DeleteFileResponse
-	1,  // 27: sameoldchat.chat.v1.FilesService.Files:output_type -> sameoldchat.chat.v1.FilePage
-	0,  // 28: sameoldchat.chat.v1.FilesService.SharePublicURL:output_type -> sameoldchat.chat.v1.File
-	0,  // 29: sameoldchat.chat.v1.FilesService.RevokePublicURL:output_type -> sameoldchat.chat.v1.File
-	2,  // 30: sameoldchat.chat.v1.FilesService.AddRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
-	2,  // 31: sameoldchat.chat.v1.FilesService.RemoteFileInfo:output_type -> sameoldchat.chat.v1.RemoteFile
-	3,  // 32: sameoldchat.chat.v1.FilesService.RemoteFiles:output_type -> sameoldchat.chat.v1.RemoteFilePage
-	12, // 33: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
-	2,  // 34: sameoldchat.chat.v1.FilesService.ShareRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
-	2,  // 35: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
-	0,  // 36: sameoldchat.chat.v1.ChatService.UploadFile:output_type -> sameoldchat.chat.v1.File
-	18, // 37: sameoldchat.chat.v1.ChatService.DownloadFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
-	18, // 38: sameoldchat.chat.v1.ChatService.DownloadPublicFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
-	25, // 39: sameoldchat.chat.v1.ChatService.UploadUserPhoto:output_type -> sameoldchat.chat.v1.User
-	23, // 40: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:output_type -> sameoldchat.chat.v1.UserPhotoDownloadPart
-	26, // 41: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:output_type -> sameoldchat.chat.v1.MutationResponse
-	24, // [24:42] is the sub-list for method output_type
-	6,  // [6:24] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	3,  // 1: sameoldchat.chat.v1.ExternalUploadPart.metadata:type_name -> sameoldchat.chat.v1.ExternalUploadRequest
+	6,  // 2: sameoldchat.chat.v1.RemoteFilePage.files:type_name -> sameoldchat.chat.v1.RemoteFile
+	17, // 3: sameoldchat.chat.v1.UploadFilePart.metadata:type_name -> sameoldchat.chat.v1.UploadFileRequest
+	0,  // 4: sameoldchat.chat.v1.DownloadFilePart.metadata:type_name -> sameoldchat.chat.v1.File
+	23, // 5: sameoldchat.chat.v1.UserPhotoUploadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoUploadRequest
+	26, // 6: sameoldchat.chat.v1.UserPhotoDownloadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoMetadata
+	3,  // 7: sameoldchat.chat.v1.FilesService.CreateExternalUpload:input_type -> sameoldchat.chat.v1.ExternalUploadRequest
+	4,  // 8: sameoldchat.chat.v1.FilesService.UploadExternalFile:input_type -> sameoldchat.chat.v1.ExternalUploadPart
+	5,  // 9: sameoldchat.chat.v1.FilesService.CompleteExternalUpload:input_type -> sameoldchat.chat.v1.CompleteExternalUploadRequest
+	13, // 10: sameoldchat.chat.v1.FilesService.FileInfo:input_type -> sameoldchat.chat.v1.FileRequest
+	13, // 11: sameoldchat.chat.v1.FilesService.DeleteFile:input_type -> sameoldchat.chat.v1.FileRequest
+	14, // 12: sameoldchat.chat.v1.FilesService.DeleteFileComment:input_type -> sameoldchat.chat.v1.FileCommentDeleteRequest
+	15, // 13: sameoldchat.chat.v1.FilesService.Files:input_type -> sameoldchat.chat.v1.FilesRequest
+	19, // 14: sameoldchat.chat.v1.FilesService.SharePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
+	19, // 15: sameoldchat.chat.v1.FilesService.RevokePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
+	9,  // 16: sameoldchat.chat.v1.FilesService.AddRemoteFile:input_type -> sameoldchat.chat.v1.AddRemoteFileRequest
+	8,  // 17: sameoldchat.chat.v1.FilesService.RemoteFileInfo:input_type -> sameoldchat.chat.v1.RemoteFileRequest
+	10, // 18: sameoldchat.chat.v1.FilesService.RemoteFiles:input_type -> sameoldchat.chat.v1.RemoteFilesRequest
+	8,  // 19: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:input_type -> sameoldchat.chat.v1.RemoteFileRequest
+	11, // 20: sameoldchat.chat.v1.FilesService.ShareRemoteFile:input_type -> sameoldchat.chat.v1.ShareRemoteFileRequest
+	12, // 21: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:input_type -> sameoldchat.chat.v1.UpdateRemoteFileRequest
+	21, // 22: sameoldchat.chat.v1.ChatService.UploadFile:input_type -> sameoldchat.chat.v1.UploadFilePart
+	18, // 23: sameoldchat.chat.v1.ChatService.DownloadFile:input_type -> sameoldchat.chat.v1.DownloadFileRequest
+	20, // 24: sameoldchat.chat.v1.ChatService.DownloadPublicFile:input_type -> sameoldchat.chat.v1.PublicFileTokenRequest
+	24, // 25: sameoldchat.chat.v1.ChatService.UploadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoUploadPart
+	25, // 26: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDownloadRequest
+	28, // 27: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDeleteRequest
+	2,  // 28: sameoldchat.chat.v1.FilesService.CreateExternalUpload:output_type -> sameoldchat.chat.v1.ExternalUpload
+	29, // 29: sameoldchat.chat.v1.FilesService.UploadExternalFile:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 30: sameoldchat.chat.v1.FilesService.CompleteExternalUpload:output_type -> sameoldchat.chat.v1.File
+	0,  // 31: sameoldchat.chat.v1.FilesService.FileInfo:output_type -> sameoldchat.chat.v1.File
+	16, // 32: sameoldchat.chat.v1.FilesService.DeleteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
+	16, // 33: sameoldchat.chat.v1.FilesService.DeleteFileComment:output_type -> sameoldchat.chat.v1.DeleteFileResponse
+	1,  // 34: sameoldchat.chat.v1.FilesService.Files:output_type -> sameoldchat.chat.v1.FilePage
+	0,  // 35: sameoldchat.chat.v1.FilesService.SharePublicURL:output_type -> sameoldchat.chat.v1.File
+	0,  // 36: sameoldchat.chat.v1.FilesService.RevokePublicURL:output_type -> sameoldchat.chat.v1.File
+	6,  // 37: sameoldchat.chat.v1.FilesService.AddRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
+	6,  // 38: sameoldchat.chat.v1.FilesService.RemoteFileInfo:output_type -> sameoldchat.chat.v1.RemoteFile
+	7,  // 39: sameoldchat.chat.v1.FilesService.RemoteFiles:output_type -> sameoldchat.chat.v1.RemoteFilePage
+	16, // 40: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
+	6,  // 41: sameoldchat.chat.v1.FilesService.ShareRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
+	6,  // 42: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
+	0,  // 43: sameoldchat.chat.v1.ChatService.UploadFile:output_type -> sameoldchat.chat.v1.File
+	22, // 44: sameoldchat.chat.v1.ChatService.DownloadFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
+	22, // 45: sameoldchat.chat.v1.ChatService.DownloadPublicFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
+	30, // 46: sameoldchat.chat.v1.ChatService.UploadUserPhoto:output_type -> sameoldchat.chat.v1.User
+	27, // 47: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:output_type -> sameoldchat.chat.v1.UserPhotoDownloadPart
+	29, // 48: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:output_type -> sameoldchat.chat.v1.MutationResponse
+	28, // [28:49] is the sub-list for method output_type
+	7,  // [7:28] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_files_proto_init() }
@@ -2138,19 +2561,23 @@ func file_sameoldchat_chat_v1_files_proto_init() {
 	}
 	file_sameoldchat_chat_v1_presence_proto_init()
 	file_sameoldchat_chat_v1_conversation_mutations_proto_init()
-	file_sameoldchat_chat_v1_files_proto_msgTypes[17].OneofWrappers = []any{
+	file_sameoldchat_chat_v1_files_proto_msgTypes[4].OneofWrappers = []any{
+		(*ExternalUploadPart_Metadata)(nil),
+		(*ExternalUploadPart_Chunk)(nil),
+	}
+	file_sameoldchat_chat_v1_files_proto_msgTypes[21].OneofWrappers = []any{
 		(*UploadFilePart_Metadata)(nil),
 		(*UploadFilePart_Chunk)(nil),
 	}
-	file_sameoldchat_chat_v1_files_proto_msgTypes[18].OneofWrappers = []any{
+	file_sameoldchat_chat_v1_files_proto_msgTypes[22].OneofWrappers = []any{
 		(*DownloadFilePart_Metadata)(nil),
 		(*DownloadFilePart_Chunk)(nil),
 	}
-	file_sameoldchat_chat_v1_files_proto_msgTypes[20].OneofWrappers = []any{
+	file_sameoldchat_chat_v1_files_proto_msgTypes[24].OneofWrappers = []any{
 		(*UserPhotoUploadPart_Metadata)(nil),
 		(*UserPhotoUploadPart_Chunk)(nil),
 	}
-	file_sameoldchat_chat_v1_files_proto_msgTypes[23].OneofWrappers = []any{
+	file_sameoldchat_chat_v1_files_proto_msgTypes[27].OneofWrappers = []any{
 		(*UserPhotoDownloadPart_Metadata)(nil),
 		(*UserPhotoDownloadPart_Chunk)(nil),
 	}
@@ -2160,7 +2587,7 @@ func file_sameoldchat_chat_v1_files_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_files_proto_rawDesc), len(file_sameoldchat_chat_v1_files_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   25,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   2,
 		},

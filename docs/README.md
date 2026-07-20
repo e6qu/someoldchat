@@ -16,6 +16,8 @@ how the application is structured, built, operated, and deployed.
   and internal administration.
 - [PostgreSQL storage](postgresql.md) describes the explicit PostgreSQL storage
   profile and qualification command.
+- [Files](files.md) describes durable file uploads and the external upload
+  lifecycle.
 - [Terminology](terminology.md) defines the Slack terms used by this project.
 
 Normative, testable requirements and pinned upstream contract sources live in

@@ -26,6 +26,45 @@ message FilePage {
   bool has_more = 3;
 }
 
+message ExternalUpload {
+  string id = 1;
+  string workspace_id = 2;
+  string uploader = 3;
+  string name = 4;
+  string title = 5;
+  string mime_type = 6;
+  int64 size = 7;
+  string status = 8;
+  string created_at = 9;
+  string expires_at = 10;
+  string uploaded_at = 11;
+  string completed_at = 12;
+}
+
+message ExternalUploadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string name = 3;
+  string mime_type = 4;
+  int64 size = 5;
+  int64 ttl_seconds = 6;
+  string upload_id = 7;
+}
+
+message ExternalUploadPart {
+  oneof part {
+    ExternalUploadRequest metadata = 1;
+    bytes chunk = 2;
+  }
+}
+
+message CompleteExternalUploadRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string upload_id = 3;
+  string title = 4;
+}
+
 message RemoteFile {
   string id = 1;
   string workspace_id = 2;
@@ -194,6 +233,9 @@ message UserPhotoDeleteRequest {
 }
 
 service FilesService {
+  rpc CreateExternalUpload(ExternalUploadRequest) returns (ExternalUpload);
+  rpc UploadExternalFile(stream ExternalUploadPart) returns (MutationResponse);
+  rpc CompleteExternalUpload(CompleteExternalUploadRequest) returns (File);
   rpc FileInfo(FileRequest) returns (File);
   rpc DeleteFile(FileRequest) returns (DeleteFileResponse);
   rpc DeleteFileComment(FileCommentDeleteRequest) returns (DeleteFileResponse);
