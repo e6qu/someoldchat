@@ -77,7 +77,7 @@ jobs:
           context: .
           platforms: ${{ matrix.arch.platform }}
           push: false
-          provenance: mode=max
+          provenance: mode=max,builder-id=https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           sbom: true
           outputs: type=oci,dest=${{ runner.temp }}/someoldchat-${{ matrix.arch.suffix }}.tar
           cache-from: type=gha,scope=someoldchat-${{ matrix.arch.suffix }}

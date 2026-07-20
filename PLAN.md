@@ -222,6 +222,9 @@ architecture image, attached signed provenance and SBOM attestations to the
 architecture digest without changing the direct tag's media type, and read the
 published references back from GitHub Container Registry. It retained at most
 the newest 20 complete release groups and removed all other package versions.
+BuildKit identified each provenance predicate with the originating GitHub
+Actions run URL, and the release gate rejected provenance whose builder
+identity or required SLSA v1 fields were absent before requesting a signature.
 
 ## Initial milestone
 

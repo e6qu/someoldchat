@@ -60,7 +60,11 @@ if ! jq -e --arg predicate "$predicate_type" '
     or
     ($predicate == "https://slsa.dev/provenance/v1"
       and (.predicate.buildDefinition.buildType | type == "string" and length > 0)
-      and (.predicate.runDetails | type == "object"))
+      and (.predicate.buildDefinition.externalParameters | type == "object")
+      and (.predicate.buildDefinition.internalParameters | type == "object")
+      and (.predicate.buildDefinition.resolvedDependencies | type == "array")
+      and (.predicate.runDetails.builder.id | type == "string" and test("^https://[^[:space:]]+$"))
+      and (.predicate.runDetails.metadata | type == "object"))
   )
 ' "$statement_blob" >/dev/null; then
 	echo "BuildKit statement was not a valid $predicate_type predicate" >&2
