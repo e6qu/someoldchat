@@ -23,7 +23,7 @@ expect_count 1 '  IMAGE: ghcr.io/e6qu/someoldchat'
 expect_count 3 "        run: echo \"short_sha=${gha}{GITHUB_SHA:0:12}\" >> \"${gha}GITHUB_OUTPUT\""
 expect_count 1 "          tags: ${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-${gha}{{ matrix.arch.suffix }}"
 expect_count 1 '          provenance: false'
-expect_count 1 '          provenance: mode=max'
+expect_count 1 "          provenance: mode=max,builder-id=https://github.com/${gha}{{ github.repository }}/actions/runs/${gha}{{ github.run_id }}"
 expect_count 1 '          sbom: false'
 expect_count 1 '          sbom: true'
 expect_count 2 '        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0'
@@ -90,6 +90,6 @@ if [[ "$selected" != '0,1,2,10,11,12,999,1000,1001' ]]; then
 	exit 1
 fi
 
-"$root/scripts/test-extract-buildkit-sbom.sh"
+"$root/scripts/test-extract-buildkit-attestation.sh"
 
 echo 'container publication contract passed'

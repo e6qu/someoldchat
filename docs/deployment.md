@@ -167,11 +167,14 @@ architecture-specific references remain direct image manifests for runtimes
 that cannot consume OCI indexes. A second cache-backed BuildKit export produces
 an SPDX SBOM for the exact architecture manifest digest. GitHub signs and
 stores separate provenance and SBOM attestations for that digest; they remain
-verifiable without changing the tag's media type. The workflow reads all three
-references back from GitHub Container Registry and fails unless their media
-types, digests, and platforms form exactly that shape. It then removes every
-package version outside the newest 20 complete release groups, including
-untagged versions, and verifies that at most 60 package versions remain.
+verifiable without changing the tag's media type. The SLSA v1 provenance uses
+the originating GitHub Actions run URL as its non-empty HTTPS builder identity;
+the extraction gate rejects incomplete provenance before signing. The workflow
+reads all three references back from GitHub Container Registry and fails unless
+their media types, digests, and platforms form exactly that shape. It then
+removes every package version outside the newest 20 complete release groups,
+including untagged versions, and verifies that at most 60 package versions
+remain.
 Deployments record and use the verified digest for the selected reference and
 verify its signed attestations:
 

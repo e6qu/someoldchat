@@ -165,6 +165,12 @@ Exit criteria:
 - Publish deployment templates and qualification tests for each supported
   profile.
 
+SQLite activator request spool leases used parsed timestamps for expiry,
+renewal, and deletion decisions, so fractional RFC 3339 timestamps could not
+be misordered lexicographically. Deterministic clock-driven race tests covered
+exclusive leases, renewal during slow delivery, expired-owner rejection, and
+crash recovery without depending on scheduler timing.
+
 Exit criteria:
 
 - Only the activator, durable object storage, and control-plane facilities
@@ -222,6 +228,9 @@ architecture image, attached signed provenance and SBOM attestations to the
 architecture digest without changing the direct tag's media type, and read the
 published references back from GitHub Container Registry. It retained at most
 the newest 20 complete release groups and removed all other package versions.
+BuildKit identified each provenance predicate with the originating GitHub
+Actions run URL, and the release gate rejected provenance whose builder
+identity or required SLSA v1 fields were absent before requesting a signature.
 
 ## Initial milestone
 
