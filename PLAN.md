@@ -221,6 +221,10 @@ Every change must pass:
 - migration forward and restore compatibility checks; and
 - generated compatibility-ledger validation.
 
+Fuzz smoke gates requested a fixed 25,000-execution budget per target under an
+explicit two-minute process timeout, so successful completion did not depend
+on a wall-clock fuzz deadline while hung inputs still failed the gate.
+
 The dependency-admission gate verified exact direct npm lockfile versions and
 Subresource Integrity checksums against the same aged evidence inventory used
 for Go modules, GitHub Actions, and container inputs.

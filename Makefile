@@ -57,14 +57,14 @@ test-transport-load:
 	GOCACHE=$(GOCACHE) go test ./internal/modules/chat/transport/grpc -run '^TestRemoteConcurrentPostsPreserveEveryCall$$' -count=1
 
 test-fuzz:
-	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzListCursorRoundTrips -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzMessageCursorRoundTrips -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeScopes -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeConversationTypes -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONScalarNeverPanics -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzDecodeFieldsNeverPanics -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONListFieldNeverPanics -fuzztime=2s -parallel=1
-	GOCACHE=$(GOCACHE) go test ./internal/store/postgres -run '^$$' -fuzz FuzzRewriteIsIdempotent -fuzztime=2s -parallel=1
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzListCursorRoundTrips -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzMessageCursorRoundTrips -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeScopes -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeConversationTypes -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONScalarNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzDecodeFieldsNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONListFieldNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/store/postgres -run '^$$' -fuzz FuzzRewriteIsIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
 
 generate:
 	$(MAKE) proto-tools
