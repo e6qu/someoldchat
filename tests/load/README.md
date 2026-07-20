@@ -19,6 +19,11 @@ before the bytes existed, and that the shared comment is posted once.
 The Socket Mode tests model a reconnect storm: many clients dialling at once
 must not push the active connection count past the documented limit, and one
 connection identifier must admit exactly one client.
+The search tests page a cursor over a corpus seeded with colliding timestamps
+while writers append, so the identifier tiebreak is actually exercised, and
+check that a private conversation never reaches a non-member while memberships
+churn. The private test asserts a member can find the messages first, so a
+search returning nothing cannot pass it silently.
 They do not represent production capacity; use the benchmark to compare
 changes and use a deployment-level load tool for capacity measurements.
 
