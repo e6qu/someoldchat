@@ -20,8 +20,10 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	MessagesService_Post_FullMethodName                           = "/sameoldchat.chat.v1.MessagesService/Post"
+	MessagesService_PostWithBlocks_FullMethodName                 = "/sameoldchat.chat.v1.MessagesService/PostWithBlocks"
 	MessagesService_PostEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/PostEphemeral"
 	MessagesService_Update_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Update"
+	MessagesService_UpdateWithBlocks_FullMethodName               = "/sameoldchat.chat.v1.MessagesService/UpdateWithBlocks"
 	MessagesService_Unfurl_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Unfurl"
 	MessagesService_Delete_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Delete"
 	MessagesService_Permalink_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/Permalink"
@@ -38,8 +40,10 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type MessagesServiceClient interface {
 	Post(ctx context.Context, in *PostRequest, opts ...grpc.CallOption) (*Message, error)
+	PostWithBlocks(ctx context.Context, in *PostWithBlocksRequest, opts ...grpc.CallOption) (*Message, error)
 	PostEphemeral(ctx context.Context, in *PostEphemeralRequest, opts ...grpc.CallOption) (*EphemeralMessage, error)
 	Update(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*Message, error)
+	UpdateWithBlocks(ctx context.Context, in *UpdateWithBlocksRequest, opts ...grpc.CallOption) (*Message, error)
 	Unfurl(ctx context.Context, in *UnfurlRequest, opts ...grpc.CallOption) (*Message, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*Message, error)
 	Permalink(ctx context.Context, in *PermalinkRequest, opts ...grpc.CallOption) (*PermalinkResponse, error)
@@ -69,6 +73,16 @@ func (c *messagesServiceClient) Post(ctx context.Context, in *PostRequest, opts 
 	return out, nil
 }
 
+func (c *messagesServiceClient) PostWithBlocks(ctx context.Context, in *PostWithBlocksRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_PostWithBlocks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *messagesServiceClient) PostEphemeral(ctx context.Context, in *PostEphemeralRequest, opts ...grpc.CallOption) (*EphemeralMessage, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EphemeralMessage)
@@ -83,6 +97,16 @@ func (c *messagesServiceClient) Update(ctx context.Context, in *UpdateRequest, o
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Message)
 	err := c.cc.Invoke(ctx, MessagesService_Update_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) UpdateWithBlocks(ctx context.Context, in *UpdateWithBlocksRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_UpdateWithBlocks_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -184,8 +208,10 @@ func (c *messagesServiceClient) PostIncomingWebhook(ctx context.Context, in *Inc
 // for forward compatibility.
 type MessagesServiceServer interface {
 	Post(context.Context, *PostRequest) (*Message, error)
+	PostWithBlocks(context.Context, *PostWithBlocksRequest) (*Message, error)
 	PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error)
 	Update(context.Context, *UpdateRequest) (*Message, error)
+	UpdateWithBlocks(context.Context, *UpdateWithBlocksRequest) (*Message, error)
 	Unfurl(context.Context, *UnfurlRequest) (*Message, error)
 	Delete(context.Context, *DeleteRequest) (*Message, error)
 	Permalink(context.Context, *PermalinkRequest) (*PermalinkResponse, error)
@@ -207,11 +233,17 @@ type UnimplementedMessagesServiceServer struct{}
 func (UnimplementedMessagesServiceServer) Post(context.Context, *PostRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Post not implemented")
 }
+func (UnimplementedMessagesServiceServer) PostWithBlocks(context.Context, *PostWithBlocksRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method PostWithBlocks not implemented")
+}
 func (UnimplementedMessagesServiceServer) PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostEphemeral not implemented")
 }
 func (UnimplementedMessagesServiceServer) Update(context.Context, *UpdateRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
+}
+func (UnimplementedMessagesServiceServer) UpdateWithBlocks(context.Context, *UpdateWithBlocksRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateWithBlocks not implemented")
 }
 func (UnimplementedMessagesServiceServer) Unfurl(context.Context, *UnfurlRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unfurl not implemented")
@@ -278,6 +310,24 @@ func _MessagesService_Post_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessagesService_PostWithBlocks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PostWithBlocksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).PostWithBlocks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_PostWithBlocks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).PostWithBlocks(ctx, req.(*PostWithBlocksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MessagesService_PostEphemeral_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PostEphemeralRequest)
 	if err := dec(in); err != nil {
@@ -310,6 +360,24 @@ func _MessagesService_Update_Handler(srv interface{}, ctx context.Context, dec f
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MessagesServiceServer).Update(ctx, req.(*UpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_UpdateWithBlocks_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateWithBlocksRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).UpdateWithBlocks(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_UpdateWithBlocks_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).UpdateWithBlocks(ctx, req.(*UpdateWithBlocksRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -488,12 +556,20 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MessagesService_Post_Handler,
 		},
 		{
+			MethodName: "PostWithBlocks",
+			Handler:    _MessagesService_PostWithBlocks_Handler,
+		},
+		{
 			MethodName: "PostEphemeral",
 			Handler:    _MessagesService_PostEphemeral_Handler,
 		},
 		{
 			MethodName: "Update",
 			Handler:    _MessagesService_Update_Handler,
+		},
+		{
+			MethodName: "UpdateWithBlocks",
+			Handler:    _MessagesService_UpdateWithBlocks_Handler,
 		},
 		{
 			MethodName: "Unfurl",

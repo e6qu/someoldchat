@@ -1026,6 +1026,24 @@ func TestPostMessagePersistsMessage(t *testing.T) {
 	}
 }
 
+func TestPostWithBlocksPersistsNormalizedPayload(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section" } ] `, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Text != "" || message.Blocks != `[{"type":"section"}]` {
+		t.Fatalf("unexpected message: %+v", message)
+	}
+	updated, err := (Messages{Store: s}).UpdateWithBlocks(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), "updated", `[{"type":"divider"}]`)
+	if err != nil || updated.Text != "updated" || updated.Blocks != `[{"type":"divider"}]` {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+}
+
 func TestPrivateConversationRequiresMembership(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

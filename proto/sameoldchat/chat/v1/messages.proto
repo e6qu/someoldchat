@@ -14,6 +14,7 @@ message Message {
   string created_at = 7;
   bool deleted = 8;
   map<string, string> unfurls = 9;
+  string blocks = 10;
 }
 
 message PostRequest {
@@ -23,6 +24,16 @@ message PostRequest {
   string text = 4;
   string thread_timestamp = 5;
   string idempotency_key = 6;
+}
+
+message PostWithBlocksRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string text = 4;
+  string blocks = 5;
+  string thread_timestamp = 6;
+  string idempotency_key = 7;
 }
 
 message EphemeralMessage {
@@ -48,6 +59,15 @@ message UpdateRequest {
   string conversation_id = 3;
   string timestamp = 4;
   string text = 5;
+}
+
+message UpdateWithBlocksRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  string text = 5;
+  string blocks = 6;
 }
 
 message UnfurlRequest {
@@ -144,6 +164,7 @@ message IncomingWebhookPostRequest {
   string text = 4;
   string thread_timestamp = 5;
   string idempotency_key = 6;
+  string blocks = 7;
 }
 
 message IncomingWebhookMutationResponse {
@@ -152,8 +173,10 @@ message IncomingWebhookMutationResponse {
 
 service MessagesService {
   rpc Post(PostRequest) returns (Message);
+  rpc PostWithBlocks(PostWithBlocksRequest) returns (Message);
   rpc PostEphemeral(PostEphemeralRequest) returns (EphemeralMessage);
   rpc Update(UpdateRequest) returns (Message);
+  rpc UpdateWithBlocks(UpdateWithBlocksRequest) returns (Message);
   rpc Unfurl(UnfurlRequest) returns (Message);
   rpc Delete(DeleteRequest) returns (Message);
   rpc Permalink(PermalinkRequest) returns (PermalinkResponse);

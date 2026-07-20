@@ -32,6 +32,7 @@ type Message struct {
 	CreatedAt       string                 `protobuf:"bytes,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	Deleted         bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
 	Unfurls         map[string]string      `protobuf:"bytes,9,rep,name=unfurls,proto3" json:"unfurls,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Blocks          string                 `protobuf:"bytes,10,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -129,6 +130,13 @@ func (x *Message) GetUnfurls() map[string]string {
 	return nil
 }
 
+func (x *Message) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
 type PostRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -213,6 +221,98 @@ func (x *PostRequest) GetIdempotencyKey() string {
 	return ""
 }
 
+type PostWithBlocksRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId  string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Text            string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	Blocks          string                 `protobuf:"bytes,5,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	ThreadTimestamp string                 `protobuf:"bytes,6,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
+	IdempotencyKey  string                 `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *PostWithBlocksRequest) Reset() {
+	*x = PostWithBlocksRequest{}
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PostWithBlocksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PostWithBlocksRequest) ProtoMessage() {}
+
+func (x *PostWithBlocksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PostWithBlocksRequest.ProtoReflect.Descriptor instead.
+func (*PostWithBlocksRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *PostWithBlocksRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetThreadTimestamp() string {
+	if x != nil {
+		return x.ThreadTimestamp
+	}
+	return ""
+}
+
+func (x *PostWithBlocksRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
 type EphemeralMessage struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -227,7 +327,7 @@ type EphemeralMessage struct {
 
 func (x *EphemeralMessage) Reset() {
 	*x = EphemeralMessage{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -239,7 +339,7 @@ func (x *EphemeralMessage) String() string {
 func (*EphemeralMessage) ProtoMessage() {}
 
 func (x *EphemeralMessage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -252,7 +352,7 @@ func (x *EphemeralMessage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EphemeralMessage.ProtoReflect.Descriptor instead.
 func (*EphemeralMessage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *EphemeralMessage) GetWorkspaceId() string {
@@ -310,7 +410,7 @@ type PostEphemeralRequest struct {
 
 func (x *PostEphemeralRequest) Reset() {
 	*x = PostEphemeralRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +422,7 @@ func (x *PostEphemeralRequest) String() string {
 func (*PostEphemeralRequest) ProtoMessage() {}
 
 func (x *PostEphemeralRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +435,7 @@ func (x *PostEphemeralRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PostEphemeralRequest.ProtoReflect.Descriptor instead.
 func (*PostEphemeralRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PostEphemeralRequest) GetWorkspaceId() string {
@@ -386,7 +486,7 @@ type UpdateRequest struct {
 
 func (x *UpdateRequest) Reset() {
 	*x = UpdateRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -398,7 +498,7 @@ func (x *UpdateRequest) String() string {
 func (*UpdateRequest) ProtoMessage() {}
 
 func (x *UpdateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -411,7 +511,7 @@ func (x *UpdateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateRequest.ProtoReflect.Descriptor instead.
 func (*UpdateRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *UpdateRequest) GetWorkspaceId() string {
@@ -449,6 +549,90 @@ func (x *UpdateRequest) GetText() string {
 	return ""
 }
 
+type UpdateWithBlocksRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	Timestamp      string                 `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *UpdateWithBlocksRequest) Reset() {
+	*x = UpdateWithBlocksRequest{}
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateWithBlocksRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateWithBlocksRequest) ProtoMessage() {}
+
+func (x *UpdateWithBlocksRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateWithBlocksRequest.ProtoReflect.Descriptor instead.
+func (*UpdateWithBlocksRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *UpdateWithBlocksRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *UpdateWithBlocksRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *UpdateWithBlocksRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *UpdateWithBlocksRequest) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *UpdateWithBlocksRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *UpdateWithBlocksRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
 type UnfurlRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -462,7 +646,7 @@ type UnfurlRequest struct {
 
 func (x *UnfurlRequest) Reset() {
 	*x = UnfurlRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -474,7 +658,7 @@ func (x *UnfurlRequest) String() string {
 func (*UnfurlRequest) ProtoMessage() {}
 
 func (x *UnfurlRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -487,7 +671,7 @@ func (x *UnfurlRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnfurlRequest.ProtoReflect.Descriptor instead.
 func (*UnfurlRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *UnfurlRequest) GetWorkspaceId() string {
@@ -537,7 +721,7 @@ type DeleteRequest struct {
 
 func (x *DeleteRequest) Reset() {
 	*x = DeleteRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -549,7 +733,7 @@ func (x *DeleteRequest) String() string {
 func (*DeleteRequest) ProtoMessage() {}
 
 func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -562,7 +746,7 @@ func (x *DeleteRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeleteRequest) GetWorkspaceId() string {
@@ -605,7 +789,7 @@ type PermalinkRequest struct {
 
 func (x *PermalinkRequest) Reset() {
 	*x = PermalinkRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -617,7 +801,7 @@ func (x *PermalinkRequest) String() string {
 func (*PermalinkRequest) ProtoMessage() {}
 
 func (x *PermalinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -630,7 +814,7 @@ func (x *PermalinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermalinkRequest.ProtoReflect.Descriptor instead.
 func (*PermalinkRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PermalinkRequest) GetWorkspaceId() string {
@@ -670,7 +854,7 @@ type PermalinkResponse struct {
 
 func (x *PermalinkResponse) Reset() {
 	*x = PermalinkResponse{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -682,7 +866,7 @@ func (x *PermalinkResponse) String() string {
 func (*PermalinkResponse) ProtoMessage() {}
 
 func (x *PermalinkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[8]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -695,7 +879,7 @@ func (x *PermalinkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PermalinkResponse.ProtoReflect.Descriptor instead.
 func (*PermalinkResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{8}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PermalinkResponse) GetPermalink() string {
@@ -716,7 +900,7 @@ type MessagePage struct {
 
 func (x *MessagePage) Reset() {
 	*x = MessagePage{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -728,7 +912,7 @@ func (x *MessagePage) String() string {
 func (*MessagePage) ProtoMessage() {}
 
 func (x *MessagePage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -741,7 +925,7 @@ func (x *MessagePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MessagePage.ProtoReflect.Descriptor instead.
 func (*MessagePage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *MessagePage) GetMessages() []*Message {
@@ -778,7 +962,7 @@ type HistoryRequest struct {
 
 func (x *HistoryRequest) Reset() {
 	*x = HistoryRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -790,7 +974,7 @@ func (x *HistoryRequest) String() string {
 func (*HistoryRequest) ProtoMessage() {}
 
 func (x *HistoryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -803,7 +987,7 @@ func (x *HistoryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HistoryRequest.ProtoReflect.Descriptor instead.
 func (*HistoryRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *HistoryRequest) GetWorkspaceId() string {
@@ -855,7 +1039,7 @@ type RepliesRequest struct {
 
 func (x *RepliesRequest) Reset() {
 	*x = RepliesRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -867,7 +1051,7 @@ func (x *RepliesRequest) String() string {
 func (*RepliesRequest) ProtoMessage() {}
 
 func (x *RepliesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[11]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -880,7 +1064,7 @@ func (x *RepliesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RepliesRequest.ProtoReflect.Descriptor instead.
 func (*RepliesRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{11}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *RepliesRequest) GetWorkspaceId() string {
@@ -938,7 +1122,7 @@ type SearchRequest struct {
 
 func (x *SearchRequest) Reset() {
 	*x = SearchRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -950,7 +1134,7 @@ func (x *SearchRequest) String() string {
 func (*SearchRequest) ProtoMessage() {}
 
 func (x *SearchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[12]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -963,7 +1147,7 @@ func (x *SearchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
 func (*SearchRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{12}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SearchRequest) GetWorkspaceId() string {
@@ -1014,7 +1198,7 @@ type IncomingWebhookCreateRequest struct {
 
 func (x *IncomingWebhookCreateRequest) Reset() {
 	*x = IncomingWebhookCreateRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1026,7 +1210,7 @@ func (x *IncomingWebhookCreateRequest) String() string {
 func (*IncomingWebhookCreateRequest) ProtoMessage() {}
 
 func (x *IncomingWebhookCreateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[13]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1039,7 +1223,7 @@ func (x *IncomingWebhookCreateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhookCreateRequest.ProtoReflect.Descriptor instead.
 func (*IncomingWebhookCreateRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{13}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *IncomingWebhookCreateRequest) GetWorkspaceId() string {
@@ -1093,7 +1277,7 @@ type IncomingWebhook struct {
 
 func (x *IncomingWebhook) Reset() {
 	*x = IncomingWebhook{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1105,7 +1289,7 @@ func (x *IncomingWebhook) String() string {
 func (*IncomingWebhook) ProtoMessage() {}
 
 func (x *IncomingWebhook) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[14]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1118,7 +1302,7 @@ func (x *IncomingWebhook) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhook.ProtoReflect.Descriptor instead.
 func (*IncomingWebhook) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{14}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *IncomingWebhook) GetId() string {
@@ -1186,7 +1370,7 @@ type IncomingWebhookCreateResponse struct {
 
 func (x *IncomingWebhookCreateResponse) Reset() {
 	*x = IncomingWebhookCreateResponse{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1198,7 +1382,7 @@ func (x *IncomingWebhookCreateResponse) String() string {
 func (*IncomingWebhookCreateResponse) ProtoMessage() {}
 
 func (x *IncomingWebhookCreateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[15]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1211,7 +1395,7 @@ func (x *IncomingWebhookCreateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhookCreateResponse.ProtoReflect.Descriptor instead.
 func (*IncomingWebhookCreateResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{15}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *IncomingWebhookCreateResponse) GetWebhook() *IncomingWebhook {
@@ -1233,7 +1417,7 @@ type IncomingWebhookEnableRequest struct {
 
 func (x *IncomingWebhookEnableRequest) Reset() {
 	*x = IncomingWebhookEnableRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1245,7 +1429,7 @@ func (x *IncomingWebhookEnableRequest) String() string {
 func (*IncomingWebhookEnableRequest) ProtoMessage() {}
 
 func (x *IncomingWebhookEnableRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[16]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1258,7 +1442,7 @@ func (x *IncomingWebhookEnableRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhookEnableRequest.ProtoReflect.Descriptor instead.
 func (*IncomingWebhookEnableRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{16}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *IncomingWebhookEnableRequest) GetWorkspaceId() string {
@@ -1297,13 +1481,14 @@ type IncomingWebhookPostRequest struct {
 	Text            string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
 	ThreadTimestamp string                 `protobuf:"bytes,5,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
 	IdempotencyKey  string                 `protobuf:"bytes,6,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	Blocks          string                 `protobuf:"bytes,7,opt,name=blocks,proto3" json:"blocks,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
 
 func (x *IncomingWebhookPostRequest) Reset() {
 	*x = IncomingWebhookPostRequest{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1315,7 +1500,7 @@ func (x *IncomingWebhookPostRequest) String() string {
 func (*IncomingWebhookPostRequest) ProtoMessage() {}
 
 func (x *IncomingWebhookPostRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[17]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1328,7 +1513,7 @@ func (x *IncomingWebhookPostRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhookPostRequest.ProtoReflect.Descriptor instead.
 func (*IncomingWebhookPostRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{17}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *IncomingWebhookPostRequest) GetWorkspaceId() string {
@@ -1373,6 +1558,13 @@ func (x *IncomingWebhookPostRequest) GetIdempotencyKey() string {
 	return ""
 }
 
+func (x *IncomingWebhookPostRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
 type IncomingWebhookMutationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -1382,7 +1574,7 @@ type IncomingWebhookMutationResponse struct {
 
 func (x *IncomingWebhookMutationResponse) Reset() {
 	*x = IncomingWebhookMutationResponse{}
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1394,7 +1586,7 @@ func (x *IncomingWebhookMutationResponse) String() string {
 func (*IncomingWebhookMutationResponse) ProtoMessage() {}
 
 func (x *IncomingWebhookMutationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[18]
+	mi := &file_sameoldchat_chat_v1_messages_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1407,7 +1599,7 @@ func (x *IncomingWebhookMutationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IncomingWebhookMutationResponse.ProtoReflect.Descriptor instead.
 func (*IncomingWebhookMutationResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{18}
+	return file_sameoldchat_chat_v1_messages_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *IncomingWebhookMutationResponse) GetOk() bool {
@@ -1421,7 +1613,7 @@ var File_sameoldchat_chat_v1_messages_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/messages.proto\x12\x13sameoldchat.chat.v1\"\xfb\x02\n" +
+	"\"sameoldchat/chat/v1/messages.proto\x12\x13sameoldchat.chat.v1\"\x93\x03\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
@@ -1432,7 +1624,9 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\tR\tcreatedAt\x12\x18\n" +
 	"\adeleted\x18\b \x01(\bR\adeleted\x12C\n" +
-	"\aunfurls\x18\t \x03(\v2).sameoldchat.chat.v1.Message.UnfurlsEntryR\aunfurls\x1a:\n" +
+	"\aunfurls\x18\t \x03(\v2).sameoldchat.chat.v1.Message.UnfurlsEntryR\aunfurls\x12\x16\n" +
+	"\x06blocks\x18\n" +
+	" \x01(\tR\x06blocks\x1a:\n" +
 	"\fUnfurlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xda\x01\n" +
@@ -1442,7 +1636,15 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12)\n" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xd0\x01\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xfc\x01\n" +
+	"\x15PostWithBlocksRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
+	"\x04text\x18\x04 \x01(\tR\x04text\x12\x16\n" +
+	"\x06blocks\x18\x05 \x01(\tR\x06blocks\x12)\n" +
+	"\x10thread_timestamp\x18\x06 \x01(\tR\x0fthreadTimestamp\x12'\n" +
+	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\"\xd0\x01\n" +
 	"\x10EphemeralMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12\x1b\n" +
@@ -1461,7 +1663,14 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x12\n" +
-	"\x04text\x18\x05 \x01(\tR\x04text\"\x99\x02\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\"\xc8\x01\n" +
+	"\x17UpdateWithBlocksRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1c\n" +
+	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12\x16\n" +
+	"\x06blocks\x18\x06 \x01(\tR\x06blocks\"\x99\x02\n" +
 	"\rUnfurlRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -1530,20 +1739,24 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"webhook_id\x18\x03 \x01(\tR\twebhookId\x12\x18\n" +
-	"\aenabled\x18\x04 \x01(\bR\aenabled\"\xd6\x01\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\"\xee\x01\n" +
 	"\x1aIncomingWebhookPostRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12\x16\n" +
 	"\x06secret\x18\x03 \x01(\tR\x06secret\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12)\n" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"1\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
+	"\x06blocks\x18\a \x01(\tR\x06blocks\"1\n" +
 	"\x1fIncomingWebhookMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xe8\b\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\xa4\n" +
+	"\n" +
 	"\x0fMessagesService\x12F\n" +
-	"\x04Post\x12 .sameoldchat.chat.v1.PostRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12a\n" +
+	"\x04Post\x12 .sameoldchat.chat.v1.PostRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12Z\n" +
+	"\x0ePostWithBlocks\x12*.sameoldchat.chat.v1.PostWithBlocksRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12a\n" +
 	"\rPostEphemeral\x12).sameoldchat.chat.v1.PostEphemeralRequest\x1a%.sameoldchat.chat.v1.EphemeralMessage\x12J\n" +
-	"\x06Update\x12\".sameoldchat.chat.v1.UpdateRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12J\n" +
+	"\x06Update\x12\".sameoldchat.chat.v1.UpdateRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12^\n" +
+	"\x10UpdateWithBlocks\x12,.sameoldchat.chat.v1.UpdateWithBlocksRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12J\n" +
 	"\x06Unfurl\x12\".sameoldchat.chat.v1.UnfurlRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12J\n" +
 	"\x06Delete\x12\".sameoldchat.chat.v1.DeleteRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12Z\n" +
 	"\tPermalink\x12%.sameoldchat.chat.v1.PermalinkRequest\x1a&.sameoldchat.chat.v1.PermalinkResponse\x12P\n" +
@@ -1566,61 +1779,67 @@ func file_sameoldchat_chat_v1_messages_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_messages_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_sameoldchat_chat_v1_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
 var file_sameoldchat_chat_v1_messages_proto_goTypes = []any{
 	(*Message)(nil),                         // 0: sameoldchat.chat.v1.Message
 	(*PostRequest)(nil),                     // 1: sameoldchat.chat.v1.PostRequest
-	(*EphemeralMessage)(nil),                // 2: sameoldchat.chat.v1.EphemeralMessage
-	(*PostEphemeralRequest)(nil),            // 3: sameoldchat.chat.v1.PostEphemeralRequest
-	(*UpdateRequest)(nil),                   // 4: sameoldchat.chat.v1.UpdateRequest
-	(*UnfurlRequest)(nil),                   // 5: sameoldchat.chat.v1.UnfurlRequest
-	(*DeleteRequest)(nil),                   // 6: sameoldchat.chat.v1.DeleteRequest
-	(*PermalinkRequest)(nil),                // 7: sameoldchat.chat.v1.PermalinkRequest
-	(*PermalinkResponse)(nil),               // 8: sameoldchat.chat.v1.PermalinkResponse
-	(*MessagePage)(nil),                     // 9: sameoldchat.chat.v1.MessagePage
-	(*HistoryRequest)(nil),                  // 10: sameoldchat.chat.v1.HistoryRequest
-	(*RepliesRequest)(nil),                  // 11: sameoldchat.chat.v1.RepliesRequest
-	(*SearchRequest)(nil),                   // 12: sameoldchat.chat.v1.SearchRequest
-	(*IncomingWebhookCreateRequest)(nil),    // 13: sameoldchat.chat.v1.IncomingWebhookCreateRequest
-	(*IncomingWebhook)(nil),                 // 14: sameoldchat.chat.v1.IncomingWebhook
-	(*IncomingWebhookCreateResponse)(nil),   // 15: sameoldchat.chat.v1.IncomingWebhookCreateResponse
-	(*IncomingWebhookEnableRequest)(nil),    // 16: sameoldchat.chat.v1.IncomingWebhookEnableRequest
-	(*IncomingWebhookPostRequest)(nil),      // 17: sameoldchat.chat.v1.IncomingWebhookPostRequest
-	(*IncomingWebhookMutationResponse)(nil), // 18: sameoldchat.chat.v1.IncomingWebhookMutationResponse
-	nil,                                     // 19: sameoldchat.chat.v1.Message.UnfurlsEntry
-	nil,                                     // 20: sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
+	(*PostWithBlocksRequest)(nil),           // 2: sameoldchat.chat.v1.PostWithBlocksRequest
+	(*EphemeralMessage)(nil),                // 3: sameoldchat.chat.v1.EphemeralMessage
+	(*PostEphemeralRequest)(nil),            // 4: sameoldchat.chat.v1.PostEphemeralRequest
+	(*UpdateRequest)(nil),                   // 5: sameoldchat.chat.v1.UpdateRequest
+	(*UpdateWithBlocksRequest)(nil),         // 6: sameoldchat.chat.v1.UpdateWithBlocksRequest
+	(*UnfurlRequest)(nil),                   // 7: sameoldchat.chat.v1.UnfurlRequest
+	(*DeleteRequest)(nil),                   // 8: sameoldchat.chat.v1.DeleteRequest
+	(*PermalinkRequest)(nil),                // 9: sameoldchat.chat.v1.PermalinkRequest
+	(*PermalinkResponse)(nil),               // 10: sameoldchat.chat.v1.PermalinkResponse
+	(*MessagePage)(nil),                     // 11: sameoldchat.chat.v1.MessagePage
+	(*HistoryRequest)(nil),                  // 12: sameoldchat.chat.v1.HistoryRequest
+	(*RepliesRequest)(nil),                  // 13: sameoldchat.chat.v1.RepliesRequest
+	(*SearchRequest)(nil),                   // 14: sameoldchat.chat.v1.SearchRequest
+	(*IncomingWebhookCreateRequest)(nil),    // 15: sameoldchat.chat.v1.IncomingWebhookCreateRequest
+	(*IncomingWebhook)(nil),                 // 16: sameoldchat.chat.v1.IncomingWebhook
+	(*IncomingWebhookCreateResponse)(nil),   // 17: sameoldchat.chat.v1.IncomingWebhookCreateResponse
+	(*IncomingWebhookEnableRequest)(nil),    // 18: sameoldchat.chat.v1.IncomingWebhookEnableRequest
+	(*IncomingWebhookPostRequest)(nil),      // 19: sameoldchat.chat.v1.IncomingWebhookPostRequest
+	(*IncomingWebhookMutationResponse)(nil), // 20: sameoldchat.chat.v1.IncomingWebhookMutationResponse
+	nil,                                     // 21: sameoldchat.chat.v1.Message.UnfurlsEntry
+	nil,                                     // 22: sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
 }
 var file_sameoldchat_chat_v1_messages_proto_depIdxs = []int32{
-	19, // 0: sameoldchat.chat.v1.Message.unfurls:type_name -> sameoldchat.chat.v1.Message.UnfurlsEntry
-	20, // 1: sameoldchat.chat.v1.UnfurlRequest.unfurls:type_name -> sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
+	21, // 0: sameoldchat.chat.v1.Message.unfurls:type_name -> sameoldchat.chat.v1.Message.UnfurlsEntry
+	22, // 1: sameoldchat.chat.v1.UnfurlRequest.unfurls:type_name -> sameoldchat.chat.v1.UnfurlRequest.UnfurlsEntry
 	0,  // 2: sameoldchat.chat.v1.MessagePage.messages:type_name -> sameoldchat.chat.v1.Message
-	14, // 3: sameoldchat.chat.v1.IncomingWebhookCreateResponse.webhook:type_name -> sameoldchat.chat.v1.IncomingWebhook
+	16, // 3: sameoldchat.chat.v1.IncomingWebhookCreateResponse.webhook:type_name -> sameoldchat.chat.v1.IncomingWebhook
 	1,  // 4: sameoldchat.chat.v1.MessagesService.Post:input_type -> sameoldchat.chat.v1.PostRequest
-	3,  // 5: sameoldchat.chat.v1.MessagesService.PostEphemeral:input_type -> sameoldchat.chat.v1.PostEphemeralRequest
-	4,  // 6: sameoldchat.chat.v1.MessagesService.Update:input_type -> sameoldchat.chat.v1.UpdateRequest
-	5,  // 7: sameoldchat.chat.v1.MessagesService.Unfurl:input_type -> sameoldchat.chat.v1.UnfurlRequest
-	6,  // 8: sameoldchat.chat.v1.MessagesService.Delete:input_type -> sameoldchat.chat.v1.DeleteRequest
-	7,  // 9: sameoldchat.chat.v1.MessagesService.Permalink:input_type -> sameoldchat.chat.v1.PermalinkRequest
-	10, // 10: sameoldchat.chat.v1.MessagesService.History:input_type -> sameoldchat.chat.v1.HistoryRequest
-	11, // 11: sameoldchat.chat.v1.MessagesService.Replies:input_type -> sameoldchat.chat.v1.RepliesRequest
-	12, // 12: sameoldchat.chat.v1.MessagesService.Search:input_type -> sameoldchat.chat.v1.SearchRequest
-	13, // 13: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:input_type -> sameoldchat.chat.v1.IncomingWebhookCreateRequest
-	16, // 14: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:input_type -> sameoldchat.chat.v1.IncomingWebhookEnableRequest
-	17, // 15: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:input_type -> sameoldchat.chat.v1.IncomingWebhookPostRequest
-	0,  // 16: sameoldchat.chat.v1.MessagesService.Post:output_type -> sameoldchat.chat.v1.Message
-	2,  // 17: sameoldchat.chat.v1.MessagesService.PostEphemeral:output_type -> sameoldchat.chat.v1.EphemeralMessage
-	0,  // 18: sameoldchat.chat.v1.MessagesService.Update:output_type -> sameoldchat.chat.v1.Message
-	0,  // 19: sameoldchat.chat.v1.MessagesService.Unfurl:output_type -> sameoldchat.chat.v1.Message
-	0,  // 20: sameoldchat.chat.v1.MessagesService.Delete:output_type -> sameoldchat.chat.v1.Message
-	8,  // 21: sameoldchat.chat.v1.MessagesService.Permalink:output_type -> sameoldchat.chat.v1.PermalinkResponse
-	9,  // 22: sameoldchat.chat.v1.MessagesService.History:output_type -> sameoldchat.chat.v1.MessagePage
-	9,  // 23: sameoldchat.chat.v1.MessagesService.Replies:output_type -> sameoldchat.chat.v1.MessagePage
-	9,  // 24: sameoldchat.chat.v1.MessagesService.Search:output_type -> sameoldchat.chat.v1.MessagePage
-	15, // 25: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:output_type -> sameoldchat.chat.v1.IncomingWebhookCreateResponse
-	18, // 26: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:output_type -> sameoldchat.chat.v1.IncomingWebhookMutationResponse
-	0,  // 27: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:output_type -> sameoldchat.chat.v1.Message
-	16, // [16:28] is the sub-list for method output_type
-	4,  // [4:16] is the sub-list for method input_type
+	2,  // 5: sameoldchat.chat.v1.MessagesService.PostWithBlocks:input_type -> sameoldchat.chat.v1.PostWithBlocksRequest
+	4,  // 6: sameoldchat.chat.v1.MessagesService.PostEphemeral:input_type -> sameoldchat.chat.v1.PostEphemeralRequest
+	5,  // 7: sameoldchat.chat.v1.MessagesService.Update:input_type -> sameoldchat.chat.v1.UpdateRequest
+	6,  // 8: sameoldchat.chat.v1.MessagesService.UpdateWithBlocks:input_type -> sameoldchat.chat.v1.UpdateWithBlocksRequest
+	7,  // 9: sameoldchat.chat.v1.MessagesService.Unfurl:input_type -> sameoldchat.chat.v1.UnfurlRequest
+	8,  // 10: sameoldchat.chat.v1.MessagesService.Delete:input_type -> sameoldchat.chat.v1.DeleteRequest
+	9,  // 11: sameoldchat.chat.v1.MessagesService.Permalink:input_type -> sameoldchat.chat.v1.PermalinkRequest
+	12, // 12: sameoldchat.chat.v1.MessagesService.History:input_type -> sameoldchat.chat.v1.HistoryRequest
+	13, // 13: sameoldchat.chat.v1.MessagesService.Replies:input_type -> sameoldchat.chat.v1.RepliesRequest
+	14, // 14: sameoldchat.chat.v1.MessagesService.Search:input_type -> sameoldchat.chat.v1.SearchRequest
+	15, // 15: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:input_type -> sameoldchat.chat.v1.IncomingWebhookCreateRequest
+	18, // 16: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:input_type -> sameoldchat.chat.v1.IncomingWebhookEnableRequest
+	19, // 17: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:input_type -> sameoldchat.chat.v1.IncomingWebhookPostRequest
+	0,  // 18: sameoldchat.chat.v1.MessagesService.Post:output_type -> sameoldchat.chat.v1.Message
+	0,  // 19: sameoldchat.chat.v1.MessagesService.PostWithBlocks:output_type -> sameoldchat.chat.v1.Message
+	3,  // 20: sameoldchat.chat.v1.MessagesService.PostEphemeral:output_type -> sameoldchat.chat.v1.EphemeralMessage
+	0,  // 21: sameoldchat.chat.v1.MessagesService.Update:output_type -> sameoldchat.chat.v1.Message
+	0,  // 22: sameoldchat.chat.v1.MessagesService.UpdateWithBlocks:output_type -> sameoldchat.chat.v1.Message
+	0,  // 23: sameoldchat.chat.v1.MessagesService.Unfurl:output_type -> sameoldchat.chat.v1.Message
+	0,  // 24: sameoldchat.chat.v1.MessagesService.Delete:output_type -> sameoldchat.chat.v1.Message
+	10, // 25: sameoldchat.chat.v1.MessagesService.Permalink:output_type -> sameoldchat.chat.v1.PermalinkResponse
+	11, // 26: sameoldchat.chat.v1.MessagesService.History:output_type -> sameoldchat.chat.v1.MessagePage
+	11, // 27: sameoldchat.chat.v1.MessagesService.Replies:output_type -> sameoldchat.chat.v1.MessagePage
+	11, // 28: sameoldchat.chat.v1.MessagesService.Search:output_type -> sameoldchat.chat.v1.MessagePage
+	17, // 29: sameoldchat.chat.v1.MessagesService.AdminCreateIncomingWebhook:output_type -> sameoldchat.chat.v1.IncomingWebhookCreateResponse
+	20, // 30: sameoldchat.chat.v1.MessagesService.AdminSetIncomingWebhookEnabled:output_type -> sameoldchat.chat.v1.IncomingWebhookMutationResponse
+	0,  // 31: sameoldchat.chat.v1.MessagesService.PostIncomingWebhook:output_type -> sameoldchat.chat.v1.Message
+	18, // [18:32] is the sub-list for method output_type
+	4,  // [4:18] is the sub-list for method input_type
 	4,  // [4:4] is the sub-list for extension type_name
 	4,  // [4:4] is the sub-list for extension extendee
 	0,  // [0:4] is the sub-list for field type_name
@@ -1637,7 +1856,7 @@ func file_sameoldchat_chat_v1_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_messages_proto_rawDesc), len(file_sameoldchat_chat_v1_messages_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   21,
+			NumMessages:   23,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
