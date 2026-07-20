@@ -217,7 +217,7 @@ func TestWebSessionRevocationClearsCookieAndDurablyInvalidates(t *testing.T) {
 	addBrowserCookies(req)
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
-	if res.Code != http.StatusSeeOther || res.Header().Get("Location") != "/" {
+	if res.Code != http.StatusSeeOther || res.Header().Get("Location") != "/signed-out" {
 		t.Fatalf("status=%d location=%q", res.Code, res.Header().Get("Location"))
 	}
 	if !strings.Contains(res.Header().Get("Set-Cookie"), "Max-Age=0") {

@@ -97,6 +97,7 @@ type messagePage struct {
 }
 
 func (h Handler) Register(mux *http.ServeMux) {
+	mux.HandleFunc("GET /signed-out", signedOut)
 	if h.Login != nil {
 		h.Login.Register(mux)
 		mux.HandleFunc("GET /app/admin/auth", h.authAdminPage)
@@ -234,13 +235,10 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
-	redirectURL := "/"
+	redirectURL := "/signed-out"
+	var logoutErr error
 	if h.Login != nil {
-		redirectURL, err = h.Login.logoutRedirectURL(r.Context(), sessionCookie.Value)
-		if err != nil {
-			http.Error(w, "session revocation unavailable", http.StatusServiceUnavailable)
-			return
-		}
+		redirectURL, logoutErr = h.Login.logoutRedirectURL(r.Context(), sessionCookie.Value)
 	}
 	if err := h.SessionRevoker.RevokeSession(r.Context(), sessionCookie.Value); err != nil {
 		status := http.StatusServiceUnavailable
@@ -253,6 +251,10 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	cookie := auth.SessionCookie("", -1, h.CookieDomain)
 	cookie.Expires = time.Unix(1, 0).UTC()
 	http.SetCookie(w, cookie)
+	w.Header().Set("Cache-Control", "no-store")
+	if h.Login != nil && logoutErr != nil {
+		redirectURL = "/signed-out?global=failed"
+	}
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 

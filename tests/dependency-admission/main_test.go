@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -80,11 +82,35 @@ func TestImmutableChecksumAcceptsGitAndDigestChecksums(t *testing.T) {
 	for _, value := range []string{
 		"git:0123456789012345678901234567890123456789",
 		"sha256:0123456789012345678901234567890123456789012345678901234567890123",
+		"sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==",
 		"h1:0123456789+/=",
 	} {
 		if !immutableChecksum(value) {
 			t.Errorf("immutableChecksum(%q) = false", value)
 		}
+	}
+}
+
+func TestDirectNPMPackagesRequiresExactResolvedDependencies(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "package-lock.json")
+	body := `{"packages":{"":{"dependencies":{"runtime":"2.0.0"},"devDependencies":{"test":"1.0.0"}},"node_modules/runtime":{"version":"2.0.0","integrity":"sha512-cnVudGltZQ=="},"node_modules/test":{"version":"1.0.0","integrity":"sha512-dGVzdA=="}}}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	packages, err := directNPMPackages(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(packages) != 2 || packages[0].name != "runtime" || packages[1].name != "test" {
+		t.Fatalf("directNPMPackages() = %#v", packages)
+	}
+
+	body = strings.Replace(body, `"test":"1.0.0"`, `"test":"^1.0.0"`, 1)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := directNPMPackages(path); err == nil || !strings.Contains(err.Error(), "mutable version constraint") {
+		t.Fatalf("directNPMPackages() error = %v, want mutable constraint error", err)
 	}
 }
 

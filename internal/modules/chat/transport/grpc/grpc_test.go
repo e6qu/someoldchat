@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -26,10 +27,13 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
@@ -234,12 +238,22 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := remote.GetExternalIdentity(ctx, "T1", "oidc", "missing-subject"); !errors.Is(err, storepkg.ErrNotFound) || status.Code(err) != codes.NotFound {
+		t.Fatalf("missing external identity error=%v, want domain not-found and gRPC NotFound", err)
+	}
+	identity := domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "remote-subject", UserID: "U1"}
+	if err := remote.CreateExternalIdentity(ctx, identity); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.CreateExternalIdentity(ctx, identity); !errors.Is(err, storepkg.ErrAlreadyExists) || status.Code(err) != codes.AlreadyExists {
+		t.Fatalf("duplicate external identity error=%v, want domain already-exists and gRPC AlreadyExists", err)
+	}
 	createdUser, err := remote.AdminCreateUser(ctx, "T1", "U1", "new@example.com", "New User", domain.WorkspaceRoleMember)
 	if err != nil || createdUser.Email != "new@example.com" || createdUser.RealName != "New User" {
 		t.Fatalf("created user=%+v err=%v", createdUser, err)
 	}
-	if _, err := remote.AdminCreateUser(ctx, "T1", "U1", "NEW@example.com", "Duplicate", domain.WorkspaceRoleMember); err == nil {
-		t.Fatal("duplicate manual user was accepted")
+	if _, err := remote.AdminCreateUser(ctx, "T1", "U1", "NEW@example.com", "Duplicate", domain.WorkspaceRoleMember); !errors.Is(err, storepkg.ErrAlreadyExists) {
+		t.Fatalf("duplicate manual user error=%v, want domain already-exists", err)
 	}
 	adminUsers, err := remote.AdminListUsers(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
 	if err != nil || len(adminUsers.Users) != 3 {

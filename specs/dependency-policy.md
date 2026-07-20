@@ -135,9 +135,12 @@ is clearer and safer.
 
 Each release MUST include or reference:
 
-- an SPDX or CycloneDX SBOM;
+- an SPDX or CycloneDX SBOM distributed separately from architecture-specific
+  OCI image tags;
 - exact source and image digests;
 - dependency-age and vulnerability reports;
-- max-level container build provenance and an SPDX SBOM attestation;
-- a signed registry attestation for each published architecture image; and
+- signed provenance and SBOM attestations bound to each architecture image
+  digest;
+- verification that published architecture tags are direct image manifests
+  and the generic tag is exactly the Linux amd64 and Linux arm64 image index;
 - the pinned Slack compatibility-source inventory.

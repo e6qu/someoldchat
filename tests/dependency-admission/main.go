@@ -1,11 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,6 +20,7 @@ var (
 	sha256DigestPattern  = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 	gitRevisionPattern   = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	moduleSumPattern     = regexp.MustCompile(`^h1:[A-Za-z0-9+/]+={0,2}$`)
+	sriChecksumPattern   = regexp.MustCompile(`^sha512-[A-Za-z0-9+/]+={0,2}$`)
 	sha256HexPattern     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	stableVersionPattern = regexp.MustCompile(`(?i)(?:[-.]alpha(?:[-.]|$)|[-.]beta(?:[-.]|$)|[-.]rc(?:[-.]|$)|[-.]dev(?:[-.]|$))`)
 )
@@ -146,7 +149,7 @@ func immutableRevision(value string) bool {
 }
 
 func immutableChecksum(value string) bool {
-	if moduleSumPattern.MatchString(value) || sha256DigestPattern.MatchString(value) {
+	if moduleSumPattern.MatchString(value) || sriChecksumPattern.MatchString(value) || sha256DigestPattern.MatchString(value) {
 		return true
 	}
 	if strings.HasPrefix(value, "git:") {
@@ -181,6 +184,19 @@ func validateRepository(root string, value inventory) error {
 		}
 		if item.Kind != "go-module" || item.Version != module.version {
 			return fmt.Errorf("dependency inventory entry for Go module %q does not match go.mod version %q", module.path, module.version)
+		}
+	}
+	npmModules, err := directNPMPackages(root + "/tests/browser/package-lock.json")
+	if err != nil {
+		return err
+	}
+	for _, module := range npmModules {
+		item, ok := byID["npm/"+module.name]
+		if !ok {
+			return fmt.Errorf("direct npm package %q is absent from dependency inventory", module.name)
+		}
+		if item.Kind != "npm-package" || item.Version != module.version || item.Checksum != module.integrity {
+			return fmt.Errorf("dependency inventory entry for npm package %q does not match package-lock.json version %q and integrity %q", module.name, module.version, module.integrity)
 		}
 	}
 	workflowFiles, err := workflowPaths(root)
@@ -238,6 +254,54 @@ func validateGoModuleSums(goModBody, goSumBody string) error {
 type goModule struct {
 	path    string
 	version string
+}
+
+type npmPackage struct {
+	name      string
+	version   string
+	integrity string
+}
+
+func directNPMPackages(path string) ([]npmPackage, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read npm lockfile: %w", err)
+	}
+	var lock struct {
+		Packages map[string]struct {
+			Dependencies    map[string]string `json:"dependencies"`
+			DevDependencies map[string]string `json:"devDependencies"`
+			Version         string            `json:"version"`
+			Integrity       string            `json:"integrity"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal(body, &lock); err != nil {
+		return nil, fmt.Errorf("decode npm lockfile: %w", err)
+	}
+	root, ok := lock.Packages[""]
+	if !ok {
+		return nil, errors.New("npm lockfile is missing its root package")
+	}
+	direct := make(map[string]string, len(root.Dependencies)+len(root.DevDependencies))
+	for name, version := range root.Dependencies {
+		direct[name] = version
+	}
+	for name, version := range root.DevDependencies {
+		direct[name] = version
+	}
+	modules := make([]npmPackage, 0, len(direct))
+	for name, requestedVersion := range direct {
+		resolved, ok := lock.Packages["node_modules/"+name]
+		if !ok || resolved.Version == "" || resolved.Integrity == "" {
+			return nil, fmt.Errorf("direct npm package %q has no resolved version and integrity", name)
+		}
+		if requestedVersion != resolved.Version {
+			return nil, fmt.Errorf("direct npm package %q uses mutable version constraint %q instead of exact version %q", name, requestedVersion, resolved.Version)
+		}
+		modules = append(modules, npmPackage{name: name, version: resolved.Version, integrity: resolved.Integrity})
+	}
+	slices.SortFunc(modules, func(left, right npmPackage) int { return strings.Compare(left.name, right.name) })
+	return modules, nil
 }
 
 func directGoModules(body string) []goModule {
@@ -331,12 +395,6 @@ func validateWorkflowPins(root string, paths []string) error {
 		"java-version: '17.0.15'",
 		"deno-version: 2.8.1",
 		"version: 1.71.0",
-		"provenance: mode=max",
-		"sbom: true",
-		"push-to-registry: true",
-		"create-storage-record: false",
-		"subject-digest:",
-		"sha=${GITHUB_SHA}",
 		"dqlite-tools-v3=3.0.4~noble1",
 		"libdqlite-dev=1.18.3~noble1",
 		"libdqlite1.18=1.18.7~noble1",

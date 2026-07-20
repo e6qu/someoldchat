@@ -39,7 +39,7 @@ test-dqlite:
 
 test-postgres:
 	test -n "$(SAMEOLDCHAT_POSTGRES_DSN)"
-	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification
+	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification ./internal/store/postgres ./internal/web
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...
@@ -87,6 +87,7 @@ fmt-check:
 workflow-check: dependency-check
 
 container-check: dependency-check
+	./scripts/check-container-publication.sh
 
 dependency-check:
 	GOTOOLCHAIN=local GOCACHE=$(GOCACHE) go list -mod=readonly all >/dev/null

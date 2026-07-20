@@ -46,6 +46,73 @@ type Remote struct {
 	rtm           chatv1.RTMServiceClient
 }
 
+// mappedClientConn preserves the domain error contract when an implementation
+// is moved behind gRPC. The server maps store invariants to canonical status
+// codes; the client maps those codes back to errors that callers can inspect
+// with errors.Is while retaining the original gRPC status.
+type mappedClientConn struct {
+	grpc.ClientConnInterface
+}
+
+func (c mappedClientConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
+	return mapRemoteError(c.ClientConnInterface.Invoke(ctx, method, args, reply, opts...))
+}
+
+func (c mappedClientConn) NewStream(ctx context.Context, descriptor *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	stream, err := c.ClientConnInterface.NewStream(ctx, descriptor, method, opts...)
+	if err != nil {
+		return nil, mapRemoteError(err)
+	}
+	return mappedClientStream{ClientStream: stream}, nil
+}
+
+type mappedClientStream struct {
+	grpc.ClientStream
+}
+
+func (s mappedClientStream) SendMsg(message any) error {
+	return mapRemoteError(s.ClientStream.SendMsg(message))
+}
+
+func (s mappedClientStream) RecvMsg(message any) error {
+	return mapRemoteError(s.ClientStream.RecvMsg(message))
+}
+
+type remoteDomainError struct {
+	status *status.Status
+	cause  error
+}
+
+func (e remoteDomainError) Error() string              { return e.status.Err().Error() }
+func (e remoteDomainError) Unwrap() error              { return e.cause }
+func (e remoteDomainError) GRPCStatus() *status.Status { return e.status }
+
+func mapRemoteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	remoteStatus, ok := status.FromError(err)
+	if !ok {
+		return err
+	}
+	var cause error
+	switch remoteStatus.Code() {
+	case codes.Canceled:
+		cause = context.Canceled
+	case codes.DeadlineExceeded:
+		cause = context.DeadlineExceeded
+	case codes.NotFound:
+		cause = store.ErrNotFound
+	case codes.AlreadyExists:
+		cause = store.ErrAlreadyExists
+	case codes.Aborted:
+		cause = store.ErrConflict
+	default:
+		return err
+	}
+	return remoteDomainError{status: remoteStatus, cause: cause}
+}
+
 var _ chatapi.Service = Remote{}
 var _ auth.TokenStore = Remote{}
 var _ auth.AppTokenStore = Remote{}
@@ -57,6 +124,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 	if conn == nil {
 		return Remote{}, errors.New("chat gRPC client requires a connection")
 	}
+	conn = mappedClientConn{ClientConnInterface: conn}
 	return Remote{
 		auth:          chatv1.NewAuthServiceClient(conn),
 		chat:          chatv1.NewChatServiceClient(conn),
@@ -4367,7 +4435,30 @@ func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsR
 }
 
 func mapError(err error) error {
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidPresence) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, domain.ErrInvalidCursor) {
+	if errors.Is(err, context.Canceled) {
+		return status.Error(codes.Canceled, err.Error())
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return status.Error(codes.DeadlineExceeded, err.Error())
+	}
+	if matchesAny(err,
+		service.ErrInvalidMessage, service.ErrInvalidTimestamp,
+		service.ErrInvalidConversation, service.ErrInvalidWorkspace,
+		service.ErrInvalidConversationPrefs, service.ErrInvalidReaction,
+		service.ErrInvalidFile, service.ErrInvalidSearch,
+		service.ErrInvalidProfile, service.ErrInvalidPresence,
+		service.ErrInvalidSnooze, service.ErrInvalidReminder,
+		service.ErrInvalidCall, service.ErrInvalidUserGroup,
+		service.ErrInvalidEphemeral, service.ErrInvalidAccessLog,
+		service.ErrInvalidEmoji, service.ErrInvalidRemoteFile,
+		service.ErrInvalidInviteRequest, service.ErrInvalidAppApproval,
+		service.ErrInvalidView, service.ErrInvalidWorkflowStep,
+		service.ErrInvalidDialog, service.ErrInvalidBot,
+		service.ErrInvalidMigration, service.ErrInvalidOAuth,
+		service.ErrInvalidOAuthClient, service.ErrInvalidIntegrationLogs,
+		store.ErrInvalidConversationType, store.ErrInvalidInviteRequest,
+		store.ErrInvalidAppApproval, domain.ErrInvalidCursor,
+	) {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
@@ -4379,8 +4470,11 @@ func mapError(err error) error {
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return status.Error(codes.AlreadyExists, err.Error())
 	}
-	if errors.Is(err, store.ErrConflict) {
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) {
 		return status.Error(codes.Aborted, err.Error())
+	}
+	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
+		return status.Error(codes.ResourceExhausted, err.Error())
 	}
 	if errors.Is(err, service.ErrMessageNotOwned) {
 		return status.Error(codes.PermissionDenied, err.Error())
@@ -4392,6 +4486,15 @@ func mapError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	}
 	return status.Error(codes.Unavailable, err.Error())
+}
+
+func matchesAny(err error, targets ...error) bool {
+	for _, target := range targets {
+		if errors.Is(err, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func encodeProtoUser(value domain.User) *chatv1.User {

@@ -54,4 +54,13 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
   await expect(page.locator('.channel-title')).toHaveText('# Cdev');
   await page.getByRole('link', { name: 'Members' }).first().click();
   await expect(page.getByRole('heading', { name: 'Workspace members' })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL('/signed-out');
+  await expect(page.getByRole('heading', { name: 'You’re signed out' })).toBeVisible();
+  await page.reload();
+  await expect(page).toHaveURL('/signed-out');
+  const protectedResponse = await page.goto('/app');
+  await expect(protectedResponse.status()).toBe(401);
 });

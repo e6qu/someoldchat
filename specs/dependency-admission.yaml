@@ -239,7 +239,7 @@ entries:
     checksum: git:f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6
     provenance: github-commit
     license: MIT
-    purpose: signed image provenance attestation in release CI
+    purpose: signed architecture provenance and SBOM attestations in release CI
     runtime: false
   - id: action/actions/setup-go
     kind: github-action
@@ -370,4 +370,17 @@ entries:
     provenance: github-commit
     license: MIT
     purpose: container publication in CI
+    runtime: false
+  - id: npm/@playwright/test
+    kind: npm-package
+    canonical: "@playwright/test"
+    source: https://github.com/microsoft/playwright
+    version: 1.61.1
+    revision: 39e3553a4f283a41134d75d7e404484bd9e6865a
+    published_at: 2026-06-23T19:49:12Z
+    evidence: https://registry.npmjs.org/@playwright%2ftest/1.61.1
+    checksum: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==
+    provenance: npm-registry-and-vcs-tag
+    license: Apache-2.0
+    purpose: Chromium browser qualification
     runtime: false
