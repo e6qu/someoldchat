@@ -611,16 +611,16 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", Text: "", Blocks: `[{"type":"divider"}]`, PostAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second), CreatedAt: time.Now().UTC().Truncate(time.Second)}
+	value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", Text: "", Blocks: `[{"type":"divider"}]`, Attachments: `[{"text":"attachment"}]`, PostAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second), CreatedAt: time.Now().UTC().Truncate(time.Second)}
 	if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: "scheduled-1", WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ListScheduledMessages(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Items) != 1 || page.Items[0].ID != id || page.Items[0].Blocks != value.Blocks {
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != id || page.Items[0].Blocks != value.Blocks || page.Items[0].Attachments != value.Attachments {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 	claimed, err := s.ClaimScheduledMessages(ctx, "T1", "worker-1", 10, time.Minute)
-	if err != nil || len(claimed) != 1 || claimed[0].ID != id || claimed[0].Blocks != value.Blocks {
+	if err != nil || len(claimed) != 1 || claimed[0].ID != id || claimed[0].Blocks != value.Blocks || claimed[0].Attachments != value.Attachments {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
 	if err := s.MarkScheduledMessageDelivered(ctx, "worker-1", id); err != nil {
