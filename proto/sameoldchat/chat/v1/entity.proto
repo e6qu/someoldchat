@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message EntityDetailsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+  string metadata = 4;
+  bool user_auth_required = 5;
+  string user_auth_url = 6;
+  string error = 7;
+}
+
+message EntityCommentsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+  string comments = 4;
+  string cursor = 5;
+  bool can_post_comment = 6;
+  string delete_action_id = 7;
+  bool user_auth_required = 8;
+  string user_auth_url = 9;
+  string error = 10;
+}
+
+message EntityCommentActionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+  string comment = 4;
+  string error = 5;
+}
+
+message EntityResponse {
+  bool ok = 1;
+}
+
+service EntityService {
+  rpc PresentDetails(EntityDetailsRequest) returns (EntityResponse);
+  rpc PresentComments(EntityCommentsRequest) returns (EntityResponse);
+  rpc AcknowledgeCommentAction(EntityCommentActionRequest) returns (EntityResponse);
+}

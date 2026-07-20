@@ -148,6 +148,39 @@ func TestListDownloadStreamsCSVAndPreservesArchiveOption(t *testing.T) {
 	}
 }
 
+func TestEntityMethodsAcceptStructuredWorkObjectPayloads(t *testing.T) {
+	handler := testHandler()
+	post := func(path string, values url.Values) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	if result := post("/api/entity.presentDetails", url.Values{
+		"trigger_id":         {"details-trigger"},
+		"metadata":           {`{"entity_type":"slack#/entities/file"}`},
+		"user_auth_required": {"true"},
+		"user_auth_url":      {"https://example.test/login"},
+	}); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("details status=%d body=%s", result.Code, result.Body)
+	}
+	if result := post("/api/entity.presentComments", url.Values{
+		"trigger_id":       {"comments-trigger"},
+		"comments":         {`[{"id":"comment-1","can_delete":true}]`},
+		"delete_action_id": {"delete-comment"},
+	}); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("comments status=%d body=%s", result.Code, result.Body)
+	}
+	if result := post("/api/entity.acknowledgeCommentAction", url.Values{
+		"trigger_id": {"ack-trigger"},
+		"comment":    {`{"id":"comment-1","value":"saved"}`},
+	}); result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+		t.Fatalf("acknowledgement status=%d body=%s", result.Code, result.Body)
+	}
+}
+
 func TestAdminInviteRequestLifecycle(t *testing.T) {
 	handler, store := testHandlerWithStore()
 	now := time.Now().UTC()

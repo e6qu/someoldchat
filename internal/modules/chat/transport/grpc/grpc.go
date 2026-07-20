@@ -27,6 +27,7 @@ type Remote struct {
 	events        chatv1.EventsServiceClient
 	files         chatv1.FilesServiceClient
 	lists         chatv1.ListsServiceClient
+	entity        chatv1.EntityServiceClient
 	interactions  chatv1.InteractionsServiceClient
 	messages      chatv1.MessagesServiceClient
 	mutations     chatv1.ConversationMutationsServiceClient
@@ -136,6 +137,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		events:        chatv1.NewEventsServiceClient(conn),
 		files:         chatv1.NewFilesServiceClient(conn),
 		lists:         chatv1.NewListsServiceClient(conn),
+		entity:        chatv1.NewEntityServiceClient(conn),
 		interactions:  chatv1.NewInteractionsServiceClient(conn),
 		messages:      chatv1.NewMessagesServiceClient(conn),
 		mutations:     chatv1.NewConversationMutationsServiceClient(conn),
@@ -2338,6 +2340,7 @@ var (
 	_ chatv1.OAuthServiceServer                   = (*Server)(nil)
 	_ chatv1.RTMServiceServer                     = (*Server)(nil)
 	_ chatv1.CanvasesServiceServer                = (*Server)(nil)
+	_ chatv1.EntityServiceServer                  = (*Server)(nil)
 )
 
 func NewServer(implementation chatapi.Service, tokens auth.TokenStore, sessions auth.SessionStore, revoker auth.SessionRevoker) (*Server, error) {
@@ -2395,6 +2398,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterOAuthServiceServer(registrar, server)
 	chatv1.RegisterRTMServiceServer(registrar, server)
 	chatv1.RegisterCanvasesServiceServer(registrar, server)
+	chatv1.RegisterEntityServiceServer(registrar, server)
 	return nil
 }
 
@@ -5951,4 +5955,52 @@ func decodeProtoCall(value *chatv1.Call) (domain.Call, error) {
 		result.EndedAt = time.Unix(value.GetEndedAt(), 0).UTC()
 	}
 	return result, nil
+}
+
+func (r Remote) PresentEntityDetails(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID, metadata string, userAuthRequired bool, userAuthURL, errorPayload string) error {
+	out, err := r.entity.PresentDetails(ctx, &chatv1.EntityDetailsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: triggerID, Metadata: metadata, UserAuthRequired: userAuthRequired, UserAuthUrl: userAuthURL, Error: errorPayload})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "entity details presentation")
+}
+
+func (r Remote) PresentEntityComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID, comments, cursor string, canPostComment bool, deleteActionID string, userAuthRequired bool, userAuthURL, errorPayload string) error {
+	out, err := r.entity.PresentComments(ctx, &chatv1.EntityCommentsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: triggerID, Comments: comments, Cursor: cursor, CanPostComment: canPostComment, DeleteActionId: deleteActionID, UserAuthRequired: userAuthRequired, UserAuthUrl: userAuthURL, Error: errorPayload})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "entity comments presentation")
+}
+
+func (r Remote) AcknowledgeEntityCommentAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID, comment, errorPayload string) error {
+	out, err := r.entity.AcknowledgeCommentAction(ctx, &chatv1.EntityCommentActionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: triggerID, Comment: comment, Error: errorPayload})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "entity comment acknowledgement")
+}
+
+func (s *Server) PresentDetails(ctx context.Context, input *chatv1.EntityDetailsRequest) (*chatv1.EntityResponse, error) {
+	err := s.implementation.PresentEntityDetails(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTriggerId(), input.GetMetadata(), input.GetUserAuthRequired(), input.GetUserAuthUrl(), input.GetError())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.EntityResponse{Ok: true}, nil
+}
+
+func (s *Server) PresentComments(ctx context.Context, input *chatv1.EntityCommentsRequest) (*chatv1.EntityResponse, error) {
+	err := s.implementation.PresentEntityComments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTriggerId(), input.GetComments(), input.GetCursor(), input.GetCanPostComment(), input.GetDeleteActionId(), input.GetUserAuthRequired(), input.GetUserAuthUrl(), input.GetError())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.EntityResponse{Ok: true}, nil
+}
+
+func (s *Server) AcknowledgeCommentAction(ctx context.Context, input *chatv1.EntityCommentActionRequest) (*chatv1.EntityResponse, error) {
+	err := s.implementation.AcknowledgeEntityCommentAction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTriggerId(), input.GetComment(), input.GetError())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.EntityResponse{Ok: true}, nil
 }
