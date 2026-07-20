@@ -707,6 +707,48 @@ assert.equal((await client.apiCall("admin.users.session.invalidate", {
 assert.equal((await client.apiCall("admin.users.session.reset", { user_id: "U2" })).ok, true);
 assert.equal((await client.admin.users.remove({ team_id: "T1", user_id: "U2" })).ok, true);
 
+// files.getUploadURLExternal hands back a file_id before any bytes exist, and
+// the documented flow references the file by that same identifier once
+// files.completeUploadExternal returns. Exercising all three steps through the
+// official client is what distinguishes a registered handler from a working
+// upload.
+const externalUpload = await client.files.getUploadURLExternal({
+	filename: "external-qualification.txt",
+	length: 11,
+});
+assert.equal(externalUpload.ok, true);
+assert.equal(typeof externalUpload.upload_url, "string");
+assert.equal(typeof externalUpload.file_id, "string");
+
+const externalUploadResponse = await fetch(`${externalUpload.upload_url}?token=${token}`, {
+	method: "POST",
+	body: "hello world",
+});
+assert.equal(externalUploadResponse.ok, true);
+
+const completedExternal = await client.files.completeUploadExternal({
+	files: [{ id: externalUpload.file_id, title: "External qualification" }],
+	channel_id: "C1",
+	initial_comment: "external upload",
+});
+assert.equal(completedExternal.ok, true);
+assert.equal(completedExternal.files.length, 1);
+assert.equal(completedExternal.files[0].id, externalUpload.file_id);
+
+const externalInfo = await client.files.info({ file: externalUpload.file_id });
+assert.equal(externalInfo.ok, true);
+assert.equal(externalInfo.file.id, externalUpload.file_id);
+assert.equal(externalInfo.file.title, "External qualification");
+assert.equal(externalInfo.file.size, 11);
+
+// The upload is single-use: completing it again must not mint a second file.
+const repeatedExternal = await client.files.completeUploadExternal({
+	files: [{ id: externalUpload.file_id, title: "External qualification" }],
+	channel_id: "C1",
+});
+assert.equal(repeatedExternal.ok, true);
+assert.equal(repeatedExternal.files[0].id, externalUpload.file_id);
+
 await assert.rejects(
 	client.api.test({ error: "synthetic" }),
 	(error) => error?.data?.ok === false && error.data.error === "synthetic",

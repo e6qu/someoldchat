@@ -9,7 +9,10 @@ buffer as file storage.
 The Slack external upload flow has three explicit operations:
 
 1. `files.getUploadURLExternal` creates a durable upload ticket and returns an
-   opaque upload URL.
+   opaque upload URL together with the identifier the finished file will carry.
+   That identifier is minted once, before any bytes exist, so a client can
+   record it and reference the file by it after completion; completion never
+   mints a new one.
 2. The client sends the declared number of bytes to that URL. The server
    streams the request into the blob store and records the ticket as uploaded
    only after the blob store accepts the complete object.
@@ -60,9 +63,9 @@ file operations instead of reporting an empty file collection.
 
 Slack documents `files.upload` as a legacy operation and directs clients to
 the external upload sequence. See the official references for
-[`files.getUploadURLExternal`](https://api.slack.com/methods/files.getUploadURLExternal),
-[`files.completeUploadExternal`](https://api.slack.com/methods/files.completeUploadExternal),
-and [`files.upload`](https://api.slack.com/methods/files.upload). The local
+[`files.getUploadURLExternal`](https://docs.slack.dev/reference/methods/files.getUploadURLExternal/),
+[`files.completeUploadExternal`](https://docs.slack.dev/reference/methods/files.completeUploadExternal/),
+and [`files.upload`](https://docs.slack.dev/reference/methods/files.upload/). The local
 compatibility decisions and evidence status are recorded in the
 [compatibility ledger](../specs/compatibility.yaml).
 

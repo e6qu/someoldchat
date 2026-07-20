@@ -72,8 +72,13 @@ func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return
 func NewCanvasID() (CanvasID, error)   { value, err := PublicID("F"); return CanvasID(value), err }
 func NewUserID() (UserID, error)       { value, err := PublicID("U"); return UserID(value), err }
 func NewListID() (ListID, error)       { value, err := PublicID("F"); return ListID(value), err }
+
+// NewExternalUploadID mints an identifier in the file identifier space.
+// files.getUploadURLExternal hands this value to the client as file_id, and the
+// file that files.completeUploadExternal creates keeps it, so a client can
+// reference the file by the identifier it was given before the bytes existed.
 func NewExternalUploadID() (ExternalUploadID, error) {
-	value, err := PublicID("upload_")
+	value, err := NewFileID()
 	return ExternalUploadID(value), err
 }
 func NewListItemID() (ListItemID, error) {

@@ -3862,10 +3862,10 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 	files := make([]domain.File, len(values))
 	eventsToEmit := make([]events.Event, len(values))
 	for index, value := range values {
-		fileID, err := domain.NewFileID()
-		if err != nil {
-			return nil, err
-		}
+		// The upload identifier was handed to the client as file_id when the
+		// upload URL was issued. Minting a fresh one here would strand every
+		// client that recorded it, so the completed file keeps it.
+		fileID := domain.FileID(value.ID)
 		title := completions[index].Title
 		if title == "" {
 			title = value.Title

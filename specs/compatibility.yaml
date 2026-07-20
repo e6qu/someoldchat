@@ -210,11 +210,11 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.getUploadURLExternal
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/files.getUploadURLExternal/
   - method: files.completeUploadExternal
-    status: schema-compatible
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/files.completeUploadExternal/
   - method: users.list
