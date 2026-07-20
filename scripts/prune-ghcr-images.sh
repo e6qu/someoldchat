@@ -29,14 +29,25 @@ versions_file="$(mktemp)"
 remaining_file="$(mktemp)"
 trap 'rm -f "$versions_file" "$remaining_file"' EXIT
 
-gh api --paginate "$base?per_page=100" | jq -s 'add' >"$versions_file"
+fetch_versions() {
+	gh api --paginate "$base?per_page=100" | jq -s 'add' >"$versions_file"
+}
 
-for expected_tag in "$current_tag" "$current_tag-amd64" "$current_tag-arm64"; do
-	occurrences="$(jq --arg tag "$expected_tag" '[.[] | select((.metadata.container.tags // []) == [$tag])] | length' "$versions_file")"
-	if [[ "$occurrences" != 1 ]]; then
-		echo "$package published $occurrences singleton package versions for current tag $expected_tag; refusing retention before the complete release is visible" >&2
+visibility_attempts=12
+for ((attempt = 1; attempt <= visibility_attempts; attempt++)); do
+	fetch_versions
+	missing="$(jq -r --arg root "$current_tag" -f "$(dirname "${BASH_SOURCE[0]}")/missing-current-container-tags.jq" "$versions_file")"
+	if [[ -z "$missing" ]]; then
+		break
+	fi
+	if ((attempt == visibility_attempts)); then
+		echo "$package package metadata did not expose the complete current release after $visibility_attempts attempts:" >&2
+		printf '%s\n' "$missing" >&2
 		exit 1
 	fi
+	echo "$package package metadata is not yet consistent with the published registry manifests (attempt $attempt/$visibility_attempts); waiting for:" >&2
+	printf '%s\n' "$missing" >&2
+	sleep 5
 done
 
 jq -r --argjson keep "$keep" -f "$(dirname "${BASH_SOURCE[0]}")/select-obsolete-container-versions.jq" "$versions_file" |

@@ -74,7 +74,7 @@ durably retained ID token, the client ID, and
 identity-provider session and coordinates logout with the other relying
 applications instead of merely clearing SameOldChat's host-scoped cookie. The
 provider returns the browser to SameOldChat's non-redirecting signed-out page;
-only the explicit **Sign in again** link starts another authorization flow. If
+only the explicit **Sign in with Shauth** action starts another authorization flow. If
 provider logout metadata is incomplete, SameOldChat still revokes its local
 session and reports the incomplete global logout on that application-owned
 page instead of silently claiming success.

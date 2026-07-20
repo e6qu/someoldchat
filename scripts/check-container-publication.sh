@@ -93,6 +93,28 @@ if [[ "$selected" != '0,1,2,10,11,12,999,1000,1001,1002,1003,1004,1005,1006' ]];
 	exit 1
 fi
 
+current_tag=000000000021
+missing="$(jq -r --arg root "$current_tag" -f "$root/scripts/missing-current-container-tags.jq" "$fixture")"
+if [[ -n "$missing" ]]; then
+	echo "complete current release was reported missing: $missing" >&2
+	exit 1
+fi
+
+incomplete_fixture="$(mktemp)"
+trap 'rm -f "$fixture" "$incomplete_fixture"' EXIT
+jq --arg tag "$current_tag-arm64" 'map(select((.metadata.container.tags // []) != [$tag]))' "$fixture" >"$incomplete_fixture"
+missing="$(jq -r --arg root "$current_tag" -f "$root/scripts/missing-current-container-tags.jq" "$incomplete_fixture")"
+if [[ "$missing" != "$current_tag-arm64: expected one singleton package version, observed 0" ]]; then
+	echo "incomplete current release produced unexpected visibility result: $missing" >&2
+	exit 1
+fi
+
+if [[ "$(grep -Fxc 'visibility_attempts=12' "$root/scripts/prune-ghcr-images.sh")" != 1 ]] ||
+	[[ "$(grep -Fxc $'\tsleep 5' "$root/scripts/prune-ghcr-images.sh")" != 1 ]]; then
+	echo 'retention must wait for GitHub Packages metadata to expose the published release' >&2
+	exit 1
+fi
+
 if grep -Eq 'predicate-(type|path):' "$workflow"; then
 	echo 'publication provenance must use the official action native SLSA generator' >&2
 	exit 1
