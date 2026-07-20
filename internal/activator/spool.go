@@ -48,6 +48,7 @@ type SQLiteSpool struct {
 	db     *sql.DB
 	cipher cipher.AEAD
 	limits SpoolLimits
+	now    func() time.Time
 }
 
 func OpenSQLiteSpool(dsn string, key []byte, limits SpoolLimits) (*SQLiteSpool, error) {
@@ -68,7 +69,7 @@ func OpenSQLiteSpool(dsn string, key []byte, limits SpoolLimits) (*SQLiteSpool, 
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	spool := &SQLiteSpool{db: db, cipher: sealed, limits: limits}
+	spool := &SQLiteSpool{db: db, cipher: sealed, limits: limits, now: time.Now}
 	if _, err := db.Exec(`PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; CREATE TABLE IF NOT EXISTS activator_request_spool (id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL, payload BLOB NOT NULL, body_bytes INTEGER NOT NULL DEFAULT 0, lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '')`); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize SQLite request spool: %w", err)
@@ -166,7 +167,7 @@ func (s *SQLiteSpool) Claim(ctx context.Context, owner string, limit int, lease 
 	if strings.TrimSpace(owner) == "" || limit <= 0 || lease <= 0 {
 		return nil, errors.New("spool claim requires an owner, positive limit, and positive lease")
 	}
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	leaseUntil := now.Add(lease)
 	nowValue := now.Format(time.RFC3339Nano)
 	leaseValue := leaseUntil.Format(time.RFC3339Nano)
@@ -175,7 +176,7 @@ func (s *SQLiteSpool) Claim(ctx context.Context, owner string, limit int, lease 
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `UPDATE activator_request_spool SET lease_owner = ?, lease_until = ? WHERE id IN (SELECT id FROM activator_request_spool WHERE lease_until = '' OR lease_until <= ? ORDER BY id LIMIT ?)`, owner, leaseValue, nowValue, limit); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE activator_request_spool SET lease_owner = ?, lease_until = ? WHERE id IN (SELECT id FROM activator_request_spool WHERE lease_until = '' OR julianday(lease_until) <= julianday(?) ORDER BY id LIMIT ?)`, owner, leaseValue, nowValue, limit); err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT id, payload FROM activator_request_spool WHERE lease_owner = ? AND lease_until = ? ORDER BY id`, owner, leaseValue)
@@ -210,7 +211,7 @@ func (s *SQLiteSpool) Renew(ctx context.Context, owner string, ids []uint64, lea
 		return errors.New("spool renewal requires an owner, request IDs, and a positive lease")
 	}
 	placeholders := make([]string, len(ids))
-	now := time.Now().UTC()
+	now := s.now().UTC()
 	args := make([]any, 0, len(ids)+3)
 	args = append(args, now.Add(lease).Format(time.RFC3339Nano), owner, now.Format(time.RFC3339Nano))
 	for index, id := range ids {
@@ -220,7 +221,7 @@ func (s *SQLiteSpool) Renew(ctx context.Context, owner string, ids []uint64, lea
 		placeholders[index] = "?"
 		args = append(args, id)
 	}
-	query := `UPDATE activator_request_spool SET lease_until = ? WHERE lease_owner = ? AND lease_until > ? AND id IN (` + strings.Join(placeholders, ",") + `)`
+	query := `UPDATE activator_request_spool SET lease_until = ? WHERE lease_owner = ? AND julianday(lease_until) > julianday(?) AND id IN (` + strings.Join(placeholders, ",") + `)`
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
@@ -245,7 +246,8 @@ func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body [
 	if int64(len(body)) > s.limits.MaxBodyBytes {
 		return 0, errors.New("request body exceeds spool limit")
 	}
-	payload, err := json.Marshal(SpooledRequest{Method: request.Method, URL: request.URL.String(), Host: request.Host, Header: request.Header.Clone(), Body: body, CreatedAt: time.Now().UTC()})
+	now := s.now().UTC()
+	payload, err := json.Marshal(SpooledRequest{Method: request.Method, URL: request.URL.String(), Host: request.Host, Header: request.Header.Clone(), Body: body, CreatedAt: now})
 	if err != nil {
 		return 0, err
 	}
@@ -266,7 +268,7 @@ func (s *SQLiteSpool) Enqueue(ctx context.Context, request *http.Request, body [
 	if queuedRequests >= s.limits.MaxQueuedRequests || queuedBytes+int64(len(body)) > s.limits.MaxQueuedBytes {
 		return 0, ErrSpoolCapacity
 	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO activator_request_spool(created_at, payload, body_bytes) VALUES (?, ?, ?)`, time.Now().UTC().Format(time.RFC3339Nano), sealed, len(body))
+	result, err := tx.ExecContext(ctx, `INSERT INTO activator_request_spool(created_at, payload, body_bytes) VALUES (?, ?, ?)`, now.Format(time.RFC3339Nano), sealed, len(body))
 	if err != nil {
 		return 0, err
 	}
@@ -309,7 +311,7 @@ func (s *SQLiteSpool) Delete(ctx context.Context, owner string, id uint64) error
 	if strings.TrimSpace(owner) == "" {
 		return errors.New("request spool delete requires an owner")
 	}
-	result, err := s.db.ExecContext(ctx, `DELETE FROM activator_request_spool WHERE id = ? AND lease_owner = ? AND lease_until > ?`, id, owner, time.Now().UTC().Format(time.RFC3339Nano))
+	result, err := s.db.ExecContext(ctx, `DELETE FROM activator_request_spool WHERE id = ? AND lease_owner = ? AND julianday(lease_until) > julianday(?)`, id, owner, s.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}

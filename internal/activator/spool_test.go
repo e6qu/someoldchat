@@ -83,6 +83,8 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer spool.Close()
+	now := time.Date(2026, time.July, 20, 7, 0, 0, 0, time.UTC)
+	spool.now = func() time.Time { return now }
 	request := httptest.NewRequest(http.MethodPost, "/api/message", nil)
 	id, err := spool.Enqueue(context.Background(), request, []byte("recover me"))
 	if err != nil {
@@ -96,7 +98,7 @@ func TestSQLiteSpoolLeaseExpiresForCrashRecovery(t *testing.T) {
 	if err != nil || len(claimed) != 0 {
 		t.Fatalf("unexpired lease was not exclusive: %+v err=%v", claimed, err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	now = now.Add(300 * time.Millisecond)
 	claimed, err = spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
 	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
 		t.Fatalf("expired lease was not reclaimable: %+v err=%v", claimed, err)
@@ -112,6 +114,8 @@ func TestSQLiteSpoolRenewKeepsLeaseWithSlowDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer spool.Close()
+	now := time.Date(2026, time.July, 20, 7, 0, 0, 0, time.UTC)
+	spool.now = func() time.Time { return now }
 	request := httptest.NewRequest(http.MethodPost, "/api/message", nil)
 	id, err := spool.Enqueue(context.Background(), request, []byte("renew me"))
 	if err != nil {
@@ -120,11 +124,11 @@ func TestSQLiteSpoolRenewKeepsLeaseWithSlowDelivery(t *testing.T) {
 	if _, err := spool.Claim(context.Background(), "slow-owner", 1, 50*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(25 * time.Millisecond)
+	now = now.Add(25 * time.Millisecond)
 	if err := spool.Renew(context.Background(), "slow-owner", []uint64{id}, 100*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(50 * time.Millisecond)
+	now = now.Add(50 * time.Millisecond)
 	claimed, err := spool.Claim(context.Background(), "replacement-owner", 1, time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -159,6 +163,8 @@ func TestSQLiteSpoolExpiredOwnerCannotRenewOrDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer spool.Close()
+	now := time.Date(2026, time.July, 20, 7, 0, 0, 0, time.UTC)
+	spool.now = func() time.Time { return now }
 	request := httptest.NewRequest(http.MethodPost, "/api/message", nil)
 	id, err := spool.Enqueue(context.Background(), request, []byte("expired"))
 	if err != nil {
@@ -167,7 +173,7 @@ func TestSQLiteSpoolExpiredOwnerCannotRenewOrDelete(t *testing.T) {
 	if _, err := spool.Claim(context.Background(), "expired-owner", 1, 100*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(150 * time.Millisecond)
+	now = now.Add(150 * time.Millisecond)
 	if err := spool.Renew(context.Background(), "expired-owner", []uint64{id}, time.Minute); !errors.Is(err, ErrSpoolLeaseLost) {
 		t.Fatalf("expired renewal error=%v, want ErrSpoolLeaseLost", err)
 	}

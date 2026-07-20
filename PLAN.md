@@ -165,6 +165,12 @@ Exit criteria:
 - Publish deployment templates and qualification tests for each supported
   profile.
 
+SQLite activator request spool leases used parsed timestamps for expiry,
+renewal, and deletion decisions, so fractional RFC 3339 timestamps could not
+be misordered lexicographically. Deterministic clock-driven race tests covered
+exclusive leases, renewal during slow delivery, expired-owner rejection, and
+crash recovery without depending on scheduler timing.
+
 Exit criteria:
 
 - Only the activator, durable object storage, and control-plane facilities
