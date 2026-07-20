@@ -803,8 +803,10 @@ func normalizeJSONArrayObjects(raw []byte, name string) (string, error) {
 		return "", fmt.Errorf("%s exceed the maximum count", name)
 	}
 	for _, block := range blocks {
-		var object map[string]json.RawMessage
-		if err := json.Unmarshal(block, &object); err != nil || object == nil {
+		// The array decode above already rejected malformed JSON, so a value
+		// beginning with '{' is an object. Decoding each one into a map to
+		// learn only its kind walks every nested value for nothing.
+		if trimmed := bytes.TrimLeft(block, " \t\r\n"); len(trimmed) == 0 || trimmed[0] != '{' {
 			return "", fmt.Errorf("each %s item must be a JSON object", name)
 		}
 	}
@@ -819,12 +821,14 @@ func NormalizeUnfurls(values map[string]string) (map[string]string, error) {
 	result := make(map[string]string, len(values))
 	for key, raw := range values {
 		key = strings.TrimSpace(key)
-		if key == "" || len(result) >= 100 || !json.Valid([]byte(raw)) {
+		if key == "" || len(result) >= 100 {
 			return nil, errors.New("invalid unfurl")
 		}
+		// Compact rejects malformed JSON on its own, so validating first would
+		// scan every value twice to learn what the compaction already reports.
 		var compact bytes.Buffer
 		if err := json.Compact(&compact, []byte(raw)); err != nil {
-			return nil, err
+			return nil, errors.New("invalid unfurl")
 		}
 		result[key] = compact.String()
 	}

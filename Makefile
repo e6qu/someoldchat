@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check rebase-audit check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check rebase-audit bench profile check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -65,6 +65,9 @@ test-fuzz:
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzDecodeFieldsNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/api/slack -run '^$$' -fuzz FuzzNormalizeJSONListFieldNeverPanics -fuzztime=25000x -parallel=1 -timeout=2m
 	GOCACHE=$(GOCACHE) go test ./internal/store/postgres -run '^$$' -fuzz FuzzRewriteIsIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeBlocksIsSafeAndIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeAttachmentsIsSafeAndIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
+	GOCACHE=$(GOCACHE) go test ./internal/domain -run '^$$' -fuzz FuzzNormalizeUnfurlsIsSafeAndIdempotent -fuzztime=25000x -parallel=1 -timeout=2m
 
 generate:
 	$(MAKE) proto-tools
@@ -108,6 +111,28 @@ rebase-audit:
 	test -n "$(PARENT)"
 	test -n "$(BRANCH)"
 	GOCACHE=$(GOCACHE) go run ./cmd/rebaseaudit -parent "$(PARENT)" -branch "$(BRANCH)" -target "$(or $(TARGET),HEAD)"
+
+BENCH ?= .
+BENCH_PKG ?= ./internal/domain ./internal/store/sqlstore ./tests/load
+BENCHTIME ?= 1s
+PROFILE_DIR ?= $(CURDIR)/.cache/profiles
+
+bench:
+	GOCACHE=$(GOCACHE) go test $(BENCH_PKG) -run '^$$' -bench '$(BENCH)' -benchtime=$(BENCHTIME) -benchmem
+
+# Writes CPU and allocation profiles for one package so a regression can be
+# attributed to a call site instead of guessed at. PKG must name a single
+# package; profiles from several packages would overwrite each other.
+PROFILE_PKG ?= ./internal/domain
+
+profile:
+	mkdir -p $(PROFILE_DIR)
+	GOCACHE=$(GOCACHE) go test $(PROFILE_PKG) -run '^$$' -bench '$(BENCH)' -benchtime=$(BENCHTIME) -benchmem \
+		-cpuprofile $(PROFILE_DIR)/cpu.out -memprofile $(PROFILE_DIR)/mem.out -o $(PROFILE_DIR)/bench.test
+	@echo
+	@echo "profiles written to $(PROFILE_DIR)"
+	@echo "  go tool pprof -top -nodecount=20 $(PROFILE_DIR)/bench.test $(PROFILE_DIR)/cpu.out"
+	@echo "  go tool pprof -top -nodecount=20 -sample_index=alloc_space $(PROFILE_DIR)/bench.test $(PROFILE_DIR)/mem.out"
 
 sdk-inventory-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/sdkcheck -require-qualified

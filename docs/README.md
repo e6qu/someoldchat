@@ -20,6 +20,8 @@ how the application is structured, built, operated, and deployed.
   lifecycle.
 - [Rebase audit](rebase-audit.md) describes checking that a rebased branch
   kept the work it contained.
+- [Benchmarks and profiling](performance.md) describes measuring the message
+  write and pagination paths.
 - [Terminology](terminology.md) defines the Slack terms used by this project.
 
 Normative, testable requirements and pinned upstream contract sources live in
