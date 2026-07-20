@@ -6163,3 +6163,137 @@ func (r Remote) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, wor
 	}
 	return decodeProtoScheduledMessage(out)
 }
+
+func (r Remote) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, mimeType string, size int64, ttl time.Duration) (domain.ExternalUpload, error) {
+	out, err := r.files.CreateExternalUpload(ctx, &chatv1.ExternalUploadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, MimeType: mimeType, Size: size, TtlSeconds: int64(ttl / time.Second)})
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	return decodeProtoExternalUpload(out)
+}
+
+func (r Remote) UploadExternalFile(ctx context.Context, id domain.ExternalUploadID, size int64, source io.Reader) error {
+	if id == "" || size < 0 || source == nil {
+		return errors.New("external upload id, size, and source are required")
+	}
+	stream, err := r.files.UploadExternalFile(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&chatv1.ExternalUploadPart{Part: &chatv1.ExternalUploadPart_Metadata{Metadata: &chatv1.ExternalUploadRequest{UploadId: string(id), Size: size}}}); err != nil {
+		return err
+	}
+	buffer := make([]byte, 64*1024)
+	for {
+		read, readErr := source.Read(buffer)
+		if read > 0 {
+			if err := stream.Send(&chatv1.ExternalUploadPart{Part: &chatv1.ExternalUploadPart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}); err != nil {
+				return err
+			}
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			return readErr
+		}
+	}
+	_, err = stream.CloseAndRecv()
+	return err
+}
+
+func (r Remote) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string) (domain.File, error) {
+	out, err := r.files.CompleteExternalUpload(ctx, &chatv1.CompleteExternalUploadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UploadId: string(id), Title: title})
+	if err != nil {
+		return domain.File{}, err
+	}
+	return decodeProtoFile(out)
+}
+
+func (s *Server) CreateExternalUpload(ctx context.Context, input *chatv1.ExternalUploadRequest) (*chatv1.ExternalUpload, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetName() == "" || input.GetMimeType() == "" || input.GetSize() < 0 || input.GetTtlSeconds() <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, name, mime_type, size, and ttl_seconds are required")
+	}
+	value, err := s.implementation.CreateExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetMimeType(), input.GetSize(), time.Duration(input.GetTtlSeconds())*time.Second)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoExternalUpload(value), nil
+}
+
+func (s *Server) UploadExternalFile(stream chatv1.FilesService_UploadExternalFileServer) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	header := first.GetMetadata()
+	if header == nil || header.GetUploadId() == "" || header.GetSize() < 0 {
+		return status.Error(codes.InvalidArgument, "upload stream must begin with upload_id and size metadata")
+	}
+	reader, writer := io.Pipe()
+	readErr := make(chan error, 1)
+	go func() {
+		defer writer.Close()
+		for {
+			part, recvErr := stream.Recv()
+			if recvErr == io.EOF {
+				readErr <- nil
+				return
+			}
+			if recvErr != nil {
+				readErr <- recvErr
+				return
+			}
+			chunk := part.GetChunk()
+			if chunk == nil {
+				readErr <- status.Error(codes.InvalidArgument, "external upload stream contains a non-chunk part")
+				return
+			}
+			if _, writeErr := writer.Write(chunk); writeErr != nil {
+				readErr <- writeErr
+				return
+			}
+		}
+	}()
+	uploadErr := s.implementation.UploadExternalFile(stream.Context(), domain.ExternalUploadID(header.GetUploadId()), header.GetSize(), reader)
+	if uploadErr != nil {
+		_ = reader.CloseWithError(uploadErr)
+	}
+	if err := <-readErr; err != nil {
+		return err
+	}
+	if uploadErr != nil {
+		return mapError(uploadErr)
+	}
+	return stream.SendAndClose(&chatv1.MutationResponse{Ok: true})
+}
+
+func (s *Server) CompleteExternalUpload(ctx context.Context, input *chatv1.CompleteExternalUploadRequest) (*chatv1.File, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetUploadId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and upload_id are required")
+	}
+	file, err := s.implementation.CompleteExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ExternalUploadID(input.GetUploadId()), input.GetTitle())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoFile(file), nil
+}
+
+func encodeProtoExternalUpload(value domain.ExternalUpload) *chatv1.ExternalUpload {
+	return &chatv1.ExternalUpload{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size, Status: string(value.Status), CreatedAt: value.CreatedAt.Format(time.RFC3339Nano), ExpiresAt: value.ExpiresAt.Format(time.RFC3339Nano), UploadedAt: value.UploadedAt.Format(time.RFC3339Nano), CompletedAt: value.CompletedAt.Format(time.RFC3339Nano)}
+}
+
+func decodeProtoExternalUpload(value *chatv1.ExternalUpload) (domain.ExternalUpload, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUploader() == "" || value.GetName() == "" || value.GetMimeType() == "" || value.GetSize() < 0 || value.GetStatus() == "" {
+		return domain.ExternalUpload{}, errors.New("typed external upload is incomplete")
+	}
+	created, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	expires, err := time.Parse(time.RFC3339Nano, value.GetExpiresAt())
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	return domain.ExternalUpload{ID: domain.ExternalUploadID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), Status: domain.ExternalUploadStatus(value.GetStatus()), CreatedAt: created, ExpiresAt: expires}, nil
+}

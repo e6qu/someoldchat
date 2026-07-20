@@ -56,6 +56,7 @@ var (
 	ErrInvalidIntegrationLogs   = errors.New("integration log arguments are invalid")
 	ErrInvalidBookmark          = errors.New("bookmark title, type, and link are invalid")
 	ErrInvalidCanvas            = errors.New("canvas content or access arguments are invalid")
+	ErrInvalidExternalUpload    = errors.New("external upload is invalid")
 )
 
 type Messages struct {
@@ -3701,4 +3702,78 @@ func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceI
 		return domain.Message{}, err
 	}
 	return message, nil
+}
+
+func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, mimeType string, size int64, ttl time.Duration) (domain.ExternalUpload, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	name = strings.TrimSpace(name)
+	mimeType = strings.TrimSpace(mimeType)
+	if name == "" || mimeType == "" || size < 0 || ttl <= 0 {
+		return domain.ExternalUpload{}, ErrInvalidExternalUpload
+	}
+	id, err := domain.NewExternalUploadID()
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	now := time.Now().UTC()
+	value := domain.ExternalUpload{ID: id, WorkspaceID: workspaceID, Uploader: userID, Name: name, Title: name, MIMEType: mimeType, BlobKey: string(workspaceID) + "/external/" + string(id), Size: size, Status: domain.ExternalUploadPending, CreatedAt: now, ExpiresAt: now.Add(ttl)}
+	if err := m.Store.CreateExternalUpload(ctx, value); err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	return value, nil
+}
+
+func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUploadID, size int64, source io.Reader) error {
+	if m.Blob == nil || source == nil || size < 0 {
+		return ErrInvalidExternalUpload
+	}
+	value, err := m.Store.GetExternalUpload(ctx, id)
+	if err != nil {
+		return err
+	}
+	if value.Status != domain.ExternalUploadPending || !value.ExpiresAt.After(time.Now().UTC()) || value.Size != size {
+		return ErrInvalidExternalUpload
+	}
+	if _, err := m.Blob.Put(ctx, value.BlobKey, value.Size, source); err != nil {
+		if errors.Is(err, blob.ErrUnavailable) {
+			return ErrBlobUnavailable
+		}
+		return err
+	}
+	if err := m.Store.MarkExternalUploadUploaded(ctx, id, time.Now().UTC()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string) (domain.File, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.File{}, err
+	}
+	value, err := m.Store.GetExternalUpload(ctx, id)
+	if err != nil || value.WorkspaceID != workspaceID || value.Uploader != userID {
+		return domain.File{}, store.ErrNotFound
+	}
+	if !value.ExpiresAt.After(time.Now().UTC()) {
+		return domain.File{}, ErrInvalidExternalUpload
+	}
+	fileID, err := domain.NewFileID()
+	if err != nil {
+		return domain.File{}, err
+	}
+	if title = strings.TrimSpace(title); title == "" {
+		title = value.Title
+	}
+	file := domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: time.Now().UTC()}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.File{}, err
+	}
+	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(file.ID), CreatedAt: file.CreatedAt}
+	if err := m.Store.CompleteExternalUpload(ctx, id, file, event); err != nil {
+		return domain.File{}, err
+	}
+	return file, nil
 }

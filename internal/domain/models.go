@@ -894,3 +894,27 @@ type SocketModeResponse struct {
 	LeaseExpiresAt time.Time
 	AcknowledgedAt time.Time
 }
+
+type ExternalUploadStatus string
+
+type ExternalUpload struct {
+	ID          ExternalUploadID
+	WorkspaceID WorkspaceID
+	Uploader    UserID
+	Name        string
+	Title       string
+	MIMEType    string
+	BlobKey     string
+	Size        int64
+	Status      ExternalUploadStatus
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	UploadedAt  time.Time
+	CompletedAt time.Time
+}
+
+const (
+	ExternalUploadPending   ExternalUploadStatus = "pending"
+	ExternalUploadUploaded  ExternalUploadStatus = "uploaded"
+	ExternalUploadCompleted ExternalUploadStatus = "completed"
+)

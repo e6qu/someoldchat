@@ -294,6 +294,49 @@ func TestRemoteStreamsFileAndUsesMetadataMethods(t *testing.T) {
 	}
 }
 
+func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := service.Messages{Store: store, Blob: blobs}
+	server := grpc.NewServer()
+	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
+		t.Fatal(err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+	ctx := context.Background()
+	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	remote, err := chatgrpc.NewRemote(conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := []byte("external bytes")
+	upload, err := remote.CreateExternalUpload(ctx, "T1", "U1", "external.txt", "text/plain", int64(len(content)), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.UploadExternalFile(ctx, upload.ID, int64(len(content)), bytes.NewReader(content)); err != nil {
+		t.Fatal(err)
+	}
+	file, err := remote.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "External")
+	if err != nil || file.Name != "external.txt" || file.Size != int64(len(content)) {
+		t.Fatalf("file=%+v err=%v", file, err)
+	}
+	if _, err := remote.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "External"); err == nil {
+		t.Fatal("second completion succeeded")
+	}
+}
+
 func TestRemoteUsesSameChatContract(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

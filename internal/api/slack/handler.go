@@ -347,6 +347,11 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.incomingWebhook)
 	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
 	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
+	mux.HandleFunc("GET /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
+	mux.HandleFunc("POST /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
+	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
+	mux.HandleFunc("GET /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
+	mux.HandleFunc("POST /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
 }
 
 func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
@@ -5464,7 +5469,7 @@ func mapServiceError(err error, notFoundReason string) (int, string) {
 	if errors.Is(err, store.ErrNotFound) || status.Code(err) == codes.NotFound {
 		return http.StatusNotFound, notFoundReason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) {
 		return http.StatusBadRequest, "invalid_arguments"
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) || status.Code(err) == codes.AlreadyExists {
@@ -6382,4 +6387,97 @@ func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	name := strings.TrimSpace(fields["filename"])
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	size, err := strconv.ParseInt(strings.TrimSpace(fields["length"]), 10, 64)
+	if err != nil || size < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	mimeType := strings.TrimSpace(fields["mime_type"])
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, size, 15*time.Minute)
+	if err != nil {
+		code, reason := mapServiceError(err, "team_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": externalUploadURL(r, upload.ID), "file_id": upload.ID})
+}
+
+func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
+	id := domain.ExternalUploadID(strings.TrimSpace(r.PathValue("upload")))
+	if id == "" || r.ContentLength < 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.UploadExternalFile(r.Context(), id, r.ContentLength, r.Body); err != nil {
+		code, reason := mapServiceError(err, "file_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	uploadID := strings.TrimSpace(fields["upload_id"])
+	if uploadID == "" {
+		var entries []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		}
+		if raw := strings.TrimSpace(fields["files"]); raw != "" && json.Unmarshal([]byte(raw), &entries) == nil && len(entries) == 1 {
+			uploadID = strings.TrimSpace(entries[0].ID)
+			if fields["title"] == "" {
+				fields["title"] = strings.TrimSpace(entries[0].Title)
+			}
+		}
+	}
+	if uploadID == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	file, err := h.Messages.CompleteExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadID(uploadID), fields["title"])
+	if err != nil {
+		code, reason := mapServiceError(err, "file_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": []map[string]any{fileResponse(file)}, "file": fileResponse(file)})
+}
+
+func externalUploadURL(r *http.Request, id domain.ExternalUploadID) string {
+	scheme := strings.TrimSpace(strings.SplitN(r.Header.Get("X-Forwarded-Proto"), ",", 2)[0])
+	if scheme == "" {
+		scheme = "http"
+	}
+	return scheme + "://" + r.Host + "/internal/files/external/" + url.PathEscape(string(id))
 }

@@ -19,6 +19,7 @@ type Service interface {
 	AdminCreateIncomingWebhook(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.UserID) (domain.IncomingWebhook, string, error)
 	AdminSetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.IncomingWebhookID, bool) error
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
+	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
@@ -35,12 +36,15 @@ type Service interface {
 	Unfurl(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, map[string]string) (domain.Message, error)
 	PostEphemeral(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string) (domain.EphemeralMessage, error)
 	PostEphemeralWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string) (domain.EphemeralMessage, error)
+	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
+	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string) (domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)
 	Permalink(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (string, error)
 	Update(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) (domain.Message, error)
 	UpdateWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string) (domain.Message, error)
+	UpdateWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string, string) (domain.Message, error)
 	Delete(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	History(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.MessagePage, error)
 	Replies(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) (domain.MessagePage, error)
@@ -163,6 +167,7 @@ type Service interface {
 	Reminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	ScheduleMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, time.Time) (domain.ScheduledMessage, error)
+	ScheduleMessageWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID) error
 	CreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) (domain.UserGroup, error)
@@ -179,6 +184,9 @@ type Service interface {
 	RemoveCallParticipants(context.Context, domain.WorkspaceID, domain.UserID, domain.CallID, []domain.UserID) error
 	Search(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	UploadFile(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, int64, io.Reader) (domain.File, error)
+	CreateExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, string, string, int64, time.Duration) (domain.ExternalUpload, error)
+	UploadExternalFile(context.Context, domain.ExternalUploadID, int64, io.Reader) error
+	CompleteExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID, string) (domain.File, error)
 	OpenFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, io.ReadCloser, error)
 	FileInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) error
@@ -215,9 +223,4 @@ type Service interface {
 	PresentEntityComments(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, bool, string, bool, string, string) error
 	AcknowledgeEntityCommentAction(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) error
 	events.Source
-	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
-	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
-	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string) (domain.EphemeralMessage, error)
-	UpdateWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string, string) (domain.Message, error)
-	ScheduleMessageWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, time.Time) (domain.ScheduledMessage, error)
 }
