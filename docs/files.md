@@ -31,6 +31,13 @@ can include channel identifiers, an initial comment, and Block Kit blocks. The
 channel relation is committed with the file metadata. The comment and blocks
 are published as an idempotent message for each shared channel; the message
 does not contain a fabricated file attachment reference.
+The current implementation accepts one or more completed files per request. A
+completion can include channel identifiers, an initial comment, and Block Kit
+blocks. The channel relation is committed with every file's metadata. The
+comment or blocks are published once as an idempotent message for each shared
+channel; when both are supplied, the initial comment takes precedence as in
+the Slack method contract. The message does not contain a fabricated file
+attachment reference.
 
 If publication is interrupted after completion, retrying the same completion
 request reads the durable channel relation and retries only the missing

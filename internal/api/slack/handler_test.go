@@ -2649,3 +2649,75 @@ func TestUpdateMessageAcceptsAttachmentsWithoutFallbackText(t *testing.T) {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
 	}
 }
+
+func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
+	objects, err := blob.NewFilesystem(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeChatWrite: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store, Blob: objects}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	create := func(name string, content string) string {
+		request := httptest.NewRequest(http.MethodPost, "/api/files.getUploadURLExternal", strings.NewReader(url.Values{"filename": {name}, "length": {strconv.Itoa(len(content))}}.Encode()))
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("create status=%d body=%s", response.Code, response.Body)
+		}
+		var body struct {
+			UploadURL string `json:"upload_url"`
+			FileID    string `json:"file_id"`
+		}
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		upload := httptest.NewRequest(http.MethodPost, body.UploadURL, strings.NewReader(content))
+		upload.Header.Set("Content-Length", strconv.Itoa(len(content)))
+		uploadResponse := httptest.NewRecorder()
+		mux.ServeHTTP(uploadResponse, upload)
+		if uploadResponse.Code != http.StatusOK {
+			t.Fatalf("upload status=%d body=%s", uploadResponse.Code, uploadResponse.Body)
+		}
+		return body.FileID
+	}
+	first := create("first.txt", "first")
+	second := create("second.txt", "second")
+	filesJSON, err := json.Marshal([]map[string]string{{"id": first, "title": "First"}, {"id": second, "title": "Second"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeValues := url.Values{"files": {string(filesJSON)}, "channels": {"C1"}, "blocks": {`[{"type":"divider"}]`}}
+	complete := httptest.NewRequest(http.MethodPost, "/api/files.completeUploadExternal", strings.NewReader(completeValues.Encode()))
+	complete.Header.Set("Authorization", "Bearer token")
+	complete.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	completed := httptest.NewRecorder()
+	mux.ServeHTTP(completed, complete)
+	if completed.Code != http.StatusOK {
+		t.Fatalf("complete status=%d body=%s", completed.Code, completed.Body)
+	}
+	var result struct {
+		OK    bool             `json:"ok"`
+		Files []map[string]any `json:"files"`
+	}
+	if err := json.NewDecoder(completed.Body).Decode(&result); err != nil {
+		t.Fatal(err)
+	}
+	if !result.OK || len(result.Files) != 2 || result.Files[0]["title"] != "First" || result.Files[1]["title"] != "Second" {
+		t.Fatalf("result=%+v", result)
+	}
+}

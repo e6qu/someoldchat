@@ -4970,7 +4970,7 @@ func mapError(err error) error {
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return status.Error(codes.AlreadyExists, err.Error())
 	}
-	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) {
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, store.ErrInvalidArgument) {
 		return status.Error(codes.Aborted, err.Error())
 	}
 	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
@@ -6212,7 +6212,7 @@ func (r Remote) CompleteExternalUpload(ctx context.Context, workspaceID domain.W
 }
 
 func (s *Server) CreateExternalUpload(ctx context.Context, input *chatv1.ExternalUploadRequest) (*chatv1.ExternalUpload, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetName() == "" || input.GetMimeType() == "" || input.GetSize() < 0 || input.GetTtlSeconds() <= 0 {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetName() == "" || input.GetMimeType() == "" || input.GetSize() <= 0 || input.GetTtlSeconds() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, name, mime_type, size, and ttl_seconds are required")
 	}
 	value, err := s.implementation.CreateExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetMimeType(), input.GetSize(), time.Duration(input.GetTtlSeconds())*time.Second)
@@ -6297,4 +6297,38 @@ func decodeProtoExternalUpload(value *chatv1.ExternalUpload) (domain.ExternalUpl
 		return domain.ExternalUpload{}, err
 	}
 	return domain.ExternalUpload{ID: domain.ExternalUploadID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), Status: domain.ExternalUploadStatus(value.GetStatus()), CreatedAt: created, ExpiresAt: expires}, nil
+}
+
+func (r Remote) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) ([]domain.File, error) {
+	entries := make([]*chatv1.ExternalUploadCompletion, 0, len(completions))
+	for _, completion := range completions {
+		entries = append(entries, &chatv1.ExternalUploadCompletion{UploadId: string(completion.ID), Title: completion.Title})
+	}
+	out, err := r.files.CompleteExternalUploads(ctx, &chatv1.CompleteExternalUploadsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Files: entries, ChannelIds: conversationStrings(channels), InitialComment: initialComment, Blocks: blocks, ThreadTimestamp: string(threadTimestamp)})
+	if err != nil {
+		return nil, err
+	}
+	page, err := decodeProtoFilePage(out)
+	if err != nil {
+		return nil, err
+	}
+	return page.Files, nil
+}
+
+func (s *Server) CompleteExternalUploads(ctx context.Context, input *chatv1.CompleteExternalUploadsRequest) (*chatv1.FilePage, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || len(input.GetFiles()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and files are required")
+	}
+	completions := make([]domain.ExternalUploadCompletion, 0, len(input.GetFiles()))
+	for _, value := range input.GetFiles() {
+		if value == nil {
+			return nil, status.Error(codes.InvalidArgument, "files contains a nil entry")
+		}
+		completions = append(completions, domain.ExternalUploadCompletion{ID: domain.ExternalUploadID(value.GetUploadId()), Title: value.GetTitle()})
+	}
+	files, err := s.implementation.CompleteExternalUploads(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), completions, conversationIDs(input.GetChannelIds()), input.GetInitialComment(), input.GetBlocks(), domain.MessageTimestamp(input.GetThreadTimestamp()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoFilePage(domain.FilePage{Files: files}), nil
 }

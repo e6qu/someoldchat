@@ -6,17 +6,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/url"
-	"sort"
-	"strings"
-	"time"
-
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/store"
+	"io"
+	"net/url"
+	"reflect"
+	"sort"
+	"strings"
+	"time"
 )
 
 var (
@@ -3710,7 +3710,7 @@ func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.W
 	}
 	name = strings.TrimSpace(name)
 	mimeType = strings.TrimSpace(mimeType)
-	if name == "" || mimeType == "" || size < 0 || ttl <= 0 {
+	if name == "" || mimeType == "" || size <= 0 || ttl <= 0 {
 		return domain.ExternalUpload{}, ErrInvalidExternalUpload
 	}
 	id, err := domain.NewExternalUploadID()
@@ -3749,81 +3749,35 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 }
 
 func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) (domain.File, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
-		return domain.File{}, err
-	}
-	value, err := m.Store.GetExternalUpload(ctx, id)
-	if err != nil || value.WorkspaceID != workspaceID || value.Uploader != userID {
-		return domain.File{}, store.ErrNotFound
-	}
-	if !value.ExpiresAt.After(time.Now().UTC()) {
-		return domain.File{}, ErrInvalidExternalUpload
-	}
-	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	if err != nil {
-		return domain.File{}, ErrInvalidExternalUpload
-	}
-	channels, err = normalizeFileShareChannels(channels)
+	files, err := m.CompleteExternalUploads(ctx, workspaceID, userID, []domain.ExternalUploadCompletion{{ID: id, Title: title}}, channels, initialComment, blocks, threadTimestamp)
 	if err != nil {
 		return domain.File{}, err
 	}
-	for _, channel := range channels {
-		if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
-			return domain.File{}, err
-		}
+	if len(files) != 1 {
+		return domain.File{}, errors.New("external upload completion returned an unexpected file count")
 	}
-	if value.Status == domain.ExternalUploadCompleted {
-		if value.FileID == "" {
-			return domain.File{}, errors.New("completed external upload has no file reference")
-		}
-		file, err := m.FileInfo(ctx, workspaceID, userID, value.FileID)
-		if err != nil {
-			return domain.File{}, err
-		}
-		if err := m.publishExternalUploadComments(ctx, workspaceID, userID, id, file.SharedChannels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
-			return domain.File{}, err
-		}
-		return file, nil
-	}
-	if value.Status != domain.ExternalUploadUploaded {
-		return domain.File{}, ErrInvalidExternalUpload
-	}
-	fileID, err := domain.NewFileID()
-	if err != nil {
-		return domain.File{}, err
-	}
-	if title = strings.TrimSpace(title); title == "" {
-		title = value.Title
-	}
-	file := domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: time.Now().UTC()}
-	file.SharedChannels = append([]domain.ConversationID(nil), channels...)
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return domain.File{}, err
-	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(file.ID), CreatedAt: file.CreatedAt}
-	if err := m.Store.CompleteExternalUpload(ctx, id, file, channels, event); err != nil {
-		return domain.File{}, err
-	}
-	if err := m.publishExternalUploadComments(ctx, workspaceID, userID, id, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
-		return domain.File{}, err
-	}
-	return file, nil
+	return files[0], nil
 }
 
-func (m Messages) publishExternalUploadComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, uploadID domain.ExternalUploadID, channels []domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp) error {
+func (m Messages) publishExternalUploadComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp) error {
 	if strings.TrimSpace(text) == "" && blocks == "" {
 		return nil
 	}
+	uploadIDs := make([]string, len(completions))
+	for index, completion := range completions {
+		uploadIDs[index] = string(completion.ID)
+	}
+	sort.Strings(uploadIDs)
+	publicationID := strings.Join(uploadIDs, ",")
 	for _, channel := range channels {
-		if _, err := m.PostWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", threadTimestamp, "external-upload:"+string(uploadID)+":"+string(channel)); err != nil {
+		if _, err := m.PostWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", threadTimestamp, "external-upload:"+publicationID+":"+string(channel)); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func normalizeFileShareChannels(values []domain.ConversationID) ([]domain.ConversationID, error) {
+func normalizeFileShareChannels(values []domain.ConversationID) []domain.ConversationID {
 	seen := make(map[domain.ConversationID]struct{}, len(values))
 	result := make([]domain.ConversationID, 0, len(values))
 	for _, value := range values {
@@ -3837,5 +3791,128 @@ func normalizeFileShareChannels(values []domain.ConversationID) ([]domain.Conver
 		seen[value] = struct{}{}
 		result = append(result, value)
 	}
+	return result
+}
+
+func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) ([]domain.File, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	completions, err := normalizeExternalUploadCompletions(completions)
+	if err != nil {
+		return nil, err
+	}
+	channels = normalizeFileShareChannels(channels)
+	if len(channels) > 100 || (threadTimestamp != "" && len(channels) != 1) {
+		return nil, ErrInvalidExternalUpload
+	}
+	if strings.TrimSpace(initialComment) != "" {
+		blocks = ""
+	}
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	if err != nil {
+		return nil, ErrInvalidExternalUpload
+	}
+	values := make([]domain.ExternalUpload, len(completions))
+	for index, completion := range completions {
+		value, err := m.Store.GetExternalUpload(ctx, completion.ID)
+		if err != nil || value.WorkspaceID != workspaceID || value.Uploader != userID {
+			return nil, store.ErrNotFound
+		}
+		if !value.ExpiresAt.After(time.Now().UTC()) {
+			return nil, ErrInvalidExternalUpload
+		}
+		values[index] = value
+	}
+	for _, channel := range channels {
+		if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
+			return nil, err
+		}
+	}
+	completed := make([]domain.File, len(values))
+	allCompleted := true
+	for index, value := range values {
+		if value.Status != domain.ExternalUploadCompleted {
+			allCompleted = false
+			continue
+		}
+		if value.FileID == "" {
+			return nil, errors.New("completed external upload has no file reference")
+		}
+		file, err := m.FileInfo(ctx, workspaceID, userID, value.FileID)
+		if err != nil {
+			return nil, err
+		}
+		completed[index] = file
+	}
+	if allCompleted {
+		if !sameFileShareChannels(completed, channels) {
+			channels = completed[0].SharedChannels
+		}
+		if err := m.publishExternalUploadComments(ctx, workspaceID, userID, completions, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
+			return nil, err
+		}
+		return completed, nil
+	}
+	for _, value := range values {
+		if value.Status != domain.ExternalUploadUploaded {
+			return nil, ErrInvalidExternalUpload
+		}
+	}
+	files := make([]domain.File, len(values))
+	eventsToEmit := make([]events.Event, len(values))
+	for index, value := range values {
+		fileID, err := domain.NewFileID()
+		if err != nil {
+			return nil, err
+		}
+		title := completions[index].Title
+		if title == "" {
+			title = value.Title
+		}
+		createdAt := time.Now().UTC()
+		files[index] = domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: createdAt, SharedChannels: append([]domain.ConversationID(nil), channels...)}
+		eventID, err := domain.NewEventID()
+		if err != nil {
+			return nil, err
+		}
+		eventsToEmit[index] = events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(fileID), CreatedAt: createdAt}
+	}
+	if err := m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit); err != nil {
+		return nil, err
+	}
+	if err := m.publishExternalUploadComments(ctx, workspaceID, userID, completions, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func normalizeExternalUploadCompletions(values []domain.ExternalUploadCompletion) ([]domain.ExternalUploadCompletion, error) {
+	if len(values) == 0 {
+		return nil, ErrInvalidExternalUpload
+	}
+	seen := make(map[domain.ExternalUploadID]struct{}, len(values))
+	result := make([]domain.ExternalUploadCompletion, 0, len(values))
+	for _, value := range values {
+		value.ID = domain.ExternalUploadID(strings.TrimSpace(string(value.ID)))
+		value.Title = strings.TrimSpace(value.Title)
+		if value.ID == "" {
+			return nil, ErrInvalidExternalUpload
+		}
+		if _, exists := seen[value.ID]; exists {
+			return nil, ErrInvalidExternalUpload
+		}
+		seen[value.ID] = struct{}{}
+		result = append(result, value)
+	}
 	return result, nil
+}
+
+func sameFileShareChannels(files []domain.File, channels []domain.ConversationID) bool {
+	for _, file := range files {
+		if !reflect.DeepEqual(file.SharedChannels, channels) {
+			return false
+		}
+	}
+	return true
 }

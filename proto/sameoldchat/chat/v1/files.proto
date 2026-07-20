@@ -59,6 +59,11 @@ message ExternalUploadPart {
   }
 }
 
+message ExternalUploadCompletion {
+  string upload_id = 1;
+  string title = 2;
+}
+
 message CompleteExternalUploadRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -68,6 +73,16 @@ message CompleteExternalUploadRequest {
   string initial_comment = 6;
   string blocks = 7;
   string thread_timestamp = 8;
+}
+
+message CompleteExternalUploadsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated ExternalUploadCompletion files = 3;
+  repeated string channel_ids = 4;
+  string initial_comment = 5;
+  string blocks = 6;
+  string thread_timestamp = 7;
 }
 
 message RemoteFile {
@@ -241,6 +256,7 @@ service FilesService {
   rpc CreateExternalUpload(ExternalUploadRequest) returns (ExternalUpload);
   rpc UploadExternalFile(stream ExternalUploadPart) returns (MutationResponse);
   rpc CompleteExternalUpload(CompleteExternalUploadRequest) returns (File);
+  rpc CompleteExternalUploads(CompleteExternalUploadsRequest) returns (FilePage);
   rpc FileInfo(FileRequest) returns (File);
   rpc DeleteFile(FileRequest) returns (DeleteFileResponse);
   rpc DeleteFileComment(FileCommentDeleteRequest) returns (DeleteFileResponse);
