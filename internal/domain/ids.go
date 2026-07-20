@@ -66,10 +66,6 @@ func PublicID(prefix string) (string, error) {
 	return prefix + hex.EncodeToString(b[:]), nil
 }
 
-func IsPublicID(value, prefix string) bool {
-	return strings.HasPrefix(value, prefix) && len(value) == len(prefix)+20
-}
-
 func NewMessageID() (MessageID, error) { value, err := PublicID("msg_"); return MessageID(value), err }
 func NewEventID() (EventID, error)     { value, err := PublicID("evt_"); return EventID(value), err }
 func NewFileID() (FileID, error)       { value, err := PublicID("file_"); return FileID(value), err }

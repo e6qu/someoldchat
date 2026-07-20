@@ -15,7 +15,7 @@ message Message {
   bool deleted = 8;
   map<string, string> unfurls = 9;
   string blocks = 10;
-	string attachments = 11;
+  string attachments = 11;
 }
 
 message PostRequest {
@@ -33,7 +33,7 @@ message PostWithBlocksRequest {
   string conversation_id = 3;
   string text = 4;
   string blocks = 5;
-	string attachments = 8;
+  string attachments = 8;
   string thread_timestamp = 6;
   string idempotency_key = 7;
 }
@@ -44,9 +44,9 @@ message EphemeralMessage {
   string author_id = 3;
   string recipient_id = 4;
   string text = 5;
-	string timestamp = 6;
-	string blocks = 7;
-	string attachments = 8;
+  string timestamp = 6;
+  string blocks = 7;
+  string attachments = 8;
 }
 
 message PostEphemeralRequest {
@@ -54,9 +54,9 @@ message PostEphemeralRequest {
   string user_id = 2;
   string conversation_id = 3;
   string recipient_id = 4;
-	string text = 5;
-	string blocks = 6;
-	string attachments = 7;
+  string text = 5;
+  string blocks = 6;
+  string attachments = 7;
 }
 
 message UpdateRequest {
@@ -172,7 +172,7 @@ message IncomingWebhookPostRequest {
   string thread_timestamp = 5;
   string idempotency_key = 6;
   string blocks = 7;
-	string attachments = 8;
+  string attachments = 8;
 }
 
 message IncomingWebhookMutationResponse {

@@ -550,7 +550,7 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	created := time.Unix(300, 0).UTC()
-	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", CreatedAt: created}
+	message := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "starred", Blocks: `[{"type":"section"}]`, CreatedAt: created}
 	if err := s.CreateMessage(ctx, message, events.Event{ID: "message-1", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +558,7 @@ func TestSQLiteStarsAreDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	stars, _, more, err := s.ListStars(ctx, "T1", "U1", domain.PageRequest{Limit: 1})
-	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || more {
+	if err != nil || len(stars) != 1 || stars[0].Message.ID != "M1" || stars[0].Message.Blocks != message.Blocks || more {
 		t.Fatalf("stars=%+v more=%v err=%v", stars, more, err)
 	}
 }
@@ -611,16 +611,16 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", Text: "later", PostAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second), CreatedAt: time.Now().UTC().Truncate(time.Second)}
+	value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", Text: "", Blocks: `[{"type":"divider"}]`, PostAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second), CreatedAt: time.Now().UTC().Truncate(time.Second)}
 	if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: "scheduled-1", WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ListScheduledMessages(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Items) != 1 || page.Items[0].ID != id {
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != id || page.Items[0].Blocks != value.Blocks {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 	claimed, err := s.ClaimScheduledMessages(ctx, "T1", "worker-1", 10, time.Minute)
-	if err != nil || len(claimed) != 1 || claimed[0].ID != id {
+	if err != nil || len(claimed) != 1 || claimed[0].ID != id || claimed[0].Blocks != value.Blocks {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
 	if err := s.MarkScheduledMessageDelivered(ctx, "worker-1", id); err != nil {
@@ -1102,12 +1102,12 @@ func TestSQLiteMessageUnfurlsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
+	value := domain.Message{ID: "msg_unfurl", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "link", Blocks: `[{"type":"section","text":{"type":"plain_text","text":"hello"}}]`, CreatedAt: now, Unfurls: map[string]string{"https://example.com": `{"title":"Example"}`}}
 	if err := s.CreateMessage(ctx, value, events.Event{ID: "evt_unfurl", WorkspaceID: "T1", Topic: "message.created", Payload: string(value.ID), CreatedAt: now}, ""); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := s.GetMessage(ctx, value.ID)
-	if err != nil || loaded.Unfurls["https://example.com"] != value.Unfurls["https://example.com"] {
+	if err != nil || loaded.Unfurls["https://example.com"] != value.Unfurls["https://example.com"] || loaded.Blocks != value.Blocks {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
 }
