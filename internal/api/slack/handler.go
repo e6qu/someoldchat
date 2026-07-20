@@ -5472,7 +5472,7 @@ func mapServiceError(err error, notFoundReason string) (int, string) {
 	if errors.Is(err, store.ErrNotFound) || status.Code(err) == codes.NotFound {
 		return http.StatusNotFound, notFoundReason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) {
 		return http.StatusBadRequest, "invalid_arguments"
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) || status.Code(err) == codes.AlreadyExists {
@@ -6409,7 +6409,7 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	size, err := strconv.ParseInt(strings.TrimSpace(fields["length"]), 10, 64)
-	if err != nil || size < 0 {
+	if err != nil || size <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
@@ -6451,34 +6451,46 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	uploadID := strings.TrimSpace(fields["upload_id"])
-	if uploadID == "" {
+	completions := make([]domain.ExternalUploadCompletion, 0, 1)
+	if uploadID := strings.TrimSpace(fields["upload_id"]); uploadID != "" {
+		completions = append(completions, domain.ExternalUploadCompletion{ID: domain.ExternalUploadID(uploadID), Title: fields["title"]})
+	} else {
 		var entries []struct {
 			ID    string `json:"id"`
 			Title string `json:"title"`
 		}
-		if raw := strings.TrimSpace(fields["files"]); raw != "" && json.Unmarshal([]byte(raw), &entries) == nil && len(entries) == 1 {
-			uploadID = strings.TrimSpace(entries[0].ID)
-			if fields["title"] == "" {
-				fields["title"] = strings.TrimSpace(entries[0].Title)
-			}
+		raw := strings.TrimSpace(fields["files"])
+		if raw == "" || json.Unmarshal([]byte(raw), &entries) != nil || len(entries) == 0 {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			return
+		}
+		for _, entry := range entries {
+			completions = append(completions, domain.ExternalUploadCompletion{ID: domain.ExternalUploadID(strings.TrimSpace(entry.ID)), Title: strings.TrimSpace(entry.Title)})
 		}
 	}
-	if uploadID == "" {
+	if len(completions) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
+	}
+	if fields["title"] != "" && len(completions) == 1 {
+		completions[0].Title = fields["title"]
 	}
 	channels := parseConversationIDs(fields["channels"])
 	if channel := strings.TrimSpace(fields["channel_id"]); channel != "" {
 		channels = append(channels, domain.ConversationID(channel))
 	}
-	file, err := h.Messages.CompleteExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadID(uploadID), fields["title"], channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
+	files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 	if err != nil {
 		code, reason := mapServiceError(err, "file_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": []map[string]any{fileResponse(file)}, "file": fileResponse(file)})
+	responses := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		responses = append(responses, fileResponse(file))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
+	return
 }
 
 func externalUploadURL(r *http.Request, id domain.ExternalUploadID) string {

@@ -19,21 +19,22 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	FilesService_CreateExternalUpload_FullMethodName   = "/sameoldchat.chat.v1.FilesService/CreateExternalUpload"
-	FilesService_UploadExternalFile_FullMethodName     = "/sameoldchat.chat.v1.FilesService/UploadExternalFile"
-	FilesService_CompleteExternalUpload_FullMethodName = "/sameoldchat.chat.v1.FilesService/CompleteExternalUpload"
-	FilesService_FileInfo_FullMethodName               = "/sameoldchat.chat.v1.FilesService/FileInfo"
-	FilesService_DeleteFile_FullMethodName             = "/sameoldchat.chat.v1.FilesService/DeleteFile"
-	FilesService_DeleteFileComment_FullMethodName      = "/sameoldchat.chat.v1.FilesService/DeleteFileComment"
-	FilesService_Files_FullMethodName                  = "/sameoldchat.chat.v1.FilesService/Files"
-	FilesService_SharePublicURL_FullMethodName         = "/sameoldchat.chat.v1.FilesService/SharePublicURL"
-	FilesService_RevokePublicURL_FullMethodName        = "/sameoldchat.chat.v1.FilesService/RevokePublicURL"
-	FilesService_AddRemoteFile_FullMethodName          = "/sameoldchat.chat.v1.FilesService/AddRemoteFile"
-	FilesService_RemoteFileInfo_FullMethodName         = "/sameoldchat.chat.v1.FilesService/RemoteFileInfo"
-	FilesService_RemoteFiles_FullMethodName            = "/sameoldchat.chat.v1.FilesService/RemoteFiles"
-	FilesService_RemoveRemoteFile_FullMethodName       = "/sameoldchat.chat.v1.FilesService/RemoveRemoteFile"
-	FilesService_ShareRemoteFile_FullMethodName        = "/sameoldchat.chat.v1.FilesService/ShareRemoteFile"
-	FilesService_UpdateRemoteFile_FullMethodName       = "/sameoldchat.chat.v1.FilesService/UpdateRemoteFile"
+	FilesService_CreateExternalUpload_FullMethodName    = "/sameoldchat.chat.v1.FilesService/CreateExternalUpload"
+	FilesService_UploadExternalFile_FullMethodName      = "/sameoldchat.chat.v1.FilesService/UploadExternalFile"
+	FilesService_CompleteExternalUpload_FullMethodName  = "/sameoldchat.chat.v1.FilesService/CompleteExternalUpload"
+	FilesService_CompleteExternalUploads_FullMethodName = "/sameoldchat.chat.v1.FilesService/CompleteExternalUploads"
+	FilesService_FileInfo_FullMethodName                = "/sameoldchat.chat.v1.FilesService/FileInfo"
+	FilesService_DeleteFile_FullMethodName              = "/sameoldchat.chat.v1.FilesService/DeleteFile"
+	FilesService_DeleteFileComment_FullMethodName       = "/sameoldchat.chat.v1.FilesService/DeleteFileComment"
+	FilesService_Files_FullMethodName                   = "/sameoldchat.chat.v1.FilesService/Files"
+	FilesService_SharePublicURL_FullMethodName          = "/sameoldchat.chat.v1.FilesService/SharePublicURL"
+	FilesService_RevokePublicURL_FullMethodName         = "/sameoldchat.chat.v1.FilesService/RevokePublicURL"
+	FilesService_AddRemoteFile_FullMethodName           = "/sameoldchat.chat.v1.FilesService/AddRemoteFile"
+	FilesService_RemoteFileInfo_FullMethodName          = "/sameoldchat.chat.v1.FilesService/RemoteFileInfo"
+	FilesService_RemoteFiles_FullMethodName             = "/sameoldchat.chat.v1.FilesService/RemoteFiles"
+	FilesService_RemoveRemoteFile_FullMethodName        = "/sameoldchat.chat.v1.FilesService/RemoveRemoteFile"
+	FilesService_ShareRemoteFile_FullMethodName         = "/sameoldchat.chat.v1.FilesService/ShareRemoteFile"
+	FilesService_UpdateRemoteFile_FullMethodName        = "/sameoldchat.chat.v1.FilesService/UpdateRemoteFile"
 )
 
 // FilesServiceClient is the client API for FilesService service.
@@ -43,6 +44,7 @@ type FilesServiceClient interface {
 	CreateExternalUpload(ctx context.Context, in *ExternalUploadRequest, opts ...grpc.CallOption) (*ExternalUpload, error)
 	UploadExternalFile(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[ExternalUploadPart, MutationResponse], error)
 	CompleteExternalUpload(ctx context.Context, in *CompleteExternalUploadRequest, opts ...grpc.CallOption) (*File, error)
+	CompleteExternalUploads(ctx context.Context, in *CompleteExternalUploadsRequest, opts ...grpc.CallOption) (*FilePage, error)
 	FileInfo(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (*File, error)
 	DeleteFile(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (*DeleteFileResponse, error)
 	DeleteFileComment(ctx context.Context, in *FileCommentDeleteRequest, opts ...grpc.CallOption) (*DeleteFileResponse, error)
@@ -92,6 +94,16 @@ func (c *filesServiceClient) CompleteExternalUpload(ctx context.Context, in *Com
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(File)
 	err := c.cc.Invoke(ctx, FilesService_CompleteExternalUpload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *filesServiceClient) CompleteExternalUploads(ctx context.Context, in *CompleteExternalUploadsRequest, opts ...grpc.CallOption) (*FilePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FilePage)
+	err := c.cc.Invoke(ctx, FilesService_CompleteExternalUploads_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +237,7 @@ type FilesServiceServer interface {
 	CreateExternalUpload(context.Context, *ExternalUploadRequest) (*ExternalUpload, error)
 	UploadExternalFile(grpc.ClientStreamingServer[ExternalUploadPart, MutationResponse]) error
 	CompleteExternalUpload(context.Context, *CompleteExternalUploadRequest) (*File, error)
+	CompleteExternalUploads(context.Context, *CompleteExternalUploadsRequest) (*FilePage, error)
 	FileInfo(context.Context, *FileRequest) (*File, error)
 	DeleteFile(context.Context, *FileRequest) (*DeleteFileResponse, error)
 	DeleteFileComment(context.Context, *FileCommentDeleteRequest) (*DeleteFileResponse, error)
@@ -254,6 +267,9 @@ func (UnimplementedFilesServiceServer) UploadExternalFile(grpc.ClientStreamingSe
 }
 func (UnimplementedFilesServiceServer) CompleteExternalUpload(context.Context, *CompleteExternalUploadRequest) (*File, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteExternalUpload not implemented")
+}
+func (UnimplementedFilesServiceServer) CompleteExternalUploads(context.Context, *CompleteExternalUploadsRequest) (*FilePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteExternalUploads not implemented")
 }
 func (UnimplementedFilesServiceServer) FileInfo(context.Context, *FileRequest) (*File, error) {
 	return nil, status.Error(codes.Unimplemented, "method FileInfo not implemented")
@@ -350,6 +366,24 @@ func _FilesService_CompleteExternalUpload_Handler(srv interface{}, ctx context.C
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(FilesServiceServer).CompleteExternalUpload(ctx, req.(*CompleteExternalUploadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FilesService_CompleteExternalUploads_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CompleteExternalUploadsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FilesServiceServer).CompleteExternalUploads(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: FilesService_CompleteExternalUploads_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FilesServiceServer).CompleteExternalUploads(ctx, req.(*CompleteExternalUploadsRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -584,6 +618,10 @@ var FilesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompleteExternalUpload",
 			Handler:    _FilesService_CompleteExternalUpload_Handler,
+		},
+		{
+			MethodName: "CompleteExternalUploads",
+			Handler:    _FilesService_CompleteExternalUploads_Handler,
 		},
 		{
 			MethodName: "FileInfo",

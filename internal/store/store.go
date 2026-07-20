@@ -14,6 +14,7 @@ var (
 	ErrLeaseConflict             = errors.New("outbox lease conflict")
 	ErrIdempotencyConflict       = errors.New("idempotency key already committed")
 	ErrAlreadyExists             = errors.New("already exists")
+	ErrInvalidArgument           = errors.New("invalid argument")
 	ErrInvalidConversationType   = errors.New("invalid conversation type")
 	ErrInvalidInviteRequest      = errors.New("invalid invite request")
 	ErrInvalidAppApproval        = errors.New("invalid app approval")
@@ -196,6 +197,7 @@ type Store interface {
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
+	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.FileID, domain.FileCommentID, events.Event) error

@@ -1722,3 +1722,58 @@ func TestSQLiteExternalUploadCompletionPersistsFileShares(t *testing.T) {
 		t.Fatalf("upload=%+v err=%v", completed, err)
 	}
 }
+
+func TestSQLiteExternalUploadBatchCompletionIsAtomicAndDurable(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "external-upload-batch.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Now().UTC().Truncate(time.Second)
+	uploads := []domain.ExternalUpload{
+		{ID: "upload_1", WorkspaceID: "T1", Uploader: "U1", Name: "one.txt", Title: "One", MIMEType: "text/plain", BlobKey: "T1/upload_1", Size: 3, Status: domain.ExternalUploadUploaded, CreatedAt: created, ExpiresAt: created.Add(time.Hour)},
+		{ID: "upload_2", WorkspaceID: "T1", Uploader: "U1", Name: "two.txt", Title: "Two", MIMEType: "text/plain", BlobKey: "T1/upload_2", Size: 3, Status: domain.ExternalUploadUploaded, CreatedAt: created, ExpiresAt: created.Add(time.Hour)},
+	}
+	for _, upload := range uploads {
+		if err := s.CreateExternalUpload(ctx, upload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	files := []domain.File{
+		{ID: "file_1", WorkspaceID: "T1", Uploader: "U1", Name: "one.txt", Title: "First", MIMEType: "text/plain", BlobKey: uploads[0].BlobKey, Size: 3, CreatedAt: created, SharedChannels: []domain.ConversationID{"C1"}},
+		{ID: "file_2", WorkspaceID: "T1", Uploader: "U1", Name: "two.txt", Title: "Second", MIMEType: "text/plain", BlobKey: uploads[1].BlobKey, Size: 3, CreatedAt: created, SharedChannels: []domain.ConversationID{"C1"}},
+	}
+	completions := []domain.ExternalUploadCompletion{{ID: uploads[0].ID, Title: files[0].Title}, {ID: uploads[1].ID, Title: files[1].Title}}
+	emitted := []events.Event{{ID: "file-event-1", WorkspaceID: "T1", Topic: "file.created", Payload: "file_1", CreatedAt: created}, {ID: "file-event-2", WorkspaceID: "T1", Topic: "file.created", Payload: "file_2", CreatedAt: created}}
+	if err := s.CompleteExternalUploads(ctx, completions, files, []domain.ConversationID{"C1"}, emitted); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for index, expected := range files {
+		got, err := s.GetFile(ctx, expected.ID)
+		if err != nil || got.Title != expected.Title || len(got.SharedChannels) != 1 || got.SharedChannels[0] != "C1" {
+			t.Fatalf("file %d=%+v err=%v", index, got, err)
+		}
+		completed, err := s.GetExternalUpload(ctx, uploads[index].ID)
+		if err != nil || completed.Status != domain.ExternalUploadCompleted || completed.FileID != expected.ID {
+			t.Fatalf("upload %d=%+v err=%v", index, completed, err)
+		}
+	}
+}

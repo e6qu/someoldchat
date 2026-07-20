@@ -920,3 +920,8 @@ const (
 	ExternalUploadUploaded  ExternalUploadStatus = "uploaded"
 	ExternalUploadCompleted ExternalUploadStatus = "completed"
 )
+
+type ExternalUploadCompletion struct {
+	ID    ExternalUploadID
+	Title string
+}

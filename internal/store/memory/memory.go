@@ -4250,26 +4250,49 @@ func (s *Store) MarkExternalUploadUploaded(_ context.Context, id domain.External
 	return nil
 }
 
-func (s *Store) CompleteExternalUpload(_ context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
+func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
+	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event})
+}
+
+func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	value, exists := s.externalUploads[id]
-	if !exists {
-		return store.ErrNotFound
+	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) {
+		return store.ErrInvalidArgument
 	}
-	if value.Status != domain.ExternalUploadUploaded || !value.ExpiresAt.After(time.Now().UTC()) {
-		return store.ErrConflict
+	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
+	seenFiles := make(map[domain.FileID]struct{}, len(files))
+	for index, completion := range completions {
+		value, exists := s.externalUploads[completion.ID]
+		if !exists {
+			return store.ErrNotFound
+		}
+		if value.Status != domain.ExternalUploadUploaded || !value.ExpiresAt.After(time.Now().UTC()) {
+			return store.ErrConflict
+		}
+		if _, exists := seenUploads[completion.ID]; exists {
+			return store.ErrInvalidArgument
+		}
+		if _, exists := seenFiles[files[index].ID]; exists {
+			return store.ErrInvalidArgument
+		}
+		if _, exists := s.files[files[index].ID]; exists {
+			return store.ErrAlreadyExists
+		}
+		seenUploads[completion.ID] = struct{}{}
+		seenFiles[files[index].ID] = struct{}{}
 	}
-	if _, exists := s.files[file.ID]; exists {
-		return store.ErrAlreadyExists
+	for index, completion := range completions {
+		value := s.externalUploads[completion.ID]
+		file := files[index]
+		value.Status = domain.ExternalUploadCompleted
+		value.CompletedAt = file.CreatedAt.UTC()
+		value.FileID = file.ID
+		s.externalUploads[completion.ID] = value
+		s.files[file.ID] = file
+		s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
+		s.outbox = append(s.outbox, emitted[index])
 	}
-	value.Status = domain.ExternalUploadCompleted
-	value.CompletedAt = file.CreatedAt.UTC()
-	value.FileID = file.ID
-	s.externalUploads[id] = value
-	s.files[file.ID] = file
-	s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
-	s.outbox = append(s.outbox, event)
-	s.eventSequence++
+	s.eventSequence += uint64(len(emitted))
 	return nil
 }

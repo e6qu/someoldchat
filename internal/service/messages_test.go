@@ -1380,11 +1380,54 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
 	}
 	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks == "" {
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
 	stored, err := s.GetExternalUpload(ctx, upload.ID)
 	if err != nil || stored.Status != domain.ExternalUploadCompleted {
 		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
+func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	ctx := context.Background()
+	first, err := messages.CreateExternalUpload(ctx, "T1", "U1", "first.txt", "text/plain", 5, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := messages.CreateExternalUpload(ctx, "T1", "U1", "second.txt", "text/plain", 6, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.UploadExternalFile(ctx, first.ID, first.Size, bytes.NewReader([]byte("first"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.UploadExternalFile(ctx, second.ID, second.Size, bytes.NewReader([]byte("second"))); err != nil {
+		t.Fatal(err)
+	}
+	files, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: first.ID, Title: "First"}, {ID: second.ID, Title: "Second"}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "")
+	if err != nil || len(files) != 2 || files[0].Title != "First" || files[1].Title != "Second" {
+		t.Fatalf("files=%+v err=%v", files, err)
+	}
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Blocks == "" {
+		t.Fatalf("messages=%+v err=%v", page.Messages, err)
+	}
+	retry, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: second.ID}, {ID: first.ID}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "")
+	if err != nil || len(retry) != 2 || retry[0].ID != files[1].ID || retry[1].ID != files[0].ID {
+		t.Fatalf("retry=%+v err=%v", retry, err)
+	}
+	page, err = messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Messages) != 1 {
+		t.Fatalf("duplicate messages=%+v err=%v", page.Messages, err)
 	}
 }

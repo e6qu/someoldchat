@@ -339,8 +339,30 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 		t.Fatalf("second completion file=%+v err=%v", second, err)
 	}
 	page, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks == "" {
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
+	}
+	firstBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", "first-batch.txt", "text/plain", 5, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBatch, err := remote.CreateExternalUpload(ctx, "T1", "U1", "second-batch.txt", "text/plain", 6, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.UploadExternalFile(ctx, firstBatch.ID, firstBatch.Size, bytes.NewReader([]byte("first"))); err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.UploadExternalFile(ctx, secondBatch.ID, secondBatch.Size, bytes.NewReader([]byte("second"))); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := remote.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: firstBatch.ID, Title: "First batch"}, {ID: secondBatch.ID, Title: "Second batch"}}, []domain.ConversationID{"C1"}, "Batch", "", "")
+	if err != nil || len(batch) != 2 || batch[0].Title != "First batch" || batch[1].Title != "Second batch" {
+		t.Fatalf("batch=%+v err=%v", batch, err)
+	}
+	page, err = remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Messages) != 2 || page.Messages[1].Text != "Batch" {
+		t.Fatalf("batch messages=%+v err=%v", page.Messages, err)
 	}
 }
 

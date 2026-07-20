@@ -187,6 +187,7 @@ type Service interface {
 	CreateExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, string, string, int64, time.Duration) (domain.ExternalUpload, error)
 	UploadExternalFile(context.Context, domain.ExternalUploadID, int64, io.Reader) error
 	CompleteExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID, string, []domain.ConversationID, string, string, domain.MessageTimestamp) (domain.File, error)
+	CompleteExternalUploads(context.Context, domain.WorkspaceID, domain.UserID, []domain.ExternalUploadCompletion, []domain.ConversationID, string, string, domain.MessageTimestamp) ([]domain.File, error)
 	OpenFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, io.ReadCloser, error)
 	FileInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID) error

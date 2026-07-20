@@ -5758,34 +5758,7 @@ func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.Extern
 }
 
 func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, file.ID, file.CreatedAt.UTC().Format(time.RFC3339Nano), id, domain.ExternalUploadUploaded, time.Now().UTC().Format(time.RFC3339Nano))
-	if err != nil {
-		return err
-	}
-	count, err := result.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if count != 1 {
-		return store.ErrConflict
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-		return err
-	}
-	for _, channel := range channels {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id) VALUES (?, ?)`, file.ID, channel); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event})
 }
 
 func (s *Store) SeedFileComment(ctx context.Context, value domain.FileComment) error {
@@ -7002,4 +6975,52 @@ func (s *Store) listFileShares(ctx context.Context, workspace domain.WorkspaceID
 		}
 	}
 	return values, nil
+}
+
+func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event) error {
+	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
+	seenFiles := make(map[domain.FileID]struct{}, len(files))
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for index, completion := range completions {
+		if _, exists := seenUploads[completion.ID]; exists {
+			return store.ErrInvalidArgument
+		}
+		if _, exists := seenFiles[files[index].ID]; exists {
+			return store.ErrInvalidArgument
+		}
+		seenUploads[completion.ID] = struct{}{}
+		seenFiles[files[index].ID] = struct{}{}
+		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, files[index].ID, files[index].CreatedAt.UTC().Format(time.RFC3339Nano), completion.ID, domain.ExternalUploadUploaded, now)
+		if err != nil {
+			return err
+		}
+		count, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if count != 1 {
+			return store.ErrConflict
+		}
+		file := files[index]
+		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+		for _, channel := range channels {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id) VALUES (?, ?)`, file.ID, channel); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, emitted[index].ID, emitted[index].WorkspaceID, emitted[index].Topic, emitted[index].Payload, emitted[index].CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
