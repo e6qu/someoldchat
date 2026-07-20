@@ -1299,3 +1299,24 @@ func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 }
+
+func TestPostEphemeralWithBlocksPersistsNormalizedEvent(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	value, err := (Messages{Store: s}).PostEphemeralWithBlocks(context.Background(), "T1", "U1", "C1", "U2", "", ` [{"type":"divider"}] `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value.Text != "" || value.Blocks != `[{"type":"divider"}]` {
+		t.Fatalf("ephemeral=%+v", value)
+	}
+	records, err := s.ListEventsAfter(context.Background(), "T1", 0, 10)
+	if err != nil || len(records) != 1 || !strings.Contains(records[0].Event.Payload, `"blocks":"[{\"type\":\"divider\"}]"`) {
+		t.Fatalf("events=%+v err=%v", records, err)
+	}
+}
