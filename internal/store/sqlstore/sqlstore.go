@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS conversation_prefs (
 CREATE TABLE IF NOT EXISTS invite_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, requested_by TEXT NOT NULL REFERENCES users(id), channel_ids TEXT NOT NULL DEFAULT '[]', custom_message TEXT NOT NULL DEFAULT '', real_name TEXT NOT NULL DEFAULT '', resend INTEGER NOT NULL DEFAULT 0, restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0, guest_expiration_at INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, created_at INTEGER NOT NULL, reviewed_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS app_approvals (app_id TEXT PRIMARY KEY, request_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, PRIMARY KEY (app_id, workspace_id));
+CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
@@ -218,7 +220,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 70
+const schemaVersion = 71
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -1092,6 +1094,14 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 					return fmt.Errorf("migrate OAuth authorization code %s: %w", column, err)
 				}
 			}
+		}
+	}
+	if version < 71 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)`); err != nil {
+			return fmt.Errorf("migrate incoming webhooks: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled)`); err != nil {
+			return fmt.Errorf("index incoming webhooks: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -2693,6 +2703,58 @@ func (s *Store) ListAppInstallations(ctx context.Context, appID domain.AppID) ([
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+func (s *Store) CreateIncomingWebhook(ctx context.Context, value domain.IncomingWebhook) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.ConversationID == "" || value.UserID == "" || value.SecretHash == "" || value.CreatedAt.IsZero() {
+		return store.ErrInvalidAppApproval
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO incoming_webhooks(id, workspace_id, app_id, conversation_id, user_id, secret_hash, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.AppID, value.ConversationID, value.UserID, value.SecretHash, boolInt(value.Enabled), value.CreatedAt.UTC().UnixNano())
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
+		return store.ErrAlreadyExists
+	}
+	return err
+}
+
+func (s *Store) LookupIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret string) (domain.IncomingWebhook, error) {
+	if workspaceID == "" || appID == "" || secret == "" {
+		return domain.IncomingWebhook{}, store.ErrNotFound
+	}
+	var value domain.IncomingWebhook
+	var enabled int
+	var created int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, app_id, conversation_id, user_id, secret_hash, enabled, created_at FROM incoming_webhooks WHERE workspace_id = ? AND app_id = ? AND secret_hash = ? AND enabled = 1`, workspaceID, appID, domain.HashToken(secret)).Scan(&value.ID, &value.WorkspaceID, &value.AppID, &value.ConversationID, &value.UserID, &value.SecretHash, &enabled, &created)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.IncomingWebhook{}, store.ErrNotFound
+		}
+		return domain.IncomingWebhook{}, err
+	}
+	value.Enabled = enabled != 0
+	value.CreatedAt = time.Unix(0, created).UTC()
+	return value, nil
+}
+
+func (s *Store) SetIncomingWebhookEnabled(ctx context.Context, workspaceID domain.WorkspaceID, id domain.IncomingWebhookID, enabled bool, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE incoming_webhooks SET enabled = ? WHERE id = ? AND workspace_id = ?`, boolInt(enabled), id, workspaceID)
+	if err != nil {
+		return err
+	}
+	if count, err := result.RowsAffected(); err != nil || count != 1 {
+		if err != nil {
+			return err
+		}
+		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox(id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.AppPermissionRequest, event events.Event) error {

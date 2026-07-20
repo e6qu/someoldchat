@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/app/localchat"
@@ -82,5 +83,27 @@ func TestDatabaseDSNDefaultUsesRuntimeEnvironment(t *testing.T) {
 	t.Setenv("SAMEOLDCHAT_DATABASE_URL", "postgres://sameoldchat:secret@postgres.example:5432/sameoldchat?sslmode=require")
 	if got, want := databaseDSNDefault(), "postgres://sameoldchat:secret@postgres.example:5432/sameoldchat?sslmode=require"; got != want {
 		t.Fatalf("database DSN default = %q, want %q", got, want)
+	}
+}
+
+func TestResolveDatabaseDSNUsesEnvironmentOnlyForLocalComposition(t *testing.T) {
+	t.Setenv("SAMEOLDCHAT_DATABASE_URL", "postgres://sameoldchat:secret@postgres.example/sameoldchat")
+	if got, err := resolveDatabaseDSN("local", ""); err != nil || got != "postgres://sameoldchat:secret@postgres.example/sameoldchat" {
+		t.Fatalf("local DSN = %q, error=%v", got, err)
+	}
+	if got, err := resolveDatabaseDSN("grpc", ""); err != nil || got != "" {
+		t.Fatalf("distributed DSN = %q, error=%v", got, err)
+	}
+}
+
+func TestResolveDatabaseDSNRejectsExplicitDistributedLocalStorage(t *testing.T) {
+	if _, err := resolveDatabaseDSN("grpc", "file:chat.db"); err == nil || !strings.Contains(err.Error(), "cannot use a local database DSN") {
+		t.Fatalf("error=%v, want explicit distributed local-storage rejection", err)
+	}
+}
+
+func TestResolveDatabaseDSNRejectsUnknownComposition(t *testing.T) {
+	if _, err := resolveDatabaseDSN("", ""); err == nil {
+		t.Fatal("unknown chat composition was accepted")
 	}
 }

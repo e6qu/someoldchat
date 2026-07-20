@@ -107,6 +107,49 @@ message SearchRequest {
   string cursor = 5;
 }
 
+message IncomingWebhookCreateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string conversation_id = 4;
+  string bot_user_id = 5;
+}
+
+message IncomingWebhook {
+  string id = 1;
+  string workspace_id = 2;
+  string app_id = 3;
+  string conversation_id = 4;
+  string user_id = 5;
+  bool enabled = 6;
+  string created_at = 7;
+  string secret = 8;
+}
+
+message IncomingWebhookCreateResponse {
+  IncomingWebhook webhook = 1;
+}
+
+message IncomingWebhookEnableRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string webhook_id = 3;
+  bool enabled = 4;
+}
+
+message IncomingWebhookPostRequest {
+  string workspace_id = 1;
+  string app_id = 2;
+  string secret = 3;
+  string text = 4;
+  string thread_timestamp = 5;
+  string idempotency_key = 6;
+}
+
+message IncomingWebhookMutationResponse {
+  bool ok = 1;
+}
+
 service MessagesService {
   rpc Post(PostRequest) returns (Message);
   rpc PostEphemeral(PostEphemeralRequest) returns (EphemeralMessage);
@@ -117,4 +160,7 @@ service MessagesService {
   rpc History(HistoryRequest) returns (MessagePage);
   rpc Replies(RepliesRequest) returns (MessagePage);
   rpc Search(SearchRequest) returns (MessagePage);
+  rpc AdminCreateIncomingWebhook(IncomingWebhookCreateRequest) returns (IncomingWebhookCreateResponse);
+  rpc AdminSetIncomingWebhookEnabled(IncomingWebhookEnableRequest) returns (IncomingWebhookMutationResponse);
+  rpc PostIncomingWebhook(IncomingWebhookPostRequest) returns (Message);
 }

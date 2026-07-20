@@ -344,6 +344,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/openid.connect.token", h.openIDConnectToken)
 	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
 	mux.HandleFunc("POST /api/openid.connect.userInfo", h.openIDConnectUserInfo)
+	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.incomingWebhook)
+	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
+	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
 }
 
 func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
@@ -6250,4 +6253,87 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 		response["https://slack.com/team_image_"+size] = image
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+type incomingWebhookPayload struct {
+	Text     string          `json:"text"`
+	ThreadTS string          `json:"thread_ts"`
+	Blocks   json.RawMessage `json:"blocks"`
+}
+
+func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
+	workspaceID := domain.WorkspaceID(r.PathValue("workspace"))
+	appID := domain.AppID(r.PathValue("app"))
+	secret := r.PathValue("secret")
+	var payload incomingWebhookPayload
+	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0) || len(payload.Blocks) > 0 && !json.Valid(payload.Blocks) {
+		writePlain(w, http.StatusBadRequest, "invalid_payload")
+		return
+	}
+	if len(payload.Blocks) > 0 {
+		writePlain(w, http.StatusBadRequest, "invalid_payload: blocks are not supported by the message storage contract")
+		return
+	}
+	message, err := h.Messages.PostIncomingWebhook(r.Context(), workspaceID, appID, secret, payload.Text, domain.MessageTimestamp(payload.ThreadTS), r.Header.Get("Idempotency-Key"))
+	if err != nil {
+		code, reason := mapServiceError(err, "no_team")
+		if code == http.StatusBadRequest {
+			reason = "invalid_payload"
+		}
+		writePlain(w, code, reason)
+		return
+	}
+	_ = message
+	writePlain(w, http.StatusOK, "ok")
+}
+
+func writePlain(w http.ResponseWriter, status int, value string) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, value)
+}
+
+func (h Handler) adminIncomingWebhookCreate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || fields["app_id"] == "" || fields["channel_id"] == "" || fields["bot_user_id"] == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	webhook, secret, err := h.Messages.AdminCreateIncomingWebhook(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppID(fields["app_id"]), domain.ConversationID(fields["channel_id"]), domain.UserID(fields["bot_user_id"]))
+	if err != nil {
+		code, reason := mapServiceError(err, "invalid_arguments")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": "https://hooks.slack.com/services/" + string(webhook.WorkspaceID) + "/" + string(webhook.AppID) + "/" + secret}})
+}
+
+func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeAdminAppsWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil || fields["webhook_id"] == "" || (fields["enabled"] != "true" && fields["enabled"] != "false") {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	enabled, err := strconv.ParseBool(fields["enabled"])
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.AdminSetIncomingWebhookEnabled(r.Context(), principal.WorkspaceID, principal.UserID, domain.IncomingWebhookID(fields["webhook_id"]), enabled); err != nil {
+		code, reason := mapServiceError(err, "invalid_arguments")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }

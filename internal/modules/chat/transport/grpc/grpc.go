@@ -6037,3 +6037,69 @@ func (s *Server) OpenIDConnectUserInfo(ctx context.Context, input *chatv1.OpenID
 	}
 	return &chatv1.OpenIDConnectUserInfoResponse{Subject: string(value.Subject), UserId: string(value.UserID), WorkspaceId: string(value.WorkspaceID), Email: value.Email, EmailVerified: value.EmailVerified, DateEmailVerified: value.DateEmailVerified, Name: value.Name, GivenName: value.GivenName, FamilyName: value.FamilyName, Locale: value.Locale, Picture: value.Picture, TeamName: value.TeamName, TeamDomain: value.TeamDomain, UserImages: value.UserImages, TeamImages: value.TeamImages, TeamImageDefault: value.TeamImageDefault}, nil
 }
+
+func (r Remote) AdminCreateIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, botUserID domain.UserID) (domain.IncomingWebhook, string, error) {
+	out, err := r.messages.AdminCreateIncomingWebhook(ctx, &chatv1.IncomingWebhookCreateRequest{WorkspaceId: string(workspaceID), UserId: string(actorID), AppId: string(appID), ConversationId: string(conversationID), BotUserId: string(botUserID)})
+	if err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	return decodeProtoIncomingWebhook(out.GetWebhook())
+}
+
+func (r Remote) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, webhookID domain.IncomingWebhookID, enabled bool) error {
+	out, err := r.messages.AdminSetIncomingWebhookEnabled(ctx, &chatv1.IncomingWebhookEnableRequest{WorkspaceId: string(workspaceID), UserId: string(actorID), WebhookId: string(webhookID), Enabled: enabled})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("incoming webhook mutation was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	out, err := r.messages.PostIncomingWebhook(ctx, &chatv1.IncomingWebhookPostRequest{WorkspaceId: string(workspaceID), AppId: string(appID), Secret: secret, Text: text, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (s *Server) AdminCreateIncomingWebhook(ctx context.Context, input *chatv1.IncomingWebhookCreateRequest) (*chatv1.IncomingWebhookCreateResponse, error) {
+	value, secret, err := s.implementation.AdminCreateIncomingWebhook(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetBotUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.IncomingWebhookCreateResponse{Webhook: encodeProtoIncomingWebhook(value, secret)}, nil
+}
+
+func (s *Server) AdminSetIncomingWebhookEnabled(ctx context.Context, input *chatv1.IncomingWebhookEnableRequest) (*chatv1.IncomingWebhookMutationResponse, error) {
+	err := s.implementation.AdminSetIncomingWebhookEnabled(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.IncomingWebhookID(input.GetWebhookId()), input.GetEnabled())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.IncomingWebhookMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) PostIncomingWebhook(ctx context.Context, input *chatv1.IncomingWebhookPostRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.PostIncomingWebhook(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()), input.GetSecret(), input.GetText(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
+func encodeProtoIncomingWebhook(value domain.IncomingWebhook, secret string) *chatv1.IncomingWebhook {
+	return &chatv1.IncomingWebhook{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), AppId: string(value.AppID), ConversationId: string(value.ConversationID), UserId: string(value.UserID), Enabled: value.Enabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Secret: secret}
+}
+
+func decodeProtoIncomingWebhook(value *chatv1.IncomingWebhook) (domain.IncomingWebhook, string, error) {
+	if value == nil {
+		return domain.IncomingWebhook{}, "", errors.New("missing incoming webhook")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return domain.IncomingWebhook{}, "", err
+	}
+	return domain.IncomingWebhook{ID: domain.IncomingWebhookID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), AppID: domain.AppID(value.GetAppId()), ConversationID: domain.ConversationID(value.GetConversationId()), UserID: domain.UserID(value.GetUserId()), Enabled: value.GetEnabled(), CreatedAt: createdAt.UTC()}, value.GetSecret(), nil
+}

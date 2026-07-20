@@ -1648,3 +1648,34 @@ func TestSQLiteIdempotencyReturnsCommittedMessage(t *testing.T) {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 }
+
+func TestSQLiteIncomingWebhookSecretIsHashedAndRevocable(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:incoming-webhook?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	value := domain.IncomingWebhook{ID: "wh_1", WorkspaceID: "T1", AppID: "A1", ConversationID: "C1", UserID: "U1", SecretHash: domain.HashToken("secret"), Enabled: true, CreatedAt: time.Unix(100, 0).UTC()}
+	if err := s.CreateIncomingWebhook(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.LookupIncomingWebhook(ctx, "T1", "A1", "secret"); err != nil || got.ID != value.ID || got.SecretHash == "secret" {
+		t.Fatalf("lookup=%+v err=%v", got, err)
+	}
+	if err := s.SetIncomingWebhookEnabled(ctx, "T1", value.ID, false, events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "incoming_webhook.disabled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LookupIncomingWebhook(ctx, "T1", "A1", "secret"); err != store.ErrNotFound {
+		t.Fatalf("disabled webhook error=%v", err)
+	}
+}

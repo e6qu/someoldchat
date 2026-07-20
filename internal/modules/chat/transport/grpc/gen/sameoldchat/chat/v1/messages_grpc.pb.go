@@ -19,15 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	MessagesService_Post_FullMethodName          = "/sameoldchat.chat.v1.MessagesService/Post"
-	MessagesService_PostEphemeral_FullMethodName = "/sameoldchat.chat.v1.MessagesService/PostEphemeral"
-	MessagesService_Update_FullMethodName        = "/sameoldchat.chat.v1.MessagesService/Update"
-	MessagesService_Unfurl_FullMethodName        = "/sameoldchat.chat.v1.MessagesService/Unfurl"
-	MessagesService_Delete_FullMethodName        = "/sameoldchat.chat.v1.MessagesService/Delete"
-	MessagesService_Permalink_FullMethodName     = "/sameoldchat.chat.v1.MessagesService/Permalink"
-	MessagesService_History_FullMethodName       = "/sameoldchat.chat.v1.MessagesService/History"
-	MessagesService_Replies_FullMethodName       = "/sameoldchat.chat.v1.MessagesService/Replies"
-	MessagesService_Search_FullMethodName        = "/sameoldchat.chat.v1.MessagesService/Search"
+	MessagesService_Post_FullMethodName                           = "/sameoldchat.chat.v1.MessagesService/Post"
+	MessagesService_PostEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/PostEphemeral"
+	MessagesService_Update_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Update"
+	MessagesService_Unfurl_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Unfurl"
+	MessagesService_Delete_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Delete"
+	MessagesService_Permalink_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/Permalink"
+	MessagesService_History_FullMethodName                        = "/sameoldchat.chat.v1.MessagesService/History"
+	MessagesService_Replies_FullMethodName                        = "/sameoldchat.chat.v1.MessagesService/Replies"
+	MessagesService_Search_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Search"
+	MessagesService_AdminCreateIncomingWebhook_FullMethodName     = "/sameoldchat.chat.v1.MessagesService/AdminCreateIncomingWebhook"
+	MessagesService_AdminSetIncomingWebhookEnabled_FullMethodName = "/sameoldchat.chat.v1.MessagesService/AdminSetIncomingWebhookEnabled"
+	MessagesService_PostIncomingWebhook_FullMethodName            = "/sameoldchat.chat.v1.MessagesService/PostIncomingWebhook"
 )
 
 // MessagesServiceClient is the client API for MessagesService service.
@@ -43,6 +46,9 @@ type MessagesServiceClient interface {
 	History(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*MessagePage, error)
 	Replies(ctx context.Context, in *RepliesRequest, opts ...grpc.CallOption) (*MessagePage, error)
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*MessagePage, error)
+	AdminCreateIncomingWebhook(ctx context.Context, in *IncomingWebhookCreateRequest, opts ...grpc.CallOption) (*IncomingWebhookCreateResponse, error)
+	AdminSetIncomingWebhookEnabled(ctx context.Context, in *IncomingWebhookEnableRequest, opts ...grpc.CallOption) (*IncomingWebhookMutationResponse, error)
+	PostIncomingWebhook(ctx context.Context, in *IncomingWebhookPostRequest, opts ...grpc.CallOption) (*Message, error)
 }
 
 type messagesServiceClient struct {
@@ -143,6 +149,36 @@ func (c *messagesServiceClient) Search(ctx context.Context, in *SearchRequest, o
 	return out, nil
 }
 
+func (c *messagesServiceClient) AdminCreateIncomingWebhook(ctx context.Context, in *IncomingWebhookCreateRequest, opts ...grpc.CallOption) (*IncomingWebhookCreateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IncomingWebhookCreateResponse)
+	err := c.cc.Invoke(ctx, MessagesService_AdminCreateIncomingWebhook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) AdminSetIncomingWebhookEnabled(ctx context.Context, in *IncomingWebhookEnableRequest, opts ...grpc.CallOption) (*IncomingWebhookMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(IncomingWebhookMutationResponse)
+	err := c.cc.Invoke(ctx, MessagesService_AdminSetIncomingWebhookEnabled_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) PostIncomingWebhook(ctx context.Context, in *IncomingWebhookPostRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_PostIncomingWebhook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // MessagesServiceServer is the server API for MessagesService service.
 // All implementations should embed UnimplementedMessagesServiceServer
 // for forward compatibility.
@@ -156,6 +192,9 @@ type MessagesServiceServer interface {
 	History(context.Context, *HistoryRequest) (*MessagePage, error)
 	Replies(context.Context, *RepliesRequest) (*MessagePage, error)
 	Search(context.Context, *SearchRequest) (*MessagePage, error)
+	AdminCreateIncomingWebhook(context.Context, *IncomingWebhookCreateRequest) (*IncomingWebhookCreateResponse, error)
+	AdminSetIncomingWebhookEnabled(context.Context, *IncomingWebhookEnableRequest) (*IncomingWebhookMutationResponse, error)
+	PostIncomingWebhook(context.Context, *IncomingWebhookPostRequest) (*Message, error)
 }
 
 // UnimplementedMessagesServiceServer should be embedded to have
@@ -191,6 +230,15 @@ func (UnimplementedMessagesServiceServer) Replies(context.Context, *RepliesReque
 }
 func (UnimplementedMessagesServiceServer) Search(context.Context, *SearchRequest) (*MessagePage, error) {
 	return nil, status.Error(codes.Unimplemented, "method Search not implemented")
+}
+func (UnimplementedMessagesServiceServer) AdminCreateIncomingWebhook(context.Context, *IncomingWebhookCreateRequest) (*IncomingWebhookCreateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminCreateIncomingWebhook not implemented")
+}
+func (UnimplementedMessagesServiceServer) AdminSetIncomingWebhookEnabled(context.Context, *IncomingWebhookEnableRequest) (*IncomingWebhookMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AdminSetIncomingWebhookEnabled not implemented")
+}
+func (UnimplementedMessagesServiceServer) PostIncomingWebhook(context.Context, *IncomingWebhookPostRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method PostIncomingWebhook not implemented")
 }
 func (UnimplementedMessagesServiceServer) testEmbeddedByValue() {}
 
@@ -374,6 +422,60 @@ func _MessagesService_Search_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessagesService_AdminCreateIncomingWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IncomingWebhookCreateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).AdminCreateIncomingWebhook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_AdminCreateIncomingWebhook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).AdminCreateIncomingWebhook(ctx, req.(*IncomingWebhookCreateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_AdminSetIncomingWebhookEnabled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IncomingWebhookEnableRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).AdminSetIncomingWebhookEnabled(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_AdminSetIncomingWebhookEnabled_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).AdminSetIncomingWebhookEnabled(ctx, req.(*IncomingWebhookEnableRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_PostIncomingWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IncomingWebhookPostRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).PostIncomingWebhook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_PostIncomingWebhook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).PostIncomingWebhook(ctx, req.(*IncomingWebhookPostRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // MessagesService_ServiceDesc is the grpc.ServiceDesc for MessagesService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -416,6 +518,18 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Search",
 			Handler:    _MessagesService_Search_Handler,
+		},
+		{
+			MethodName: "AdminCreateIncomingWebhook",
+			Handler:    _MessagesService_AdminCreateIncomingWebhook_Handler,
+		},
+		{
+			MethodName: "AdminSetIncomingWebhookEnabled",
+			Handler:    _MessagesService_AdminSetIncomingWebhookEnabled_Handler,
+		},
+		{
+			MethodName: "PostIncomingWebhook",
+			Handler:    _MessagesService_PostIncomingWebhook_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
