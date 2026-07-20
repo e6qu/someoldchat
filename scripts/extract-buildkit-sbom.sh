@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-archive="${1:?usage: extract-buildkit-attestation.sh <oci-archive> <output> <image-digest> <predicate-type>}"
-output="${2:?usage: extract-buildkit-attestation.sh <oci-archive> <output> <image-digest> <predicate-type>}"
-image_digest="${3:?usage: extract-buildkit-attestation.sh <oci-archive> <output> <image-digest> <predicate-type>}"
-predicate_type="${4:?usage: extract-buildkit-attestation.sh <oci-archive> <output> <image-digest> <predicate-type>}"
+archive="${1:?usage: extract-buildkit-sbom.sh <oci-archive> <output> <image-digest>}"
+output="${2:?usage: extract-buildkit-sbom.sh <oci-archive> <output> <image-digest>}"
+image_digest="${3:?usage: extract-buildkit-sbom.sh <oci-archive> <output> <image-digest>}"
+predicate_type='https://spdx.dev/Document'
 
 if [[ ! "$image_digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 	echo "image digest must be a SHA-256 digest: $image_digest" >&2
 	exit 1
 fi
-case "$predicate_type" in
-	https://slsa.dev/provenance/v1 | https://spdx.dev/Document) ;;
-	*)
-		echo "unsupported BuildKit predicate type: $predicate_type" >&2
-		exit 1
-		;;
-esac
 
 layout="$(mktemp -d)"
 trap 'rm -rf "$layout"' EXIT
@@ -53,19 +46,8 @@ statement_blob="$(blob_path "$statement_digest")"
 if ! jq -e --arg predicate "$predicate_type" '
   ._type == "https://in-toto.io/Statement/v1"
   and .predicateType == $predicate
-  and (
-    ($predicate == "https://spdx.dev/Document"
-      and .predicate.spdxVersion == "SPDX-2.3"
-      and .predicate.SPDXID == "SPDXRef-DOCUMENT")
-    or
-    ($predicate == "https://slsa.dev/provenance/v1"
-      and (.predicate.buildDefinition.buildType | type == "string" and length > 0)
-      and (.predicate.buildDefinition.externalParameters | type == "object")
-      and (.predicate.buildDefinition.internalParameters | type == "object")
-      and (.predicate.buildDefinition.resolvedDependencies | type == "array")
-      and (.predicate.runDetails.builder.id | type == "string" and test("^https://[^[:space:]]+$"))
-      and (.predicate.runDetails.metadata | type == "object"))
-  )
+  and .predicate.spdxVersion == "SPDX-2.3"
+  and .predicate.SPDXID == "SPDXRef-DOCUMENT"
 ' "$statement_blob" >/dev/null; then
 	echo "BuildKit statement was not a valid $predicate_type predicate" >&2
 	exit 1

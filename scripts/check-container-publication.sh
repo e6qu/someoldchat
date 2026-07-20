@@ -22,16 +22,14 @@ expect_count 1 '          - platform: linux/arm64'
 expect_count 1 '  IMAGE: ghcr.io/e6qu/someoldchat'
 expect_count 3 "        run: echo \"short_sha=${gha}{GITHUB_SHA:0:12}\" >> \"${gha}GITHUB_OUTPUT\""
 expect_count 1 "          tags: ${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-${gha}{{ matrix.arch.suffix }}"
-expect_count 1 '          provenance: false'
-expect_count 1 "          provenance: mode=max,builder-id=https://github.com/${gha}{{ github.repository }}/actions/runs/${gha}{{ github.run_id }}"
+expect_count 2 '          provenance: false'
 expect_count 1 '          sbom: false'
 expect_count 1 '          sbom: true'
 expect_count 2 '        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0'
 expect_count 2 "          subject-digest: ${gha}{{ steps.push.outputs.digest }}"
-expect_count 1 '          predicate-type: https://slsa.dev/provenance/v1'
-expect_count 1 "          predicate-path: ${gha}{{ runner.temp }}/someoldchat-${gha}{{ matrix.arch.suffix }}.provenance.json"
+expect_count 2 '          create-storage-record: false'
 expect_count 1 "          sbom-path: ${gha}{{ runner.temp }}/someoldchat-${gha}{{ matrix.arch.suffix }}.spdx.json"
-expect_count 2 "          ./scripts/extract-buildkit-attestation.sh ${continuation}"
+expect_count 1 "          ./scripts/extract-buildkit-sbom.sh ${continuation}"
 expect_count 1 "            --tag \"${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}\" ${continuation}"
 expect_count 1 "            \"${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-amd64\" ${continuation}"
 expect_count 1 "            \"${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-arm64\""
@@ -81,15 +79,25 @@ jq -n '[
 ] + [
   {id: 999, created_at: "2026-08-01T00:00:00Z", metadata: {container: {tags: ["main"]}}},
   {id: 1000, created_at: "2026-08-01T00:00:00Z", metadata: {container: {tags: ["0123456789abcdef0123456789abcdef01234567"]}}},
-  {id: 1001, created_at: "2026-08-01T00:00:00Z", metadata: {container: {tags: []}}}
+  {id: 1001, created_at: "2026-08-01T00:00:00Z", metadata: {container: {tags: []}}},
+  {id: 1002, created_at: "2026-08-03T00:00:00Z", metadata: {container: {tags: ["ffffffffffff"]}}},
+  {id: 1003, created_at: "2026-08-03T00:00:01Z", metadata: {container: {tags: ["ffffffffffff-amd64"]}}},
+  {id: 1004, created_at: "2026-08-02T00:00:00Z", metadata: {container: {tags: ["eeeeeeeeeeee"]}}},
+  {id: 1005, created_at: "2026-08-02T00:00:01Z", metadata: {container: {tags: ["eeeeeeeeeeee-amd64"]}}},
+  {id: 1006, created_at: "2026-08-02T00:00:02Z", metadata: {container: {tags: ["eeeeeeeeeeee-arm64", "main"]}}}
 ]' >"$fixture"
 
 selected="$(jq -r --argjson keep 20 -f "$root/scripts/select-obsolete-container-versions.jq" "$fixture" | sort -n | paste -sd, -)"
-if [[ "$selected" != '0,1,2,10,11,12,999,1000,1001' ]]; then
+if [[ "$selected" != '0,1,2,10,11,12,999,1000,1001,1002,1003,1004,1005,1006' ]]; then
 	echo "retention selector chose unexpected package versions: $selected" >&2
 	exit 1
 fi
 
-"$root/scripts/test-extract-buildkit-attestation.sh"
+if grep -Eq 'predicate-(type|path):' "$workflow"; then
+	echo 'publication provenance must use the official action native SLSA generator' >&2
+	exit 1
+fi
+
+"$root/scripts/test-extract-buildkit-sbom.sh"
 
 echo 'container publication contract passed'

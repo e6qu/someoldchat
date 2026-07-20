@@ -171,6 +171,10 @@ be misordered lexicographically. Deterministic clock-driven race tests covered
 exclusive leases, renewal during slow delivery, expired-owner rejection, and
 crash recovery without depending on scheduler timing.
 
+The dqlite qualification gate ran package suites serially because its real
+clusters bind ephemeral loopback ports; this prevented independent package
+processes from racing between port discovery and dqlite listener creation.
+
 Exit criteria:
 
 - Only the activator, durable object storage, and control-plane facilities
@@ -217,20 +221,46 @@ Every change must pass:
 - migration forward and restore compatibility checks; and
 - generated compatibility-ledger validation.
 
+Fuzz smoke gates requested a fixed 25,000-execution budget per target under an
+explicit two-minute process timeout, so successful completion did not depend
+on a wall-clock fuzz deadline while hung inputs still failed the gate.
+
+Dqlite qualification clusters retained their kernel-assigned TCP listeners for
+the complete test lifetime and passed those real connections through
+Canonical's external-connection interface. The adapter used the same dialer
+for cluster health probes. Accepted upgrades remained queued until each
+Canonical dqlite application had constructed its local engine, and restarted
+applications received a distinct transport session on the same retained
+listener. Stores deactivated and drained their external accept loop before
+closing the local engine; the drain barrier completed Canonical's real dqlite
+wire handshake after all routed connections. Peer dials therefore could not
+reach an obsolete session during node loss or restart. Cluster creation and
+restart tests had neither a released-port bind window nor an external-accept
+lifecycle race and required neither retries nor sleeps.
+
 The dependency-admission gate verified exact direct npm lockfile versions and
 Subresource Integrity checksums against the same aged evidence inventory used
 for Go modules, GitHub Actions, and container inputs.
 
+The official SDK qualification script cleared `CDPATH` with a portable empty
+assignment, so its repository-root discovery passed ShellCheck on Linux and
+macOS shells without inheriting caller-specific directory search behavior.
+
 The container publication gate emitted immutable 12-character commit tags,
 direct Linux amd64 and Linux arm64 image manifests, and a generic index made
 from exactly those two manifests. It generated an SPDX SBOM from the exact
-architecture image, attached signed provenance and SBOM attestations to the
-architecture digest without changing the direct tag's media type, and read the
-published references back from GitHub Container Registry. It retained at most
-the newest 20 complete release groups and removed all other package versions.
-BuildKit identified each provenance predicate with the originating GitHub
-Actions run URL, and the release gate rejected provenance whose builder
-identity or required SLSA v1 fields were absent before requesting a signature.
+architecture image, attached GitHub's native signed SLSA provenance and a
+signed SBOM attestation to the architecture digest without changing the direct
+tag's media type, and read the published references back from GitHub Container
+Registry. It retained at most
+the newest 20 complete three-version release groups and removed incomplete,
+mixed-tag, untagged, and older package versions. Every remaining root was
+verified to have exactly one direct amd64 and one direct arm64 sibling, while
+signed attestation records remained outside the container package versions.
+The release gate used the official GitHub attestation action's native SLSA
+generator instead of submitting BuildKit extension fields to GitHub's stricter
+SLSA decoder, and it rejected malformed BuildKit SPDX documents before
+requesting an SBOM signature.
 
 ## Initial milestone
 

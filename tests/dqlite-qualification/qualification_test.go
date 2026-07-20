@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,35 +18,41 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
 	adapter "github.com/sameoldchat/sameoldchat/internal/store/dqlite"
+	"github.com/sameoldchat/sameoldchat/internal/store/dqlitetest"
 )
 
 func TestThreeNodeClusterCommitReadAndHandover(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	addresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	network := newTestNetwork(t, 3)
+	connections := network.Connections()
+	addresses := connectionAddresses(connections)
 	directories := []string{t.TempDir(), t.TempDir(), t.TempDir()}
 
-	first, err := app.New(directories[0], app.WithAddress(addresses[0]), app.WithVoters(3))
+	first, err := app.New(directories[0], app.WithAddress(addresses[0]), connections[0].Option(), app.WithVoters(3))
 	if err != nil {
 		t.Fatal(err)
 	}
+	connections[0].Activate()
 	firstClosed := false
 	t.Cleanup(func() {
 		if !firstClosed {
-			_ = first.Close()
+			_ = closeDqliteApp(connections[0], first)
 		}
 	})
-	second, err := app.New(directories[1], app.WithAddress(addresses[1]), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
+	second, err := app.New(directories[1], app.WithAddress(addresses[1]), connections[1].Option(), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer second.Close()
-	third, err := app.New(directories[2], app.WithAddress(addresses[2]), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
+	connections[1].Activate()
+	defer func() { _ = closeDqliteApp(connections[1], second) }()
+	third, err := app.New(directories[2], app.WithAddress(addresses[2]), connections[2].Option(), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer third.Close()
+	connections[2].Activate()
+	defer func() { _ = closeDqliteApp(connections[2], third) }()
 
 	for _, node := range []*app.App{first, second, third} {
 		if err := node.Ready(ctx); err != nil {
@@ -79,7 +85,7 @@ func TestThreeNodeClusterCommitReadAndHandover(t *testing.T) {
 	if err := first.Handover(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := first.Close(); err != nil {
+	if err := closeDqliteApp(connections[0], first); err != nil {
 		t.Fatal(err)
 	}
 	firstClosed = true
@@ -95,10 +101,12 @@ func TestDqliteLeaderFailurePreservesCommittedData(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	addresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	network := newTestNetwork(t, 3)
+	connections := network.Connections()
+	addresses := connectionAddresses(connections)
 	directories := []string{t.TempDir(), t.TempDir(), t.TempDir()}
 	databaseName := fmt.Sprintf("leader_failure_%d", time.Now().UnixNano())
-	first, err := adapter.Open(ctx, adapter.Config{Directory: directories[0], Address: addresses[0], Database: databaseName})
+	first, err := adapter.Open(ctx, storeConfig(connections[0], directories[0], databaseName, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +116,7 @@ func TestDqliteLeaderFailurePreservesCommittedData(t *testing.T) {
 			_ = first.Close()
 		}
 	}()
-	second, err := adapter.Open(ctx, adapter.Config{Directory: directories[1], Address: addresses[1], Cluster: []string{addresses[0]}, Database: databaseName})
+	second, err := adapter.Open(ctx, storeConfig(connections[1], directories[1], databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,7 +126,7 @@ func TestDqliteLeaderFailurePreservesCommittedData(t *testing.T) {
 			_ = second.Close()
 		}
 	}()
-	third, err := adapter.Open(ctx, adapter.Config{Directory: directories[2], Address: addresses[2], Cluster: []string{addresses[0]}, Database: databaseName})
+	third, err := adapter.Open(ctx, storeConfig(connections[2], directories[2], databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,6 +149,10 @@ func TestDqliteLeaderFailurePreservesCommittedData(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstClosed = true
+	if remote, err := connections[1].Dial(ctx, addresses[0]); err == nil {
+		_ = remote.Close()
+		t.Fatal("peer dial reached a deactivated dqlite transport")
+	}
 
 	degraded := waitForLeaderChange(t, ctx, second, addresses[0])
 	if degraded.Nodes != 3 || degraded.Voters != 3 || degraded.ReachableVoters != 2 || !degraded.Quorum {
@@ -168,15 +180,17 @@ func TestDqliteAdapterHealthReportsLeaderAndQuorum(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	addresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	network := newTestNetwork(t, 3)
+	connections := network.Connections()
+	addresses := connectionAddresses(connections)
 	directories := []string{t.TempDir(), t.TempDir(), t.TempDir()}
 	databaseName := fmt.Sprintf("adapter_health_%d", time.Now().UnixNano())
-	first, err := adapter.Open(ctx, adapter.Config{Directory: directories[0], Address: addresses[0], Database: databaseName})
+	first, err := adapter.Open(ctx, storeConfig(connections[0], directories[0], databaseName, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := adapter.Open(ctx, adapter.Config{Directory: directories[1], Address: addresses[1], Cluster: []string{addresses[0]}, Database: databaseName})
+	second, err := adapter.Open(ctx, storeConfig(connections[1], directories[1], databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +200,7 @@ func TestDqliteAdapterHealthReportsLeaderAndQuorum(t *testing.T) {
 			_ = second.Close()
 		}
 	}()
-	third, err := adapter.Open(ctx, adapter.Config{Directory: directories[2], Address: addresses[2], Cluster: []string{addresses[0]}, Database: databaseName})
+	third, err := adapter.Open(ctx, storeConfig(connections[2], directories[2], databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,20 +300,22 @@ func TestDqliteAdapterReplicatesRepositoryWrites(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	addresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	network := newTestNetwork(t, 3)
+	connections := network.Connections()
+	addresses := connectionAddresses(connections)
 	directories := []string{t.TempDir(), t.TempDir(), t.TempDir()}
 	databaseName := fmt.Sprintf("adapter_repository_%d", time.Now().UnixNano())
-	first, err := adapter.Open(ctx, adapter.Config{Directory: directories[0], Address: addresses[0], Database: databaseName})
+	first, err := adapter.Open(ctx, storeConfig(connections[0], directories[0], databaseName, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := adapter.Open(ctx, adapter.Config{Directory: directories[1], Address: addresses[1], Cluster: []string{addresses[0]}, Database: databaseName})
+	second, err := adapter.Open(ctx, storeConfig(connections[1], directories[1], databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
-	third, err := adapter.Open(ctx, adapter.Config{Directory: directories[2], Address: addresses[2], Cluster: []string{addresses[0]}, Database: databaseName})
+	third, err := adapter.Open(ctx, storeConfig(connections[2], directories[2], databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +362,9 @@ func TestDqliteStateDirectorySnapshotRestoresCluster(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	addresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	network := newTestNetwork(t, 3)
+	connections := network.Connections()
+	addresses := connectionAddresses(connections)
 	root := t.TempDir()
 	sourceRoot := filepath.Join(root, "source-cluster")
 	if err := os.MkdirAll(sourceRoot, 0o700); err != nil {
@@ -358,7 +376,7 @@ func TestDqliteStateDirectorySnapshotRestoresCluster(t *testing.T) {
 		}
 	}
 	databaseName := fmt.Sprintf("directory_restore_%d", time.Now().UnixNano())
-	first, err := adapter.Open(ctx, adapter.Config{Directory: filepath.Join(sourceRoot, "node-a"), Address: addresses[0], Database: databaseName})
+	first, err := adapter.Open(ctx, storeConfig(connections[0], filepath.Join(sourceRoot, "node-a"), databaseName, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +386,7 @@ func TestDqliteStateDirectorySnapshotRestoresCluster(t *testing.T) {
 			_ = first.Close()
 		}
 	}()
-	second, err := adapter.Open(ctx, adapter.Config{Directory: filepath.Join(sourceRoot, "node-b"), Address: addresses[1], Cluster: []string{addresses[0]}, Database: databaseName})
+	second, err := adapter.Open(ctx, storeConfig(connections[1], filepath.Join(sourceRoot, "node-b"), databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +396,7 @@ func TestDqliteStateDirectorySnapshotRestoresCluster(t *testing.T) {
 			_ = second.Close()
 		}
 	}()
-	third, err := adapter.Open(ctx, adapter.Config{Directory: filepath.Join(sourceRoot, "node-c"), Address: addresses[2], Cluster: []string{addresses[0]}, Database: databaseName})
+	third, err := adapter.Open(ctx, storeConfig(connections[2], filepath.Join(sourceRoot, "node-c"), databaseName, []string{addresses[0]}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,21 +442,25 @@ func TestDqliteStateDirectorySnapshotRestoresCluster(t *testing.T) {
 	}
 
 	restoredRoot := filepath.Join(root, "restored-cluster")
-	restoredFirst, err := app.New(filepath.Join(restoredRoot, "node-a"), app.WithAddress(addresses[0]), app.WithVoters(3))
+	restoredConnections := network.Connections()
+	restoredFirst, err := app.New(filepath.Join(restoredRoot, "node-a"), app.WithAddress(addresses[0]), restoredConnections[0].Option(), app.WithVoters(3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restoredFirst.Close()
-	restoredSecond, err := app.New(filepath.Join(restoredRoot, "node-b"), app.WithAddress(addresses[1]), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
+	restoredConnections[0].Activate()
+	defer func() { _ = closeDqliteApp(restoredConnections[0], restoredFirst) }()
+	restoredSecond, err := app.New(filepath.Join(restoredRoot, "node-b"), app.WithAddress(addresses[1]), restoredConnections[1].Option(), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restoredSecond.Close()
-	restoredThird, err := app.New(filepath.Join(restoredRoot, "node-c"), app.WithAddress(addresses[2]), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
+	restoredConnections[1].Activate()
+	defer func() { _ = closeDqliteApp(restoredConnections[1], restoredSecond) }()
+	restoredThird, err := app.New(filepath.Join(restoredRoot, "node-c"), app.WithAddress(addresses[2]), restoredConnections[2].Option(), app.WithCluster([]string{addresses[0]}), app.WithVoters(3))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer restoredThird.Close()
+	restoredConnections[2].Activate()
+	defer func() { _ = closeDqliteApp(restoredConnections[2], restoredThird) }()
 	for _, node := range []*app.App{restoredFirst, restoredSecond, restoredThird} {
 		if err := node.Ready(ctx); err != nil {
 			t.Fatal(err)
@@ -462,7 +484,9 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	oldAddresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	oldNetwork := newTestNetwork(t, 3)
+	oldConnections := oldNetwork.Connections()
+	oldAddresses := connectionAddresses(oldConnections)
 	root := t.TempDir()
 	sourceRoot := filepath.Join(root, "source-cluster")
 	directories := []string{filepath.Join(sourceRoot, "node-a"), filepath.Join(sourceRoot, "node-b"), filepath.Join(sourceRoot, "node-c")}
@@ -472,16 +496,16 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 		}
 	}
 	databaseName := fmt.Sprintf("topology_restore_%d", time.Now().UnixNano())
-	first, err := adapter.Open(ctx, adapter.Config{Directory: directories[0], Address: oldAddresses[0], Database: databaseName})
+	first, err := adapter.Open(ctx, storeConfig(oldConnections[0], directories[0], databaseName, nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := adapter.Open(ctx, adapter.Config{Directory: directories[1], Address: oldAddresses[1], Cluster: []string{oldAddresses[0]}, Database: databaseName})
+	second, err := adapter.Open(ctx, storeConfig(oldConnections[1], directories[1], databaseName, []string{oldAddresses[0]}))
 	if err != nil {
 		_ = first.Close()
 		t.Fatal(err)
 	}
-	third, err := adapter.Open(ctx, adapter.Config{Directory: directories[2], Address: oldAddresses[2], Cluster: []string{oldAddresses[0]}, Database: databaseName})
+	third, err := adapter.Open(ctx, storeConfig(oldConnections[2], directories[2], databaseName, []string{oldAddresses[0]}))
 	if err != nil {
 		_ = second.Close()
 		_ = first.Close()
@@ -492,7 +516,7 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 	if err := first.SeedWorkspace(ctx, workspace); err != nil {
 		t.Fatal(err)
 	}
-	leader, err := client.New(ctx, oldAddresses[0])
+	leader, err := client.New(ctx, oldAddresses[0], client.WithDialFunc(oldConnections[0].Dial))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -514,6 +538,9 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := oldNetwork.Close(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -538,7 +565,9 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 		memberByAddress[member.Address] = member
 	}
 	restoredRoot := filepath.Join(root, "restored-cluster")
-	newAddresses := []string{freeAddress(t), freeAddress(t), freeAddress(t)}
+	newNetwork := newTestNetwork(t, 3)
+	newConnections := newNetwork.Connections()
+	newAddresses := connectionAddresses(newConnections)
 	recoveryNodes := make([]adapter.RecoveryNode, 0, len(directories))
 	for i, oldAddress := range oldAddresses {
 		member, ok := memberByAddress[oldAddress]
@@ -553,13 +582,16 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 	}
 
 	apps := make([]*app.App, 0, len(recoveryNodes))
-	for _, node := range recoveryNodes {
-		instance, err := app.New(node.Directory, app.WithAddress(node.Address), app.WithVoters(3))
+	for i, node := range recoveryNodes {
+		instance, err := app.New(node.Directory, app.WithAddress(node.Address), newConnections[i].Option(), app.WithVoters(3))
 		if err != nil {
 			t.Fatal(err)
 		}
+		newConnections[i].Activate()
 		apps = append(apps, instance)
-		defer instance.Close()
+		defer func(connection dqlitetest.Connection, application *app.App) {
+			_ = closeDqliteApp(connection, application)
+		}(newConnections[i], instance)
 	}
 	for _, instance := range apps {
 		if err := instance.Ready(ctx); err != nil {
@@ -580,17 +612,39 @@ func TestDqliteRecoveryChangesTopologyAfterDirectoryRestore(t *testing.T) {
 	}
 }
 
-func freeAddress(t *testing.T) string {
+func newTestNetwork(t *testing.T, size int) *dqlitetest.Network {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	network, err := dqlitetest.NewNetwork(size)
 	if err != nil {
 		t.Fatal(err)
 	}
-	address := listener.Addr().String()
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
+	t.Cleanup(func() { _ = network.Close() })
+	return network
+}
+
+func connectionAddresses(connections []dqlitetest.Connection) []string {
+	addresses := make([]string, len(connections))
+	for i, connection := range connections {
+		addresses[i] = connection.Address
 	}
-	return address
+	return addresses
+}
+
+func storeConfig(connection dqlitetest.Connection, directory, database string, cluster []string) adapter.Config {
+	return adapter.Config{
+		Directory:      directory,
+		Address:        connection.Address,
+		Cluster:        cluster,
+		Database:       database,
+		ExternalDial:   connection.Dial,
+		ExternalAccept: connection.Accept,
+		ExternalReady:  connection.Activate,
+		ExternalClose:  connection.Deactivate,
+	}
+}
+
+func closeDqliteApp(connection dqlitetest.Connection, application *app.App) error {
+	return errors.Join(connection.Deactivate(), application.Close())
 }
 
 func openDatabase(t *testing.T, ctx context.Context, node *app.App, name string) *sql.DB {

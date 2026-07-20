@@ -1,20 +1,37 @@
-# A release consists of a 12-character commit tag and its -amd64/-arm64 tags.
-# Keep the newest requested roots and delete every other package version.
-def release_tags:
-  [.metadata.container.tags[]? | select(test("^[0-9a-f]{12}$"))];
+# A release consists of three distinct package versions with exactly one tag
+# each: a 12-character commit root and its -amd64/-arm64 siblings.
+def release_part:
+  (.metadata.container.tags // []) as $tags
+  | if ($tags | length) != 1 then null
+    elif $tags[0] | test("^[0-9a-f]{12}$") then
+      {root: $tags[0], kind: "root"}
+    elif $tags[0] | test("^[0-9a-f]{12}-amd64$") then
+      {root: ($tags[0] | sub("-amd64$"; "")), kind: "amd64"}
+    elif $tags[0] | test("^[0-9a-f]{12}-arm64$") then
+      {root: ($tags[0] | sub("-arm64$"; "")), kind: "arm64"}
+    else null
+    end;
 
-(map(select((release_tags | length) > 0))
- | sort_by(.created_at)
- | reverse
- | .[:$keep]) as $releases
-| ($releases
-   | map(release_tags[])
-   | map(., . + "-amd64", . + "-arm64")
-   | unique) as $kept_tags
-| map(
-    select(
-      (.metadata.container.tags // [] | length) == 0
-      or any(.metadata.container.tags[]?; . as $tag | $kept_tags | index($tag) == null)
-    )
-  )
-| .[].id
+. as $versions
+| ([$versions[]
+    | . as $version
+    | (release_part) as $part
+    | select($part != null)
+    | $part + {id: $version.id, created_at: $version.created_at}]) as $parts
+| ($parts
+   | group_by(.root)
+   | map(
+       select(length == 3 and (map(.kind) | sort) == ["amd64", "arm64", "root"])
+       | {
+           root: .[0].root,
+           created_at: (map(.created_at) | max),
+           ids: map(.id)
+         }
+     )
+   | sort_by(.created_at, .root)
+   | reverse
+   | .[:$keep]
+   | map(.ids[])) as $kept_ids
+| $versions[]
+| select(.id as $id | $kept_ids | index($id) == null)
+| .id

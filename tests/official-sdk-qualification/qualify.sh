@@ -2,7 +2,7 @@
 
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/sameoldchat-sdk-qualification.XXXXXX")
 fixture_pid=""
 

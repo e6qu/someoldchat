@@ -30,6 +30,15 @@ remaining_file="$(mktemp)"
 trap 'rm -f "$versions_file" "$remaining_file"' EXIT
 
 gh api --paginate "$base?per_page=100" | jq -s 'add' >"$versions_file"
+
+for expected_tag in "$current_tag" "$current_tag-amd64" "$current_tag-arm64"; do
+	occurrences="$(jq --arg tag "$expected_tag" '[.[] | select((.metadata.container.tags // []) == [$tag])] | length' "$versions_file")"
+	if [[ "$occurrences" != 1 ]]; then
+		echo "$package published $occurrences singleton package versions for current tag $expected_tag; refusing retention before the complete release is visible" >&2
+		exit 1
+	fi
+done
+
 jq -r --argjson keep "$keep" -f "$(dirname "${BASH_SOURCE[0]}")/select-obsolete-container-versions.jq" "$versions_file" |
 	while IFS= read -r version_id; do
 		echo "deleting obsolete $package package version $version_id"
@@ -50,6 +59,18 @@ if ((version_count > keep * 3)); then
 	exit 1
 fi
 
+if ((version_count != release_count * 3)); then
+	echo "$package retained $version_count package versions for $release_count release groups; expected exactly $((release_count * 3))" >&2
+	exit 1
+fi
+
+obsolete_versions="$(jq -r --argjson keep "$keep" -f "$(dirname "${BASH_SOURCE[0]}")/select-obsolete-container-versions.jq" "$remaining_file")"
+if [[ -n "$obsolete_versions" ]]; then
+	echo 'obsolete, incomplete, mixed-tag, or untagged package versions remained after GitHub Container Registry retention:' >&2
+	printf '%s\n' "$obsolete_versions" >&2
+	exit 1
+fi
+
 invalid_tags="$(jq -r '
   [.[].metadata.container.tags[]? | select(test("^[0-9a-f]{12}$"))] as $roots
   | ($roots | map(., . + "-amd64", . + "-arm64") | unique) as $allowed
@@ -60,6 +81,18 @@ invalid_tags="$(jq -r '
 if [[ -n "$invalid_tags" ]]; then
 	echo 'unexpected tags remained after GitHub Container Registry retention:' >&2
 	printf '%s\n' "$invalid_tags" >&2
+	exit 1
+fi
+
+incomplete_roots="$(jq -r '
+  [.[].metadata.container.tags[]?] as $tags
+  | [$tags[] | select(test("^[0-9a-f]{12}$"))] | unique[]
+  | . as $root
+  | select(any([$root, $root + "-amd64", $root + "-arm64"][]; . as $expected | ([$tags[] | select(. == $expected)] | length) != 1))
+' "$remaining_file")"
+if [[ -n "$incomplete_roots" ]]; then
+	echo 'incomplete release groups remained after GitHub Container Registry retention:' >&2
+	printf '%s\n' "$incomplete_roots" >&2
 	exit 1
 fi
 
