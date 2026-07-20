@@ -35,7 +35,7 @@ build-dqlite:
 	GOCACHE=$(GOCACHE) go build -tags dqlite -trimpath -o bin/sameoldchat-blobgc-dqlite ./cmd/blobgc
 
 test-dqlite:
-	GOCACHE=$(GOCACHE) go test -tags dqlite ./...
+	GOCACHE=$(GOCACHE) go test -p 1 -tags dqlite ./...
 
 test-postgres:
 	test -n "$(SAMEOLDCHAT_POSTGRES_DSN)"

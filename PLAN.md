@@ -171,6 +171,10 @@ be misordered lexicographically. Deterministic clock-driven race tests covered
 exclusive leases, renewal during slow delivery, expired-owner rejection, and
 crash recovery without depending on scheduler timing.
 
+The dqlite qualification gate ran package suites serially because its real
+clusters bind ephemeral loopback ports; this prevented independent package
+processes from racing between port discovery and dqlite listener creation.
+
 Exit criteria:
 
 - Only the activator, durable object storage, and control-plane facilities
@@ -227,7 +231,10 @@ from exactly those two manifests. It generated an SPDX SBOM from the exact
 architecture image, attached signed provenance and SBOM attestations to the
 architecture digest without changing the direct tag's media type, and read the
 published references back from GitHub Container Registry. It retained at most
-the newest 20 complete release groups and removed all other package versions.
+the newest 20 complete three-version release groups and removed incomplete,
+mixed-tag, untagged, and older package versions. Every remaining root was
+verified to have exactly one direct amd64 and one direct arm64 sibling, while
+signed attestation records remained outside the container package versions.
 BuildKit identified each provenance predicate with the originating GitHub
 Actions run URL, and the release gate rejected provenance whose builder
 identity or required SLSA v1 fields were absent before requesting a signature.

@@ -173,8 +173,11 @@ the extraction gate rejects incomplete provenance before signing. The workflow
 reads all three references back from GitHub Container Registry and fails unless
 their media types, digests, and platforms form exactly that shape. It then
 removes every package version outside the newest 20 complete release groups,
-including untagged versions, and verifies that at most 60 package versions
-remain.
+including incomplete release roots, mixed-tag versions, and untagged versions.
+It verifies that every retained root has exactly one direct amd64 sibling and
+one direct arm64 sibling, and that at most 60 package versions remain. GitHub
+stores signed attestations outside the container package-version records, so
+retention cannot delete provenance or SBOM attestations.
 Deployments record and use the verified digest for the selected reference and
 verify its signed attestations:
 
