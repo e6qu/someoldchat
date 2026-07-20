@@ -42,6 +42,7 @@ type Remote struct {
 	bots          chatv1.BotsServiceClient
 	migration     chatv1.MigrationServiceClient
 	enterprise    chatv1.EnterpriseConversationsServiceClient
+	bookmarks     chatv1.BookmarksServiceClient
 	oauth         chatv1.OAuthServiceClient
 	rtm           chatv1.RTMServiceClient
 }
@@ -148,6 +149,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		bots:          chatv1.NewBotsServiceClient(conn),
 		migration:     chatv1.NewMigrationServiceClient(conn),
 		enterprise:    chatv1.NewEnterpriseConversationsServiceClient(conn),
+		bookmarks:     chatv1.NewBookmarksServiceClient(conn),
 		oauth:         chatv1.NewOAuthServiceClient(conn),
 		rtm:           chatv1.NewRTMServiceClient(conn),
 	}, nil
@@ -1969,6 +1971,56 @@ func (r Remote) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userI
 	return page.Stars, page.NextCursor, page.HasMore, nil
 }
 
+func (r Remote) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
+	out, err := r.bookmarks.AddBookmark(ctx, &chatv1.AddBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Title: title, Type: bookmarkType, Link: link, Emoji: emoji, EntityId: entityID, AccessLevel: accessLevel, ParentId: parentID})
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	return decodeProtoBookmark(out)
+}
+
+func (r Remote) EditBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID, update domain.BookmarkUpdate) (domain.Bookmark, error) {
+	input := &chatv1.EditBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), BookmarkId: string(id)}
+	if update.SetTitle {
+		input.Title = &update.Title
+	}
+	if update.SetLink {
+		input.Link = &update.Link
+	}
+	if update.SetEmoji {
+		input.Emoji = &update.Emoji
+	}
+	out, err := r.bookmarks.EditBookmark(ctx, input)
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	return decodeProtoBookmark(out)
+}
+
+func (r Remote) Bookmarks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) ([]domain.Bookmark, error) {
+	out, err := r.bookmarks.ListBookmarks(ctx, &chatv1.BookmarksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID)})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.Bookmark, 0, len(out.GetBookmarks()))
+	for _, item := range out.GetBookmarks() {
+		bookmark, err := decodeProtoBookmark(item)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, bookmark)
+	}
+	return items, nil
+}
+
+func (r Remote) RemoveBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID) error {
+	out, err := r.bookmarks.RemoveBookmark(ctx, &chatv1.BookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), BookmarkId: string(id)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "bookmark removal")
+}
+
 func (r Remote) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, due time.Time) (domain.Reminder, error) {
 	out, err := r.reminders.AddReminder(ctx, &chatv1.AddReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(targetID), Text: text, Time: due.Unix()})
 	if err != nil {
@@ -2096,6 +2148,7 @@ var (
 	_ chatv1.MessagesServiceServer                = (*Server)(nil)
 	_ chatv1.PresenceServiceServer                = (*Server)(nil)
 	_ chatv1.ReactionsServiceServer               = (*Server)(nil)
+	_ chatv1.BookmarksServiceServer               = (*Server)(nil)
 	_ chatv1.UserGroupsServiceServer              = (*Server)(nil)
 	_ chatv1.CallsServiceServer                   = (*Server)(nil)
 	_ chatv1.AccessLogsServiceServer              = (*Server)(nil)
@@ -2147,6 +2200,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterAuthServiceServer(registrar, server)
 	chatv1.RegisterEventsServiceServer(registrar, server)
 	chatv1.RegisterReactionsServiceServer(registrar, server)
+	chatv1.RegisterBookmarksServiceServer(registrar, server)
 	chatv1.RegisterMessagesServiceServer(registrar, server)
 	chatv1.RegisterRemindersServiceServer(registrar, server)
 	chatv1.RegisterScheduledMessagesServiceServer(registrar, server)
@@ -3452,6 +3506,22 @@ func (s *Server) Stars(ctx context.Context, input *chatv1.StarsRequest) (*chatv1
 	return s.starsProto(ctx, input)
 }
 
+func (s *Server) AddBookmark(ctx context.Context, input *chatv1.AddBookmarkRequest) (*chatv1.Bookmark, error) {
+	return s.addBookmarkProto(ctx, input)
+}
+
+func (s *Server) EditBookmark(ctx context.Context, input *chatv1.EditBookmarkRequest) (*chatv1.Bookmark, error) {
+	return s.editBookmarkProto(ctx, input)
+}
+
+func (s *Server) ListBookmarks(ctx context.Context, input *chatv1.BookmarksRequest) (*chatv1.BookmarksResponse, error) {
+	return s.bookmarksProto(ctx, input)
+}
+
+func (s *Server) RemoveBookmark(ctx context.Context, input *chatv1.BookmarkRequest) (*chatv1.MutationResponse, error) {
+	return s.removeBookmarkProto(ctx, input)
+}
+
 func (s *Server) AddReminder(ctx context.Context, input *chatv1.AddReminderRequest) (*chatv1.Reminder, error) {
 	return s.addReminderProto(ctx, input)
 }
@@ -4313,6 +4383,53 @@ func (s *Server) starsProto(ctx context.Context, input *chatv1.StarsRequest) (*c
 	return encodeProtoStarPage(items, next, more), nil
 }
 
+func (s *Server) addBookmarkProto(ctx context.Context, input *chatv1.AddBookmarkRequest) (*chatv1.Bookmark, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTitle() == "" || input.GetType() == "" || input.GetLink() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, title, type, and link are required")
+	}
+	bookmark, err := s.implementation.AddBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetTitle(), input.GetType(), input.GetLink(), input.GetEmoji(), input.GetEntityId(), input.GetAccessLevel(), input.GetParentId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoBookmark(bookmark), nil
+}
+
+func (s *Server) editBookmarkProto(ctx context.Context, input *chatv1.EditBookmarkRequest) (*chatv1.Bookmark, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetBookmarkId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and bookmark_id are required")
+	}
+	bookmark, err := s.implementation.EditBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.BookmarkID(input.GetBookmarkId()), domain.BookmarkUpdate{Title: input.GetTitle(), Link: input.GetLink(), Emoji: input.GetEmoji(), SetTitle: input.Title != nil, SetLink: input.Link != nil, SetEmoji: input.Emoji != nil})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoBookmark(bookmark), nil
+}
+
+func (s *Server) bookmarksProto(ctx context.Context, input *chatv1.BookmarksRequest) (*chatv1.BookmarksResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+	}
+	items, err := s.implementation.Bookmarks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.Bookmark, 0, len(items))
+	for _, item := range items {
+		result = append(result, encodeProtoBookmark(item))
+	}
+	return &chatv1.BookmarksResponse{Bookmarks: result}, nil
+}
+
+func (s *Server) removeBookmarkProto(ctx context.Context, input *chatv1.BookmarkRequest) (*chatv1.MutationResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetBookmarkId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and bookmark_id are required")
+	}
+	if err := s.implementation.RemoveBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.BookmarkID(input.GetBookmarkId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) addReminderProto(ctx context.Context, input *chatv1.AddReminderRequest) (*chatv1.Reminder, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetText() == "" || input.GetTime() <= 0 {
 		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, text, and positive time are required")
@@ -5136,6 +5253,17 @@ func encodeProtoStarPage(items []domain.Star, next domain.Cursor, more bool) *ch
 		result = append(result, encodeProtoStar(item))
 	}
 	return &chatv1.StarPage{Stars: result, NextCursor: string(next), HasMore: more}
+}
+
+func encodeProtoBookmark(value domain.Bookmark) *chatv1.Bookmark {
+	return &chatv1.Bookmark{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), Title: value.Title, Type: value.Type, Link: value.Link, Emoji: value.Emoji, EntityId: value.EntityID, AccessLevel: value.AccessLevel, ParentId: string(value.ParentID), CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), UpdatedBy: string(value.UpdatedBy)}
+}
+
+func decodeProtoBookmark(value *chatv1.Bookmark) (domain.Bookmark, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetTitle() == "" || value.GetType() == "" || value.GetUpdatedBy() == "" {
+		return domain.Bookmark{}, errors.New("typed bookmark is incomplete")
+	}
+	return domain.Bookmark{ID: domain.BookmarkID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), Title: value.GetTitle(), Type: value.GetType(), Link: value.GetLink(), Emoji: value.GetEmoji(), EntityID: value.GetEntityId(), AccessLevel: value.GetAccessLevel(), ParentID: domain.BookmarkID(value.GetParentId()), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), UpdatedAt: time.Unix(value.GetUpdatedAt(), 0).UTC(), UpdatedBy: domain.UserID(value.GetUpdatedBy())}, nil
 }
 
 func decodeProtoStar(value *chatv1.Star) (domain.Star, error) {

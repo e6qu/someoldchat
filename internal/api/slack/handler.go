@@ -245,6 +245,11 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/stars.list", h.listStars)
 	mux.HandleFunc("POST /api/stars.list", h.listStars)
 	mux.HandleFunc("POST /api/stars.remove", h.removeStar)
+	mux.HandleFunc("POST /api/bookmarks.add", h.addBookmark)
+	mux.HandleFunc("POST /api/bookmarks.edit", h.editBookmark)
+	mux.HandleFunc("GET /api/bookmarks.list", h.listBookmarks)
+	mux.HandleFunc("POST /api/bookmarks.list", h.listBookmarks)
+	mux.HandleFunc("POST /api/bookmarks.remove", h.removeBookmark)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
@@ -3200,6 +3205,118 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": items, "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
 
+func (h Handler) addBookmark(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeBookmarksWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channel == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	bookmark, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], fields["type"], fields["link"], fields["emoji"], fields["entity_id"], fields["access_level"], fields["parent_id"])
+	if err != nil {
+		code, reason := mapServiceError(err, "channel_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bookmark": bookmarkResponse(bookmark)})
+}
+
+func (h Handler) editBookmark(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeBookmarksWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	id := domain.BookmarkID(strings.TrimSpace(fields["bookmark_id"]))
+	if channel == "" || id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	_, titleSet := fields["title"]
+	_, linkSet := fields["link"]
+	_, emojiSet := fields["emoji"]
+	bookmark, err := h.Messages.EditBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, id, domain.BookmarkUpdate{Title: fields["title"], Link: fields["link"], Emoji: fields["emoji"], SetTitle: titleSet, SetLink: linkSet, SetEmoji: emojiSet})
+	if err != nil {
+		code, reason := mapServiceError(err, "bookmark_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bookmark": bookmarkResponse(bookmark)})
+}
+
+func (h Handler) listBookmarks(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeBookmarksRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	if channel == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	bookmarks, err := h.Messages.Bookmarks(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		code, reason := mapServiceError(err, "channel_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	items := make([]map[string]any, 0, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		items = append(items, bookmarkResponse(bookmark))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bookmarks": items})
+}
+
+func (h Handler) removeBookmark(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeBookmarksWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
+	id := domain.BookmarkID(strings.TrimSpace(fields["bookmark_id"]))
+	if channel == "" || id == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.RemoveBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, id); err != nil {
+		code, reason := mapServiceError(err, "bookmark_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func bookmarkResponse(bookmark domain.Bookmark) map[string]any {
+	return map[string]any{"id": bookmark.ID, "channel_id": bookmark.Conversation, "title": bookmark.Title, "type": bookmark.Type, "link": bookmark.Link, "emoji": bookmark.Emoji, "entity_id": bookmark.EntityID, "access_level": bookmark.AccessLevel, "parent_id": bookmark.ParentID, "date_created": bookmark.CreatedAt.Unix(), "date_updated": bookmark.UpdatedAt.Unix(), "last_updated_by_user_id": bookmark.UpdatedBy}
+}
+
 func (h Handler) addPin(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopePinsWrite)
 	if err != nil {
@@ -5128,7 +5245,7 @@ func mapServiceError(err error, notFoundReason string) (int, string) {
 	if errors.Is(err, store.ErrNotFound) || status.Code(err) == codes.NotFound {
 		return http.StatusNotFound, notFoundReason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument {
 		return http.StatusBadRequest, "invalid_arguments"
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) || status.Code(err) == codes.AlreadyExists {
@@ -5154,6 +5271,9 @@ func mapServiceError(err error, notFoundReason string) (int, string) {
 	}
 	if errors.Is(err, store.ErrConflict) {
 		return http.StatusConflict, "hash_conflict"
+	}
+	if errors.Is(err, store.ErrBookmarkLimit) {
+		return http.StatusBadRequest, "too_many_bookmarks"
 	}
 	return http.StatusServiceUnavailable, "service_unavailable"
 }

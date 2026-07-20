@@ -377,6 +377,17 @@ assert.equal(remoteShare.ok, true);
 assert.deepEqual(remoteShare.file.channels, ["C1"]);
 const remoteRemove = await client.files.remote.remove({ external_id: "remote-qualification" });
 assert.equal(remoteRemove.ok, true);
+const bookmark = await client.bookmarks.add({ channel_id: "C1", title: "SDK bookmark", type: "link", link: "https://example.com/bookmark", emoji: ":link:" });
+assert.equal(bookmark.ok, true);
+assert.equal(typeof bookmark.bookmark.id, "string");
+const bookmarks = await client.bookmarks.list({ channel_id: "C1" });
+assert.equal(bookmarks.ok, true);
+assert.equal(bookmarks.bookmarks.length, 1);
+const editedBookmark = await client.bookmarks.edit({ channel_id: "C1", bookmark_id: bookmark.bookmark.id, title: "Updated SDK bookmark" });
+assert.equal(editedBookmark.ok, true);
+assert.equal(editedBookmark.bookmark.title, "Updated SDK bookmark");
+const removedBookmark = await client.bookmarks.remove({ channel_id: "C1", bookmark_id: bookmark.bookmark.id });
+assert.equal(removedBookmark.ok, true);
 const scheduled = await client.chat.scheduleMessage({
 	channel: "C1",
 	text: "scheduled qualification",

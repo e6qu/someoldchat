@@ -330,6 +330,17 @@ assert remote_share["ok"] is True
 assert remote_share["file"]["channels"] == ["C1"]
 remote_remove = client.files_remote_remove(external_id="remote-qualification")
 assert remote_remove["ok"] is True
+bookmark = client.bookmarks_add(channel_id="C1", title="SDK bookmark", type="link", link="https://example.com/bookmark", emoji=":link:")
+assert bookmark["ok"] is True
+assert isinstance(bookmark["bookmark"]["id"], str)
+bookmarks = client.bookmarks_list(channel_id="C1")
+assert bookmarks["ok"] is True
+assert len(bookmarks["bookmarks"]) == 1
+edited_bookmark = client.bookmarks_edit(channel_id="C1", bookmark_id=bookmark["bookmark"]["id"], title="Updated SDK bookmark")
+assert edited_bookmark["ok"] is True
+assert edited_bookmark["bookmark"]["title"] == "Updated SDK bookmark"
+removed_bookmark = client.bookmarks_remove(channel_id="C1", bookmark_id=bookmark["bookmark"]["id"])
+assert removed_bookmark["ok"] is True
 scheduled = client.chat_scheduleMessage(
     channel="C1", text="scheduled qualification", post_at=int(time.time()) + 60
 )

@@ -52,6 +52,7 @@ var (
 	ErrInvalidOAuth             = errors.New("oauth authorization is invalid")
 	ErrInvalidOAuthClient       = errors.New("oauth client is invalid")
 	ErrInvalidIntegrationLogs   = errors.New("integration log arguments are invalid")
+	ErrInvalidBookmark          = errors.New("bookmark title, type, and link are invalid")
 )
 
 type Messages struct {
@@ -2730,6 +2731,81 @@ func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, use
 		return nil, "", false, err
 	}
 	return m.Store.ListStars(ctx, workspaceID, userID, request)
+}
+
+func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.Bookmark{}, err
+	}
+	title = strings.TrimSpace(title)
+	bookmarkType = strings.TrimSpace(bookmarkType)
+	link = strings.TrimSpace(link)
+	accessLevel = strings.TrimSpace(accessLevel)
+	if title == "" || len(title) > 255 || bookmarkType != "link" || link == "" || accessLevel != "" && accessLevel != "read" && accessLevel != "write" {
+		return domain.Bookmark{}, ErrInvalidBookmark
+	}
+	id, err := domain.NewBookmarkID()
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	now := time.Now().UTC()
+	bookmark := domain.Bookmark{ID: id, WorkspaceID: workspaceID, Conversation: conversationID, Title: title, Type: bookmarkType, Link: link, Emoji: strings.TrimSpace(emoji), EntityID: strings.TrimSpace(entityID), AccessLevel: accessLevel, ParentID: domain.BookmarkID(strings.TrimSpace(parentID)), CreatedAt: now, UpdatedAt: now, UpdatedBy: userID}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	if err := m.Store.CreateBookmark(ctx, bookmark, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "bookmark.created", Payload: string(id), CreatedAt: now}); err != nil {
+		return domain.Bookmark{}, err
+	}
+	return bookmark, nil
+}
+
+func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID, update domain.BookmarkUpdate) (domain.Bookmark, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.Bookmark{}, err
+	}
+	bookmark, err := m.Store.GetBookmark(ctx, workspaceID, conversationID, id)
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	if update.SetTitle {
+		bookmark.Title = strings.TrimSpace(update.Title)
+	}
+	if update.SetLink {
+		bookmark.Link = strings.TrimSpace(update.Link)
+	}
+	if update.SetEmoji {
+		bookmark.Emoji = strings.TrimSpace(update.Emoji)
+	}
+	if bookmark.Title == "" || len(bookmark.Title) > 255 || bookmark.Type != "link" || bookmark.Link == "" {
+		return domain.Bookmark{}, ErrInvalidBookmark
+	}
+	bookmark.UpdatedAt = time.Now().UTC()
+	bookmark.UpdatedBy = userID
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
+	return m.Store.UpdateBookmark(ctx, bookmark, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "bookmark.updated", Payload: string(id), CreatedAt: bookmark.UpdatedAt})
+}
+
+func (m Messages) Bookmarks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) ([]domain.Bookmark, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	return m.Store.ListBookmarks(ctx, workspaceID, conversationID)
+}
+
+func (m Messages) RemoveBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, id domain.BookmarkID) error {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteBookmark(ctx, workspaceID, conversationID, id, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "bookmark.removed", Payload: string(id), CreatedAt: now})
 }
 
 func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, due time.Time) (domain.Reminder, error) {

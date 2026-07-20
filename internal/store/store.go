@@ -18,6 +18,7 @@ var (
 	ErrInvalidInviteRequest      = errors.New("invalid invite request")
 	ErrInvalidAppApproval        = errors.New("invalid app approval")
 	ErrConflict                  = errors.New("state conflict")
+	ErrBookmarkLimit             = errors.New("bookmark limit reached")
 	ErrSocketModeConnectionLimit = errors.New("Socket Mode connection limit reached")
 )
 
@@ -155,6 +156,11 @@ type Store interface {
 	AddStar(context.Context, domain.Star, events.Event) error
 	RemoveStar(context.Context, domain.Star, events.Event) error
 	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	CreateBookmark(context.Context, domain.Bookmark, events.Event) error
+	GetBookmark(context.Context, domain.WorkspaceID, domain.ConversationID, domain.BookmarkID) (domain.Bookmark, error)
+	ListBookmarks(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.Bookmark, error)
+	UpdateBookmark(context.Context, domain.Bookmark, events.Event) (domain.Bookmark, error)
+	DeleteBookmark(context.Context, domain.WorkspaceID, domain.ConversationID, domain.BookmarkID, events.Event) error
 	CreateReminder(context.Context, domain.Reminder, events.Event) error
 	GetReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)

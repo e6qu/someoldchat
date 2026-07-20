@@ -23,6 +23,7 @@ type InviteRequestID string
 type AppID string
 type AppRequestID string
 type CallID string
+type BookmarkID string
 type ViewID string
 type WorkflowStepID string
 type DialogID string
@@ -78,6 +79,11 @@ func NewReminderID() (ReminderID, error) {
 func NewConversationID() (ConversationID, error) {
 	value, err := PublicID("C")
 	return ConversationID(value), err
+}
+
+func NewBookmarkID() (BookmarkID, error) {
+	value, err := PublicID("Bk")
+	return BookmarkID(value), err
 }
 
 func NewScheduledMessageID() (ScheduledMessageID, error) {

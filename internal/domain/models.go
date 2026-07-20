@@ -403,6 +403,33 @@ type Star struct {
 	CreatedAt    time.Time
 }
 
+type Bookmark struct {
+	ID           BookmarkID
+	WorkspaceID  WorkspaceID
+	Conversation ConversationID
+	Title        string
+	Type         string
+	Link         string
+	Emoji        string
+	EntityID     string
+	AccessLevel  string
+	ParentID     BookmarkID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	UpdatedBy    UserID
+}
+
+type BookmarkUpdate struct {
+	Title    string
+	Link     string
+	Emoji    string
+	SetTitle bool
+	SetLink  bool
+	SetEmoji bool
+}
+
+const MaxBookmarksPerConversation = 100
+
 type File struct {
 	ID          FileID
 	WorkspaceID WorkspaceID

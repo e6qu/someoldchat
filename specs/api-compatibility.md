@@ -49,6 +49,13 @@ the evidence represented by every lower status, so the report uses
 Community SDKs, including Go SDKs, MAY be test targets but MUST NOT override an
 official source merely because their behavior differs.
 
+The current Slack reference also defines `bookmarks.add`, `bookmarks.edit`,
+`bookmarks.list`, and `bookmarks.remove`. These methods are tracked with
+`slack-reference` provenance because they were introduced after the pinned
+OpenAPI snapshot; their request, response, scope, and error behavior must be
+qualified against the current official references before the provenance can be
+promoted.
+
 ## Provenance hierarchy
 
 When sources conflict, the chosen behavior SHOULD follow:

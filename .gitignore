@@ -1,5 +1,6 @@
 /bin/
 /.cache/
+/tests/official-sdk-qualification/java-slack-api/target/
 **/.terraform/
 /coverage.out
 /dist/

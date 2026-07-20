@@ -33,6 +33,7 @@ type operation struct {
 	Method     string `yaml:"method"`
 	Status     string `yaml:"status"`
 	Provenance string `yaml:"provenance"`
+	Reference  string `yaml:"reference"`
 }
 
 var statusRank = map[string]int{
@@ -130,6 +131,9 @@ func verify() error {
 		seenMethods[operation.Method] = struct{}{}
 		if operation.Status != "unimplemented" {
 			implementedMethods[operation.Method] = struct{}{}
+		}
+		if operation.Provenance == "slack-reference" && !strings.HasPrefix(operation.Reference, "https://docs.slack.dev/reference/methods/") {
+			return fmt.Errorf("compatibility ledger operation %q requires an official Slack reference", operation.Method)
 		}
 		if _, ok := openapi.Paths["/"+operation.Method]; !ok && operation.Provenance != "slack-reference" {
 			return fmt.Errorf("compatibility ledger operation %q is absent from pinned OpenAPI", operation.Method)
