@@ -168,7 +168,7 @@ CREATE TABLE IF NOT EXISTS reminders (
 CREATE INDEX IF NOT EXISTS reminders_user_due ON reminders(workspace_id, user_id, due_at, id);
 CREATE TABLE IF NOT EXISTS scheduled_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), channel_id TEXT NOT NULL REFERENCES conversations(id),
- author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, post_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+ author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', post_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
  delivered INTEGER NOT NULL DEFAULT 0, lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS scheduled_messages_owner ON scheduled_messages(workspace_id, author_id, id);
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 72
+const schemaVersion = 73
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -702,6 +702,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 71 {
+		columns, err := s.tableColumns(ctx, db, "scheduled_messages")
+		if err != nil {
+			return err
+		}
+		if !columns["blocks"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN blocks TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate scheduled message blocks: %w", err)
+			}
+		}
+	}
 	if version < 26 {
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS user_groups (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, handle TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', creator_id TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER NOT NULL DEFAULT 0, enabled INTEGER NOT NULL DEFAULT 1)`); err != nil {
 			return fmt.Errorf("migrate user groups: %w", err)
@@ -1112,6 +1123,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		if !columns["blocks"] {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN blocks TEXT NOT NULL DEFAULT ''`); err != nil {
 				return fmt.Errorf("migrate message blocks: %w", err)
+			}
+		}
+	}
+	if version < 73 {
+		columns, err := s.tableColumns(ctx, db, "scheduled_messages")
+		if err != nil {
+			return err
+		}
+		if !columns["blocks"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN blocks TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate scheduled message blocks: %w", err)
 			}
 		}
 	}
@@ -5038,7 +5060,7 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, blocks, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.Blocks, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
 		}
@@ -5066,7 +5088,7 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, channel_id, author_id, text, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND author_id = ? AND delivered = 0`
+	query := `SELECT id, workspace_id, channel_id, author_id, text, blocks, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND author_id = ? AND delivered = 0`
 	args := []any{workspace, user}
 	if channel != "" {
 		query += ` AND channel_id = ?`
@@ -5087,7 +5109,7 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	for rows.Next() {
 		var value domain.ScheduledMessage
 		var postAt, createdAt int64
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &postAt, &createdAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &postAt, &createdAt); err != nil {
 			return domain.ScheduledMessagePage{}, err
 		}
 		value.PostAt = time.Unix(postAt, 0).UTC()
@@ -5150,7 +5172,7 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, channel_id, author_id, text, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY id LIMIT ?`, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
+	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, channel_id, author_id, text, blocks, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY id LIMIT ?`, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -5159,7 +5181,7 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	for rows.Next() {
 		var value domain.ScheduledMessage
 		var postAt, createdAt int64
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &postAt, &createdAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &postAt, &createdAt); err != nil {
 			return nil, err
 		}
 		value.PostAt = time.Unix(postAt, 0).UTC()

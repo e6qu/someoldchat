@@ -1875,6 +1875,9 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if !exists || grant.ClientID != clientID || grant.RedirectURI != redirect {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
+	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
 	delete(s.oauthCodes, code)
 	grant.Scopes = domain.NormalizeScopes(grant.Scopes)
 	s.tokens[domain.HashToken(accessToken)] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, Scopes: append([]string(nil), grant.Scopes...)}
@@ -1884,6 +1887,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	token.WorkspaceID = grant.WorkspaceID
 	token.UserID = grant.UserID
 	token.Scopes = append([]string(nil), grant.Scopes...)
+	token.CodeVerifier = ""
 	return token, nil
 }
 

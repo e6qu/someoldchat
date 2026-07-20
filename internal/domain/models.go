@@ -525,6 +525,7 @@ type FileComment struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	Text        string
+	Blocks      string
 	CreatedAt   time.Time
 	Deleted     bool
 }
@@ -552,6 +553,7 @@ type ScheduledMessage struct {
 	Channel     ConversationID
 	Author      UserID
 	Text        string
+	Blocks      string
 	PostAt      time.Time
 	CreatedAt   time.Time
 }

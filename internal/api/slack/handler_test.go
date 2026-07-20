@@ -2593,3 +2593,14 @@ func TestHistoryCursorAdvancesBoundedPage(t *testing.T) {
 		t.Fatalf("second status=%d body=%s", secondResult.Code, secondResult.Body)
 	}
 }
+
+func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat.scheduleMessage", strings.NewReader("channel=C1&post_at=4102444800&blocks=%5B%7B%22type%22%3A%22divider%22%7D%5D"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	testHandler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}

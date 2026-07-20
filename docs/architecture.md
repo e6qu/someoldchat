@@ -163,7 +163,7 @@ explicit integration; `slack-events` validates a Slack Events API envelope,
 adds the configured application ID and signing-secret headers when the durable
 payload is an inner event, and fails loudly for identifier-only domain events.
 Both formats use durable leases and the event ID as their idempotency key. Due
-scheduled messages are claimed with a separate durable lease and posted with
+scheduled messages, including normalized Block Kit payloads, are claimed with a separate durable lease and posted with
 the scheduled-message ID as their idempotency key before the scheduled record
 is acknowledged. A worker crash therefore leaves both committed events and
 scheduled records claimable after lease expiry rather than losing a

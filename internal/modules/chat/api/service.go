@@ -161,6 +161,7 @@ type Service interface {
 	ReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
 	Reminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	ScheduleMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)
+	ScheduleMessageWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID) error
 	CreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) (domain.UserGroup, error)

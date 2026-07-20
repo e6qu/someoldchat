@@ -2254,11 +2254,7 @@ func (r Remote) Reminders(ctx context.Context, workspaceID domain.WorkspaceID, u
 }
 
 func (r Remote) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
-	out, err := r.scheduled.ScheduleMessage(ctx, &chatv1.ScheduleMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), Text: text, PostAt: postAt.Unix()})
-	if err != nil {
-		return domain.ScheduledMessage{}, err
-	}
-	return decodeProtoScheduledMessage(out)
+	return r.ScheduleMessageWithBlocks(ctx, workspaceID, userID, channel, text, "", postAt)
 }
 
 func (r Remote) ScheduledMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
@@ -4883,10 +4879,10 @@ func (s *Server) deleteReminderProto(ctx context.Context, input *chatv1.Reminder
 }
 
 func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetChannelId() == "" || input.GetText() == "" || input.GetPostAt() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, channel_id, text, and positive post_at are required")
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetChannelId() == "" || input.GetPostAt() <= 0 || (input.GetText() == "" && input.GetBlocks() == "") {
+		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, channel_id, text or blocks, and positive post_at are required")
 	}
-	value, err := s.implementation.ScheduleMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetText(), time.Unix(input.GetPostAt(), 0).UTC())
+	value, err := s.implementation.ScheduleMessageWithBlocks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetText(), input.GetBlocks(), time.Unix(input.GetPostAt(), 0).UTC())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -4978,7 +4974,7 @@ func mapError(err error) error {
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return status.Error(codes.AlreadyExists, err.Error())
 	}
-	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) {
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) {
 		return status.Error(codes.Aborted, err.Error())
 	}
 	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
@@ -5343,7 +5339,7 @@ func encodeProtoMessage(value domain.Message) *chatv1.Message {
 	return &chatv1.Message{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation),
 		AuthorId: string(value.AuthorID), Text: value.Text, ThreadTimestamp: string(value.ThreadTimestamp),
-		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls,
+		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls, Blocks: value.Blocks,
 	}
 }
 
@@ -5358,7 +5354,7 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 	return domain.Message{
 		ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()),
-		Text: value.GetText(), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(),
+		Text: value.GetText(), Blocks: value.GetBlocks(), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(),
 	}, nil
 }
 
@@ -5810,14 +5806,14 @@ func decodeProtoReminder(value *chatv1.Reminder) (domain.Reminder, error) {
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {
-	return &chatv1.ScheduledMessage{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author), Text: value.Text, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix()}
+	return &chatv1.ScheduledMessage{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author), Text: value.Text, Blocks: value.Blocks, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix()}
 }
 
 func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.ScheduledMessage, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || value.GetText() == "" || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "") || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
 		return domain.ScheduledMessage{}, errors.New("typed scheduled message is incomplete")
 	}
-	return domain.ScheduledMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()), Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()), Text: value.GetText(), PostAt: time.Unix(value.GetPostAt(), 0).UTC(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC()}, nil
+	return domain.ScheduledMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()), Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()), Text: value.GetText(), Blocks: value.GetBlocks(), PostAt: time.Unix(value.GetPostAt(), 0).UTC(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC()}, nil
 }
 
 func decodeProtoUser(value *chatv1.User) (domain.User, error) {
@@ -6134,4 +6130,12 @@ func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithB
 		return nil, mapError(err)
 	}
 	return encodeProtoMessage(value), nil
+}
+
+func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
+	out, err := r.scheduled.ScheduleMessage(ctx, &chatv1.ScheduleMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), Text: text, Blocks: blocks, PostAt: postAt.Unix()})
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	return decodeProtoScheduledMessage(out)
 }
