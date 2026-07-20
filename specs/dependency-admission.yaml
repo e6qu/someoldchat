@@ -228,19 +228,6 @@ entries:
     license: MIT
     purpose: source checkout in CI
     runtime: false
-  - id: action/actions/attest
-    kind: github-action
-    canonical: actions/attest
-    source: https://github.com/actions/attest
-    version: v4.2.0
-    revision: f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6
-    published_at: 2026-07-16T17:19:03Z
-    evidence: https://api.github.com/repos/actions/attest/commits/f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6
-    checksum: git:f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6
-    provenance: github-commit
-    license: MIT
-    purpose: signed image provenance attestation in release CI
-    runtime: false
   - id: action/actions/setup-go
     kind: github-action
     canonical: actions/setup-go

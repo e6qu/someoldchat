@@ -87,6 +87,7 @@ fmt-check:
 workflow-check: dependency-check
 
 container-check: dependency-check
+	./scripts/check-container-publication.sh
 
 dependency-check:
 	GOTOOLCHAIN=local GOCACHE=$(GOCACHE) go list -mod=readonly all >/dev/null

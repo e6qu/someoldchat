@@ -215,6 +215,13 @@ The dependency-admission gate verified exact direct npm lockfile versions and
 Subresource Integrity checksums against the same aged evidence inventory used
 for Go modules, GitHub Actions, and container inputs.
 
+The container publication gate emitted immutable 12-character commit tags,
+direct Linux amd64 and Linux arm64 image manifests, and a generic index made
+from exactly those two manifests. It read the published references back from
+GitHub Container Registry, rejected provenance or software-bill-of-materials
+children in architecture tags, and retained at most the newest 20 complete
+release groups.
+
 ## Initial milestone
 
 The first demonstrable milestone is a cold system receiving a request through

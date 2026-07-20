@@ -151,19 +151,22 @@ Related documents: [architecture](architecture.md), [operations](operations.md),
 
 ## Published container verification
 
-The main-branch release workflow publishes architecture images and a
-multi-architecture manifest under the full commit identifier. It attaches
-max-level BuildKit provenance and an SPDX software bill of materials to each
-architecture image, then publishes a signed registry attestation. Deploy an
-image by digest, not by a mutable tag. Verify the registry attestation with the
-GitHub Command Line Interface before deployment:
+The main-branch release workflow uses the first 12 lowercase hexadecimal
+characters of the commit identifier as its immutable release tag. It publishes
+three references:
 
-```sh
-gh attestation verify \
-  oci://ghcr.io/e6qu/someoldchat@sha256:<manifest-digest> \
-  --repo e6qu/someoldchat
-```
+- `ghcr.io/e6qu/someoldchat:<sha12>` is an OCI image index containing exactly
+  Linux amd64 and Linux arm64;
+- `ghcr.io/e6qu/someoldchat:<sha12>-amd64` is a direct Linux amd64 image
+  manifest; and
+- `ghcr.io/e6qu/someoldchat:<sha12>-arm64` is a direct Linux arm64 image
+  manifest.
 
-The manifest digest must be recorded with the deployment change. A missing or
-invalid attestation is a release failure; the deployment must not select a
-different image as an implicit substitute.
+BuildKit provenance and software-bill-of-materials registry attachments are
+disabled for this workflow so the architecture-specific references remain
+direct image manifests for runtimes that cannot consume OCI indexes. The
+workflow reads all three references back from GitHub Container Registry and
+fails unless their media types, digests, and platforms form exactly that
+shape. It then removes tagged package versions outside the newest 20 complete
+release groups and verifies the retained tags. Deployments should record and
+use the verified digest for the selected reference.
