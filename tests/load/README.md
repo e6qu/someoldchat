@@ -13,6 +13,9 @@ The scheduled-message recovery test applies the same rule to delayed message
 execution and verifies that the idempotency key prevents a duplicate post.
 The activator forwarding test checks that concurrent durable requests reach the
 callers that submitted them and that successful delivery drains the spool.
+The external upload tests race many callers on one upload ticket and check that
+the two-phase completion yields a single file carrying the identifier issued
+before the bytes existed, and that the shared comment is posted once.
 They do not represent production capacity; use the benchmark to compare
 changes and use a deployment-level load tool for capacity measurements.
 

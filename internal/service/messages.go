@@ -3829,21 +3829,9 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 			return nil, err
 		}
 	}
-	completed := make([]domain.File, len(values))
-	allCompleted := true
-	for index, value := range values {
-		if value.Status != domain.ExternalUploadCompleted {
-			allCompleted = false
-			continue
-		}
-		if value.FileID == "" {
-			return nil, errors.New("completed external upload has no file reference")
-		}
-		file, err := m.FileInfo(ctx, workspaceID, userID, value.FileID)
-		if err != nil {
-			return nil, err
-		}
-		completed[index] = file
+	completed, allCompleted, err := m.completedExternalUploadFiles(ctx, workspaceID, userID, completions)
+	if err != nil {
+		return nil, err
 	}
 	if allCompleted {
 		if !sameFileShareChannels(completed, channels) {
@@ -3879,12 +3867,54 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		eventsToEmit[index] = events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(fileID), CreatedAt: createdAt}
 	}
 	if err := m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit); err != nil {
-		return nil, err
+		// A concurrent caller may have completed these tickets between the read
+		// above and this write. The store rejects the second writer rather than
+		// completing twice, which is correct, but the caller's upload did
+		// finish: reporting a conflict would make a retry or a duplicated
+		// request look like a failure. Re-read and answer with what the winner
+		// produced, exactly as a sequential retry is answered.
+		if !errors.Is(err, store.ErrConflict) {
+			return nil, err
+		}
+		settled, allSettled, settleErr := m.completedExternalUploadFiles(ctx, workspaceID, userID, completions)
+		if settleErr != nil || !allSettled {
+			return nil, err
+		}
+		files = settled
+		if !sameFileShareChannels(files, channels) {
+			channels = files[0].SharedChannels
+		}
 	}
 	if err := m.publishExternalUploadComments(ctx, workspaceID, userID, completions, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
 		return nil, err
 	}
 	return files, nil
+}
+
+// completedExternalUploadFiles reports the files behind a set of tickets when
+// every one of them has already been completed. Completion is answered from
+// here both when the caller is retrying and when a concurrent caller won the
+// write, so a retry and a race produce the same answer.
+func (m Messages) completedExternalUploadFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion) ([]domain.File, bool, error) {
+	files := make([]domain.File, len(completions))
+	for index, completion := range completions {
+		value, err := m.Store.GetExternalUpload(ctx, completion.ID)
+		if err != nil {
+			return nil, false, err
+		}
+		if value.Status != domain.ExternalUploadCompleted {
+			return nil, false, nil
+		}
+		if value.FileID == "" {
+			return nil, false, errors.New("completed external upload has no file reference")
+		}
+		file, err := m.FileInfo(ctx, workspaceID, userID, value.FileID)
+		if err != nil {
+			return nil, false, err
+		}
+		files[index] = file
+	}
+	return files, true, nil
 }
 
 func normalizeExternalUploadCompletions(values []domain.ExternalUploadCompletion) ([]domain.ExternalUploadCompletion, error) {
