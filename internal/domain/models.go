@@ -3,6 +3,7 @@ package domain
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -251,22 +252,59 @@ type ExternalIdentity struct {
 }
 
 type OAuthCode struct {
-	Code        string
-	ClientID    string
-	WorkspaceID WorkspaceID
-	UserID      UserID
-	Scopes      []string
-	RedirectURI string
+	Code                string
+	ClientID            string
+	WorkspaceID         WorkspaceID
+	UserID              UserID
+	Scopes              []string
+	RedirectURI         string
+	CodeChallenge       string
+	CodeChallengeMethod string
 }
 
 type OAuthToken struct {
-	AccessToken string
+	AccessToken  string
+	ClientID     string
+	AppID        AppID
+	WorkspaceID  WorkspaceID
+	UserID       UserID
+	Scopes       []string
+	TokenType    string
+	CodeVerifier string
+}
+
+type OpenIDToken struct {
+	OAuthToken
+	IDToken      string
+	RefreshToken string
+}
+
+type OpenIDRefreshToken struct {
+	TokenHash   string
 	ClientID    string
-	AppID       AppID
 	WorkspaceID WorkspaceID
 	UserID      UserID
 	Scopes      []string
-	TokenType   string
+	ExpiresAt   time.Time
+}
+
+type OpenIDUserInfo struct {
+	Subject           UserID
+	UserID            UserID
+	WorkspaceID       WorkspaceID
+	Email             string
+	EmailVerified     bool
+	DateEmailVerified int64
+	Name              string
+	GivenName         string
+	FamilyName        string
+	Locale            string
+	Picture           string
+	TeamName          string
+	TeamDomain        string
+	UserImages        map[string]string
+	TeamImages        map[string]string
+	TeamImageDefault  bool
 }
 
 func (d DoNotDisturb) SnoozeEnabled(now time.Time) bool {
@@ -308,6 +346,20 @@ type SessionRecord struct {
 func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+func VerifyPKCE(codeChallenge, method, verifier string) bool {
+	codeChallenge = strings.TrimSpace(codeChallenge)
+	method = strings.TrimSpace(method)
+	verifier = strings.TrimSpace(verifier)
+	if codeChallenge == "" {
+		return verifier == ""
+	}
+	if method != "S256" || verifier == "" {
+		return false
+	}
+	hash := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(hash[:]) == codeChallenge
 }
 
 func NormalizeScopes(scopes []string) []string {

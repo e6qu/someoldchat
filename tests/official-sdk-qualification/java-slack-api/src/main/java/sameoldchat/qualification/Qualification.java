@@ -115,6 +115,22 @@ public final class Qualification {
                             .build());
             require(oauthToken.isOk() && oauthToken.getAccessToken() != null,
                     "oauth.token failed: " + oauthToken.getError());
+            com.slack.api.methods.response.openid.connect.OpenIDConnectTokenResponse openidToken = methods.openIDConnectToken(
+                    com.slack.api.methods.request.openid.connect.OpenIDConnectTokenRequest.builder()
+                            .clientId("qualification-client")
+                            .clientSecret("qualification-secret")
+                            .code("qualification-openid-code")
+                            .redirectUri("https://example.com/oauth")
+                            .grantType("authorization_code")
+                            .build());
+            require(openidToken.isOk() && "Bearer".equals(openidToken.getTokenType())
+                            && openidToken.getIdToken() != null && openidToken.getRefreshToken() != null,
+                    "openid.connect.token failed: " + openidToken.getError());
+            com.slack.api.methods.response.openid.connect.OpenIDConnectUserInfoResponse openidInfo = methods.openIDConnectUserInfo(
+                    com.slack.api.methods.request.openid.connect.OpenIDConnectUserInfoRequest.builder()
+                            .token(openidToken.getAccessToken()).build());
+            require(openidInfo.isOk() && "U1".equals(openidInfo.getSub()) && "T1".equals(openidInfo.getTeamId()),
+                    "openid.connect.userInfo failed: " + openidInfo.getError());
             com.slack.api.methods.response.apps.event.authorizations.AppsEventAuthorizationsListResponse authorizations = methods.appsEventAuthorizationsList(
                     com.slack.api.methods.request.apps.event.authorizations.AppsEventAuthorizationsListRequest.builder()
                             .eventContext("qualification-event").build());

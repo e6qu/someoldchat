@@ -104,6 +104,41 @@ func TestCoreRepositoryContract(t *testing.T) {
 	}
 }
 
+func TestOpenIDRefreshTokenRotationIsDurable(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := openStore(t, ctx)
+	defer closeRepository()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-openid-" + suffix)
+	userID := domain.UserID("U-openid-" + suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "OpenID qualification"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: userID, WorkspaceID: workspaceID, Email: "openid@example.com", Name: "openid"}); err != nil {
+		t.Fatal(err)
+	}
+	clientID := "openid-client-" + suffix
+	if err := repository.CreateOAuthClient(ctx, domain.OAuthClient{ID: clientID, SecretHash: domain.HashToken("secret"), AppID: "A-openid"}); err != nil {
+		t.Fatal(err)
+	}
+	oldRefreshToken := "old-refresh-" + suffix
+	newRefreshToken := "new-refresh-" + suffix
+	if err := repository.CreateOpenIDRefreshToken(ctx, domain.OpenIDRefreshToken{TokenHash: domain.HashToken(oldRefreshToken), ClientID: clientID, WorkspaceID: workspaceID, UserID: userID, Scopes: []string{"openid"}, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	rotated, err := repository.ExchangeOpenIDRefreshToken(ctx, clientID, oldRefreshToken, "access-"+suffix, newRefreshToken, domain.OpenIDToken{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.AccessToken != "access-"+suffix || rotated.RefreshToken != newRefreshToken || rotated.WorkspaceID != workspaceID || rotated.UserID != userID || len(rotated.Scopes) != 1 || rotated.Scopes[0] != "openid" {
+		t.Fatalf("rotated token=%+v", rotated)
+	}
+	if _, err := repository.ExchangeOpenIDRefreshToken(ctx, clientID, oldRefreshToken, "replay-access-"+suffix, "replay-refresh-"+suffix, domain.OpenIDToken{}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("replayed refresh token error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
 func TestListsRepositoryContract(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

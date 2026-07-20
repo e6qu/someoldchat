@@ -52,7 +52,8 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS workspace_default_channels (workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (workspace_id, conversation_id));
 CREATE TABLE IF NOT EXISTS conversation_teams (conversation_id TEXT NOT NULL REFERENCES conversations(id), team_id TEXT NOT NULL REFERENCES workspaces(id), org_channel INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (conversation_id, team_id));
 CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, app_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0);
@@ -217,7 +218,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 68
+const schemaVersion = 70
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -1075,6 +1076,24 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 69 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, expires_at INTEGER NOT NULL)`); err != nil {
+			return fmt.Errorf("migrate OpenID Connect refresh tokens: %w", err)
+		}
+	}
+	if version < 70 {
+		columns, err := s.tableColumns(ctx, db, "oauth_codes")
+		if err != nil {
+			return fmt.Errorf("inspect OAuth authorization codes: %w", err)
+		}
+		for _, column := range []string{"code_challenge", "code_challenge_method"} {
+			if !columns[column] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE oauth_codes ADD COLUMN `+column+` TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("migrate OAuth authorization code %s: %w", column, err)
+				}
+			}
+		}
+	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
@@ -1147,7 +1166,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -3136,7 +3155,7 @@ func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) err
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, redirect_uri) VALUES (?, ?, ?, ?, ?, ?)`, value.Code, value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.RedirectURI)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.Code, value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.RedirectURI, value.CodeChallenge, value.CodeChallengeMethod)
 	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
 		return store.ErrAlreadyExists
 	}
@@ -3155,12 +3174,16 @@ func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, r
 	}
 	var grant domain.OAuthCode
 	var scopes string
-	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, redirect_uri FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, code, clientID, redirect).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.RedirectURI); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, code, clientID, redirect).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.RedirectURI, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	if err := json.Unmarshal([]byte(scopes), &grant.Scopes); err != nil {
 		return domain.OAuthToken{}, err
 	}
+	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	token.CodeVerifier = ""
 	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, code, clientID, redirect)
 	if err != nil {
 		return domain.OAuthToken{}, err
@@ -3183,6 +3206,68 @@ func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, r
 	token.Scopes = grant.Scopes
 	if err := tx.Commit(); err != nil {
 		return domain.OAuthToken{}, err
+	}
+	return token, nil
+}
+
+func (s *Store) CreateOpenIDRefreshToken(ctx context.Context, value domain.OpenIDRefreshToken) error {
+	if value.TokenHash == "" || value.ClientID == "" || value.WorkspaceID == "" || value.UserID == "" || !value.ExpiresAt.After(time.Now().UTC()) || len(domain.NormalizeScopes(value.Scopes)) == 0 {
+		return errors.New("invalid OpenID Connect refresh token")
+	}
+	scopes, err := json.Marshal(domain.NormalizeScopes(value.Scopes))
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO openid_refresh_tokens(token_hash, client_id, workspace_id, user_id, scopes, expires_at) VALUES (?, ?, ?, ?, ?, ?)`, value.TokenHash, value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.ExpiresAt.UTC().Unix())
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
+		return store.ErrAlreadyExists
+	}
+	return err
+}
+
+func (s *Store) ExchangeOpenIDRefreshToken(ctx context.Context, clientID, oldToken, accessToken, refreshToken string, token domain.OpenIDToken) (domain.OpenIDToken, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	defer tx.Rollback()
+	var value domain.OpenIDRefreshToken
+	var scopes string
+	var expiresAt int64
+	err = tx.QueryRowContext(ctx, `SELECT token_hash, client_id, workspace_id, user_id, scopes, expires_at FROM openid_refresh_tokens WHERE token_hash = ? AND client_id = ?`, domain.HashToken(oldToken), clientID).Scan(&value.TokenHash, &value.ClientID, &value.WorkspaceID, &value.UserID, &scopes, &expiresAt)
+	if err := translateNotFound(err); err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	if err := json.Unmarshal([]byte(scopes), &value.Scopes); err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	value.ExpiresAt = time.Unix(expiresAt, 0).UTC()
+	if !value.ExpiresAt.After(time.Now().UTC()) {
+		return domain.OpenIDToken{}, store.ErrNotFound
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM openid_refresh_tokens WHERE token_hash = ?`, domain.HashToken(oldToken))
+	if err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil || changed != 1 {
+		return domain.OpenIDToken{}, store.ErrNotFound
+	}
+	newScopes, err := json.Marshal(domain.NormalizeScopes(value.Scopes))
+	if err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO openid_refresh_tokens(token_hash, client_id, workspace_id, user_id, scopes, expires_at) VALUES (?, ?, ?, ?, ?, ?)`, domain.HashToken(refreshToken), value.ClientID, value.WorkspaceID, value.UserID, string(newScopes), time.Now().UTC().Add(30*24*time.Hour).Unix()); err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	token.AccessToken = accessToken
+	token.RefreshToken = refreshToken
+	token.ClientID = value.ClientID
+	token.WorkspaceID = value.WorkspaceID
+	token.UserID = value.UserID
+	token.Scopes = value.Scopes
+	if err := tx.Commit(); err != nil {
+		return domain.OpenIDToken{}, err
 	}
 	return token, nil
 }

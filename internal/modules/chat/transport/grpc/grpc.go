@@ -6004,3 +6004,36 @@ func (s *Server) AcknowledgeCommentAction(ctx context.Context, input *chatv1.Ent
 	}
 	return &chatv1.EntityResponse{Ok: true}, nil
 }
+
+func (r Remote) OpenIDConnectToken(ctx context.Context, clientID, clientSecret, code, redirectURI, grantType, refreshToken, codeVerifier string) (domain.OpenIDToken, error) {
+	out, err := r.oauth.OpenIDConnectToken(ctx, &chatv1.OpenIDConnectTokenRequest{ClientId: clientID, ClientSecret: clientSecret, Code: code, RedirectUri: redirectURI, GrantType: grantType, RefreshToken: refreshToken, CodeVerifier: codeVerifier})
+	if err != nil {
+		return domain.OpenIDToken{}, err
+	}
+	oauthToken := out.GetOauthToken()
+	return domain.OpenIDToken{OAuthToken: domain.OAuthToken{AccessToken: oauthToken.GetAccessToken(), ClientID: oauthToken.GetClientId(), AppID: domain.AppID(oauthToken.GetAppId()), WorkspaceID: domain.WorkspaceID(oauthToken.GetWorkspaceId()), UserID: domain.UserID(oauthToken.GetUserId()), Scopes: append([]string(nil), oauthToken.GetScopes()...), TokenType: oauthToken.GetTokenType()}, IDToken: out.GetIdToken(), RefreshToken: out.GetRefreshToken()}, nil
+}
+
+func (r Remote) OpenIDConnectUserInfo(ctx context.Context, token string) (domain.OpenIDUserInfo, error) {
+	out, err := r.oauth.OpenIDConnectUserInfo(ctx, &chatv1.OpenIDConnectUserInfoRequest{Token: token})
+	if err != nil {
+		return domain.OpenIDUserInfo{}, err
+	}
+	return domain.OpenIDUserInfo{Subject: domain.UserID(out.GetSubject()), UserID: domain.UserID(out.GetUserId()), WorkspaceID: domain.WorkspaceID(out.GetWorkspaceId()), Email: out.GetEmail(), EmailVerified: out.GetEmailVerified(), DateEmailVerified: out.GetDateEmailVerified(), Name: out.GetName(), GivenName: out.GetGivenName(), FamilyName: out.GetFamilyName(), Locale: out.GetLocale(), Picture: out.GetPicture(), TeamName: out.GetTeamName(), TeamDomain: out.GetTeamDomain(), UserImages: out.GetUserImages(), TeamImages: out.GetTeamImages(), TeamImageDefault: out.GetTeamImageDefault()}, nil
+}
+
+func (s *Server) OpenIDConnectToken(ctx context.Context, input *chatv1.OpenIDConnectTokenRequest) (*chatv1.OpenIDConnectTokenResponse, error) {
+	value, err := s.implementation.OpenIDConnectToken(ctx, input.GetClientId(), input.GetClientSecret(), input.GetCode(), input.GetRedirectUri(), input.GetGrantType(), input.GetRefreshToken(), input.GetCodeVerifier())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.OpenIDConnectTokenResponse{OauthToken: &chatv1.OAuthToken{AccessToken: value.AccessToken, ClientId: value.ClientID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: value.Scopes, TokenType: value.TokenType}, IdToken: value.IDToken, RefreshToken: value.RefreshToken}, nil
+}
+
+func (s *Server) OpenIDConnectUserInfo(ctx context.Context, input *chatv1.OpenIDConnectUserInfoRequest) (*chatv1.OpenIDConnectUserInfoResponse, error) {
+	value, err := s.implementation.OpenIDConnectUserInfo(ctx, input.GetToken())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.OpenIDConnectUserInfoResponse{Subject: string(value.Subject), UserId: string(value.UserID), WorkspaceId: string(value.WorkspaceID), Email: value.Email, EmailVerified: value.EmailVerified, DateEmailVerified: value.DateEmailVerified, Name: value.Name, GivenName: value.GivenName, FamilyName: value.FamilyName, Locale: value.Locale, Picture: value.Picture, TeamName: value.TeamName, TeamDomain: value.TeamDomain, UserImages: value.UserImages, TeamImages: value.TeamImages, TeamImageDefault: value.TeamImageDefault}, nil
+}

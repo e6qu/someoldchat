@@ -107,6 +107,14 @@ The same reference defines the `entity` Work Objects methods. They are
 stateless response acknowledgements and are tracked separately from the
 pinned OpenAPI snapshot for the same reason.
 
+The same reference defines `openid.connect.token` and
+`openid.connect.userInfo` for Sign in with Slack. The implementation keeps
+authorization codes single-use and rotates refresh tokens in the selected
+durable store. It signs the returned JSON Web Token with the OAuth client
+secret because this local compatibility service does not publish a separate
+JSON Web Key Set. The methods are tracked separately from the pinned OpenAPI
+snapshot for the same reason.
+
 ## HTTP behavior
 
 - Web API methods MUST be served beneath `/api/{method}`.

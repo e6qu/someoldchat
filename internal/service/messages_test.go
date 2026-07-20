@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -52,6 +53,41 @@ func TestOAuthExchangeConsumesAuthorizationCode(t *testing.T) {
 	}
 	if _, err := (Messages{Store: s}).OAuthExchange(ctx, "client", "secret", "code", "https://callback"); !errors.Is(err, ErrInvalidOAuth) {
 		t.Fatalf("second exchange error = %v, want %v", err, ErrInvalidOAuth)
+	}
+}
+
+func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "test.example"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com"})
+	ctx := context.Background()
+	if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: append(auth.AllScopes(), "openid"), RedirectURI: "https://callback", CodeChallenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", CodeChallengeMethod: "S256"}); err != nil {
+		t.Fatal(err)
+	}
+	service := Messages{Store: s}
+	token, err := service.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.AccessToken == "" || token.RefreshToken == "" || len(strings.Split(token.IDToken, ".")) != 3 || token.TokenType != "Bearer" {
+		t.Fatalf("token=%+v", token)
+	}
+	info, err := service.OpenIDConnectUserInfo(ctx, token.AccessToken)
+	if err != nil || info.Subject != "U1" || info.WorkspaceID != "T1" || !info.EmailVerified {
+		t.Fatalf("userinfo=%+v err=%v", info, err)
+	}
+	rotated, err := service.OpenIDConnectToken(ctx, "client", "secret", "", "", "refresh_token", token.RefreshToken, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rotated.AccessToken == token.AccessToken || rotated.RefreshToken == token.RefreshToken || rotated.IDToken == "" {
+		t.Fatalf("refresh did not rotate credentials: old=%+v new=%+v", token, rotated)
+	}
+	if _, err := service.OpenIDConnectToken(ctx, "client", "secret", "", "", "refresh_token", token.RefreshToken, ""); !errors.Is(err, ErrInvalidOAuth) {
+		t.Fatalf("reused refresh token error=%v, want %v", err, ErrInvalidOAuth)
 	}
 }
 

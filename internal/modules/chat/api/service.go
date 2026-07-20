@@ -73,6 +73,8 @@ type Service interface {
 	AdminDisconnectSharedConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID) error
 	AdminConnectedChannelInfo(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, []domain.WorkspaceID, domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error)
 	OAuthExchange(context.Context, string, string, string, string) (domain.OAuthToken, error)
+	OpenIDConnectToken(context.Context, string, string, string, string, string, string, string) (domain.OpenIDToken, error)
+	OpenIDConnectUserInfo(context.Context, string) (domain.OpenIDUserInfo, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)
 	ConsumeRTMConnection(context.Context, string) (domain.RTMConnection, error)
 	CreateSocketModeConnection(context.Context, domain.SocketModeConnection) error

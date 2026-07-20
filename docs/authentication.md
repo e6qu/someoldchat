@@ -104,6 +104,16 @@ the subject has not been linked. An OpenID Connect identity is provisioned only
 when the configured issuer returns a supported `developer` or `admin` role;
 missing or unknown roles fail closed.
 
+The Slack-compatible Sign in with Slack API is separate from the browser login
+provider configuration. `POST /api/openid.connect.token` exchanges a durable,
+single-use authorization code or rotates a durable refresh token. The exchange
+requires the `openid` scope and verifies Proof Key for Code Exchange when the
+authorization code carries a challenge. `POST /api/openid.connect.userInfo`
+accepts the resulting bearer token and returns the Slack-shaped user identity.
+These methods use the same selected storage backend in monolith and separate
+mode; the separate mode reaches the implementation through the generated
+gRPC client.
+
 ## Administration
 
 When external authorization is configured, an administrator with the relevant
