@@ -22,19 +22,20 @@ const (
 )
 
 type File struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Uploader      string                 `protobuf:"bytes,3,opt,name=uploader,proto3" json:"uploader,omitempty"`
-	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	Title         string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
-	MimeType      string                 `protobuf:"bytes,6,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
-	Size          int64                  `protobuf:"varint,7,opt,name=size,proto3" json:"size,omitempty"`
-	CreatedAt     string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Deleted       bool                   `protobuf:"varint,9,opt,name=deleted,proto3" json:"deleted,omitempty"`
-	PublicToken   string                 `protobuf:"bytes,10,opt,name=public_token,json=publicToken,proto3" json:"public_token,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId    string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Uploader       string                 `protobuf:"bytes,3,opt,name=uploader,proto3" json:"uploader,omitempty"`
+	Name           string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Title          string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	MimeType       string                 `protobuf:"bytes,6,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
+	Size           int64                  `protobuf:"varint,7,opt,name=size,proto3" json:"size,omitempty"`
+	CreatedAt      string                 `protobuf:"bytes,8,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Deleted        bool                   `protobuf:"varint,9,opt,name=deleted,proto3" json:"deleted,omitempty"`
+	PublicToken    string                 `protobuf:"bytes,10,opt,name=public_token,json=publicToken,proto3" json:"public_token,omitempty"`
+	SharedChannels []string               `protobuf:"bytes,11,rep,name=shared_channels,json=sharedChannels,proto3" json:"shared_channels,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *File) Reset() {
@@ -135,6 +136,13 @@ func (x *File) GetPublicToken() string {
 		return x.PublicToken
 	}
 	return ""
+}
+
+func (x *File) GetSharedChannels() []string {
+	if x != nil {
+		return x.SharedChannels
+	}
+	return nil
 }
 
 type FilePage struct {
@@ -504,13 +512,17 @@ func (*ExternalUploadPart_Metadata) isExternalUploadPart_Part() {}
 func (*ExternalUploadPart_Chunk) isExternalUploadPart_Part() {}
 
 type CompleteExternalUploadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	UploadId      string                 `protobuf:"bytes,3,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
-	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UploadId        string                 `protobuf:"bytes,3,opt,name=upload_id,json=uploadId,proto3" json:"upload_id,omitempty"`
+	Title           string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	ChannelIds      []string               `protobuf:"bytes,5,rep,name=channel_ids,json=channelIds,proto3" json:"channel_ids,omitempty"`
+	InitialComment  string                 `protobuf:"bytes,6,opt,name=initial_comment,json=initialComment,proto3" json:"initial_comment,omitempty"`
+	Blocks          string                 `protobuf:"bytes,7,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	ThreadTimestamp string                 `protobuf:"bytes,8,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *CompleteExternalUploadRequest) Reset() {
@@ -567,6 +579,34 @@ func (x *CompleteExternalUploadRequest) GetUploadId() string {
 func (x *CompleteExternalUploadRequest) GetTitle() string {
 	if x != nil {
 		return x.Title
+	}
+	return ""
+}
+
+func (x *CompleteExternalUploadRequest) GetChannelIds() []string {
+	if x != nil {
+		return x.ChannelIds
+	}
+	return nil
+}
+
+func (x *CompleteExternalUploadRequest) GetInitialComment() string {
+	if x != nil {
+		return x.InitialComment
+	}
+	return ""
+}
+
+func (x *CompleteExternalUploadRequest) GetBlocks() string {
+	if x != nil {
+		return x.Blocks
+	}
+	return ""
+}
+
+func (x *CompleteExternalUploadRequest) GetThreadTimestamp() string {
+	if x != nil {
+		return x.ThreadTimestamp
 	}
 	return ""
 }
@@ -2243,7 +2283,7 @@ var File_sameoldchat_chat_v1_files_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/files.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/presence.proto\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\x8c\x02\n" +
+	"\x1fsameoldchat/chat/v1/files.proto\x12\x13sameoldchat.chat.v1\x1a\"sameoldchat/chat/v1/presence.proto\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xb5\x02\n" +
 	"\x04File\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1a\n" +
@@ -2256,7 +2296,8 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"created_at\x18\b \x01(\tR\tcreatedAt\x12\x18\n" +
 	"\adeleted\x18\t \x01(\bR\adeleted\x12!\n" +
 	"\fpublic_token\x18\n" +
-	" \x01(\tR\vpublicToken\"w\n" +
+	" \x01(\tR\vpublicToken\x12'\n" +
+	"\x0fshared_channels\x18\v \x03(\tR\x0esharedChannels\"w\n" +
 	"\bFilePage\x12/\n" +
 	"\x05files\x18\x01 \x03(\v2\x19.sameoldchat.chat.v1.FileR\x05files\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -2291,12 +2332,17 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x12ExternalUploadPart\x12H\n" +
 	"\bmetadata\x18\x01 \x01(\v2*.sameoldchat.chat.v1.ExternalUploadRequestH\x00R\bmetadata\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
-	"\x04part\"\x8e\x01\n" +
+	"\x04part\"\x9b\x02\n" +
 	"\x1dCompleteExternalUploadRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1b\n" +
 	"\tupload_id\x18\x03 \x01(\tR\buploadId\x12\x14\n" +
-	"\x05title\x18\x04 \x01(\tR\x05title\"\xec\x02\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\x12\x1f\n" +
+	"\vchannel_ids\x18\x05 \x03(\tR\n" +
+	"channelIds\x12'\n" +
+	"\x0finitial_comment\x18\x06 \x01(\tR\x0einitialComment\x12\x16\n" +
+	"\x06blocks\x18\a \x01(\tR\x06blocks\x12)\n" +
+	"\x10thread_timestamp\x18\b \x01(\tR\x0fthreadTimestamp\"\xec\x02\n" +
 	"\n" +
 	"RemoteFile\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +

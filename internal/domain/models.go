@@ -484,17 +484,18 @@ type BookmarkUpdate struct {
 const MaxBookmarksPerConversation = 100
 
 type File struct {
-	ID          FileID
-	WorkspaceID WorkspaceID
-	Uploader    UserID
-	Name        string
-	Title       string
-	MIMEType    string
-	BlobKey     string
-	PublicToken string
-	Size        int64
-	CreatedAt   time.Time
-	Deleted     bool
+	ID             FileID
+	WorkspaceID    WorkspaceID
+	Uploader       UserID
+	Name           string
+	Title          string
+	MIMEType       string
+	BlobKey        string
+	PublicToken    string
+	Size           int64
+	CreatedAt      time.Time
+	Deleted        bool
+	SharedChannels []ConversationID
 }
 
 type Canvas struct {
@@ -905,6 +906,7 @@ type ExternalUpload struct {
 	Title       string
 	MIMEType    string
 	BlobKey     string
+	FileID      FileID
 	Size        int64
 	Status      ExternalUploadStatus
 	CreatedAt   time.Time

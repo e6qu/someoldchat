@@ -225,7 +225,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 75
+const schemaVersion = 76
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -1172,6 +1172,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate external uploads: %w", err)
 		}
 	}
+	if version < 76 {
+		columns, err := s.tableColumns(ctx, db, "external_uploads")
+		if err != nil {
+			return err
+		}
+		if !columns["file_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE external_uploads ADD COLUMN file_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate external upload file reference: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS file_shares (file_id TEXT NOT NULL REFERENCES files(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (file_id, conversation_id))`); err != nil {
+			return fmt.Errorf("migrate file shares: %w", err)
+		}
+	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
@@ -1244,7 +1258,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -5700,14 +5714,14 @@ func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.E
 }
 
 func (s *Store) CreateExternalUpload(ctx context.Context, value domain.ExternalUpload) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.Size, value.Status, value.CreatedAt.UTC().Format(time.RFC3339Nano), value.ExpiresAt.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.FileID, value.Size, value.Status, value.CreatedAt.UTC().Format(time.RFC3339Nano), value.ExpiresAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
 
 func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadID) (domain.ExternalUpload, error) {
 	var value domain.ExternalUpload
 	var created, expires, uploaded, completed string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, status, created_at, expires_at, uploaded_at, completed_at FROM external_uploads WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Uploader, &value.Name, &value.Title, &value.MIMEType, &value.BlobKey, &value.Size, &value.Status, &created, &expires, &uploaded, &completed)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, status, created_at, expires_at, uploaded_at, completed_at FROM external_uploads WHERE id = ?`, id).Scan(&value.ID, &value.WorkspaceID, &value.Uploader, &value.Name, &value.Title, &value.MIMEType, &value.BlobKey, &value.FileID, &value.Size, &value.Status, &created, &expires, &uploaded, &completed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ExternalUpload{}, store.ErrNotFound
 	}
@@ -5743,13 +5757,13 @@ func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.Extern
 	return nil
 }
 
-func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, event events.Event) error {
+func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, file.CreatedAt.UTC().Format(time.RFC3339Nano), id, domain.ExternalUploadUploaded, time.Now().UTC().Format(time.RFC3339Nano))
+	result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, file.ID, file.CreatedAt.UTC().Format(time.RFC3339Nano), id, domain.ExternalUploadUploaded, time.Now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
@@ -5762,6 +5776,11 @@ func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUp
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
+	}
+	for _, channel := range channels {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id) VALUES (?, ?)`, file.ID, channel); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
 		return err
@@ -5810,6 +5829,12 @@ func (s *Store) GetFile(ctx context.Context, id domain.FileID) (domain.File, err
 	}
 	file.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 	file.Deleted = deleted != 0
+	if err == nil {
+		file.SharedChannels, err = s.listFileShares(ctx, file.WorkspaceID, file.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			err = nil
+		}
+	}
 	return file, err
 }
 
@@ -6949,4 +6974,32 @@ func translateNotFound(err error) error {
 		return store.ErrNotFound
 	}
 	return err
+}
+
+func (s *Store) listFileShares(ctx context.Context, workspace domain.WorkspaceID, id domain.FileID) ([]domain.ConversationID, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT fs.conversation_id FROM file_shares fs JOIN files f ON f.id = fs.file_id WHERE fs.file_id = ? AND f.workspace_id = ? AND f.deleted = 0 ORDER BY fs.conversation_id`, id, workspace)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.ConversationID, 0)
+	for rows.Next() {
+		var channel domain.ConversationID
+		if err := rows.Scan(&channel); err != nil {
+			return nil, err
+		}
+		values = append(values, channel)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		var exists int
+		if err := s.db.QueryRowContext(ctx, `SELECT 1 FROM files WHERE id = ? AND workspace_id = ? AND deleted = 0`, id, workspace).Scan(&exists); errors.Is(err, sql.ErrNoRows) {
+			return nil, store.ErrNotFound
+		} else if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
 }

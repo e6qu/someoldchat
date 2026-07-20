@@ -3748,7 +3748,7 @@ func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUplo
 	return nil
 }
 
-func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string) (domain.File, error) {
+func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) (domain.File, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.File{}, err
 	}
@@ -3759,6 +3759,35 @@ func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain
 	if !value.ExpiresAt.After(time.Now().UTC()) {
 		return domain.File{}, ErrInvalidExternalUpload
 	}
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
+	if err != nil {
+		return domain.File{}, ErrInvalidExternalUpload
+	}
+	channels, err = normalizeFileShareChannels(channels)
+	if err != nil {
+		return domain.File{}, err
+	}
+	for _, channel := range channels {
+		if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
+			return domain.File{}, err
+		}
+	}
+	if value.Status == domain.ExternalUploadCompleted {
+		if value.FileID == "" {
+			return domain.File{}, errors.New("completed external upload has no file reference")
+		}
+		file, err := m.FileInfo(ctx, workspaceID, userID, value.FileID)
+		if err != nil {
+			return domain.File{}, err
+		}
+		if err := m.publishExternalUploadComments(ctx, workspaceID, userID, id, file.SharedChannels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
+			return domain.File{}, err
+		}
+		return file, nil
+	}
+	if value.Status != domain.ExternalUploadUploaded {
+		return domain.File{}, ErrInvalidExternalUpload
+	}
 	fileID, err := domain.NewFileID()
 	if err != nil {
 		return domain.File{}, err
@@ -3767,13 +3796,46 @@ func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain
 		title = value.Title
 	}
 	file := domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: time.Now().UTC()}
+	file.SharedChannels = append([]domain.ConversationID(nil), channels...)
 	eventID, err := domain.NewEventID()
 	if err != nil {
 		return domain.File{}, err
 	}
 	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(file.ID), CreatedAt: file.CreatedAt}
-	if err := m.Store.CompleteExternalUpload(ctx, id, file, event); err != nil {
+	if err := m.Store.CompleteExternalUpload(ctx, id, file, channels, event); err != nil {
+		return domain.File{}, err
+	}
+	if err := m.publishExternalUploadComments(ctx, workspaceID, userID, id, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
 		return domain.File{}, err
 	}
 	return file, nil
+}
+
+func (m Messages) publishExternalUploadComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, uploadID domain.ExternalUploadID, channels []domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp) error {
+	if strings.TrimSpace(text) == "" && blocks == "" {
+		return nil
+	}
+	for _, channel := range channels {
+		if _, err := m.PostWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", threadTimestamp, "external-upload:"+string(uploadID)+":"+string(channel)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeFileShareChannels(values []domain.ConversationID) ([]domain.ConversationID, error) {
+	seen := make(map[domain.ConversationID]struct{}, len(values))
+	result := make([]domain.ConversationID, 0, len(values))
+	for _, value := range values {
+		value = domain.ConversationID(strings.TrimSpace(string(value)))
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
 }

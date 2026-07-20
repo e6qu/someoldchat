@@ -4413,6 +4413,9 @@ func fileResponse(file domain.File) map[string]any {
 	if file.PublicToken != "" {
 		result["permalink_public"] = "/files/public/" + file.PublicToken
 	}
+	if len(file.SharedChannels) > 0 {
+		result["channels"] = file.SharedChannels
+	}
 	return result
 }
 
@@ -6465,7 +6468,11 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
 		return
 	}
-	file, err := h.Messages.CompleteExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadID(uploadID), fields["title"])
+	channels := parseConversationIDs(fields["channels"])
+	if channel := strings.TrimSpace(fields["channel_id"]); channel != "" {
+		channels = append(channels, domain.ConversationID(channel))
+	}
+	file, err := h.Messages.CompleteExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ExternalUploadID(uploadID), fields["title"], channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 	if err != nil {
 		code, reason := mapServiceError(err, "file_not_found")
 		writeJSON(w, code, map[string]any{"ok": false, "error": reason})

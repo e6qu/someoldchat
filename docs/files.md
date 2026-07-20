@@ -26,6 +26,16 @@ The current implementation accepts one completed file per request. Channel
 sharing, initial comments, and Block Kit publication associated with external
 completion are not silently inferred; callers must use the existing message
 and file-sharing operations until those fields have an explicit implementation.
+The current implementation accepts one completed file per request. A completion
+can include channel identifiers, an initial comment, and Block Kit blocks. The
+channel relation is committed with the file metadata. The comment and blocks
+are published as an idempotent message for each shared channel; the message
+does not contain a fabricated file attachment reference.
+
+If publication is interrupted after completion, retrying the same completion
+request reads the durable channel relation and retries only the missing
+idempotent messages. The file is not created again. A retry cannot change the
+durable channel relation by supplying a different channel list.
 
 ## Process boundary
 

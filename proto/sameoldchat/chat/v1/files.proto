@@ -18,6 +18,7 @@ message File {
   string created_at = 8;
   bool deleted = 9;
   string public_token = 10;
+  repeated string shared_channels = 11;
 }
 
 message FilePage {
@@ -63,6 +64,10 @@ message CompleteExternalUploadRequest {
   string user_id = 2;
   string upload_id = 3;
   string title = 4;
+  repeated string channel_ids = 5;
+  string initial_comment = 6;
+  string blocks = 7;
+  string thread_timestamp = 8;
 }
 
 message RemoteFile {

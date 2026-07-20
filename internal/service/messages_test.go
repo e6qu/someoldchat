@@ -1210,6 +1210,7 @@ func TestUploadFileKeepsBytesExternalAndMetadataDurable(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -1352,6 +1353,7 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -1365,12 +1367,21 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	if err := messages.UploadExternalFile(ctx, upload.ID, 7, bytes.NewReader([]byte("content"))); err != nil {
 		t.Fatal(err)
 	}
-	file, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes")
+	file, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes", []domain.ConversationID{"C1", "C1"}, "Uploaded", `[{"type":"divider"}]`, "")
 	if err != nil || file.BlobKey != upload.BlobKey {
 		t.Fatalf("file=%+v err=%v", file, err)
 	}
-	if _, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes"); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("second completion error=%v, want conflict", err)
+	second, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes", []domain.ConversationID{"C1"}, "Uploaded", `[{"type":"divider"}]`, "")
+	if err != nil || second.ID != file.ID {
+		t.Fatalf("second completion file=%+v err=%v", second, err)
+	}
+	metadata, err := messages.FileInfo(ctx, "T1", "U1", file.ID)
+	if err != nil || len(metadata.SharedChannels) != 1 || metadata.SharedChannels[0] != "C1" {
+		t.Fatalf("metadata=%+v err=%v", metadata, err)
+	}
+	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks == "" {
+		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
 	stored, err := s.GetExternalUpload(ctx, upload.ID)
 	if err != nil || stored.Status != domain.ExternalUploadCompleted {
