@@ -133,6 +133,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	connection, err := h.Store.ConsumeSocketModeConnection(r.Context(), id)
 	if err != nil {
+		// At the limit the ticket is perfectly valid; the app is simply holding
+		// as many connections as it may. Answering 401 would send a client off
+		// to re-authenticate instead of releasing a connection and retrying.
+		if errors.Is(err, store.ErrSocketModeConnectionLimit) {
+			http.Error(w, "Socket Mode connection limit reached", http.StatusTooManyRequests)
+			return
+		}
 		http.Error(w, "connection is invalid or expired", http.StatusUnauthorized)
 		return
 	}

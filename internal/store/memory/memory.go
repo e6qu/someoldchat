@@ -1961,6 +1961,20 @@ func (s *Store) ConsumeSocketModeConnection(_ context.Context, id string) (domai
 		}
 		return domain.SocketModeConnection{}, store.ErrNotFound
 	}
+	// Consumption is what makes a connection active, so it is the only place
+	// the concurrent-connection limit can be enforced. Checking it when the
+	// ticket is issued counts nothing, because a ticket is inactive until it is
+	// dialled: an app could take unbounded tickets first and dial them all.
+	now := time.Now().UTC()
+	active := 0
+	for other, connection := range s.socketConnections {
+		if s.socketConnectionActive[other] && connection.AppID == value.AppID && connection.ExpiresAt.After(now) {
+			active++
+		}
+	}
+	if active >= domain.SocketModeConnectionLimit {
+		return domain.SocketModeConnection{}, store.ErrSocketModeConnectionLimit
+	}
 	s.socketConnectionActive[id] = true
 	return value, nil
 }

@@ -16,6 +16,9 @@ callers that submitted them and that successful delivery drains the spool.
 The external upload tests race many callers on one upload ticket and check that
 the two-phase completion yields a single file carrying the identifier issued
 before the bytes existed, and that the shared comment is posted once.
+The Socket Mode tests model a reconnect storm: many clients dialling at once
+must not push the active connection count past the documented limit, and one
+connection identifier must admit exactly one client.
 They do not represent production capacity; use the benchmark to compare
 changes and use a deployment-level load tool for capacity measurements.
 
