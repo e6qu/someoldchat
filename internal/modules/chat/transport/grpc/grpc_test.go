@@ -94,6 +94,7 @@ func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	local := service.Messages{Store: store}
 	server := grpc.NewServer()
 	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
@@ -298,6 +299,7 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -328,12 +330,17 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	if err := remote.UploadExternalFile(ctx, upload.ID, int64(len(content)), bytes.NewReader(content)); err != nil {
 		t.Fatal(err)
 	}
-	file, err := remote.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "External")
-	if err != nil || file.Name != "external.txt" || file.Size != int64(len(content)) {
+	file, err := remote.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "External", []domain.ConversationID{"C1"}, "Uploaded", `[{"type":"divider"}]`, "")
+	if err != nil || file.Name != "external.txt" || file.Size != int64(len(content)) || len(file.SharedChannels) != 1 || file.SharedChannels[0] != "C1" {
 		t.Fatalf("file=%+v err=%v", file, err)
 	}
-	if _, err := remote.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "External"); err == nil {
-		t.Fatal("second completion succeeded")
+	second, err := remote.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "External", []domain.ConversationID{"C1"}, "Uploaded", `[{"type":"divider"}]`, "")
+	if err != nil || second.ID != file.ID {
+		t.Fatalf("second completion file=%+v err=%v", second, err)
+	}
+	page, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks == "" {
+		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
 }
 

@@ -195,7 +195,7 @@ type Store interface {
 	CreateExternalUpload(context.Context, domain.ExternalUpload) error
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
-	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, events.Event) error
+	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.FileID, domain.FileCommentID, events.Event) error

@@ -401,7 +401,7 @@ func TestSQLiteCallsAreDurable(t *testing.T) {
 	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
 		t.Fatal(err)
 	}
-	created := time.Unix(1700000000, 0).UTC()
+	created := time.Now().UTC().Truncate(time.Second)
 	value := domain.Call{ID: "call_123", WorkspaceID: "T1", ExternalUniqueID: "external-1", JoinURL: "https://call.example", CreatedBy: "U1", StartedAt: created, Participants: []domain.UserID{"U1"}}
 	if err := s.CreateCall(ctx, value, events.Event{ID: "call-event-1", WorkspaceID: "T1", Topic: "call.created", Payload: "call_123", CreatedAt: created}); err != nil {
 		t.Fatal(err)
@@ -1677,5 +1677,48 @@ func TestSQLiteIncomingWebhookSecretIsHashedAndRevocable(t *testing.T) {
 	}
 	if _, err := s.LookupIncomingWebhook(ctx, "T1", "A1", "secret"); err != store.ErrNotFound {
 		t.Fatalf("disabled webhook error=%v", err)
+	}
+}
+
+func TestSQLiteExternalUploadCompletionPersistsFileShares(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "external-upload.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Now().UTC().Truncate(time.Second)
+	upload := domain.ExternalUpload{ID: "upload_1", WorkspaceID: "T1", Uploader: "U1", Name: "notes.txt", Title: "Notes", MIMEType: "text/plain", BlobKey: "T1/upload_1", Size: 7, Status: domain.ExternalUploadUploaded, CreatedAt: created, ExpiresAt: created.Add(time.Hour)}
+	if err := s.CreateExternalUpload(ctx, upload); err != nil {
+		t.Fatal(err)
+	}
+	file := domain.File{ID: "file_1", WorkspaceID: "T1", Uploader: "U1", Name: upload.Name, Title: upload.Title, MIMEType: upload.MIMEType, BlobKey: upload.BlobKey, Size: upload.Size, CreatedAt: created}
+	if err := s.CompleteExternalUpload(ctx, upload.ID, file, []domain.ConversationID{"C1"}, events.Event{ID: "file-event-1", WorkspaceID: "T1", Topic: "file.created", Payload: string(file.ID), CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	got, err := s.GetFile(ctx, file.ID)
+	if err != nil || len(got.SharedChannels) != 1 || got.SharedChannels[0] != "C1" {
+		t.Fatalf("file=%+v err=%v", got, err)
+	}
+	completed, err := s.GetExternalUpload(ctx, upload.ID)
+	if err != nil || completed.Status != domain.ExternalUploadCompleted || completed.FileID != file.ID {
+		t.Fatalf("upload=%+v err=%v", completed, err)
 	}
 }

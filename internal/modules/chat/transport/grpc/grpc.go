@@ -5424,6 +5424,7 @@ func encodeProtoFile(value domain.File) *chatv1.File {
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader),
 		Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
 		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, PublicToken: value.PublicToken,
+		SharedChannels: conversationStrings(value.SharedChannels),
 	}
 }
 
@@ -5438,7 +5439,7 @@ func decodeProtoFile(value *chatv1.File) (domain.File, error) {
 	if err != nil {
 		return domain.File{}, errors.New("typed file created_at is invalid")
 	}
-	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken()}, nil
+	return domain.File{ID: domain.FileID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), PublicToken: value.GetPublicToken(), SharedChannels: conversationIDs(value.GetSharedChannels())}, nil
 }
 
 func encodeProtoFilePage(page domain.FilePage) *chatv1.FilePage {
@@ -6202,8 +6203,8 @@ func (r Remote) UploadExternalFile(ctx context.Context, id domain.ExternalUpload
 	return err
 }
 
-func (r Remote) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string) (domain.File, error) {
-	out, err := r.files.CompleteExternalUpload(ctx, &chatv1.CompleteExternalUploadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UploadId: string(id), Title: title})
+func (r Remote) CompleteExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ExternalUploadID, title string, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) (domain.File, error) {
+	out, err := r.files.CompleteExternalUpload(ctx, &chatv1.CompleteExternalUploadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), UploadId: string(id), Title: title, ChannelIds: conversationStrings(channels), InitialComment: initialComment, Blocks: blocks, ThreadTimestamp: string(threadTimestamp)})
 	if err != nil {
 		return domain.File{}, err
 	}
@@ -6272,7 +6273,7 @@ func (s *Server) CompleteExternalUpload(ctx context.Context, input *chatv1.Compl
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetUploadId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and upload_id are required")
 	}
-	file, err := s.implementation.CompleteExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ExternalUploadID(input.GetUploadId()), input.GetTitle())
+	file, err := s.implementation.CompleteExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ExternalUploadID(input.GetUploadId()), input.GetTitle(), conversationIDs(input.GetChannelIds()), input.GetInitialComment(), input.GetBlocks(), domain.MessageTimestamp(input.GetThreadTimestamp()))
 	if err != nil {
 		return nil, mapError(err)
 	}
