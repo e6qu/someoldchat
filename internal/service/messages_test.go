@@ -1431,3 +1431,82 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 		t.Fatalf("duplicate messages=%+v err=%v", page.Messages, err)
 	}
 }
+
+// files.getUploadURLExternal hands the caller a file_id before any bytes exist,
+// and Slack's documented flow uses that same identifier to reference the file
+// once files.completeUploadExternal returns. Minting a fresh identifier at
+// completion strands every caller that recorded the first one.
+func TestExternalUploadKeepsItsIdentifierThroughCompletion(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	ctx := context.Background()
+
+	upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.UploadExternalFile(ctx, upload.ID, 7, bytes.NewReader([]byte("content"))); err != nil {
+		t.Fatal(err)
+	}
+	file, err := messages.CompleteExternalUpload(ctx, "T1", "U1", upload.ID, "Notes", []domain.ConversationID{"C1"}, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(file.ID) != string(upload.ID) {
+		t.Fatalf("completed file id %q, want the upload id %q handed to the caller", file.ID, upload.ID)
+	}
+	// The identifier the caller was given must resolve without it having to
+	// read a new one out of the completion response.
+	metadata, err := messages.FileInfo(ctx, "T1", "U1", domain.FileID(upload.ID))
+	if err != nil {
+		t.Fatalf("FileInfo(%q) after completion: %v", upload.ID, err)
+	}
+	if metadata.Name != "notes.txt" {
+		t.Fatalf("metadata=%+v", metadata)
+	}
+}
+
+// A batch completion must preserve each upload's identifier, not just the first.
+func TestExternalUploadBatchKeepsEveryIdentifier(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	ctx := context.Background()
+
+	completions := make([]domain.ExternalUploadCompletion, 0, 3)
+	for index := 0; index < 3; index++ {
+		upload, err := messages.CreateExternalUpload(ctx, "T1", "U1", "batch.txt", "text/plain", 7, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := messages.UploadExternalFile(ctx, upload.ID, 7, bytes.NewReader([]byte("content"))); err != nil {
+			t.Fatal(err)
+		}
+		completions = append(completions, domain.ExternalUploadCompletion{ID: upload.ID, Title: "Batch"})
+	}
+	files, err := messages.CompleteExternalUploads(ctx, "T1", "U1", completions, []domain.ConversationID{"C1"}, "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != len(completions) {
+		t.Fatalf("completed %d files, want %d", len(files), len(completions))
+	}
+	for index, file := range files {
+		if string(file.ID) != string(completions[index].ID) {
+			t.Fatalf("file %d has id %q, want %q", index, file.ID, completions[index].ID)
+		}
+	}
+}
