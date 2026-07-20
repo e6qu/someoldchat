@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 73
+const schemaVersion = 74
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -1134,6 +1134,26 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		if !columns["blocks"] {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN blocks TEXT NOT NULL DEFAULT ''`); err != nil {
 				return fmt.Errorf("migrate scheduled message blocks: %w", err)
+			}
+		}
+	}
+	if version < 74 {
+		columns, err := s.tableColumns(ctx, db, "messages")
+		if err != nil {
+			return err
+		}
+		if !columns["attachments"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				return fmt.Errorf("migrate message attachments: %w", err)
+			}
+		}
+		columns, err = s.tableColumns(ctx, db, "scheduled_messages")
+		if err != nil {
+			return err
+		}
+		if !columns["attachments"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN attachments TEXT NOT NULL DEFAULT '[]'`); err != nil {
+				return fmt.Errorf("migrate scheduled message attachments: %w", err)
 			}
 		}
 	}
@@ -4220,6 +4240,13 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 	if err != nil {
 		return err
 	}
+	attachments, err := domain.NormalizeAttachments([]byte(message.Attachments))
+	if err != nil {
+		return err
+	}
+	if attachments == "" {
+		attachments = "[]"
+	}
 	unfurls, err := encodeUnfurls(message.Unfurls)
 	if err != nil {
 		return err
@@ -4242,7 +4269,7 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 			return store.ErrIdempotencyConflict
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, message.ThreadTimestamp, message.CreatedAt.UTC().Format(time.RFC3339Nano), unfurls); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, attachments, message.ThreadTimestamp, message.CreatedAt.UTC().Format(time.RFC3339Nano), unfurls); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -4257,8 +4284,8 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	var message domain.Message
 	var deleted int
 	var stored string
-	var blocks, unfurls string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, createdAt.UTC().Format(time.RFC3339Nano)).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
+	var blocks, attachments, unfurls string
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, createdAt.UTC().Format(time.RFC3339Nano)).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &attachments, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
@@ -4271,6 +4298,7 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	}
 	message.Deleted = deleted != 0
 	message.Blocks = blocks
+	message.Attachments = attachments
 	message.Unfurls, err = decodeUnfurls(unfurls)
 	if err != nil {
 		return domain.Message{}, err
@@ -4282,6 +4310,13 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err
+	}
+	attachments, err := domain.NormalizeAttachments([]byte(message.Attachments))
+	if err != nil {
+		return err
+	}
+	if attachments == "" {
+		attachments = "[]"
 	}
 	unfurls, err := encodeUnfurls(message.Unfurls)
 	if err != nil {
@@ -4296,7 +4331,7 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if message.Deleted {
 		deleted = 1
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, blocks = ?, deleted = ?, unfurls = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, blocks, deleted, unfurls, message.ID, message.WorkspaceID, message.Conversation)
+	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, blocks = ?, attachments = ?, deleted = ?, unfurls = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, blocks, attachments, deleted, unfurls, message.ID, message.WorkspaceID, message.Conversation)
 	if err != nil {
 		return err
 	}
@@ -4423,7 +4458,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return domain.UserReactionPage{}, err
 	}
-	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.text, m.blocks, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user, user}
 	if after != "" {
 		parts := strings.Split(after, "\x00")
@@ -4445,7 +4480,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 		var item domain.UserReaction
 		var deleted int
 		var messageCreated, reactionCreated string
-		if err := rows.Scan(&item.Conversation, &item.Message.ID, &item.Message.WorkspaceID, &item.Message.AuthorID, &item.Message.Text, &item.Message.Blocks, &item.Message.ThreadTimestamp, &messageCreated, &deleted, &item.Reaction.Name, &item.Reaction.UserID, &reactionCreated); err != nil {
+		if err := rows.Scan(&item.Conversation, &item.Message.ID, &item.Message.WorkspaceID, &item.Message.AuthorID, &item.Message.Text, &item.Message.Blocks, &item.Message.Attachments, &item.Message.ThreadTimestamp, &messageCreated, &deleted, &item.Reaction.Name, &item.Reaction.UserID, &reactionCreated); err != nil {
 			return domain.UserReactionPage{}, err
 		}
 		item.Message.Deleted = deleted != 0
@@ -4635,7 +4670,7 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	if err != nil {
 		return nil, "", false, err
 	}
-	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
+	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
 	args := []any{user, workspace}
 	if after != "" {
 		separator := strings.IndexByte(after, 0)
@@ -4658,7 +4693,7 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 		var star domain.Star
 		var starCreated, messageCreated string
 		var deleted int
-		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.Text, &star.Message.Blocks, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
+		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
 			return nil, "", false, err
 		}
 		star.UserID = user
@@ -5060,7 +5095,7 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, blocks, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.Blocks, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.Blocks, value.Attachments, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique") {
 			return store.ErrAlreadyExists
 		}
@@ -5088,7 +5123,7 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, channel_id, author_id, text, blocks, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND author_id = ? AND delivered = 0`
+	query := `SELECT id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND author_id = ? AND delivered = 0`
 	args := []any{workspace, user}
 	if channel != "" {
 		query += ` AND channel_id = ?`
@@ -5109,7 +5144,7 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	for rows.Next() {
 		var value domain.ScheduledMessage
 		var postAt, createdAt int64
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &postAt, &createdAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &value.Attachments, &postAt, &createdAt); err != nil {
 			return domain.ScheduledMessagePage{}, err
 		}
 		value.PostAt = time.Unix(postAt, 0).UTC()
@@ -5172,7 +5207,7 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, channel_id, author_id, text, blocks, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY id LIMIT ?`, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
+	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY id LIMIT ?`, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -5181,7 +5216,7 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	for rows.Next() {
 		var value domain.ScheduledMessage
 		var postAt, createdAt int64
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &postAt, &createdAt); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &value.Attachments, &postAt, &createdAt); err != nil {
 			return nil, err
 		}
 		value.PostAt = time.Unix(postAt, 0).UTC()
@@ -6099,7 +6134,8 @@ func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Mes
 	var deleted int
 	var created string
 	var unfurls string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE id = ?`, id).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &message.ThreadTimestamp, &created, &deleted, &unfurls)
+	var attachments string
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE id = ?`, id).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &attachments, &message.ThreadTimestamp, &created, &deleted, &unfurls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
@@ -6111,6 +6147,7 @@ func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Mes
 		return domain.Message{}, err
 	}
 	message.Deleted = deleted != 0
+	message.Attachments = attachments
 	message.Unfurls, err = decodeUnfurls(unfurls)
 	if err != nil {
 		return domain.Message{}, err
@@ -6336,7 +6373,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	if request.Limit <= 0 {
 		return domain.MessagePage{}, errors.New("page limit must be positive")
 	}
-	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ?`
+	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ?`
 	args := []any{conversation}
 	if request.Cursor != "" {
 		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
@@ -6357,9 +6394,9 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	var values []domain.Message
 	for rows.Next() {
 		var value domain.Message
-		var created, unfurls string
+		var created, attachments, unfurls string
 		var deleted int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &attachments, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
 		value.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -6367,6 +6404,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 			return domain.MessagePage{}, err
 		}
 		value.Deleted = deleted != 0
+		value.Attachments = attachments
 		value.Unfurls, err = decodeUnfurls(unfurls)
 		if err != nil {
 			return domain.MessagePage{}, err
@@ -6399,7 +6437,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if len(terms) == 0 {
 		return domain.MessagePage{}, errors.New("search query must not be empty")
 	}
-	querySQL := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.thread_timestamp, m.created_at, m.deleted, m.unfurls FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	querySQL := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, m.unfurls FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user}
 	for _, term := range terms {
 		querySQL += ` AND LOWER(m.text) LIKE ? ESCAPE '\'`
@@ -6424,9 +6462,9 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	values := make([]domain.Message, 0, request.Limit+1)
 	for rows.Next() {
 		var message domain.Message
-		var created, unfurls string
+		var created, attachments, unfurls string
 		var deleted int
-		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
+		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &attachments, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
 		message.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -6434,6 +6472,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 			return domain.MessagePage{}, err
 		}
 		message.Deleted = deleted != 0
+		message.Attachments = attachments
 		message.Unfurls, err = decodeUnfurls(unfurls)
 		if err != nil {
 			return domain.MessagePage{}, err
@@ -6758,7 +6797,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
+	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
 	created := createdAt.UTC().Format(time.RFC3339Nano)
 	args := []any{conversation, created, string(timestamp)}
 	if request.Cursor != "" {
@@ -6786,8 +6825,8 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 		var value domain.Message
 		var stored string
 		var deleted int
-		var unfurls string
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
+		var attachments, unfurls string
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &attachments, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
 		value.CreatedAt, err = time.Parse(time.RFC3339Nano, stored)
@@ -6795,6 +6834,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 			return domain.MessagePage{}, err
 		}
 		value.Deleted = deleted != 0
+		value.Attachments = attachments
 		value.Unfurls, err = decodeUnfurls(unfurls)
 		if err != nil {
 			return domain.MessagePage{}, err

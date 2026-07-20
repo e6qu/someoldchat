@@ -33,6 +33,7 @@ type Message struct {
 	Deleted         bool                   `protobuf:"varint,8,opt,name=deleted,proto3" json:"deleted,omitempty"`
 	Unfurls         map[string]string      `protobuf:"bytes,9,rep,name=unfurls,proto3" json:"unfurls,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Blocks          string                 `protobuf:"bytes,10,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments     string                 `protobuf:"bytes,11,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -137,6 +138,13 @@ func (x *Message) GetBlocks() string {
 	return ""
 }
 
+func (x *Message) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
+	}
+	return ""
+}
+
 type PostRequest struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -228,6 +236,7 @@ type PostWithBlocksRequest struct {
 	ConversationId  string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	Text            string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
 	Blocks          string                 `protobuf:"bytes,5,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments     string                 `protobuf:"bytes,8,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	ThreadTimestamp string                 `protobuf:"bytes,6,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
 	IdempotencyKey  string                 `protobuf:"bytes,7,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	unknownFields   protoimpl.UnknownFields
@@ -299,6 +308,13 @@ func (x *PostWithBlocksRequest) GetBlocks() string {
 	return ""
 }
 
+func (x *PostWithBlocksRequest) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
+	}
+	return ""
+}
+
 func (x *PostWithBlocksRequest) GetThreadTimestamp() string {
 	if x != nil {
 		return x.ThreadTimestamp
@@ -322,6 +338,7 @@ type EphemeralMessage struct {
 	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
 	Timestamp      string                 `protobuf:"bytes,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Blocks         string                 `protobuf:"bytes,7,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments    string                 `protobuf:"bytes,8,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -405,6 +422,13 @@ func (x *EphemeralMessage) GetBlocks() string {
 	return ""
 }
 
+func (x *EphemeralMessage) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
+	}
+	return ""
+}
+
 type PostEphemeralRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -413,6 +437,7 @@ type PostEphemeralRequest struct {
 	RecipientId    string                 `protobuf:"bytes,4,opt,name=recipient_id,json=recipientId,proto3" json:"recipient_id,omitempty"`
 	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
 	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments    string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -485,6 +510,13 @@ func (x *PostEphemeralRequest) GetText() string {
 func (x *PostEphemeralRequest) GetBlocks() string {
 	if x != nil {
 		return x.Blocks
+	}
+	return ""
+}
+
+func (x *PostEphemeralRequest) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
 	}
 	return ""
 }
@@ -573,6 +605,7 @@ type UpdateWithBlocksRequest struct {
 	Timestamp      string                 `protobuf:"bytes,4,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
 	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments    string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -645,6 +678,13 @@ func (x *UpdateWithBlocksRequest) GetText() string {
 func (x *UpdateWithBlocksRequest) GetBlocks() string {
 	if x != nil {
 		return x.Blocks
+	}
+	return ""
+}
+
+func (x *UpdateWithBlocksRequest) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
 	}
 	return ""
 }
@@ -1498,6 +1538,7 @@ type IncomingWebhookPostRequest struct {
 	ThreadTimestamp string                 `protobuf:"bytes,5,opt,name=thread_timestamp,json=threadTimestamp,proto3" json:"thread_timestamp,omitempty"`
 	IdempotencyKey  string                 `protobuf:"bytes,6,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
 	Blocks          string                 `protobuf:"bytes,7,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments     string                 `protobuf:"bytes,8,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1581,6 +1622,13 @@ func (x *IncomingWebhookPostRequest) GetBlocks() string {
 	return ""
 }
 
+func (x *IncomingWebhookPostRequest) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
+	}
+	return ""
+}
+
 type IncomingWebhookMutationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -1629,7 +1677,7 @@ var File_sameoldchat_chat_v1_messages_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/messages.proto\x12\x13sameoldchat.chat.v1\"\x93\x03\n" +
+	"\"sameoldchat/chat/v1/messages.proto\x12\x13sameoldchat.chat.v1\"\xb5\x03\n" +
 	"\aMessage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12'\n" +
@@ -1642,7 +1690,8 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\adeleted\x18\b \x01(\bR\adeleted\x12C\n" +
 	"\aunfurls\x18\t \x03(\v2).sameoldchat.chat.v1.Message.UnfurlsEntryR\aunfurls\x12\x16\n" +
 	"\x06blocks\x18\n" +
-	" \x01(\tR\x06blocks\x1a:\n" +
+	" \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\v \x01(\tR\vattachments\x1a:\n" +
 	"\fUnfurlsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xda\x01\n" +
@@ -1652,15 +1701,16 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12)\n" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\xfc\x01\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"\x9e\x02\n" +
 	"\x15PostWithBlocksRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12\x16\n" +
-	"\x06blocks\x18\x05 \x01(\tR\x06blocks\x12)\n" +
+	"\x06blocks\x18\x05 \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\b \x01(\tR\vattachments\x12)\n" +
 	"\x10thread_timestamp\x18\x06 \x01(\tR\x0fthreadTimestamp\x12'\n" +
-	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\"\xe8\x01\n" +
+	"\x0fidempotency_key\x18\a \x01(\tR\x0eidempotencyKey\"\x8a\x02\n" +
 	"\x10EphemeralMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12'\n" +
 	"\x0fconversation_id\x18\x02 \x01(\tR\x0econversationId\x12\x1b\n" +
@@ -1668,27 +1718,30 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\frecipient_id\x18\x04 \x01(\tR\vrecipientId\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x1c\n" +
 	"\ttimestamp\x18\x06 \x01(\tR\ttimestamp\x12\x16\n" +
-	"\x06blocks\x18\a \x01(\tR\x06blocks\"\xca\x01\n" +
+	"\x06blocks\x18\a \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\b \x01(\tR\vattachments\"\xec\x01\n" +
 	"\x14PostEphemeralRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12!\n" +
 	"\frecipient_id\x18\x04 \x01(\tR\vrecipientId\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x16\n" +
-	"\x06blocks\x18\x06 \x01(\tR\x06blocks\"\xa6\x01\n" +
+	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\a \x01(\tR\vattachments\"\xa6\x01\n" +
 	"\rUpdateRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x12\n" +
-	"\x04text\x18\x05 \x01(\tR\x04text\"\xc8\x01\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\"\xea\x01\n" +
 	"\x17UpdateWithBlocksRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\tR\ttimestamp\x12\x12\n" +
 	"\x04text\x18\x05 \x01(\tR\x04text\x12\x16\n" +
-	"\x06blocks\x18\x06 \x01(\tR\x06blocks\"\x99\x02\n" +
+	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\a \x01(\tR\vattachments\"\x99\x02\n" +
 	"\rUnfurlRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
@@ -1757,7 +1810,7 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"webhook_id\x18\x03 \x01(\tR\twebhookId\x12\x18\n" +
-	"\aenabled\x18\x04 \x01(\bR\aenabled\"\xee\x01\n" +
+	"\aenabled\x18\x04 \x01(\bR\aenabled\"\x90\x02\n" +
 	"\x1aIncomingWebhookPostRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x15\n" +
 	"\x06app_id\x18\x02 \x01(\tR\x05appId\x12\x16\n" +
@@ -1765,7 +1818,8 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12)\n" +
 	"\x10thread_timestamp\x18\x05 \x01(\tR\x0fthreadTimestamp\x12'\n" +
 	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\x12\x16\n" +
-	"\x06blocks\x18\a \x01(\tR\x06blocks\"1\n" +
+	"\x06blocks\x18\a \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\b \x01(\tR\vattachments\"1\n" +
 	"\x1fIncomingWebhookMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok2\xa4\n" +
 	"\n" +

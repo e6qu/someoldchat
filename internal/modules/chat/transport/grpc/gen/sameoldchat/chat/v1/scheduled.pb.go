@@ -31,6 +31,7 @@ type ScheduledMessage struct {
 	PostAt        int64                  `protobuf:"varint,6,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
 	CreatedAt     int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	Blocks        string                 `protobuf:"bytes,8,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments   string                 `protobuf:"bytes,9,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -121,6 +122,13 @@ func (x *ScheduledMessage) GetBlocks() string {
 	return ""
 }
 
+func (x *ScheduledMessage) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
+	}
+	return ""
+}
+
 type ScheduleMessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -129,6 +137,7 @@ type ScheduleMessageRequest struct {
 	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
 	PostAt        int64                  `protobuf:"varint,5,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
 	Blocks        string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments   string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -201,6 +210,13 @@ func (x *ScheduleMessageRequest) GetPostAt() int64 {
 func (x *ScheduleMessageRequest) GetBlocks() string {
 	if x != nil {
 		return x.Blocks
+	}
+	return ""
+}
+
+func (x *ScheduleMessageRequest) GetAttachments() string {
+	if x != nil {
+		return x.Attachments
 	}
 	return ""
 }
@@ -413,7 +429,7 @@ var File_sameoldchat_chat_v1_scheduled_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
-	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xe5\x01\n" +
+	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\x87\x02\n" +
 	"\x10ScheduledMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
@@ -424,7 +440,8 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\apost_at\x18\x06 \x01(\x03R\x06postAt\x12\x1d\n" +
 	"\n" +
 	"created_at\x18\a \x01(\x03R\tcreatedAt\x12\x16\n" +
-	"\x06blocks\x18\b \x01(\tR\x06blocks\"\xb8\x01\n" +
+	"\x06blocks\x18\b \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\t \x01(\tR\vattachments\"\xda\x01\n" +
 	"\x16ScheduleMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -432,7 +449,8 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"channel_id\x18\x03 \x01(\tR\tchannelId\x12\x12\n" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12\x17\n" +
 	"\apost_at\x18\x05 \x01(\x03R\x06postAt\x12\x16\n" +
-	"\x06blocks\x18\x06 \x01(\tR\x06blocks\"\xa3\x01\n" +
+	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
+	"\vattachments\x18\a \x01(\tR\vattachments\"\xa3\x01\n" +
 	"\x18ScheduledMessagesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +

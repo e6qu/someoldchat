@@ -3402,7 +3402,7 @@ func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chat
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeralWithBlocks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks())
+	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -4878,7 +4878,7 @@ func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.Schedul
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetChannelId() == "" || input.GetPostAt() <= 0 || (input.GetText() == "" && input.GetBlocks() == "") {
 		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, channel_id, text or blocks, and positive post_at are required")
 	}
-	value, err := s.implementation.ScheduleMessageWithBlocks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetText(), input.GetBlocks(), time.Unix(input.GetPostAt(), 0).UTC())
+	value, err := s.implementation.ScheduleMessageWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), time.Unix(input.GetPostAt(), 0).UTC())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -5335,7 +5335,7 @@ func encodeProtoMessage(value domain.Message) *chatv1.Message {
 	return &chatv1.Message{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation),
 		AuthorId: string(value.AuthorID), Text: value.Text, ThreadTimestamp: string(value.ThreadTimestamp),
-		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls, Blocks: value.Blocks,
+		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls, Blocks: value.Blocks, Attachments: value.Attachments,
 	}
 }
 
@@ -5350,7 +5350,7 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 	return domain.Message{
 		ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()),
-		Text: value.GetText(), Blocks: value.GetBlocks(), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(),
+		Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(),
 	}, nil
 }
 
@@ -5363,7 +5363,7 @@ func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection 
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {
-	return &chatv1.EphemeralMessage{WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Timestamp: string(value.Timestamp)}
+	return &chatv1.EphemeralMessage{WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp)}
 }
 func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.EphemeralMessage, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || (value.GetText() == "" && value.GetBlocks() == "") || value.GetTimestamp() == "" {
@@ -5372,7 +5372,7 @@ func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.Ephemer
 	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(value.GetTimestamp())); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	return domain.EphemeralMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Timestamp: domain.MessageTimestamp(value.GetTimestamp())}, nil
+	return domain.EphemeralMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp())}, nil
 }
 
 func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
@@ -5802,14 +5802,14 @@ func decodeProtoReminder(value *chatv1.Reminder) (domain.Reminder, error) {
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {
-	return &chatv1.ScheduledMessage{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author), Text: value.Text, Blocks: value.Blocks, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix()}
+	return &chatv1.ScheduledMessage{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix()}
 }
 
 func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.ScheduledMessage, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "") || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
 		return domain.ScheduledMessage{}, errors.New("typed scheduled message is incomplete")
 	}
-	return domain.ScheduledMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()), Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()), Text: value.GetText(), Blocks: value.GetBlocks(), PostAt: time.Unix(value.GetPostAt(), 0).UTC(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC()}, nil
+	return domain.ScheduledMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()), Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), PostAt: time.Unix(value.GetPostAt(), 0).UTC(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC()}, nil
 }
 
 func decodeProtoUser(value *chatv1.User) (domain.User, error) {
@@ -6049,12 +6049,8 @@ func (r Remote) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceID 
 	return nil
 }
 
-func (r Remote) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	out, err := r.messages.PostIncomingWebhook(ctx, &chatv1.IncomingWebhookPostRequest{WorkspaceId: string(workspaceID), AppId: string(appID), Secret: secret, Text: text, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
-	if err != nil {
-		return domain.Message{}, err
-	}
-	return decodeProtoMessage(out)
+func (r Remote) PostIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	return r.PostIncomingWebhookWithAttachments(ctx, workspaceID, appID, secret, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
 func (s *Server) AdminCreateIncomingWebhook(ctx context.Context, input *chatv1.IncomingWebhookCreateRequest) (*chatv1.IncomingWebhookCreateResponse, error) {
@@ -6074,7 +6070,7 @@ func (s *Server) AdminSetIncomingWebhookEnabled(ctx context.Context, input *chat
 }
 
 func (s *Server) PostIncomingWebhook(ctx context.Context, input *chatv1.IncomingWebhookPostRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.PostIncomingWebhook(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()), input.GetSecret(), input.GetText(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
+	value, err := s.implementation.PostIncomingWebhookWithAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId()), input.GetSecret(), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -6097,23 +6093,15 @@ func decodeProtoIncomingWebhook(value *chatv1.IncomingWebhook) (domain.IncomingW
 }
 
 func (r Remote) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	out, err := r.messages.PostWithBlocks(ctx, &chatv1.PostWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Text: text, Blocks: blocks, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
-	if err != nil {
-		return domain.Message{}, err
-	}
-	return decodeProtoMessage(out)
+	return r.PostWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
 func (r Remote) UpdateWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
-	out, err := r.messages.UpdateWithBlocks(ctx, &chatv1.UpdateWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text, Blocks: blocks})
-	if err != nil {
-		return domain.Message{}, err
-	}
-	return decodeProtoMessage(out)
+	return r.UpdateWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, timestamp, text, blocks, "")
 }
 
 func (s *Server) PostWithBlocks(ctx context.Context, input *chatv1.PostWithBlocksRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.PostWithBlocks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetText(), input.GetBlocks(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
+	value, err := s.implementation.PostWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -6121,7 +6109,7 @@ func (s *Server) PostWithBlocks(ctx context.Context, input *chatv1.PostWithBlock
 }
 
 func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithBlocksRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.UpdateWithBlocks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetText(), input.GetBlocks())
+	value, err := s.implementation.UpdateWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetText(), input.GetBlocks(), input.GetAttachments())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -6129,17 +6117,49 @@ func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithB
 }
 
 func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
-	out, err := r.scheduled.ScheduleMessage(ctx, &chatv1.ScheduleMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), Text: text, Blocks: blocks, PostAt: postAt.Unix()})
-	if err != nil {
-		return domain.ScheduledMessage{}, err
-	}
-	return decodeProtoScheduledMessage(out)
+	return r.ScheduleMessageWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", postAt)
 }
 
 func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks})
+	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "")
+}
+
+func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	out, err := r.messages.PostWithBlocks(ctx, &chatv1.PostWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+	out, err := r.messages.PostIncomingWebhook(ctx, &chatv1.IncomingWebhookPostRequest{WorkspaceId: string(workspaceID), AppId: string(appID), Secret: secret, Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
 	return decodeProtoEphemeralMessage(out)
+}
+
+func (r Remote) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
+	out, err := r.messages.UpdateWithBlocks(ctx, &chatv1.UpdateWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text, Blocks: blocks, Attachments: attachments})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
+	out, err := r.scheduled.ScheduleMessage(ctx, &chatv1.ScheduleMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), Text: text, Blocks: blocks, Attachments: attachments, PostAt: postAt.Unix()})
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	return decodeProtoScheduledMessage(out)
 }
