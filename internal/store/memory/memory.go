@@ -72,6 +72,8 @@ type Store struct {
 	userGroups             map[domain.UserGroupID]domain.UserGroup
 	calls                  map[domain.CallID]domain.Call
 	emojis                 map[string]domain.CustomEmoji
+	canvases               map[domain.CanvasID]domain.Canvas
+	canvasAccess           map[string]domain.CanvasAccess
 	accessLogs             []domain.AccessLog
 	eventSequence          uint64
 }
@@ -132,13 +134,103 @@ type memoryLease struct {
 }
 
 func New() *Store {
-	s := &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji)}
-	s.bookmarks = make(map[domain.BookmarkID]domain.Bookmark)
-	return s
+	return &Store{workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
 	return string(workspace) + "\x00" + name
+}
+
+func canvasAccessKey(value domain.CanvasAccess) string {
+	return string(value.CanvasID) + "\x00" + value.EntityType + "\x00" + value.EntityID
+}
+
+func (s *Store) CreateCanvas(_ context.Context, canvas domain.Canvas, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.workspaces[canvas.WorkspaceID]; !ok {
+		return store.ErrNotFound
+	}
+	if user, ok := s.users[canvas.OwnerID]; !ok || user.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.canvases[canvas.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.canvases[canvas.ID] = canvas
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) GetCanvas(_ context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	canvas, ok := s.canvases[id]
+	if !ok || canvas.WorkspaceID != workspace {
+		return domain.Canvas{}, store.ErrNotFound
+	}
+	return canvas, nil
+}
+
+func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.canvases[canvas.ID]
+	if !ok || current.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	canvas.CreatedAt = current.CreatedAt
+	s.canvases[canvas.ID] = canvas
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) DeleteCanvas(_ context.Context, workspace domain.WorkspaceID, id domain.CanvasID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	canvas, ok := s.canvases[id]
+	if !ok || canvas.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	delete(s.canvases, id)
+	for key, access := range s.canvasAccess {
+		if access.CanvasID == id {
+			delete(s.canvasAccess, key)
+		}
+	}
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) SetCanvasAccess(_ context.Context, access domain.CanvasAccess, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.canvases[access.CanvasID]; !ok {
+		return store.ErrNotFound
+	}
+	s.canvasAccess[canvasAccessKey(access)] = access
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
+}
+
+func (s *Store) DeleteCanvasAccess(_ context.Context, access domain.CanvasAccess, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.canvases[access.CanvasID]; !ok {
+		return store.ErrNotFound
+	}
+	key := canvasAccessKey(access)
+	if _, ok := s.canvasAccess[key]; !ok {
+		return store.ErrNotFound
+	}
+	delete(s.canvasAccess, key)
+	s.outbox = append(s.outbox, event)
+	s.eventSequence++
+	return nil
 }
 
 func (s *Store) AddEmoji(_ context.Context, value domain.CustomEmoji, event events.Event) error {

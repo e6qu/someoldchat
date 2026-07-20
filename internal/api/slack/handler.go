@@ -250,6 +250,12 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/bookmarks.list", h.listBookmarks)
 	mux.HandleFunc("POST /api/bookmarks.list", h.listBookmarks)
 	mux.HandleFunc("POST /api/bookmarks.remove", h.removeBookmark)
+	mux.HandleFunc("POST /api/canvases.create", h.createCanvas)
+	mux.HandleFunc("POST /api/canvases.edit", h.editCanvas)
+	mux.HandleFunc("POST /api/canvases.delete", h.deleteCanvas)
+	mux.HandleFunc("POST /api/canvases.access.set", h.setCanvasAccess)
+	mux.HandleFunc("POST /api/canvases.access.delete", h.deleteCanvasAccess)
+	mux.HandleFunc("POST /api/canvases.sections.lookup", h.lookupCanvasSections)
 	mux.HandleFunc("POST /api/reminders.add", h.addReminder)
 	mux.HandleFunc("POST /api/reminders.complete", h.completeReminder)
 	mux.HandleFunc("POST /api/reminders.delete", h.deleteReminder)
@@ -3494,6 +3500,157 @@ func reminderResponse(reminder domain.Reminder) map[string]any {
 	return response
 }
 
+func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	canvas, err := h.Messages.CreateCanvas(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], fields["document_content"], domain.ConversationID(strings.TrimSpace(fields["channel_id"])))
+	if err != nil {
+		code, reason := mapServiceError(err, "canvas_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "canvas_id": canvas.ID})
+}
+
+func (h Handler) editCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	if strings.TrimSpace(fields["canvas_id"]) == "" || strings.TrimSpace(fields["changes"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.EditCanvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), fields["changes"]); err != nil {
+		code, reason := mapServiceError(err, "canvas_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) deleteCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	if strings.TrimSpace(fields["canvas_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.DeleteCanvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"]))); err != nil {
+		code, reason := mapServiceError(err, "canvas_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) setCanvasAccess(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	if strings.TrimSpace(fields["canvas_id"]) == "" || strings.TrimSpace(fields["access_level"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), strings.TrimSpace(fields["access_level"]), parseConversationIDs(fields["channel_ids"]), parseCanvasUsers(fields["user_ids"])); err != nil {
+		code, reason := mapServiceError(err, "canvas_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) deleteCanvasAccess(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	if strings.TrimSpace(fields["canvas_id"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	if err := h.Messages.DeleteCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), parseConversationIDs(fields["channel_ids"]), parseCanvasUsers(fields["user_ids"])); err != nil {
+		code, reason := mapServiceError(err, "canvas_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) lookupCanvasSections(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		return
+	}
+	if strings.TrimSpace(fields["canvas_id"]) == "" || strings.TrimSpace(fields["criteria"]) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		return
+	}
+	sections, err := h.Messages.LookupCanvasSections(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), fields["criteria"])
+	if err != nil {
+		code, reason := mapServiceError(err, "canvas_not_found")
+		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		return
+	}
+	result := make([]map[string]string, 0, len(sections))
+	for _, section := range sections {
+		result = append(result, map[string]string{"id": section.ID})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sections": result})
+}
+
+func parseCanvasUsers(raw string) []domain.UserID {
+	values := strings.Split(raw, ",")
+	result := make([]domain.UserID, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, domain.UserID(value))
+		}
+	}
+	return result
+}
+
 func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeRemindersWrite)
 	if err != nil {
@@ -5245,7 +5402,7 @@ func mapServiceError(err error, notFoundReason string) (int, string) {
 	if errors.Is(err, store.ErrNotFound) || status.Code(err) == codes.NotFound {
 		return http.StatusNotFound, notFoundReason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) {
 		return http.StatusBadRequest, "invalid_arguments"
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) || status.Code(err) == codes.AlreadyExists {
@@ -5453,10 +5610,10 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 	if isListField(name) {
 		return normalizeJSONListField(value)
 	}
-	if name != "profile" && name != "unfurls" && name != "metadata" && name != "user_auth_blocks" && name != "view" && name != "outputs" && name != "error" && name != "inputs" && name != "dialog" && name != "prefs" {
+	if name != "profile" && name != "unfurls" && name != "metadata" && name != "user_auth_blocks" && name != "view" && name != "outputs" && name != "error" && name != "inputs" && name != "dialog" && name != "prefs" && name != "document_content" && name != "changes" && name != "criteria" {
 		return normalizeJSONScalar(value)
 	}
-	if name == "unfurls" || name == "metadata" || name == "user_auth_blocks" || name == "view" || name == "outputs" || name == "error" || name == "inputs" || name == "dialog" || name == "prefs" {
+	if name == "unfurls" || name == "metadata" || name == "user_auth_blocks" || name == "view" || name == "outputs" || name == "error" || name == "inputs" || name == "dialog" || name == "prefs" || name == "document_content" || name == "changes" || name == "criteria" {
 		var structured any
 		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
 			return "", fmt.Errorf("%s must be structured JSON", name)

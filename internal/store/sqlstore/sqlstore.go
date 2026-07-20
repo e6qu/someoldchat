@@ -198,9 +198,9 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 );
 `
 
-const schemaVersion = 65
+const schemaVersion = 66
 
-const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read team:read"
+const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write team:read"
 
 type queryExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -1019,6 +1019,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS bookmarks_conversation_rank ON bookmarks(workspace_id, conversation_id, created_at, id)`); err != nil {
 			return fmt.Errorf("index bookmarks: %w", err)
+		}
+	}
+	if version < 66 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+			return fmt.Errorf("migrate canvases: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvas_access (canvas_id TEXT NOT NULL REFERENCES canvases(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (canvas_id, entity_type, entity_id))`); err != nil {
+			return fmt.Errorf("migrate canvas access: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS canvases_workspace_updated ON canvases(workspace_id, updated_at, id)`); err != nil {
+			return fmt.Errorf("migrate canvas index: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -4542,6 +4553,131 @@ func (s *Store) DeleteBookmark(ctx context.Context, workspace domain.WorkspaceID
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `DELETE FROM bookmarks WHERE id = ? AND workspace_id = ? AND conversation_id = ?`, id, workspace, conversation)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrAlreadyExists
+		}
+		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
+	var canvas domain.Canvas
+	var created, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &created, &updated)
+	if err := translateNotFound(err); err != nil {
+		return domain.Canvas{}, err
+	}
+	canvas.CreatedAt = time.Unix(created, 0).UTC()
+	canvas.UpdatedAt = time.Unix(updated, 0).UTC()
+	return canvas, nil
+}
+
+func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, canvas.Title, canvas.DocumentContent, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM canvas_access WHERE canvas_id = ?`, id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) SetCanvasAccess(ctx context.Context, access domain.CanvasAccess, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvas_access (canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?) ON CONFLICT(canvas_id, entity_type, entity_id) DO UPDATE SET access_level = excluded.access_level`, access.CanvasID, access.EntityType, access.EntityID, access.Access)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteCanvasAccess(ctx context.Context, access domain.CanvasAccess, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM canvas_access WHERE canvas_id = ? AND entity_type = ? AND entity_id = ?`, access.CanvasID, access.EntityType, access.EntityID)
 	if err != nil {
 		return err
 	}

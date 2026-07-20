@@ -384,6 +384,26 @@ completed_reminder = client.reminders_complete(reminder=reminder["reminder"]["id
 assert completed_reminder["ok"] is True
 deleted_reminder = client.reminders_delete(reminder=reminder["reminder"]["id"])
 assert deleted_reminder["ok"] is True
+created_canvas = client.canvases_create(
+    title="SDK qualification canvas",
+    document_content={"type": "h1", "markdown": "SDK canvas"},
+    channel_id="C1",
+)
+assert created_canvas["ok"] is True
+assert isinstance(created_canvas["canvas_id"], str)
+edited_canvas = client.canvases_edit(
+    canvas_id=created_canvas["canvas_id"],
+    changes=[{"operation": "insert_at_end", "document_content": {"type": "paragraph", "markdown": "SDK details"}}],
+)
+assert edited_canvas["ok"] is True
+canvas_sections = client.canvases_sections_lookup(
+    canvas_id=created_canvas["canvas_id"], criteria={"contains_text": "SDK details"}
+)
+assert canvas_sections["ok"] is True
+assert len(canvas_sections["sections"]) == 1
+assert client.canvases_access_set(canvas_id=created_canvas["canvas_id"], access_level="write", user_ids=["U1"])["ok"] is True
+assert client.canvases_access_delete(canvas_id=created_canvas["canvas_id"], user_ids=["U1"])["ok"] is True
+assert client.canvases_delete(canvas_id=created_canvas["canvas_id"])["ok"] is True
 created_usergroup = client.usergroups_create(
     name="Qualification group", handle="qualification-group", description="SDK qualification"
 )

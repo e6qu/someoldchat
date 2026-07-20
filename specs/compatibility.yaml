@@ -71,6 +71,30 @@ operations:
   - method: chat.delete
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+  - method: canvases.access.delete
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.access.delete/
+  - method: canvases.access.set
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.access.set/
+  - method: canvases.create
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.create/
+  - method: canvases.delete
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.delete/
+  - method: canvases.edit
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.edit/
+  - method: canvases.sections.lookup
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/canvases.sections.lookup/
   - method: chat.getPermalink
     status: behavior-compatible
     provenance: slack-api-specs-openapi

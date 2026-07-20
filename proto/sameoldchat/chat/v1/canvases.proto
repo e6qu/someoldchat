@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+
+message Canvas {
+  string id = 1;
+  string workspace_id = 2;
+  string owner_id = 3;
+  string title = 4;
+  string document_content = 5;
+  int64 created_at = 6;
+  int64 updated_at = 7;
+}
+
+message CreateCanvasRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string title = 3;
+  string document_content = 4;
+  string channel_id = 5;
+}
+
+message CanvasRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+}
+
+message EditCanvasRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  string changes = 4;
+}
+
+message CanvasAccessRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  string access_level = 4;
+  repeated string channel_ids = 5;
+  repeated string user_ids = 6;
+}
+
+message CanvasAccessDeleteRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  repeated string channel_ids = 4;
+  repeated string user_ids = 5;
+}
+
+message CanvasSection {
+  string id = 1;
+  string type = 2;
+  string text = 3;
+}
+
+message CanvasSectionsLookupRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string canvas_id = 3;
+  string criteria = 4;
+}
+
+message CanvasSectionsResponse {
+  repeated CanvasSection sections = 1;
+}
+
+service CanvasesService {
+  rpc CreateCanvas(CreateCanvasRequest) returns (Canvas);
+  rpc EditCanvas(EditCanvasRequest) returns (MutationResponse);
+  rpc DeleteCanvas(CanvasRequest) returns (MutationResponse);
+  rpc SetCanvasAccess(CanvasAccessRequest) returns (MutationResponse);
+  rpc DeleteCanvasAccess(CanvasAccessDeleteRequest) returns (MutationResponse);
+  rpc LookupCanvasSections(CanvasSectionsLookupRequest) returns (CanvasSectionsResponse);
+}

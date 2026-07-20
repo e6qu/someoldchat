@@ -184,5 +184,11 @@ type Service interface {
 	RemoveRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileLookup) error
 	ShareRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileLookup, []domain.ConversationID) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileUpdate) (domain.RemoteFile, error)
+	CreateCanvas(context.Context, domain.WorkspaceID, domain.UserID, string, string, domain.ConversationID) (domain.Canvas, error)
+	EditCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) error
+	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
+	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string, []domain.ConversationID, []domain.UserID) error
+	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error
+	LookupCanvasSections(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) ([]domain.CanvasSection, error)
 	events.Source
 }

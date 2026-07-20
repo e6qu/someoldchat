@@ -201,5 +201,11 @@ type Store interface {
 	RemoveRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, events.Event) error
 	SetRemoteFileShares(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, []domain.ConversationID, events.Event) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFile, events.Event) (domain.RemoteFile, error)
+	CreateCanvas(context.Context, domain.Canvas, events.Event) error
+	GetCanvas(context.Context, domain.WorkspaceID, domain.CanvasID) (domain.Canvas, error)
+	UpdateCanvas(context.Context, domain.Canvas, events.Event) error
+	DeleteCanvas(context.Context, domain.WorkspaceID, domain.CanvasID, events.Event) error
+	SetCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
+	DeleteCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 }

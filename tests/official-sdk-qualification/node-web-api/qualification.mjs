@@ -437,6 +437,27 @@ const completedReminder = await client.reminders.complete({ reminder: reminder.r
 assert.equal(completedReminder.ok, true);
 const deletedReminder = await client.reminders.delete({ reminder: reminder.reminder.id });
 assert.equal(deletedReminder.ok, true);
+const createdCanvas = await client.canvases.create({
+	title: "SDK qualification canvas",
+	document_content: { type: "h1", markdown: "SDK canvas" },
+	channel_id: "C1",
+});
+assert.equal(createdCanvas.ok, true);
+assert.equal(typeof createdCanvas.canvas_id, "string");
+const editedCanvas = await client.canvases.edit({
+	canvas_id: createdCanvas.canvas_id,
+	changes: [{ operation: "insert_at_end", document_content: { type: "paragraph", markdown: "SDK details" } }],
+});
+assert.equal(editedCanvas.ok, true);
+const canvasSections = await client.canvases.sections.lookup({
+	canvas_id: createdCanvas.canvas_id,
+	criteria: { contains_text: "SDK details" },
+});
+assert.equal(canvasSections.ok, true);
+assert.equal(canvasSections.sections.length, 1);
+assert.equal((await client.canvases.access.set({ canvas_id: createdCanvas.canvas_id, access_level: "write", user_ids: ["U1"] })).ok, true);
+assert.equal((await client.canvases.access.delete({ canvas_id: createdCanvas.canvas_id, user_ids: ["U1"] })).ok, true);
+assert.equal((await client.canvases.delete({ canvas_id: createdCanvas.canvas_id })).ok, true);
 const createdUsergroup = await client.usergroups.create({
 	name: "Qualification group",
 	handle: "qualification-group",
