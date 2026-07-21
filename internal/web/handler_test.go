@@ -183,8 +183,24 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 	applicationRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	applicationResponse := httptest.NewRecorder()
 	mux.ServeHTTP(applicationResponse, applicationRequest)
-	if applicationResponse.Code != http.StatusOK || !strings.Contains(applicationResponse.Body.String(), `href="/me" aria-label="My profile"`) {
-		t.Fatalf("authenticated application status=%d body=%s", applicationResponse.Code, applicationResponse.Body)
+	// The workspace shell itself has to name the signed-in user and expose the
+	// real sign-out control: post-deployment qualification reads them there, not
+	// on the separate validation page.
+	for _, expected := range []string{
+		`href="/me" aria-label="My profile"`,
+		`data-shauth-user="developer"`,
+		`<span class="signed-in-name">developer</span>`,
+		`data-shauth-sign-out`,
+	} {
+		if applicationResponse.Code != http.StatusOK || !strings.Contains(applicationResponse.Body.String(), expected) {
+			t.Fatalf("authenticated application status=%d missing %q body=%s", applicationResponse.Code, expected, applicationResponse.Body)
+		}
+	}
+	// A narrow viewport collapses the sidebar labels the same way it collapses
+	// every other sidebar link; it must never remove the sign-out control, which
+	// would leave a small screen with no way to sign out.
+	if strings.Contains(applicationResponse.Body.String(), ".sidebar-bottom form{display:none}") {
+		t.Fatal("narrow viewports hid the sign-out control instead of collapsing its label")
 	}
 	anonymous := httptest.NewRecorder()
 	mux.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/auth/validation", nil))
