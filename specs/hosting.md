@@ -5,7 +5,7 @@
 SameOldChat MUST be deployable in these environments:
 
 1. One or more ordinary Linux virtual machines on any provider.
-2. AWS ECS using the Fargate launch type.
+2. Amazon Elastic Container Service (ECS) using the AWS Fargate launch type.
 3. Google Cloud Run for stateless services, with lifecycle-controlled companion
    compute for persistence when required.
 4. Azure Container Apps for stateless services and, only after qualification,
@@ -74,7 +74,7 @@ The VM profile MUST:
 The installation MUST provide configuration validation, service units,
 firewall guidance, TLS termination, upgrade, backup, and restore commands.
 
-## AWS ECS/Fargate profile
+## Amazon ECS on AWS Fargate profile
 
 - ECS service desired counts for server, worker, and database units MUST reach
   zero during hibernation.

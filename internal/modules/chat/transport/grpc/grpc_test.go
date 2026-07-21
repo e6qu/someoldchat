@@ -436,6 +436,17 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil || session.OIDCProvider != "oidc" || session.OIDCIDToken != "signed.id.token" || session.OIDCSubject != "subject" || session.OIDCSID != "provider-session" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
+	logoutExpiry := time.Now().UTC().Add(time.Minute)
+	if err := remote.RevokeOIDCSessions(ctx, "T1", "oidc", "", "provider-session", "logout-token-id", logoutExpiry); err != nil {
+		t.Fatal(err)
+	}
+	session, err = remote.LookupSession(ctx, "session-token")
+	if err != nil || !session.Revoked {
+		t.Fatalf("provider-revoked session=%+v err=%v", session, err)
+	}
+	if err := remote.RevokeOIDCSessions(ctx, "T1", "oidc", "", "provider-session", "logout-token-id", logoutExpiry); !errors.Is(err, storepkg.ErrConflict) || status.Code(err) != codes.Aborted {
+		t.Fatalf("replayed logout token error=%v, want domain conflict and gRPC Aborted", err)
+	}
 	token, err := tokenStore.LookupToken(ctx, "api-token")
 	if err != nil || token.UserID != "U1" || len(token.Scopes) != 1 || token.Scopes[0] != "chat:write" {
 		t.Fatalf("token=%+v err=%v", token, err)

@@ -1,12 +1,16 @@
 # ECS scale-to-zero
 
-This is the current AWS Elastic Container Service infrastructure module. See
-the [deployment guide](../../docs/deployment.md),
+This is the current Amazon Elastic Container Service (ECS) infrastructure
+module. See the [deployment guide](../../docs/deployment.md),
 [hosting specification](../../specs/hosting.md), and
 [scale-to-zero specification](../../specs/scale-to-zero.md) for the
 provider-neutral requirements.
 
-This module exposes an API Gateway HTTP API backed by a VPC Lambda activator. The activator starts one or more Fargate tasks with `ecs:RunTask`, waits for the task ENI and `/readyz`, then forwards the original HTTP request. When no request is active, the application has zero running tasks.
+This module exposes an Amazon API Gateway HTTP API backed by an AWS Lambda
+activator connected to the VPC. The activator starts one or more AWS Fargate
+tasks with `ecs:RunTask`, waits for the task ENI and `/readyz`, then forwards
+the original HTTP request. When no request is active, the application has zero
+running tasks.
 
 Configure the AWS provider in the parent configuration and call this directory as a child module. The module intentionally does not configure a provider itself.
 
@@ -27,8 +31,8 @@ module "chat" {
 }
 ```
 
-There is deliberately no Application Load Balancer and no Elastic Container
-Service managing the application task count. The task definition is launched
+There is deliberately no Application Load Balancer and no Amazon ECS service
+managing the application task count. The task definition is launched
 directly so the zero-task state is real. The activator is the always-available
 HTTP entry point; the application is stateless and must keep durable state in
 its configured store.

@@ -32,8 +32,8 @@ request-triggered restoration for deployments that support scale-to-zero.
 - Runtime and build inputs use the newest eligible stable release only after a
   mandatory 24-hour publication quarantine.
 - The repository contains deployment guidance for Linux virtual machines,
-  AWS Elastic Container Service, Google Cloud Run, and Azure Container Apps.
-  The AWS Elastic Container Service scale-to-zero module is the current
+  Amazon Elastic Container Service (ECS) on AWS Fargate, Google Cloud Run, and
+  Azure Container Apps. The Amazon ECS scale-to-zero module is the current
   provider-specific infrastructure implementation; the other profiles require
   their stated qualification work.
 - The production container uses standard OpenID Connect discovery, so a
@@ -54,6 +54,7 @@ or any later version. See [LICENSE](LICENSE).
 ```sh
 make check
 make browser-qualification
+SHAUTH_SOURCE_DIR=/path/to/shauth make shauth-sso-qualification
 make build
 make build-static
 make run                    # explicitly selects local mode, memory, and dev credentials

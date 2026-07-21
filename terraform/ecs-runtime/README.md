@@ -22,8 +22,10 @@ Connect identity carrying a `developer` or `admin` role is provisioned as its
 own durable workspace user on first sign-in; it is not collapsed into the
 bootstrap account by email.
 
-The OpenID Connect client registration must allow
-`https://<application-host>/signed-out` as the RP-initiated post-logout redirect
-URI and register
+The OpenID Connect client registration must allow the exact
+`https://<application-host>/auth/shauth/logout/complete` bridge as the
+RP-initiated post-logout redirect URI and register
 `https://<application-host>/auth/oidc/backchannel-logout` as the back-channel
-logout URI.
+logout URI. `release_revision` must identify the exact deployed commit or image
+digest; the module exposes it to the task as `SAMEOLDCHAT_RELEASE_REVISION` for
+Shauth validation.

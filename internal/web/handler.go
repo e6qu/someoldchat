@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,12 +18,24 @@ import (
 )
 
 type Handler struct {
-	Messages       chatapi.Service
-	Authenticator  auth.Authenticator
-	SessionRevoker auth.SessionRevoker
-	Channel        domain.ConversationID
-	CookieDomain   string
-	Login          *LoginHandler
+	Messages        chatapi.Service
+	Authenticator   auth.Authenticator
+	SessionRevoker  auth.SessionRevoker
+	Channel         domain.ConversationID
+	CookieDomain    string
+	Login           *LoginHandler
+	ReleaseRevision string
+}
+
+var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
+
+func (h *Handler) SetReleaseRevision(revision string) error {
+	revision = strings.TrimSpace(revision)
+	if !immutableReleaseRevision.MatchString(revision) {
+		return errors.New("web release revision must be an immutable commit or image digest")
+	}
+	h.ReleaseRevision = revision
+	return nil
 }
 
 func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, sessionRevoker auth.SessionRevoker, channel, cookieDomain string) (Handler, error) {
@@ -47,7 +60,7 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, sess
 var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 <html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{.Channel}} · SameOldChat</title><style>
 :root{color-scheme:light;--bg:#fff;--panel:#f8f8fa;--panel-strong:#fff;--text:#1d1c1d;--muted:#696969;--line:#dedede;--accent:#611f69;--accent-2:#36c5f0;--hover:#f1edf2;--shadow:0 8px 24px #1d1c1d18}*{box-sizing:border-box}html[data-theme=dark]{color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45;--hover:#2c3035;--shadow:0 8px 24px #0006}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input{font:inherit}button{cursor:pointer}.shell{min-height:100vh;display:grid;grid-template-rows:52px 1fr}.topbar{background:var(--accent);color:#fff;display:flex;align-items:center;gap:16px;padding:0 20px;box-shadow:var(--shadow)}.brand{font-weight:800;letter-spacing:.2px}.search{flex:1;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #fff5;border-radius:7px;padding:6px 12px;color:#fff}.search input{width:100%;border:0;outline:0;background:transparent;color:#fff}.search input::placeholder{color:#fff}.top-actions{display:flex;gap:8px;margin-left:auto}.icon-button{border:0;background:transparent;color:inherit;border-radius:6px;padding:7px 9px}.icon-button:hover{background:#fff2}.workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}.sidebar{background:var(--accent);color:#fff;padding:18px 10px;display:flex;flex-direction:column;gap:18px}.workspace-name{font-weight:800;padding:0 10px}.workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}.side-section{display:grid;gap:2px}.side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}.side-link{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:5px;color:#fff;text-decoration:none}.side-link:hover,.side-link[aria-current=page]{background:#ffffff26}.side-link[aria-current=page]{font-weight:700}.badge{margin-left:auto;background:#fff;color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 5px;font-size:12px;font-weight:700}.sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff38;padding-top:12px}.content{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) {{if .ThreadTimestamp}}360px{{end}};background:var(--bg)}.chat{min-width:0;display:grid;grid-template-rows:64px minmax(0,1fr) auto}.channel-header{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:0 26px}.channel-title{font-size:18px;font-weight:800}.channel-meta{color:var(--muted);font-size:13px}.timeline{overflow:auto;padding:24px 26px 12px}.message{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:10px 8px;border-radius:7px}.message:hover{background:var(--hover)}.avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#36c5f0,#2eb67d);color:#fff;display:grid;place-items:center;font-weight:800}.message-head{display:flex;align-items:baseline;gap:8px}.author{font-weight:800}.time{color:var(--muted);font-size:12px}.message-text{margin:2px 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}.message-actions{display:flex;gap:8px;align-items:center}.message-actions a,.message-actions button{color:var(--muted);background:transparent;border:0;padding:2px 0;text-decoration:none;font-size:12px}.message-actions a:hover,.message-actions button:hover{color:var(--accent-2)}.inline-form{display:inline-flex;gap:6px}.inline-form input{width:120px;border:1px solid var(--line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}.composer-wrap{padding:12px 26px 20px;background:linear-gradient(transparent,var(--bg) 15%)}.composer{border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:10px}.composer textarea{width:100%;min-height:44px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text)}.composer-footer{display:flex;justify-content:space-between;align-items:center}.composer-tools{color:var(--muted);font-size:13px}.send{border:0;border-radius:5px;background:#007a5a;color:#fff;font-weight:700;padding:7px 14px}.thread{border-left:1px solid var(--line);background:var(--panel);padding:20px;overflow:auto}.thread h2{margin:0 0 18px;font-size:18px}.empty{color:var(--muted);padding:30px;text-align:center}.theme-toggle{border:1px solid #fff6;border-radius:5px;color:#fff;background:transparent;padding:6px 9px}.theme-toggle:hover{background:#fff2}@media(max-width:800px){.workspace{grid-template-columns:68px minmax(0,1fr)}.sidebar{padding:18px 6px}.workspace-name,.workspace-sub,.side-label,.side-link span:not(.badge),.sidebar-bottom form{display:none}.side-link{justify-content:center}.content{grid-template-columns:minmax(0,1fr)}.thread{display:none}.search{max-width:none}.topbar{padding:0 10px}.timeline,.composer-wrap{padding-left:14px;padding-right:14px}}
-</style></head><body><div class="shell"><header class="topbar"><div class="brand">SameOldChat</div><label class="search" aria-label="Search"><span>⌕</span><input placeholder="Search the workspace" aria-label="Search the workspace"></label><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle dark mode">☾</button><a class="icon-button" href="/app/members" aria-label="Members">◉</a></div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members"><span>♙</span><span>Members</span></a></nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Conversations}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}}><span>#</span><span>{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-label="unread messages">{{.UnreadCount}}</span>{{end}}</a>{{else}}<span class="side-link">No channels available.</span>{{end}}</nav><div class="sidebar-bottom"><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit"><span>↪</span><span>Sign out</span></button></form></div></aside><div class="content"><section class="chat"><header class="channel-header"><div><div class="channel-title"># {{.Channel}}</div><div class="channel-meta">Messages and conversations</div></div></header><section id="timeline" class="timeline" aria-live="polite">{{template "messages" .}}</section><div class="composer-wrap"><form class="composer" method="post" action="/app/message?channel={{.Channel}}" hx-post="/app/message?channel={{.Channel}}" hx-target="#timeline" hx-swap="beforeend"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><textarea id="text" name="text" required autofocus placeholder="Message #{{.Channel}}" aria-label="Message"></textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><div class="composer-tools">Replying in thread</div>{{end}}<div class="composer-footer"><span class="composer-tools">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></section>{{if .ThreadTimestamp}}<aside class="thread" aria-label="Thread"><h2>Thread</h2>{{template "messages" .Thread}}</aside>{{end}}</div></div></div><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')});if(window.EventSource){const events=new EventSource('/events');const refresh=()=>window.location.reload();['message.created','message.updated','message.deleted'].forEach(type=>events.addEventListener(type,refresh))}})();</script></body></html>
+</style></head><body><div class="shell"><header class="topbar"><div class="brand">SameOldChat</div><label class="search" aria-label="Search"><span>⌕</span><input placeholder="Search the workspace" aria-label="Search the workspace"></label><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle dark mode">☾</button>{{if .ShowProfile}}<a class="icon-button" href="/me" aria-label="My profile">●</a>{{end}}<a class="icon-button" href="/app/members" aria-label="Members">◉</a></div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members"><span>♙</span><span>Members</span></a></nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Conversations}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}}><span>#</span><span>{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-label="unread messages">{{.UnreadCount}}</span>{{end}}</a>{{else}}<span class="side-link">No channels available.</span>{{end}}</nav><div class="sidebar-bottom"><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit"><span>↪</span><span>Sign out</span></button></form></div></aside><div class="content"><section class="chat"><header class="channel-header"><div><div class="channel-title"># {{.Channel}}</div><div class="channel-meta">Messages and conversations</div></div></header><section id="timeline" class="timeline" aria-live="polite">{{template "messages" .}}</section><div class="composer-wrap"><form class="composer" method="post" action="/app/message?channel={{.Channel}}" hx-post="/app/message?channel={{.Channel}}" hx-target="#timeline" hx-swap="beforeend"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><textarea id="text" name="text" required autofocus placeholder="Message #{{.Channel}}" aria-label="Message"></textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><div class="composer-tools">Replying in thread</div>{{end}}<div class="composer-footer"><span class="composer-tools">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></section>{{if .ThreadTimestamp}}<aside class="thread" aria-label="Thread"><h2>Thread</h2>{{template "messages" .Thread}}</aside>{{end}}</div></div></div><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')});if(window.EventSource){const events=new EventSource('/events');const refresh=()=>window.location.reload();['message.created','message.updated','message.deleted'].forEach(type=>events.addEventListener(type,refresh))}})();</script></body></html>
 {{define "messages"}}{{range .Messages}}<article class="message" data-message-id="{{.ID}}"><div class="avatar" aria-hidden="true">{{.AuthorID}}</div><div><div class="message-head"><span class="author">{{.AuthorID}}</span><time class="time" datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></div><p class="message-text">{{.Text}}</p><div class="message-actions"><a href="/app?channel={{$.Channel}}&thread={{.Timestamp}}">Reply in thread</a><form class="inline-form" aria-label="Add reaction" method="post" action="/app/reaction?channel={{$.Channel}}&ts={{.Timestamp}}" hx-post="/app/reaction?channel={{$.Channel}}&ts={{.Timestamp}}" hx-target="#timeline" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label for="reaction-{{.ID}}" hidden>Reaction</label><input id="reaction-{{.ID}}" name="name" maxlength="64" placeholder="Add reaction" required><button type="submit">Add</button></form><form method="post" action="/app/pin?channel={{$.Channel}}&ts={{.Timestamp}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Pin</button></form></div></div></article>{{else}}<p class="empty">No messages yet. Start the conversation.</p>{{end}}{{end}}`))
 
 var membersTemplate = template.Must(template.New("members").Parse(`<!doctype html>
@@ -64,6 +77,7 @@ type pageData struct {
 	Thread          messagePage
 	ThreadTimestamp string
 	CSRFToken       string
+	ShowProfile     bool
 }
 type membersData struct {
 	Members   []memberView
@@ -89,6 +103,21 @@ type searchData struct {
 	Messages []messageView
 }
 
+type identityData struct {
+	Heading   string
+	Username  string
+	Email     string
+	Role      string
+	Release   string
+	CSRFToken string
+	AvatarURL string
+	Avatar    string
+}
+
+var identityTemplate = template.Must(template.New("identity").Parse(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>{{.Heading}} · SameOldChat</title><style>
+:root{color-scheme:light;--bg:#f7f3f8;--panel:#fff;--text:#211b24;--muted:#665c69;--line:#d8cddd;--accent:#7f1689;--accent-hover:#65106e;--focus:#087db6;--danger:#b4234b}@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#17131a;--panel:#241e28;--text:#faf6fb;--muted:#c9bccd;--line:#4d4053;--accent:#d152de;--accent-hover:#e57bef;--focus:#5dc8ff;--danger:#ff6d91}}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 0%,color-mix(in srgb,var(--accent) 18%,transparent),transparent 34%),var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{display:flex;align-items:center;gap:16px;padding:16px 24px;background:var(--panel);border-bottom:1px solid var(--line)}.bar a{color:var(--accent);font-weight:750;text-decoration:none}.bar a:focus-visible,.button:focus-visible{outline:3px solid var(--focus);outline-offset:3px}.layout{width:min(760px,calc(100% - 32px));margin:48px auto}.card{padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 52px #0002}.identity-heading{display:grid;grid-template-columns:72px 1fr;align-items:center;gap:18px;margin-bottom:8px}.avatar{width:72px;height:72px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#36c5f0);color:#fff;font-size:1.8rem;font-weight:850;object-fit:cover}h1{margin:0;font-size:clamp(2rem,6vw,3.4rem);line-height:1.05}.lede{margin:0 0 28px;color:var(--muted)}dl{display:grid;grid-template-columns:minmax(120px,180px) 1fr;margin:0 0 28px;border-top:1px solid var(--line)}dt,dd{margin:0;padding:13px 0;border-bottom:1px solid var(--line)}dt{color:var(--muted);font-weight:700}dd{overflow-wrap:anywhere}.button{border:0;border-radius:8px;padding:11px 17px;background:var(--danger);color:#fff;font:inherit;font-weight:800;cursor:pointer}@media(max-width:540px){.layout{margin:24px auto}.card{padding:24px}.identity-heading{grid-template-columns:56px 1fr}.avatar{width:56px;height:56px;border-radius:12px}dl{grid-template-columns:1fr}dt{padding-bottom:0;border-bottom:0}dd{padding-top:3px}}</style></head><body><header class="bar"><strong>SameOldChat</strong><a href="/app">Back to chat</a></header><main class="layout"><section class="card" aria-labelledby="identity-heading"><div class="identity-heading">{{if .AvatarURL}}<img class="avatar" src="{{.AvatarURL}}" alt="Avatar for {{.Username}}">{{else}}<span class="avatar" role="img" aria-label="Avatar for {{.Username}}">{{.Avatar}}</span>{{end}}<h1 id="identity-heading">{{.Heading}}</h1></div><p class="lede">Your verified Shauth identity and this immutable application release.</p><dl><dt>Username</dt><dd data-testid="validation-username">{{.Username}}</dd><dt>Email</dt><dd data-testid="validation-email">{{.Email}}</dd><dt>Role</dt><dd data-testid="validation-role">{{.Role}}</dd><dt>Release</dt><dd data-testid="validation-release">{{.Release}}</dd></dl><form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="button" type="submit">Sign out</button></form></section></main></body></html>`))
+
 const progressiveEnhancementScript = `<script>(function(){var suppressRefresh=false;var events=null;document.addEventListener('submit',function(event){var form=event.target.closest('form');if(!form)return;if(!form.hasAttribute('hx-post')){suppressRefresh=true;if(events)events.close();return}event.preventDefault();suppressRefresh=true;if(events)events.close();form.classList.remove('is-error');fetch(form.getAttribute('hx-post'),{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'}}).then(function(response){if(!response.ok)throw new Error('request failed');var redirect=response.headers.get('HX-Redirect');if(redirect){window.location.assign(redirect);return null}if(response.status===204)return null;return response.text()}).then(function(html){if(html===null)return;var target=document.querySelector(form.getAttribute('hx-target'));if(!target)throw new Error('update target missing');if(form.getAttribute('hx-swap')==='outerHTML')target.outerHTML=html;else target.insertAdjacentHTML('beforeend',html)}).catch(function(){form.classList.add('is-error')}).finally(function(){suppressRefresh=false})});if(window.EventSource){var cursor=sessionStorage.getItem('sameoldchat-last-event')||'';events=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));var refresh=function(event){if(event.lastEventId)sessionStorage.setItem('sameoldchat-last-event',event.lastEventId);if(suppressRefresh||(document.activeElement&&document.activeElement.form))return;events.close();window.location.reload()};['message.created','message.updated','message.deleted'].forEach(function(type){events.addEventListener(type,refresh)})}})();</script>`
 
 type messagePage struct {
@@ -100,6 +129,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /signed-out", signedOut)
 	if h.Login != nil {
 		h.Login.Register(mux)
+		mux.HandleFunc("GET /auth/validation", h.validation)
+		mux.HandleFunc("GET /me", h.me)
 		mux.HandleFunc("GET /app/admin/auth", h.authAdminPage)
 		mux.HandleFunc("GET /api/admin.auth.methods.list", h.authMethodsList)
 		mux.HandleFunc("POST /api/admin.auth.methods.set", h.authMethodSet)
@@ -262,7 +293,11 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
 		if errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
-			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			target := "/login"
+			if h.Login.hasOpenIDConnectProvider() {
+				target = "/auth/oidc"
+			}
+			http.Redirect(w, r, target, http.StatusSeeOther)
 			return
 		}
 		h.writeAuthError(w, err)
@@ -311,7 +346,7 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "session unavailable", http.StatusUnauthorized)
 		return
 	}
-	if err := pageTemplate.Execute(&output, pageData{Messages: toViews(page.Messages), Conversations: views, Channel: string(channel), Thread: thread, ThreadTimestamp: threadTimestamp, CSRFToken: auth.CSRFToken(sessionCookie.Value)}); err != nil {
+	if err := pageTemplate.Execute(&output, pageData{Messages: toViews(page.Messages), Conversations: views, Channel: string(channel), Thread: thread, ThreadTimestamp: threadTimestamp, CSRFToken: auth.CSRFToken(sessionCookie.Value), ShowProfile: h.Login != nil}); err != nil {
 		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -333,6 +368,90 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 	rendered = strings.Replace(rendered, "</body>", progressiveEnhancementScript+"</body>", 1)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(rendered))
+}
+
+func (h Handler) validation(w http.ResponseWriter, r *http.Request) {
+	h.identity(w, r, "SameOldChat is authenticated")
+}
+
+func (h Handler) me(w http.ResponseWriter, r *http.Request) {
+	h.identity(w, r, "My profile")
+}
+
+func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string) {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
+		if errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
+			http.Redirect(w, r, "/signed-out", http.StatusSeeOther)
+			return
+		}
+		h.writeAuthError(w, err)
+		return
+	}
+	if h.Login == nil || !h.Login.hasOpenIDConnectProvider() || !immutableReleaseRevision.MatchString(h.ReleaseRevision) {
+		http.Error(w, "Shauth identity validation is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		http.Error(w, "identity is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	role, err := h.currentRole(r, principal)
+	if err != nil {
+		http.Error(w, "identity role is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	h.setCSRFCookie(w, r)
+	avatar := "?"
+	for _, character := range strings.TrimSpace(user.Name) {
+		avatar = strings.ToUpper(string(character))
+		break
+	}
+	avatarURL := strings.TrimSpace(user.Profile.Image72)
+	if avatarURL == "" {
+		avatarURL = strings.TrimSpace(user.Profile.Image48)
+	}
+	var rendered bytes.Buffer
+	if err := identityTemplate.Execute(&rendered, identityData{Heading: heading, Username: user.Name, Email: user.Email, Role: role, Release: h.ReleaseRevision, CSRFToken: auth.CSRFToken(sessionCookie.Value), AvatarURL: avatarURL, Avatar: avatar}); err != nil {
+		http.Error(w, "identity rendering unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(rendered.Bytes())
+}
+
+func (h Handler) currentRole(r *http.Request, principal auth.Principal) (string, error) {
+	request := domain.PageRequest{Limit: 100}
+	for {
+		page, err := h.Messages.AdminListUsers(r.Context(), principal.WorkspaceID, principal.UserID, request)
+		if err != nil {
+			return "", err
+		}
+		for _, item := range page.Users {
+			if item.User.ID != principal.UserID {
+				continue
+			}
+			switch item.Membership.Role {
+			case domain.WorkspaceRoleMember:
+				return "developer", nil
+			case domain.WorkspaceRoleAdmin, domain.WorkspaceRoleOwner:
+				return "admin", nil
+			default:
+				return "", errors.New("identity has an unsupported workspace role")
+			}
+		}
+		if !page.HasMore {
+			return "", store.ErrNotFound
+		}
+		request.Cursor = page.NextCursor
+	}
 }
 
 func normalizeSearchControl(rendered string) (string, error) {

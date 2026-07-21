@@ -14,7 +14,7 @@ jobs:
   go:
     name: Go checks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -108,7 +108,7 @@ jobs:
   sdk:
     name: Official SDK qualification
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -166,10 +166,46 @@ jobs:
       - name: Install browser qualification dependencies
         run: make browser-qualification
 
+  shauth-sso:
+    name: Shauth SSO qualification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out SameOldChat
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check out the exact Shauth contract
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: e6qu/shauth
+          ref: 0fda680cba964e5768ed75a9c3e5b7230c418ca6
+          path: .qualification/shauth
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.7.0
+
+      - name: Install the browser contract dependencies
+        run: |
+          npm ci --prefix tests/browser
+          npx --prefix tests/browser playwright install --with-deps chromium
+
+      - name: Run the real Shauth, Ory Hydra, PostgreSQL, and browser matrix
+        env:
+          SHAUTH_SOURCE_DIR: ${{ github.workspace }}/.qualification/shauth
+        run: make shauth-sso-qualification
+
   dqlite:
     name: dqlite qualification
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

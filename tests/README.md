@@ -5,6 +5,9 @@ against browser behavior, official Slack SDKs, and native dqlite behavior.
 
 - [Browser qualification](browser/README.md) checks the server-rendered user
   journey with Playwright.
+- The Shauth SSO qualification runs the provider's exact pinned validator
+  against real Shauth, Ory Hydra, PostgreSQL, and two isolated SameOldChat
+  relying parties.
 - [Official SDK qualification](official-sdk-qualification/README.md) checks
   pinned releases of the official Slack SDKs.
 - [dqlite qualification](dqlite-qualification/README.md) checks the pinned

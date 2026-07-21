@@ -23,6 +23,16 @@ variable "oidc_client_secret_arn" {
   type        = string
 }
 
+variable "release_revision" {
+  description = "Immutable SameOldChat commit or image digest exposed to Shauth validation."
+  type        = string
+
+  validation {
+    condition     = can(regex("^([0-9a-f]{12,64}|sha256:[0-9a-f]{64})$", var.release_revision))
+    error_message = "release_revision must be a 12-64 character lowercase hexadecimal commit or a sha256 digest."
+  }
+}
+
 variable "bootstrap_admin_email" {
   description = "Verified OIDC email address that owns the initial SameOldChat workspace user."
   type        = string

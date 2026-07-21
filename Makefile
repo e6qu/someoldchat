@@ -1,7 +1,9 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check rebase-audit bench profile check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check rebase-audit bench profile check clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
+GOWORK := off
+export GOWORK
 PROTOC_GEN_GO_VERSION := $(shell go list -m -f '{{.Version}}' google.golang.org/protobuf)
 
 proto-tools:
@@ -89,7 +91,7 @@ generated-check:
 	git diff --exit-code -- internal/modules/chat/transport/grpc/gen
 
 fmt-check:
-	test -z "$$(gofmt -l .)"
+	test -z "$$(git ls-files -- '*.go' | xargs gofmt -l)"
 
 workflow-check: dependency-check
 
@@ -149,10 +151,14 @@ browser-qualification:
 	npx --prefix tests/browser playwright install --with-deps chromium
 	npm test --prefix tests/browser
 
+shauth-sso-qualification:
+	test -n "$(SHAUTH_SOURCE_DIR)"
+	./scripts/test-shauth-sso.sh
+
 check: fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check proto-lint generated-check test
 
 clean:
-	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform
+	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform terraform/ecs-runtime/.terraform
 
 run:
 	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -api-token xoxb-dev -session-token dev-session

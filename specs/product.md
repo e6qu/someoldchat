@@ -55,7 +55,8 @@ The product MUST support:
 ## Hosting
 
 - SameOldChat MUST support self-hosting on ordinary Linux virtual machines.
-- It MUST provide qualified deployment profiles for AWS ECS on Fargate, Google
+- It MUST provide qualified deployment profiles for Amazon Elastic Container
+  Service (ECS) on AWS Fargate, Google
   Cloud Run, and Azure Container Apps, subject to the qualification levels in
   the hosting specification.
 - Hosting adapters MUST preserve the same snapshot, fencing, wake, and

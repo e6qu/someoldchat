@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 	user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL DEFAULT '', expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0,
 	oidc_provider TEXT NOT NULL DEFAULT '', oidc_id_token TEXT NOT NULL DEFAULT '', oidc_subject TEXT NOT NULL DEFAULT '', oidc_sid TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS oidc_logout_tokens (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, token_id TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (workspace_id, provider, token_id));
 CREATE TABLE IF NOT EXISTS auth_methods (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, enabled INTEGER NOT NULL, PRIMARY KEY(workspace_id, provider));
 CREATE TABLE IF NOT EXISTS external_identities (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, subject TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(workspace_id, provider, subject));
 CREATE TABLE IF NOT EXISTS conversations (
@@ -225,7 +226,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 76
+const schemaVersion = 77
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -1174,6 +1175,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS file_shares (file_id TEXT NOT NULL REFERENCES files(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (file_id, conversation_id))`); err != nil {
 			return fmt.Errorf("migrate file shares: %w", err)
+		}
+	}
+	if version < 77 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS oidc_logout_tokens (workspace_id TEXT NOT NULL REFERENCES workspaces(id), provider TEXT NOT NULL, token_id TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY (workspace_id, provider, token_id))`); err != nil {
+			return fmt.Errorf("migrate OpenID Connect logout tokens: %w", err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
@@ -2180,6 +2186,51 @@ func (s *Store) RevokeSession(ctx context.Context, token string) error {
 		return store.ErrNotFound
 	}
 	return nil
+}
+
+func (s *Store) RevokeOIDCSessions(ctx context.Context, workspaceID domain.WorkspaceID, provider, subject, sid, tokenID string, expiresAt time.Time, event events.Event) error {
+	if workspaceID == "" || strings.TrimSpace(provider) == "" || (strings.TrimSpace(subject) == "" && strings.TrimSpace(sid) == "") || strings.TrimSpace(tokenID) == "" || !expiresAt.After(time.Now().UTC()) {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Unix()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM oidc_logout_tokens WHERE expires_at <= ?`, now); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oidc_logout_tokens(workspace_id, provider, token_id, expires_at) VALUES (?, ?, ?, ?)`, workspaceID, provider, tokenID, expiresAt.UTC().Unix()); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return store.ErrConflict
+		}
+		return err
+	}
+	statement := `UPDATE sessions SET revoked = 1 WHERE workspace_id = ? AND oidc_provider = ? AND revoked = 0`
+	arguments := []any{workspaceID, provider}
+	if sid != "" {
+		statement += ` AND oidc_sid = ?`
+		arguments = append(arguments, sid)
+	}
+	if subject != "" {
+		statement += ` AND oidc_subject = ?`
+		arguments = append(arguments, subject)
+	}
+	result, err := tx.ExecContext(ctx, statement, arguments...)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed > 0 {
+		if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, event events.Event) error {

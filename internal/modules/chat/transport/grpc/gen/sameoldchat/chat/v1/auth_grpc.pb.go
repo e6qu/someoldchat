@@ -31,6 +31,7 @@ const (
 	AuthService_SetAuthMethod_FullMethodName          = "/sameoldchat.chat.v1.AuthService/SetAuthMethod"
 	AuthService_GetExternalIdentity_FullMethodName    = "/sameoldchat.chat.v1.AuthService/GetExternalIdentity"
 	AuthService_CreateExternalIdentity_FullMethodName = "/sameoldchat.chat.v1.AuthService/CreateExternalIdentity"
+	AuthService_RevokeOIDCSessions_FullMethodName     = "/sameoldchat.chat.v1.AuthService/RevokeOIDCSessions"
 )
 
 // AuthServiceClient is the client API for AuthService service.
@@ -49,6 +50,7 @@ type AuthServiceClient interface {
 	SetAuthMethod(ctx context.Context, in *AuthMethodRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 	GetExternalIdentity(ctx context.Context, in *ExternalIdentityRequest, opts ...grpc.CallOption) (*ExternalIdentity, error)
 	CreateExternalIdentity(ctx context.Context, in *ExternalIdentityRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
+	RevokeOIDCSessions(ctx context.Context, in *RevokeOIDCSessionsRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 }
 
 type authServiceClient struct {
@@ -179,6 +181,16 @@ func (c *authServiceClient) CreateExternalIdentity(ctx context.Context, in *Exte
 	return out, nil
 }
 
+func (c *authServiceClient) RevokeOIDCSessions(ctx context.Context, in *RevokeOIDCSessionsRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthRevokeResponse)
+	err := c.cc.Invoke(ctx, AuthService_RevokeOIDCSessions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AuthServiceServer is the server API for AuthService service.
 // All implementations should embed UnimplementedAuthServiceServer
 // for forward compatibility.
@@ -195,6 +207,7 @@ type AuthServiceServer interface {
 	SetAuthMethod(context.Context, *AuthMethodRequest) (*AuthRevokeResponse, error)
 	GetExternalIdentity(context.Context, *ExternalIdentityRequest) (*ExternalIdentity, error)
 	CreateExternalIdentity(context.Context, *ExternalIdentityRequest) (*AuthRevokeResponse, error)
+	RevokeOIDCSessions(context.Context, *RevokeOIDCSessionsRequest) (*AuthRevokeResponse, error)
 }
 
 // UnimplementedAuthServiceServer should be embedded to have
@@ -239,6 +252,9 @@ func (UnimplementedAuthServiceServer) GetExternalIdentity(context.Context, *Exte
 }
 func (UnimplementedAuthServiceServer) CreateExternalIdentity(context.Context, *ExternalIdentityRequest) (*AuthRevokeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateExternalIdentity not implemented")
+}
+func (UnimplementedAuthServiceServer) RevokeOIDCSessions(context.Context, *RevokeOIDCSessionsRequest) (*AuthRevokeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RevokeOIDCSessions not implemented")
 }
 func (UnimplementedAuthServiceServer) testEmbeddedByValue() {}
 
@@ -476,6 +492,24 @@ func _AuthService_CreateExternalIdentity_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AuthService_RevokeOIDCSessions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RevokeOIDCSessionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).RevokeOIDCSessions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_RevokeOIDCSessions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).RevokeOIDCSessions(ctx, req.(*RevokeOIDCSessionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AuthService_ServiceDesc is the grpc.ServiceDesc for AuthService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -530,6 +564,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateExternalIdentity",
 			Handler:    _AuthService_CreateExternalIdentity_Handler,
+		},
+		{
+			MethodName: "RevokeOIDCSessions",
+			Handler:    _AuthService_RevokeOIDCSessions_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

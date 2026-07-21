@@ -86,6 +86,20 @@ func TestDatabaseDSNDefaultUsesRuntimeEnvironment(t *testing.T) {
 	}
 }
 
+func TestReleaseRevisionDefaultPrefersRuntimeCoordinateThenBakedIdentity(t *testing.T) {
+	original := releaseRevision
+	releaseRevision = "0123456789abcdef0123456789abcdef01234567"
+	t.Cleanup(func() { releaseRevision = original })
+	t.Setenv("SAMEOLDCHAT_RELEASE_REVISION", "")
+	if got := releaseRevisionDefault(); got != releaseRevision {
+		t.Fatalf("baked release revision=%q", got)
+	}
+	t.Setenv("SAMEOLDCHAT_RELEASE_REVISION", "abcdef012345abcdef012345abcdef012345abcd")
+	if got := releaseRevisionDefault(); got != "abcdef012345abcdef012345abcdef012345abcd" {
+		t.Fatalf("runtime release revision=%q", got)
+	}
+}
+
 func TestResolveDatabaseDSNUsesEnvironmentOnlyForLocalComposition(t *testing.T) {
 	t.Setenv("SAMEOLDCHAT_DATABASE_URL", "postgres://sameoldchat:secret@postgres.example/sameoldchat")
 	if got, err := resolveDatabaseDSN("local", ""); err != nil || got != "postgres://sameoldchat:secret@postgres.example/sameoldchat" {

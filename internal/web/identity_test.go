@@ -80,13 +80,13 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "person@example.com", Name: "person"})
 	service := service.Messages{Store: store}
-	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "oidc-subject", UserID: "U2"}); err != nil {
+	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "oidc-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := service.CreateSession(context.Background(), "second-browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "oidc-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.CreateSession(context.Background(), "second-browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour)}); err != nil {
+	if err := service.CreateSession(context.Background(), "other-provider-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "other-session"}); err != nil {
 		t.Fatal(err)
 	}
 	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
@@ -102,7 +102,7 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 	now := time.Now().UTC()
 	raw, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}, "https://example.test/other-event": map[string]any{}},
 	}).Serialize()
 	if err != nil {
@@ -122,16 +122,45 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 			t.Fatalf("session %q=%+v err=%v", sessionToken, record, err)
 		}
 	}
+	other, err := store.LookupSession(context.Background(), "other-provider-session")
+	if err != nil || other.Revoked {
+		t.Fatalf("unrelated provider session=%+v err=%v", other, err)
+	}
+	replay := httptest.NewRecorder()
+	replayRequest := httptest.NewRequest(http.MethodPost, "/auth/oidc/backchannel-logout", strings.NewReader(form.Encode()))
+	replayRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	handler.backchannelLogout(replay, replayRequest)
+	if replay.Code != http.StatusBadRequest {
+		t.Fatalf("replayed logout token status=%d body=%s", replay.Code, replay.Body.String())
+	}
+	subjectOnly, err := jwt.Signed(signer).Claims(map[string]any{
+		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "subject-logout-id",
+		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
+	}).Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjectRequest := httptest.NewRequest(http.MethodPost, "/auth/oidc/backchannel-logout", strings.NewReader(url.Values{"logout_token": {subjectOnly}}.Encode()))
+	subjectRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	subjectResponse := httptest.NewRecorder()
+	handler.backchannelLogout(subjectResponse, subjectRequest)
+	if subjectResponse.Code != http.StatusOK {
+		t.Fatalf("subject-only logout status=%d body=%s", subjectResponse.Code, subjectResponse.Body.String())
+	}
+	other, err = store.LookupSession(context.Background(), "other-provider-session")
+	if err != nil || !other.Revoked {
+		t.Fatalf("subject-matched provider session=%+v err=%v", other, err)
+	}
 
 	invalid, err := jwt.Signed(signer).Claims(map[string]any{
-		"iss": issuer.URL, "aud": "sameoldchat", "sub": "", "sid": "oidc-session", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
+		"iss": issuer.URL, "aud": "sameoldchat", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-logout-id",
 		"events": map[string]any{backchannelLogoutEvent: map[string]any{}},
 	}).Serialize()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := handler.verifyBackchannelLogout(context.Background(), invalid); err == nil {
-		t.Fatal("logout token without a subject was accepted")
+		t.Fatal("logout token without a subject or provider session ID was accepted")
 	}
 	invalidEvent, err := jwt.Signed(signer).Claims(map[string]any{
 		"iss": issuer.URL, "aud": "sameoldchat", "sub": "oidc-subject", "iat": now.Unix(), "exp": now.Add(time.Minute).Unix(), "jti": "invalid-event-id",
@@ -142,6 +171,37 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	}
 	if _, err := handler.verifyBackchannelLogout(context.Background(), invalidEvent); err == nil {
 		t.Fatal("logout token with a non-object event was accepted")
+	}
+}
+
+func TestOpenIDConnectBackchannelLogoutRejectsNonCanonicalTokenDelivery(t *testing.T) {
+	handler, err := NewLoginHandler(service.Messages{Store: memory.New()}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", Issuer: "https://auth.example.test", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name        string
+		target      string
+		contentType string
+		body        string
+		want        int
+	}{
+		{name: "JSON body", target: "/auth/oidc/backchannel-logout", contentType: "application/json", body: `{"logout_token":"token"}`, want: http.StatusUnsupportedMediaType},
+		{name: "query token", target: "/auth/oidc/backchannel-logout?logout_token=token", contentType: "application/x-www-form-urlencoded", want: http.StatusBadRequest},
+		{name: "query and body token", target: "/auth/oidc/backchannel-logout?logout_token=query", contentType: "application/x-www-form-urlencoded", body: "logout_token=body", want: http.StatusBadRequest},
+		{name: "duplicate body token", target: "/auth/oidc/backchannel-logout", contentType: "application/x-www-form-urlencoded", body: "logout_token=one&logout_token=two", want: http.StatusBadRequest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, test.target, strings.NewReader(test.body))
+			request.Header.Set("Content-Type", test.contentType)
+			response := httptest.NewRecorder()
+			handler.backchannelLogout(response, request)
+			if response.Code != test.want {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
 
@@ -327,12 +387,45 @@ func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if location.Scheme != "https" || location.Host != "auth.example.test" || location.Path != "/oauth2/sessions/logout" || location.Query().Get("id_token_hint") != "signed.id.token" || location.Query().Get("client_id") != "sameoldchat" || location.Query().Get("post_logout_redirect_uri") != "https://chat.example.test/signed-out" {
+	if location.Scheme != "https" || location.Host != "auth.example.test" || location.Path != "/oauth2/sessions/logout" || location.Query().Get("id_token_hint") != "signed.id.token" || location.Query().Get("client_id") != "sameoldchat" || location.Query().Get("post_logout_redirect_uri") != "https://chat.example.test/auth/shauth/logout/complete" {
 		t.Fatalf("logout redirect=%s", location)
 	}
 	record, err := store.LookupSession(context.Background(), "session")
 	if err != nil || !record.Revoked {
 		t.Fatalf("session=%+v err=%v", record, err)
+	}
+}
+
+func TestShauthLogoutCompletionBridgeUsesOnlyTheIssuerCompletionEndpoint(t *testing.T) {
+	login, err := NewLoginHandler(service.Messages{Store: memory.New()}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", Issuer: "https://auth.example.test", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", EndSessionURL: "https://auth.example.test/oauth2/sessions/logout", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	login.Register(mux)
+	request := httptest.NewRequest(http.MethodGet, "https://chat.example.test/auth/shauth/logout/complete?next=https%3A%2F%2Fattacker.invalid%2F&redirect_uri=https%3A%2F%2Fattacker.invalid%2F", nil)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "https://auth.example.test/oauth/logout/complete" || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("Pragma") != "no-cache" || response.Header().Get("Referrer-Policy") != "no-referrer" {
+		t.Fatalf("completion status=%d location=%q headers=%v", response.Code, response.Header().Get("Location"), response.Header())
+	}
+}
+
+func TestDiscoverOpenIDConnectProviderAllowsOnlyLoopbackHTTPDevelopmentCoordinates(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(OpenIDConfiguration{Issuer: server.URL, AuthorizationEndpoint: server.URL + "/authorize", TokenEndpoint: server.URL + "/token", UserInfoEndpoint: server.URL + "/userinfo", JWKSURI: server.URL + "/jwks", EndSessionEndpoint: server.URL + "/logout"})
+	}))
+	defer server.Close()
+	provider, err := DiscoverOpenIDConnectProvider(context.Background(), server.Client(), server.URL, "client", "secret")
+	if err != nil || provider.Issuer != server.URL {
+		t.Fatalf("loopback provider=%+v err=%v", provider, err)
+	}
+	if _, err := DiscoverOpenIDConnectProvider(context.Background(), server.Client(), "http://identity.example.test", "client", "secret"); err == nil {
+		t.Fatal("non-loopback HTTP issuer was accepted")
 	}
 }
 

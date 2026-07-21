@@ -817,6 +817,90 @@ func (x *ExternalIdentity) GetUserId() string {
 	return ""
 }
 
+type RevokeOIDCSessionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	Subject       string                 `protobuf:"bytes,3,opt,name=subject,proto3" json:"subject,omitempty"`
+	Sid           string                 `protobuf:"bytes,4,opt,name=sid,proto3" json:"sid,omitempty"`
+	TokenId       string                 `protobuf:"bytes,5,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	ExpiresAt     string                 `protobuf:"bytes,6,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RevokeOIDCSessionsRequest) Reset() {
+	*x = RevokeOIDCSessionsRequest{}
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RevokeOIDCSessionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RevokeOIDCSessionsRequest) ProtoMessage() {}
+
+func (x *RevokeOIDCSessionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_auth_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RevokeOIDCSessionsRequest.ProtoReflect.Descriptor instead.
+func (*RevokeOIDCSessionsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_auth_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *RevokeOIDCSessionsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *RevokeOIDCSessionsRequest) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *RevokeOIDCSessionsRequest) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *RevokeOIDCSessionsRequest) GetSid() string {
+	if x != nil {
+		return x.Sid
+	}
+	return ""
+}
+
+func (x *RevokeOIDCSessionsRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *RevokeOIDCSessionsRequest) GetExpiresAt() string {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_auth_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
@@ -878,7 +962,16 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x18\n" +
 	"\asubject\x18\x03 \x01(\tR\asubject\x12\x17\n" +
-	"\auser_id\x18\x04 \x01(\tR\x06userId2\xac\t\n" +
+	"\auser_id\x18\x04 \x01(\tR\x06userId\"\xc0\x01\n" +
+	"\x19RevokeOIDCSessionsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1a\n" +
+	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x18\n" +
+	"\asubject\x18\x03 \x01(\tR\asubject\x12\x10\n" +
+	"\x03sid\x18\x04 \x01(\tR\x03sid\x12\x19\n" +
+	"\btoken_id\x18\x05 \x01(\tR\atokenId\x12\x1d\n" +
+	"\n" +
+	"expires_at\x18\x06 \x01(\tR\texpiresAt2\x9b\n" +
+	"\n" +
 	"\vAuthService\x12R\n" +
 	"\vLookupToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a .sameoldchat.chat.v1.TokenRecord\x12X\n" +
 	"\x0eLookupAppToken\x12!.sameoldchat.chat.v1.TokenRequest\x1a#.sameoldchat.chat.v1.AppTokenRecord\x12m\n" +
@@ -891,7 +984,8 @@ const file_sameoldchat_chat_v1_auth_proto_rawDesc = "" +
 	"\rGetAuthMethod\x12&.sameoldchat.chat.v1.AuthMethodRequest\x1a\x1f.sameoldchat.chat.v1.AuthMethod\x12`\n" +
 	"\rSetAuthMethod\x12&.sameoldchat.chat.v1.AuthMethodRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponse\x12j\n" +
 	"\x13GetExternalIdentity\x12,.sameoldchat.chat.v1.ExternalIdentityRequest\x1a%.sameoldchat.chat.v1.ExternalIdentity\x12o\n" +
-	"\x16CreateExternalIdentity\x12,.sameoldchat.chat.v1.ExternalIdentityRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x16CreateExternalIdentity\x12,.sameoldchat.chat.v1.ExternalIdentityRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponse\x12m\n" +
+	"\x12RevokeOIDCSessions\x12..sameoldchat.chat.v1.RevokeOIDCSessionsRequest\x1a'.sameoldchat.chat.v1.AuthRevokeResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_auth_proto_rawDescOnce sync.Once
@@ -905,21 +999,22 @@ func file_sameoldchat_chat_v1_auth_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_auth_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_sameoldchat_chat_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_sameoldchat_chat_v1_auth_proto_goTypes = []any{
-	(*TokenRecord)(nil),              // 0: sameoldchat.chat.v1.TokenRecord
-	(*AppTokenRecord)(nil),           // 1: sameoldchat.chat.v1.AppTokenRecord
-	(*AppInstallation)(nil),          // 2: sameoldchat.chat.v1.AppInstallation
-	(*AppInstallationRequest)(nil),   // 3: sameoldchat.chat.v1.AppInstallationRequest
-	(*AppInstallationsResponse)(nil), // 4: sameoldchat.chat.v1.AppInstallationsResponse
-	(*SessionRecord)(nil),            // 5: sameoldchat.chat.v1.SessionRecord
-	(*TokenRequest)(nil),             // 6: sameoldchat.chat.v1.TokenRequest
-	(*AuthRevokeResponse)(nil),       // 7: sameoldchat.chat.v1.AuthRevokeResponse
-	(*CreateSessionRequest)(nil),     // 8: sameoldchat.chat.v1.CreateSessionRequest
-	(*AuthMethodRequest)(nil),        // 9: sameoldchat.chat.v1.AuthMethodRequest
-	(*AuthMethod)(nil),               // 10: sameoldchat.chat.v1.AuthMethod
-	(*ExternalIdentityRequest)(nil),  // 11: sameoldchat.chat.v1.ExternalIdentityRequest
-	(*ExternalIdentity)(nil),         // 12: sameoldchat.chat.v1.ExternalIdentity
+	(*TokenRecord)(nil),               // 0: sameoldchat.chat.v1.TokenRecord
+	(*AppTokenRecord)(nil),            // 1: sameoldchat.chat.v1.AppTokenRecord
+	(*AppInstallation)(nil),           // 2: sameoldchat.chat.v1.AppInstallation
+	(*AppInstallationRequest)(nil),    // 3: sameoldchat.chat.v1.AppInstallationRequest
+	(*AppInstallationsResponse)(nil),  // 4: sameoldchat.chat.v1.AppInstallationsResponse
+	(*SessionRecord)(nil),             // 5: sameoldchat.chat.v1.SessionRecord
+	(*TokenRequest)(nil),              // 6: sameoldchat.chat.v1.TokenRequest
+	(*AuthRevokeResponse)(nil),        // 7: sameoldchat.chat.v1.AuthRevokeResponse
+	(*CreateSessionRequest)(nil),      // 8: sameoldchat.chat.v1.CreateSessionRequest
+	(*AuthMethodRequest)(nil),         // 9: sameoldchat.chat.v1.AuthMethodRequest
+	(*AuthMethod)(nil),                // 10: sameoldchat.chat.v1.AuthMethod
+	(*ExternalIdentityRequest)(nil),   // 11: sameoldchat.chat.v1.ExternalIdentityRequest
+	(*ExternalIdentity)(nil),          // 12: sameoldchat.chat.v1.ExternalIdentity
+	(*RevokeOIDCSessionsRequest)(nil), // 13: sameoldchat.chat.v1.RevokeOIDCSessionsRequest
 }
 var file_sameoldchat_chat_v1_auth_proto_depIdxs = []int32{
 	2,  // 0: sameoldchat.chat.v1.AppInstallationRequest.installation:type_name -> sameoldchat.chat.v1.AppInstallation
@@ -937,20 +1032,22 @@ var file_sameoldchat_chat_v1_auth_proto_depIdxs = []int32{
 	9,  // 12: sameoldchat.chat.v1.AuthService.SetAuthMethod:input_type -> sameoldchat.chat.v1.AuthMethodRequest
 	11, // 13: sameoldchat.chat.v1.AuthService.GetExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
 	11, // 14: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:input_type -> sameoldchat.chat.v1.ExternalIdentityRequest
-	0,  // 15: sameoldchat.chat.v1.AuthService.LookupToken:output_type -> sameoldchat.chat.v1.TokenRecord
-	1,  // 16: sameoldchat.chat.v1.AuthService.LookupAppToken:output_type -> sameoldchat.chat.v1.AppTokenRecord
-	7,  // 17: sameoldchat.chat.v1.AuthService.CreateAppInstallation:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	4,  // 18: sameoldchat.chat.v1.AuthService.ListAppInstallations:output_type -> sameoldchat.chat.v1.AppInstallationsResponse
-	5,  // 19: sameoldchat.chat.v1.AuthService.LookupSession:output_type -> sameoldchat.chat.v1.SessionRecord
-	7,  // 20: sameoldchat.chat.v1.AuthService.RevokeSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	7,  // 21: sameoldchat.chat.v1.AuthService.RevokeToken:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	7,  // 22: sameoldchat.chat.v1.AuthService.CreateSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	10, // 23: sameoldchat.chat.v1.AuthService.GetAuthMethod:output_type -> sameoldchat.chat.v1.AuthMethod
-	7,  // 24: sameoldchat.chat.v1.AuthService.SetAuthMethod:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	12, // 25: sameoldchat.chat.v1.AuthService.GetExternalIdentity:output_type -> sameoldchat.chat.v1.ExternalIdentity
-	7,  // 26: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
-	15, // [15:27] is the sub-list for method output_type
-	3,  // [3:15] is the sub-list for method input_type
+	13, // 15: sameoldchat.chat.v1.AuthService.RevokeOIDCSessions:input_type -> sameoldchat.chat.v1.RevokeOIDCSessionsRequest
+	0,  // 16: sameoldchat.chat.v1.AuthService.LookupToken:output_type -> sameoldchat.chat.v1.TokenRecord
+	1,  // 17: sameoldchat.chat.v1.AuthService.LookupAppToken:output_type -> sameoldchat.chat.v1.AppTokenRecord
+	7,  // 18: sameoldchat.chat.v1.AuthService.CreateAppInstallation:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	4,  // 19: sameoldchat.chat.v1.AuthService.ListAppInstallations:output_type -> sameoldchat.chat.v1.AppInstallationsResponse
+	5,  // 20: sameoldchat.chat.v1.AuthService.LookupSession:output_type -> sameoldchat.chat.v1.SessionRecord
+	7,  // 21: sameoldchat.chat.v1.AuthService.RevokeSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	7,  // 22: sameoldchat.chat.v1.AuthService.RevokeToken:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	7,  // 23: sameoldchat.chat.v1.AuthService.CreateSession:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	10, // 24: sameoldchat.chat.v1.AuthService.GetAuthMethod:output_type -> sameoldchat.chat.v1.AuthMethod
+	7,  // 25: sameoldchat.chat.v1.AuthService.SetAuthMethod:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	12, // 26: sameoldchat.chat.v1.AuthService.GetExternalIdentity:output_type -> sameoldchat.chat.v1.ExternalIdentity
+	7,  // 27: sameoldchat.chat.v1.AuthService.CreateExternalIdentity:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	7,  // 28: sameoldchat.chat.v1.AuthService.RevokeOIDCSessions:output_type -> sameoldchat.chat.v1.AuthRevokeResponse
+	16, // [16:29] is the sub-list for method output_type
+	3,  // [3:16] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -967,7 +1064,7 @@ func file_sameoldchat_chat_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_auth_proto_rawDesc), len(file_sameoldchat_chat_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

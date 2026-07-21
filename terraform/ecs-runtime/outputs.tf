@@ -9,6 +9,7 @@ output "environment" {
     SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL = var.bootstrap_admin_email
     SAMEOLDCHAT_OIDC_CLIENT_ID        = var.oidc_client_id
     SAMEOLDCHAT_OIDC_ISSUER           = var.oidc_issuer
+    SAMEOLDCHAT_RELEASE_REVISION      = var.release_revision
   }
 }
 

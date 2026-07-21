@@ -20,8 +20,9 @@ Build SameOldChat, a multi-workspace chat application with:
 - dependency admission that selects the newest eligible stable release only
   after a mandatory 24-hour publication quarantine;
 - self-hosted deployment on ordinary Linux VMs in any cloud; and
-- managed-container deployment on AWS ECS/Fargate, Google Cloud Run, and Azure
-  Container Apps, subject to the persistence qualification rules.
+- managed-container deployment on Amazon Elastic Container Service (ECS) on
+  AWS Fargate, Google Cloud Run, and Azure Container Apps, subject to the
+  persistence qualification rules.
 
 The compatibility target is a pinned, reproducible contract. The archived
 Slack specifications alone do not describe all Slack behavior,
@@ -133,8 +134,19 @@ logout revoked the local session before redirecting through the provider's
 discovered end-session endpoint with an ID-token hint, client ID, and an exact
 return to SameOldChat's terminal signed-out page. Provider logout failures left
 the application signed out and were reported on that page. The signed
-back-channel receiver revoked every correlated local session when the provider
-initiated logout.
+back-channel receiver accepted the standard `sid` or `sub` correlation forms,
+rejected non-canonical token delivery and replayed `jti` values, and revoked
+only the correlated provider sessions. Logout-token replay state remained
+durable until expiry through the same SQLite/PostgreSQL store and generated
+gRPC boundary used by split-process deployments.
+
+Shauth qualification used the provider's exact pinned browser contract against
+real PostgreSQL, Ory Hydra, and two SameOldChat relying parties with distinct
+databases and origins. It covered direct and catalog entry, silent SSO,
+application-initiated and provider-initiated global logout, witness-session
+revocation, the one-time logout completion bridge, fail-closed anonymous
+access, verified identity and role display, immutable release identity, and
+validator credential isolation.
 
 Remote chat services preserved canonical store and context errors across the
 gRPC boundary, so first-login identity provisioning behaved the same in local
@@ -160,7 +172,8 @@ Exit criteria:
 - Preserve scheduled wake deadlines outside the hibernated database.
 - Add bounded request buffering and explicit overload behavior.
 - Implement the provider-neutral lifecycle driver and hosting drivers for Linux
-  VMs, AWS ECS/Fargate, Google Cloud Run plus companion database compute, and
+  VMs, Amazon ECS on AWS Fargate, Google Cloud Run plus companion database
+  compute, and
   Azure Container Apps plus any required companion database compute.
 - Publish deployment templates and qualification tests for each supported
   profile.

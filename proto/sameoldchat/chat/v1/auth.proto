@@ -84,6 +84,15 @@ message ExternalIdentity {
   string user_id = 4;
 }
 
+message RevokeOIDCSessionsRequest {
+  string workspace_id = 1;
+  string provider = 2;
+  string subject = 3;
+  string sid = 4;
+  string token_id = 5;
+  string expires_at = 6;
+}
+
 service AuthService {
   rpc LookupToken(TokenRequest) returns (TokenRecord);
   rpc LookupAppToken(TokenRequest) returns (AppTokenRecord);
@@ -97,4 +106,5 @@ service AuthService {
   rpc SetAuthMethod(AuthMethodRequest) returns (AuthRevokeResponse);
   rpc GetExternalIdentity(ExternalIdentityRequest) returns (ExternalIdentity);
   rpc CreateExternalIdentity(ExternalIdentityRequest) returns (AuthRevokeResponse);
+  rpc RevokeOIDCSessions(RevokeOIDCSessionsRequest) returns (AuthRevokeResponse);
 }

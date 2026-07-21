@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"sort"
@@ -92,8 +94,8 @@ func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, iss
 	clientID = strings.TrimSpace(clientID)
 	clientSecret = strings.TrimSpace(clientSecret)
 	parsed, err := url.Parse(issuer)
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return ProviderConfig{}, errors.New("OpenID Connect issuer must be an absolute HTTPS URL")
+	if err != nil || !validAuthorizationURL(parsed) || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return ProviderConfig{}, errors.New("OpenID Connect issuer must be an absolute HTTPS URL, except for an explicit loopback development coordinate")
 	}
 	if clientID == "" || clientSecret == "" {
 		return ProviderConfig{}, errors.New("OpenID Connect client ID and secret are required")
@@ -123,14 +125,14 @@ func DiscoverOpenIDConnectProvider(ctx context.Context, client *http.Client, iss
 	}
 	for label, endpoint := range map[string]string{"authorization": document.AuthorizationEndpoint, "token": document.TokenEndpoint, "userinfo": document.UserInfoEndpoint, "JSON Web Key Set": document.JWKSURI} {
 		parsedEndpoint, parseErr := url.Parse(strings.TrimSpace(endpoint))
-		if parseErr != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Host == "" {
-			return ProviderConfig{}, fmt.Errorf("OpenID Connect %s endpoint must be an absolute HTTPS URL", label)
+		if parseErr != nil || !validAuthorizationURL(parsedEndpoint) {
+			return ProviderConfig{}, fmt.Errorf("OpenID Connect %s endpoint must be an absolute HTTPS URL, except for an explicit loopback development coordinate", label)
 		}
 	}
 	if document.EndSessionEndpoint != "" {
 		parsedEndpoint, parseErr := url.Parse(strings.TrimSpace(document.EndSessionEndpoint))
-		if parseErr != nil || parsedEndpoint.Scheme != "https" || parsedEndpoint.Host == "" || parsedEndpoint.User != nil || parsedEndpoint.Fragment != "" {
-			return ProviderConfig{}, errors.New("OpenID Connect end-session endpoint must be an absolute HTTPS URL")
+		if parseErr != nil || !validAuthorizationURL(parsedEndpoint) {
+			return ProviderConfig{}, errors.New("OpenID Connect end-session endpoint must be an absolute HTTPS URL, except for an explicit loopback development coordinate")
 		}
 	}
 	keySet := oidc.NewRemoteKeySet(oidc.ClientContext(ctx, client), document.JWKSURI)
@@ -143,8 +145,8 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		return LoginHandler{}, errors.New("login requires service, workspace, lookup user, public URL, and a 32-byte state key")
 	}
 	base, err := url.Parse(strings.TrimRight(publicURL, "/"))
-	if err != nil || base.Scheme != "https" || base.Host == "" {
-		return LoginHandler{}, errors.New("login public URL must be an absolute HTTPS URL")
+	if err != nil || !validAuthorizationURL(base) || base.RawQuery != "" || base.Fragment != "" {
+		return LoginHandler{}, errors.New("login public URL must be an absolute HTTPS URL, except for an explicit loopback development coordinate")
 	}
 	cookieDomain = strings.TrimSpace(cookieDomain)
 	if err := auth.ValidateSessionCookieDomain(cookieDomain); err != nil {
@@ -175,8 +177,8 @@ func NewLoginHandler(service chatapi.Service, workspace domain.WorkspaceID, look
 		}
 		if provider.EndSessionURL != "" {
 			endpoint, parseErr := url.Parse(provider.EndSessionURL)
-			if parseErr != nil || endpoint.Scheme != "https" || endpoint.Host == "" || endpoint.User != nil || endpoint.Fragment != "" {
-				return LoginHandler{}, fmt.Errorf("provider %q end-session endpoint must be an absolute HTTPS URL", provider.Name)
+			if parseErr != nil || !validAuthorizationURL(endpoint) {
+				return LoginHandler{}, fmt.Errorf("provider %q end-session endpoint must be an absolute HTTPS URL, except for an explicit loopback development coordinate", provider.Name)
 			}
 		}
 		normalizedScopes, err := normalizeScopes(provider.Scopes)
@@ -224,7 +226,43 @@ func (h LoginHandler) Register(mux *http.ServeMux) {
 	}
 	if provider, ok := h.providers["oidc"]; ok && provider.Issuer != "" {
 		mux.HandleFunc("POST /auth/oidc/backchannel-logout", h.backchannelLogout)
+		mux.HandleFunc("GET /auth/shauth/logout/complete", h.providerLogoutComplete)
 	}
+}
+
+func validAuthorizationURL(value *url.URL) bool {
+	if value == nil || value.Host == "" || value.User != nil || value.Fragment != "" {
+		return false
+	}
+	if value.Scheme == "https" {
+		return true
+	}
+	host := strings.Trim(strings.ToLower(value.Hostname()), "[]")
+	address := net.ParseIP(host)
+	return value.Scheme == "http" && (host == "localhost" || strings.HasSuffix(host, ".localhost") || address != nil && address.IsLoopback())
+}
+
+func (h LoginHandler) hasOpenIDConnectProvider() bool {
+	provider, ok := h.providers["oidc"]
+	return ok && provider.Issuer != ""
+}
+
+func (h LoginHandler) providerLogoutComplete(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	provider, ok := h.providers["oidc"]
+	if !ok || provider.Issuer == "" {
+		http.Error(w, "Shauth logout completion is unavailable", http.StatusNotFound)
+		return
+	}
+	issuer, err := url.Parse(provider.Issuer)
+	if err != nil {
+		http.Error(w, "Shauth logout completion is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	target := issuer.ResolveReference(&url.URL{Path: "/oauth/logout/complete"})
+	http.Redirect(w, r, target.String(), http.StatusSeeOther)
 }
 
 func signedOut(w http.ResponseWriter, r *http.Request) {
@@ -248,69 +286,71 @@ type backchannelLogoutClaims struct {
 	Expires  int64                      `json:"exp"`
 	JWTID    string                     `json:"jti"`
 	Nonce    string                     `json:"nonce"`
+	Subject  string                     `json:"sub"`
 	SID      string                     `json:"sid"`
 }
 
-func (h LoginHandler) verifyBackchannelLogout(ctx context.Context, raw string) (*oidc.IDToken, error) {
+func (h LoginHandler) verifyBackchannelLogout(ctx context.Context, raw string) (backchannelLogoutClaims, error) {
 	providerConfig := h.providers["oidc"]
 	verifier := providerConfig.verifier
 	if verifier == nil {
 		ctx = oidc.ClientContext(ctx, h.client)
 		provider, err := oidc.NewProvider(ctx, providerConfig.Issuer)
 		if err != nil {
-			return nil, fmt.Errorf("discover OpenID Connect provider: %w", err)
+			return backchannelLogoutClaims{}, fmt.Errorf("discover OpenID Connect provider: %w", err)
 		}
 		verifier = provider.Verifier(&oidc.Config{ClientID: providerConfig.ClientID})
 	}
 	token, err := verifier.Verify(ctx, raw)
 	if err != nil {
-		return nil, fmt.Errorf("verify logout token: %w", err)
+		return backchannelLogoutClaims{}, fmt.Errorf("verify logout token: %w", err)
 	}
 	var claims backchannelLogoutClaims
 	if err := token.Claims(&claims); err != nil {
-		return nil, fmt.Errorf("decode logout token: %w", err)
+		return backchannelLogoutClaims{}, fmt.Errorf("decode logout token: %w", err)
 	}
+	claims.Subject = token.Subject
 	event, eventPresent := claims.Events[backchannelLogoutEvent]
 	var eventValue map[string]any
 	if eventPresent {
-		if err := json.Unmarshal(event, &eventValue); err != nil || eventValue == nil {
+		if err := json.Unmarshal(event, &eventValue); err != nil || eventValue == nil || len(eventValue) != 0 {
 			eventPresent = false
 		}
 	}
 	now := time.Now().UTC().Unix()
-	if token.Subject == "" || claims.IssuedAt == 0 || claims.Expires == 0 || claims.JWTID == "" || claims.Nonce != "" || !eventPresent || claims.IssuedAt > now+60 || claims.IssuedAt < now-600 {
-		return nil, errors.New("logout token claims are invalid")
+	if (claims.Subject == "" && claims.SID == "") || claims.IssuedAt == 0 || claims.Expires == 0 || claims.JWTID == "" || claims.Nonce != "" || !eventPresent || claims.IssuedAt > now+60 || claims.IssuedAt < now-600 {
+		return backchannelLogoutClaims{}, errors.New("logout token claims are invalid")
 	}
-	return token, nil
+	return claims, nil
 }
 
 func (h LoginHandler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(contentType, "application/x-www-form-urlencoded") {
+		http.Error(w, "logout token media type is unsupported", http.StatusUnsupportedMediaType)
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxBackchannelLogoutRequest)
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "logout token is invalid", http.StatusBadRequest)
 		return
 	}
-	values := r.Form["logout_token"]
+	if len(r.URL.Query()["logout_token"]) != 0 {
+		http.Error(w, "logout token is invalid", http.StatusBadRequest)
+		return
+	}
+	values := r.PostForm["logout_token"]
 	if len(values) != 1 {
 		http.Error(w, "logout token is invalid", http.StatusBadRequest)
 		return
 	}
-	token, err := h.verifyBackchannelLogout(r.Context(), strings.TrimSpace(values[0]))
+	claims, err := h.verifyBackchannelLogout(r.Context(), strings.TrimSpace(values[0]))
 	if err != nil {
 		http.Error(w, "logout token is invalid", http.StatusBadRequest)
 		return
 	}
-	identity, err := h.service.GetExternalIdentity(r.Context(), h.workspace, "oidc", token.Subject)
-	if errors.Is(err, store.ErrNotFound) {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-	if err != nil {
-		http.Error(w, "logout token could not be applied", http.StatusBadRequest)
-		return
-	}
-	if err := h.service.ResetUserSessions(r.Context(), h.workspace, h.lookupUser, identity.UserID); err != nil && !errors.Is(err, store.ErrNotFound) {
+	if err := h.service.RevokeOIDCSessions(r.Context(), h.workspace, "oidc", claims.Subject, claims.SID, claims.JWTID, time.Unix(claims.Expires, 0)); err != nil {
 		http.Error(w, "logout token could not be applied", http.StatusBadRequest)
 		return
 	}
@@ -348,7 +388,7 @@ func providerLabel(name string) string {
 	case "entra":
 		return "Microsoft Entra ID"
 	case "oidc":
-		return "Single Sign-On"
+		return "Shauth"
 	default:
 		return name
 	}
@@ -641,7 +681,7 @@ func (h LoginHandler) logoutRedirectURL(ctx context.Context, sessionToken string
 	query := endpoint.Query()
 	query.Set("id_token_hint", record.OIDCIDToken)
 	query.Set("client_id", provider.ClientID)
-	query.Set("post_logout_redirect_uri", h.publicURL+"/signed-out")
+	query.Set("post_logout_redirect_uri", h.publicURL+"/auth/shauth/logout/complete")
 	endpoint.RawQuery = query.Encode()
 	return endpoint.String(), nil
 }

@@ -130,6 +130,46 @@ func TestSQLiteSessionPreservesOIDCLogoutMetadata(t *testing.T) {
 	}
 }
 
+func TestSQLiteOIDCLogoutRevokesOnlyTheCorrelatedProviderSessionAndRejectsReplay(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:oidc-provider-logout?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "Alice"}); err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := time.Now().UTC().Add(time.Hour)
+	for token, sid := range map[string]string{"matched": "provider-session", "unrelated": "other-session"} {
+		if err := s.CreateSession(ctx, token, domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{"openid"}, ExpiresAt: expiresAt, OIDCProvider: "oidc", OIDCSubject: "subject", OIDCSID: sid}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logoutExpiry := time.Now().UTC().Add(time.Minute)
+	event := events.Event{ID: "E-oidc-logout", WorkspaceID: "T1", Topic: "user.sessions_revoked_by_oidc", Payload: "oidc", CreatedAt: time.Now().UTC()}
+	if err := s.RevokeOIDCSessions(ctx, "T1", "oidc", "", "", "unscoped-token-id", logoutExpiry, event); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("unscoped logout error=%v, want invalid argument", err)
+	}
+	if err := s.RevokeOIDCSessions(ctx, "T1", "oidc", "", "provider-session", "logout-token-id", logoutExpiry, event); err != nil {
+		t.Fatal(err)
+	}
+	matched, err := s.LookupSession(ctx, "matched")
+	if err != nil || !matched.Revoked {
+		t.Fatalf("matched session=%+v err=%v", matched, err)
+	}
+	unrelated, err := s.LookupSession(ctx, "unrelated")
+	if err != nil || unrelated.Revoked {
+		t.Fatalf("unrelated session=%+v err=%v", unrelated, err)
+	}
+	if err := s.RevokeOIDCSessions(ctx, "T1", "oidc", "", "provider-session", "logout-token-id", logoutExpiry, event); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("replayed logout token error=%v, want conflict", err)
+	}
+}
+
 func TestSQLiteViewLifecycleIsDurable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:view-lifecycle?mode=memory&cache=shared")
