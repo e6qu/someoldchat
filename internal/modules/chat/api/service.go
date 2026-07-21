@@ -30,6 +30,7 @@ type Service interface {
 	SetAuthMethod(context.Context, domain.AuthMethod) error
 	GetExternalIdentity(context.Context, domain.WorkspaceID, string, string) (domain.ExternalIdentity, error)
 	CreateExternalIdentity(context.Context, domain.ExternalIdentity) error
+	RevokeOIDCSessions(context.Context, domain.WorkspaceID, string, string, string, string, time.Time) error
 	ResetUserSessions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) error
 	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, domain.MessageTimestamp, string) (domain.Message, error)

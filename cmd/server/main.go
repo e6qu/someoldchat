@@ -29,6 +29,8 @@ import (
 	"google.golang.org/grpc/credentials"
 )
 
+var releaseRevision = "development"
+
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	chatMode := flag.String("chat-mode", "", "chat composition: local or grpc (required)")
@@ -52,7 +54,7 @@ func main() {
 	authWorkspace := flag.String("auth-workspace", "", "workspace for external authorization (required when enabled)")
 	authLookupUser := flag.String("auth-lookup-user", "", "existing user used to authorize external identity lookup (required when enabled)")
 	authPublicURL := flag.String("auth-public-url", "", "public HTTPS URL used for authorization callbacks")
-	authCookieDomain := flag.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "shared parent DNS domain for browser single sign-on across applications")
+	authCookieDomain := flag.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "optional parent DNS domain for SameOldChat session cookies")
 	authStateKeyHex := flag.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
 	bootstrapAdminEmail := flag.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
 	appToken := flag.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
@@ -69,6 +71,7 @@ func main() {
 	oidcIssuer := flag.String("oidc-issuer", os.Getenv("SAMEOLDCHAT_OIDC_ISSUER"), "OpenID Connect issuer URL")
 	oidcClientID := flag.String("oidc-client-id", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_ID"), "OpenID Connect client ID")
 	oidcClientSecret := flag.String("oidc-client-secret", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_SECRET"), "OpenID Connect client secret")
+	release := flag.String("release-revision", releaseRevisionDefault(), "immutable application commit or image digest exposed to Shauth validation")
 	flag.Parse()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	resolvedDSN, err := resolveDatabaseDSN(*chatMode, *dsn)
@@ -302,6 +305,12 @@ func main() {
 			os.Exit(1)
 		}
 		webHandler.Login = &loginHandler
+		if *oidcIssuer != "" {
+			if releaseErr := webHandler.SetReleaseRevision(*release); releaseErr != nil {
+				logger.Error("configure immutable release identity", "error", releaseErr)
+				os.Exit(2)
+			}
+		}
 	}
 	webHandler.Register(mux)
 	sseHandler, err := realtime.NewHandler(chatService, "Tdev", webAuthenticator)
@@ -345,6 +354,13 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+func releaseRevisionDefault() string {
+	if configured := strings.TrimSpace(os.Getenv("SAMEOLDCHAT_RELEASE_REVISION")); configured != "" {
+		return configured
+	}
+	return releaseRevision
 }
 
 func databaseDSNDefault() string {

@@ -78,7 +78,7 @@ func TestBrowserAuthenticatorUsesPersistedScopes(t *testing.T) {
 	}
 }
 
-func TestSessionCookieDomainIsExplicitAndShared(t *testing.T) {
+func TestSessionCookieDomainIsExplicitAndScoped(t *testing.T) {
 	for _, domain := range []string{"example.com", "apps.example.com"} {
 		if err := ValidateSessionCookieDomain(domain); err != nil {
 			t.Fatalf("validate %q: %v", domain, err)

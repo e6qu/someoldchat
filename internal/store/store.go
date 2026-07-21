@@ -36,6 +36,7 @@ type Store interface {
 	GetExternalIdentity(context.Context, domain.WorkspaceID, string, string) (domain.ExternalIdentity, error)
 	CreateExternalIdentity(context.Context, domain.ExternalIdentity) error
 	RevokeSession(context.Context, string) error
+	RevokeOIDCSessions(context.Context, domain.WorkspaceID, string, string, string, string, time.Time, events.Event) error
 	RevokeUserSessions(context.Context, domain.WorkspaceID, domain.UserID, events.Event) error
 	RevokeToken(context.Context, string) error
 	RevokeAppToken(context.Context, string) error

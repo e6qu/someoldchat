@@ -20,7 +20,7 @@ hibernation, wake, fencing, and recovery tests.
 | Profile | Stateless tiers | SQLite | PostgreSQL | dqlite | Cold database |
 |---|---|---|---|---|---|
 | Linux VM | Native | Recommended for one VM | Supported with a durable PostgreSQL service | Supported on 3+ VMs | Snapshot, then stop units/VMs |
-| AWS ECS/Fargate | Native | Conditional single-owner | Supported when PostgreSQL is external to ECS | Targeted via stable ECS services | S3 snapshot, desired count 0 |
+| Amazon Elastic Container Service (ECS) on AWS Fargate | Native | Conditional single-owner | Supported when PostgreSQL is external to ECS | Targeted via stable ECS services | S3 snapshot, desired count 0 |
 | Google Cloud Run | Native | Not authoritative on local disk | Use an external PostgreSQL service | Companion compute required | Cloud Storage snapshot, compute 0 |
 | Azure Container Apps | Native | Conditional single-owner | Use an external PostgreSQL service | Conditional raw-TCP profile; VM profile is a separate qualified option | Blob snapshot, replicas/VMs 0 |
 
@@ -112,7 +112,7 @@ virtualization when it is given compatible object storage and lifecycle hooks.
 
 ## Managed-container notes
 
-AWS ECS services expose an explicit desired task count and can be reduced to
+Amazon ECS services expose an explicit desired task count and can be reduced to
 zero. Fargate tasks provide ephemeral storage and ECS supports Cloud Map service
 discovery, making a lifecycle-controlled temporary dqlite cluster a target for
 qualification.
@@ -161,6 +161,14 @@ three references:
   manifest; and
 - `ghcr.io/e6qu/someoldchat:<sha12>-arm64` is a direct Linux arm64 image
   manifest.
+
+Every application image embeds the full immutable commit in the server binary
+and exposes it through `SAMEOLDCHAT_RELEASE_REVISION` for Shauth validation. A
+manual build must supply the same immutable coordinate explicitly:
+
+```sh
+docker build --build-arg RELEASE_REVISION="$(git rev-parse HEAD)" .
+```
 
 BuildKit registry attachments are disabled on the publishing build so the
 architecture-specific references remain direct image manifests for runtimes

@@ -3,12 +3,14 @@ FROM --platform=$BUILDPLATFORM docker.io/library/golang:1.26-bookworm@sha256:1ec
 
 ARG TARGETOS
 ARG TARGETARCH
+ARG RELEASE_REVISION
 
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags='-s -w' -o /out/sameoldchat ./cmd/server
+RUN test -n "$RELEASE_REVISION" && \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags="-s -w -X main.releaseRevision=$RELEASE_REVISION" -o /out/sameoldchat ./cmd/server
 
 FROM gcr.io/distroless/static-debian12:nonroot@sha256:aef9602f8710ec12bde19d593fed1f76c708531bb7aba205110f1029786ead7b
 

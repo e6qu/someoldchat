@@ -66,7 +66,7 @@ func TestHTMXPostMessage(t *testing.T) {
 	addBrowserCookies(index)
 	indexResult := httptest.NewRecorder()
 	mux.ServeHTTP(indexResult, index)
-	if indexResult.Code != http.StatusOK || !strings.Contains(indexResult.Body.String(), "general") || !strings.Contains(indexResult.Body.String(), "hello") || !strings.Contains(indexResult.Body.String(), "unread messages") || !strings.Contains(indexResult.Body.String(), "theme-toggle") || !strings.Contains(indexResult.Body.String(), "data-theme=\"light\"") || !strings.Contains(indexResult.Body.String(), "HX-Request") || !strings.Contains(indexResult.Body.String(), "last_event_id") || !strings.Contains(indexResult.Body.String(), "sessionStorage") || strings.Contains(indexResult.Body.String(), "const events=new EventSource") || !strings.Contains(indexResult.Body.String(), `method="get" action="/app/search"`) || !strings.Contains(indexResult.Body.String(), `name="q"`) {
+	if indexResult.Code != http.StatusOK || !strings.Contains(indexResult.Body.String(), "general") || !strings.Contains(indexResult.Body.String(), "hello") || !strings.Contains(indexResult.Body.String(), "unread messages") || !strings.Contains(indexResult.Body.String(), "theme-toggle") || !strings.Contains(indexResult.Body.String(), "data-theme=\"light\"") || !strings.Contains(indexResult.Body.String(), "HX-Request") || !strings.Contains(indexResult.Body.String(), "last_event_id") || !strings.Contains(indexResult.Body.String(), "sessionStorage") || strings.Contains(indexResult.Body.String(), "const events=new EventSource") || !strings.Contains(indexResult.Body.String(), `method="get" action="/app/search"`) || !strings.Contains(indexResult.Body.String(), `name="q"`) || strings.Contains(indexResult.Body.String(), `href="/me"`) {
 		t.Fatalf("index status=%d body=%s", indexResult.Code, indexResult.Body)
 	}
 	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "C1"); err != nil {
@@ -111,6 +111,88 @@ func TestApplicationRedirectsUnauthenticatedBrowserToLogin(t *testing.T) {
 	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app", nil))
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login" {
 		t.Fatalf("unauthenticated application response = %d location=%q", response.Code, response.Header().Get("Location"))
+	}
+}
+
+func TestApplicationStartsShauthForUnauthenticatedDirectEntry(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	authenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store}, authenticator, store, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "oidc", Issuer: "https://auth.example.test", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid", "profile", "email"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/app", nil))
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/auth/oidc" {
+		t.Fatalf("unauthenticated application response = %d location=%q", response.Code, response.Header().Get("Location"))
+	}
+}
+
+func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "developer@example.test", Name: "developer"})
+	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	if err := store.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: store}, authenticator, store, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{Name: "oidc", Issuer: "https://auth.example.test", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid", "profile", "email"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	if err := handler.SetReleaseRevision("0123456789abcdef0123456789abcdef01234567"); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	for _, path := range []string{"/auth/validation", "/me"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		body := response.Body.String()
+		for _, expected := range []string{`data-testid="validation-username">developer`, `data-testid="validation-email">developer@example.test`, `data-testid="validation-role">developer`, `data-testid="validation-release">0123456789abcdef0123456789abcdef01234567`, `aria-label="Avatar for developer">D</span>`, `action="/logout"`, `>Sign out</button>`} {
+			if response.Code != http.StatusOK || !strings.Contains(body, expected) {
+				t.Fatalf("%s status=%d missing %q body=%s", path, response.Code, expected, body)
+			}
+		}
+	}
+	applicationRequest := httptest.NewRequest(http.MethodGet, "/app", nil)
+	applicationRequest.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	applicationResponse := httptest.NewRecorder()
+	mux.ServeHTTP(applicationResponse, applicationRequest)
+	if applicationResponse.Code != http.StatusOK || !strings.Contains(applicationResponse.Body.String(), `href="/me" aria-label="My profile"`) {
+		t.Fatalf("authenticated application status=%d body=%s", applicationResponse.Code, applicationResponse.Body)
+	}
+	anonymous := httptest.NewRecorder()
+	mux.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/auth/validation", nil))
+	if anonymous.Code != http.StatusSeeOther || anonymous.Header().Get("Location") != "/signed-out" {
+		t.Fatalf("anonymous validation status=%d location=%q", anonymous.Code, anonymous.Header().Get("Location"))
+	}
+	if err := handler.SetReleaseRevision("latest"); err == nil {
+		t.Fatal("mutable release revision was accepted")
 	}
 }
 

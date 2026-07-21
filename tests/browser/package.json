@@ -4,6 +4,9 @@
   "scripts": {
     "test": "playwright test"
   },
+  "allowScripts": {
+    "fsevents@2.3.2": true
+  },
   "devDependencies": {
     "@playwright/test": "1.61.1"
   }

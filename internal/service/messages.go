@@ -196,6 +196,21 @@ func (m Messages) CreateExternalIdentity(ctx context.Context, identity domain.Ex
 	return m.Store.CreateExternalIdentity(ctx, identity)
 }
 
+func (m Messages) RevokeOIDCSessions(ctx context.Context, workspaceID domain.WorkspaceID, provider, subject, sid, tokenID string, expiresAt time.Time) error {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	subject = strings.TrimSpace(subject)
+	sid = strings.TrimSpace(sid)
+	tokenID = strings.TrimSpace(tokenID)
+	if workspaceID == "" || provider == "" || (subject == "" && sid == "") || tokenID == "" || !expiresAt.After(time.Now().UTC()) {
+		return store.ErrInvalidArgument
+	}
+	eventID, err := domain.NewEventID()
+	if err != nil {
+		return err
+	}
+	return m.Store.RevokeOIDCSessions(ctx, workspaceID, provider, subject, sid, tokenID, expiresAt, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.sessions_revoked_by_oidc", Payload: provider, CreatedAt: time.Now().UTC()})
+}
+
 func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType string, size int64, source io.Reader) (domain.File, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.File{}, err

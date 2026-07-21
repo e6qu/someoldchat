@@ -22,6 +22,7 @@ expect_count 1 '          - platform: linux/arm64'
 expect_count 1 '  IMAGE: ghcr.io/e6qu/someoldchat'
 expect_count 3 "        run: echo \"short_sha=${gha}{GITHUB_SHA:0:12}\" >> \"${gha}GITHUB_OUTPUT\""
 expect_count 1 "          tags: ${gha}{{ env.IMAGE }}:${gha}{{ steps.version.outputs.short_sha }}-${gha}{{ matrix.arch.suffix }}"
+expect_count 2 "          build-args: RELEASE_REVISION=${gha}{{ github.sha }}"
 expect_count 2 '          provenance: false'
 expect_count 1 '          sbom: false'
 expect_count 1 '          sbom: true'

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -242,6 +243,14 @@ func TestAuthSeedingDoesNotOverwriteDurableState(t *testing.T) {
 	session, err = s.LookupSession(context.Background(), "session")
 	if err != nil || !session.Revoked {
 		t.Fatalf("revoked session=%+v err=%v", session, err)
+	}
+}
+
+func TestOIDCLogoutRejectsAnUnscopedRevocation(t *testing.T) {
+	s := New()
+	err := s.RevokeOIDCSessions(context.Background(), "T1", "oidc", "", "", "logout-token", time.Now().UTC().Add(time.Minute), events.Event{})
+	if !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("unscoped OpenID Connect logout error=%v, want invalid argument", err)
 	}
 }
 

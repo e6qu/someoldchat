@@ -773,6 +773,17 @@ func (r Remote) CreateExternalIdentity(ctx context.Context, value domain.Externa
 	return nil
 }
 
+func (r Remote) RevokeOIDCSessions(ctx context.Context, workspaceID domain.WorkspaceID, provider, subject, sid, tokenID string, expiresAt time.Time) error {
+	out, err := r.auth.RevokeOIDCSessions(ctx, &chatv1.RevokeOIDCSessionsRequest{WorkspaceId: string(workspaceID), Provider: provider, Subject: subject, Sid: sid, TokenId: tokenID, ExpiresAt: expiresAt.UTC().Format(time.RFC3339Nano)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed OpenID Connect session revocation was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) RevokeSession(ctx context.Context, token string) error {
 	in := &chatv1.TokenRequest{Token: token}
 	out, err := r.auth.RevokeSession(ctx, in)
@@ -3139,6 +3150,20 @@ func (s *Server) CreateExternalIdentity(ctx context.Context, input *chatv1.Exter
 		return nil, status.Error(codes.InvalidArgument, "external identity is incomplete")
 	}
 	if err := s.implementation.CreateExternalIdentity(ctx, domain.ExternalIdentity{WorkspaceID: domain.WorkspaceID(input.GetWorkspaceId()), Provider: input.GetProvider(), Subject: input.GetSubject(), UserID: domain.UserID(input.GetUserId())}); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AuthRevokeResponse{Ok: true}, nil
+}
+
+func (s *Server) RevokeOIDCSessions(ctx context.Context, input *chatv1.RevokeOIDCSessionsRequest) (*chatv1.AuthRevokeResponse, error) {
+	if input == nil || input.GetWorkspaceId() == "" || input.GetProvider() == "" || (input.GetSubject() == "" && input.GetSid() == "") || input.GetTokenId() == "" || input.GetExpiresAt() == "" {
+		return nil, status.Error(codes.InvalidArgument, "OpenID Connect session revocation is incomplete")
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, input.GetExpiresAt())
+	if err != nil {
+		return nil, status.Error(codes.InvalidArgument, "OpenID Connect logout token expiry is invalid")
+	}
+	if err := s.implementation.RevokeOIDCSessions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetProvider(), input.GetSubject(), input.GetSid(), input.GetTokenId(), expiresAt); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.AuthRevokeResponse{Ok: true}, nil
