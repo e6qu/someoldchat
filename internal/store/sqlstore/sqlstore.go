@@ -662,22 +662,30 @@ func sqliteBusy(err error) bool {
 
 // underContention runs a write that may lose a race for the engine's write lock.
 //
-// SQLite absorbs contention inside the driver through busy_timeout, so a
-// concurrent writer waits. The replicated profile has no equivalent: it reports
-// the contention to the caller, so a write that would simply have waited on one
-// profile fails on another — the same operation, a different answer per
-// deployment. Retrying with a short backoff gives every profile the behaviour
-// SQLite already had.
+// SQLite absorbs contention inside the driver: busy_timeout makes a losing
+// writer wait up to requiredBusyTimeout before failing. The replicated profile
+// has no equivalent — it reports the contention to the caller — so a write that
+// would simply have waited on one profile failed on another. That is the same
+// operation answering differently per deployment.
 //
-// The bound is deliberate. Contention is transient by definition, so an
-// operation that keeps losing is reporting something other than contention and
-// must surface rather than spin.
+// The budget is deliberately the SAME as the busy timeout the SQLite profiles
+// are configured with, so the two profiles wait equally long before giving up.
+// An earlier version of this used a handful of short retries, which is not the
+// behaviour SQLite has: it exhausted roughly a twenty-fifth of the timeout and
+// then reported contention that SQLite would have waited out.
+//
+// The budget is bounded rather than unlimited because contention is transient by
+// definition: an operation still losing after the full timeout is reporting
+// something other than contention and must surface rather than spin.
 func underContention(ctx context.Context, attempt func() error) error {
-	const attempts = 8
+	deadline := time.Now().Add(requiredBusyTimeout * time.Millisecond)
 	delay := time.Millisecond
 	var err error
-	for try := 0; try < attempts; try++ {
+	for {
 		if err = attempt(); err == nil || !sqliteBusy(err) {
+			return err
+		}
+		if !time.Now().Add(delay).Before(deadline) {
 			return err
 		}
 		select {
@@ -685,11 +693,10 @@ func underContention(ctx context.Context, attempt func() error) error {
 			return ctx.Err()
 		case <-time.After(delay):
 		}
-		if delay < 64*time.Millisecond {
+		if delay < 50*time.Millisecond {
 			delay *= 2
 		}
 	}
-	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }
