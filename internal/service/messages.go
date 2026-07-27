@@ -2041,6 +2041,17 @@ func (m Messages) ConversationMembers(ctx context.Context, workspaceID domain.Wo
 	return m.Store.ListConversationMembers(ctx, conversationID, request)
 }
 
+// IsConversationMember reports the mutation authority the current user has in
+// a conversation they may read. A public channel deliberately remains readable
+// before joining it; callers need this separate fact so they do not advertise
+// posting, reactions, pins, or unread state that the service will refuse.
+func (m Messages) IsConversationMember(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (bool, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return false, err
+	}
+	return m.Store.IsConversationMember(ctx, conversationID, userID)
+}
+
 func (m Messages) WorkspaceInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.Workspace, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Workspace{}, err
@@ -2288,7 +2299,11 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	event, err := conversationEvent(workspaceID, "conversation.member_added", conversationID)
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"conversation.member_added",
+		events.String("channel_id", string(conversationID)),
+		events.String("user_id", string(userID)),
+	), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
 	}

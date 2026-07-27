@@ -2509,6 +2509,43 @@ func TestLeavePublicConversation(t *testing.T) {
 	}
 }
 
+// Public-channel history is visible to a workspace member before joining, but
+// chat.postMessage is not. This exercises the complete Slack-facing recovery
+// path instead of only checking join and post independently.
+func TestJoinRecoversPostOutsidePublicConversation(t *testing.T) {
+	handler := testHandler()
+	call := func(path, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+
+	left := call("/api/conversations.leave", "channel=C1")
+	if left.Code != http.StatusOK || !strings.Contains(left.Body.String(), `"ok":true`) {
+		t.Fatalf("leave status=%d body=%s", left.Code, left.Body)
+	}
+	history := call("/api/conversations.history", "channel=C1")
+	if history.Code != http.StatusOK || !strings.Contains(history.Body.String(), `"ok":true`) {
+		t.Fatalf("public history status=%d body=%s", history.Code, history.Body)
+	}
+	refused := call("/api/chat.postMessage", "channel=C1&text=before+joining")
+	if refused.Code != http.StatusOK || !strings.Contains(refused.Body.String(), `"error":"not_in_channel"`) {
+		t.Fatalf("post before join status=%d body=%s", refused.Code, refused.Body)
+	}
+	joined := call("/api/conversations.join", "channel=C1")
+	if joined.Code != http.StatusOK || !strings.Contains(joined.Body.String(), `"ok":true`) {
+		t.Fatalf("join status=%d body=%s", joined.Code, joined.Body)
+	}
+	posted := call("/api/chat.postMessage", "channel=C1&text=after+joining")
+	if posted.Code != http.StatusOK || !strings.Contains(posted.Body.String(), `"ok":true`) || !strings.Contains(posted.Body.String(), `"after joining"`) {
+		t.Fatalf("post after join status=%d body=%s", posted.Code, posted.Body)
+	}
+}
+
 func TestMarkConversation(t *testing.T) {
 	handler := testHandler()
 	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=hello"))

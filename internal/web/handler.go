@@ -118,8 +118,10 @@ type messageList struct {
 	Messages    []messageView
 	ChannelName string
 	CSRFToken   string
+	IsMember    bool
 	CanReact    bool
 	CanPin      bool
+	CanReply    bool
 }
 
 type messageView struct {
@@ -164,10 +166,16 @@ type pageData struct {
 	MoreChannelsURL   string
 	Channel           string
 	ChannelName       string
+	ChannelPrefix     string
 	ChannelMeta       string
+	WorkspaceName     string
 	CSRFToken         string
 	ShowProfile       bool
 	ShowAdmin         bool
+	IsMember          bool
+	CanPost           bool
+	CanJoin           bool
+	JoinURL           string
 	Username          string
 	UserInitial       string
 	OlderURL          string
@@ -375,12 +383,245 @@ const pageStyle = `<style>
 }
 </style>`
 
-const messagesPartial = `{{define "messages"}}{{range $message := .Messages}}<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}"><div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div><div class="message-body"><div class="message-head"><span class="author">{{$message.AuthorName}}</span><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}</div><p class="message-text">{{$message.Text}}</p>{{if $message.Reactions}}<ul class="reactions">{{range $reaction := $message.Reactions}}<li>{{if $.CanReact}}<form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="name" value="{{$reaction.Name}}"><button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></button></form>{{else}}<span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></span>{{end}}</li>{{end}}</ul>{{end}}<div class="message-actions"><a href="{{$message.ReplyURL}}">Reply in thread</a>{{if $.CanReact}}<form class="inline-form" aria-label="Add reaction" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="reaction-{{$message.ID}}">Add a reaction to the message from {{$message.AuthorName}}</label><input id="reaction-{{$message.ID}}" type="text" name="name" maxlength="255" placeholder=":wave:" required><button type="submit">Add</button></form>{{end}}{{if $.CanPin}}<form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button></form>{{end}}</div></div></article>{{else}}<p class="empty">No messages yet. Start the conversation.</p>{{end}}{{end}}`
+const workspaceRefinements = `<style>
+.topbar{height:48px;padding:0 12px;border-bottom:1px solid #ffffff24;box-shadow:none}
+.brand{max-width:220px}
+.search{height:34px;max-width:680px;padding:3px 8px;background:#ffffff20}
+.search-icon{width:16px;height:16px;flex:0 0 auto}
+.search-shortcut{border:1px solid #ffffff66;border-radius:4px;padding:0 5px;color:#fff;font-size:11px;line-height:20px;background:#0000001f}
+.top-profile{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:7px;background:#ffffff35;font-weight:800;text-transform:uppercase}
+.workspace{grid-template-columns:260px minmax(0,1fr)}
+.sidebar{padding:12px 8px;background:linear-gradient(180deg,var(--accent),#3f1645)}
+.workspace-name{font-size:17px;line-height:1.25}
+.workspace-sub{display:flex;align-items:center;gap:6px}
+.presence-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#2eb67d;box-shadow:0 0 0 2px #ffffff2e}
+.side-link{min-height:34px}
+.side-link[aria-current=page]{background:#1264a3;color:#fff}
+.content{background:var(--panel-strong)}
+.channel-header{min-height:64px;padding:9px 20px;background:var(--panel-strong)}
+.channel-identity{display:flex;align-items:center;gap:10px;min-width:0}
+.channel-title{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.channel-copy{min-width:0}
+.channel-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:680px}
+.membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+.membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.timeline{padding-top:12px}
+.message{position:relative;border-radius:6px}
+.message-actions{min-height:25px}
+.message-actions details{display:inline-block;position:relative}
+.message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
+.message-actions summary::-webkit-details-marker{display:none}
+.message-actions details[open]{padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.message-actions details[open] summary{margin-bottom:6px;font-weight:700}
+.composer-wrap{background:var(--panel-strong);padding-top:10px}
+.composer{border-color:var(--field-line);border-radius:9px;box-shadow:none}
+.composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+.composer textarea{min-height:58px}
+.composer-footer{border-top:1px solid var(--line);padding-top:8px}
+.composer-tools kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel);font:11px/1.4 inherit}
+.send{min-width:70px}
+.conversation-gate{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
+.conversation-gate-copy{min-width:0}
+.conversation-gate strong{display:block;margin-bottom:2px}
+.conversation-gate p{margin:0;color:var(--muted);font-size:13px}
+.join-button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);font-weight:800;padding:8px 18px;white-space:nowrap}
+@media(max-width:800px){
+.workspace{grid-template-columns:64px minmax(0,1fr)}
+.brand{display:none}
+.workspace-name,.workspace-sub{display:none}
+.search-shortcut{display:none}
+.channel-header{padding-left:12px;padding-right:12px}
+.membership-pill{display:none}
+.conversation-gate{align-items:stretch;flex-direction:column}
+.join-button{width:100%}
+}
+</style>`
 
-var pageMarkup = `{{define "title"}}#{{.ChannelName}} · SameOldChat{{end}}
-{{define "styles"}}` + pageStyle + `{{end}}
+const messagesPartial = `{{define "messages"}}
+{{range $message := .Messages}}
+<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}">
+  <div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div>
+  <div class="message-body">
+    <div class="message-head">
+      <span class="author">{{$message.AuthorName}}</span>
+      <time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>
+      {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
+    </div>
+    <p class="message-text">{{$message.Text}}</p>
+    {{if $message.Reactions}}
+    <ul class="reactions">
+      {{range $reaction := $message.Reactions}}
+      <li>
+        {{if $.CanReact}}
+        <form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <input type="hidden" name="name" value="{{$reaction.Name}}">
+          <button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></button>
+        </form>
+        {{else}}
+        <span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></span>
+        {{end}}
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+    <div class="message-actions">
+      <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
+      {{if $.CanReact}}
+      <details>
+        <summary>Add reaction</summary>
+        <form class="inline-form" aria-label="Add reaction" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label class="visually-hidden" for="reaction-{{$message.ID}}">Add a reaction to the message from {{$message.AuthorName}}</label>
+          <input id="reaction-{{$message.ID}}" type="text" name="name" maxlength="255" placeholder=":wave:" required>
+          <button type="submit">Add</button>
+        </form>
+      </details>
+      {{end}}
+      {{if $.CanPin}}
+      <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+</article>
+{{else}}
+<p class="empty">{{if .IsMember}}No messages yet. Start the conversation.{{else}}No messages have been posted in this channel yet.{{end}}</p>
+{{end}}
+{{end}}`
+
+var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
+{{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
 {{define "scripts"}}` + progressiveEnhancementScript + `{{end}}
-{{define "content"}}<a class="skip-link" href="#timeline">Skip to the messages</a><div class="shell"><header class="topbar"><span class="brand">SameOldChat</span><form class="search" method="get" action="/app/search" role="search" aria-label="Search the workspace"><span aria-hidden="true">⌕</span><label class="visually-hidden" for="workspace-search">Search the workspace</label><input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search the workspace" required><button class="search-submit" type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button>{{if .ShowProfile}}<a class="icon-button" href="/me" aria-label="My profile">●</a>{{end}}</div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">☰</span><span class="side-text">Members</span></a>{{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">⚙</span><span class="side-text">Authorization</span></a>{{end}}</nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Channels}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{else}}<p class="side-empty">No channels available.</p>{{end}}</nav>{{if .Directs}}<nav class="side-section" aria-label="Direct messages"><div class="side-label">Direct messages</div>{{range .Directs}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">◍</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{end}}</nav>{{end}}{{if .MoreChannelsURL}}<a class="side-more" href="{{.MoreChannelsURL}}">More conversations</a>{{end}}<div class="sidebar-bottom"><div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.UserInitial}}</span><span class="signed-in-name">{{.Username}}</span></div><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit" data-shauth-sign-out aria-label="Sign out"><span class="side-icon" aria-hidden="true">↪</span><span class="side-text">Sign out</span></button></form></div></aside><main class="content" id="content"><header class="channel-header"><div><h1 class="channel-title"># {{.ChannelName}}</h1><p class="channel-meta">{{.ChannelMeta}}</p></div><div class="channel-actions">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}{{if .MarkReadURL}}<form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}"><button type="submit">Mark as read</button></form>{{end}}{{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to the channel</a>{{end}}</div></header><div class="timeline-wrap">{{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}<section id="timeline" class="timeline" tabindex="-1" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}</div>{{if .ThreadTimestamp}}<aside class="thread" aria-labelledby="thread-heading"><h2 id="thread-heading">Thread</h2><div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div></aside>{{end}}<div class="composer-wrap"><p class="live-status" id="live-status" role="status" aria-live="polite"></p><form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}"><p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}</label><textarea id="text" name="text" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}">{{.Draft}}</textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><p class="composer-tools">Replying in thread</p>{{end}}<div class="composer-footer"><span class="composer-tools" id="composer-hint">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></main></div></div>{{end}}
+{{define "content"}}
+<a class="skip-link" href="#timeline">Skip to the messages</a>
+<div class="shell">
+  <header class="topbar">
+    <span class="brand">{{.WorkspaceName}}</span>
+    <form class="search" method="get" action="/app/search" role="search" aria-label="Search {{.WorkspaceName}}">
+      <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+      <label class="visually-hidden" for="workspace-search">Search {{.WorkspaceName}}</label>
+      <input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search {{.WorkspaceName}}" aria-keyshortcuts="Control+K Meta+K" required>
+      <span class="search-shortcut" aria-hidden="true">Ctrl K</span>
+      <button class="search-submit" type="submit">Search</button>
+      <input type="hidden" name="channel" value="{{.Channel}}">
+    </form>
+    <div class="top-actions">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button>
+      {{if .ShowProfile}}<a class="icon-button top-profile" href="/me" aria-label="My profile">{{.UserInitial}}</a>{{end}}
+    </div>
+  </header>
+  <div class="workspace">
+    <aside class="sidebar">
+      <div>
+        <div class="workspace-name">{{.WorkspaceName}}</div>
+        <div class="workspace-sub"><span class="presence-dot" aria-hidden="true"></span>{{.Username}}</div>
+      </div>
+      <nav class="side-section" aria-label="Workspace navigation">
+        <div class="side-label">Workspace</div>
+        <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
+        {{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
+      </nav>
+      <nav class="side-section" aria-label="Channels">
+        <div class="side-label">Channels</div>
+        {{range .Channels}}
+        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}">
+          <span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>
+          {{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
+        </a>
+        {{else}}<p class="side-empty">No channels available.</p>{{end}}
+      </nav>
+      {{if .Directs}}
+      <nav class="side-section" aria-label="Direct messages">
+        <div class="side-label">Direct messages</div>
+        {{range .Directs}}
+        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}">
+          <span class="side-icon" aria-hidden="true">@</span><span class="side-text">{{.Name}}</span>
+          {{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
+        </a>
+        {{end}}
+      </nav>
+      {{end}}
+      {{if .MoreChannelsURL}}<a class="side-more" href="{{.MoreChannelsURL}}">More conversations</a>{{end}}
+      <div class="sidebar-bottom">
+        <div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.UserInitial}}</span><span class="signed-in-name">{{.Username}}</span></div>
+        <form method="post" action="/app/session/revoke">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <button class="side-link" type="submit" data-shauth-sign-out aria-label="Sign out"><span class="side-icon" aria-hidden="true">→</span><span class="side-text">Sign out</span></button>
+        </form>
+      </div>
+    </aside>
+    <main class="content" id="content">
+      <header class="channel-header">
+        <div class="channel-identity">
+          <div class="channel-copy">
+            <h1 class="channel-title">{{if .ChannelPrefix}}{{.ChannelPrefix}} {{end}}{{.ChannelName}}</h1>
+            <p class="channel-meta">{{.ChannelMeta}}</p>
+          </div>
+          <span class="membership-pill{{if .IsMember}} joined{{end}}">{{if .IsMember}}Joined{{else}}Not joined{{end}}</span>
+        </div>
+        <div class="channel-actions">
+          {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+          {{if .MarkReadURL}}
+          <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}">
+            <button type="submit">Mark as read</button>
+          </form>
+          {{end}}
+          {{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to channel</a>{{end}}
+        </div>
+      </header>
+      <div class="timeline-wrap">
+        {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
+        <section id="timeline" class="timeline" tabindex="-1" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
+        {{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
+      </div>
+      {{if .ThreadTimestamp}}
+      <aside class="thread" aria-labelledby="thread-heading">
+        <h2 id="thread-heading">Thread</h2>
+        <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
+      </aside>
+      {{end}}
+      <div class="composer-wrap">
+        <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
+        {{if .CanPost}}
+        <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}">
+          <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
+          <textarea id="text" name="text" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
+          <div class="composer-footer">
+            <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line</span>
+            <button class="send" type="submit">Send</button>
+          </div>
+        </form>
+        {{else}}
+        <section class="conversation-gate" aria-label="Conversation access">
+          <div class="conversation-gate-copy">
+            {{if .IsMember}}
+            <strong>This conversation is read-only for your session.</strong>
+            <p>Your current permissions allow reading messages but not posting them.</p>
+            {{else}}
+            <strong>Join {{.ChannelPrefix}}{{.ChannelName}} to take part.</strong>
+            <p>You can read this public channel before joining. Join to post, react, pin, and track unread messages.</p>
+            {{end}}
+          </div>
+          {{if .CanJoin}}
+          <form method="post" action="{{.JoinURL}}">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+            <button class="join-button" type="submit">Join channel</button>
+          </form>
+          {{end}}
+        </section>
+        {{end}}
+      </div>
+    </main>
+  </div>
+</div>
+{{end}}
 ` + messagesPartial
 
 var pageTemplate = mustPage(pageMarkup)
@@ -516,6 +757,7 @@ var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
 var text=document.getElementById('text');
+var search=document.getElementById('workspace-search');
 var errorBox=document.getElementById('composer-error');
 var status=document.getElementById('live-status');
 var generation=0;
@@ -619,6 +861,39 @@ if(sending)return;
 if(typeof composer.requestSubmit==='function'){composer.requestSubmit();return}
 composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 })}
+document.addEventListener('keydown',function(event){
+var key=typeof event.key==='string'?event.key.toLowerCase():'';
+if((event.ctrlKey||event.metaKey)&&!event.altKey&&key==='k'){
+if(!search)return;
+event.preventDefault();
+search.focus();
+search.select();
+return;
+}
+var target=event.target;
+var editing=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.isContentEditable);
+if(key==='/'&&!editing&&!event.ctrlKey&&!event.metaKey&&!event.altKey){
+if(!search)return;
+event.preventDefault();
+search.focus();
+return;
+}
+if(event.key==='Escape'&&search&&document.activeElement===search&&text){
+event.preventDefault();
+text.focus();
+return;
+}
+if(!event.altKey||event.ctrlKey||event.metaKey||(event.key!=='ArrowUp'&&event.key!=='ArrowDown'))return;
+var links=Array.prototype.slice.call(document.querySelectorAll('.side-section[aria-label="Channels"] .side-link,.side-section[aria-label="Direct messages"] .side-link'));
+if(links.length<2)return;
+var current=links.findIndex(function(link){return link.getAttribute('aria-current')==='page'});
+if(current<0)current=0;
+var next=event.key==='ArrowDown'?(current+1)%links.length:(current+links.length-1)%links.length;
+var href=links[next].getAttribute('href');
+if(!ownPath(href))return;
+event.preventDefault();
+window.location.assign(href);
+});
 if(window.EventSource){
 var cursor='';
 try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
@@ -678,6 +953,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/members", h.members)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
+	mux.HandleFunc("POST /app/join", h.joinConversation)
 	mux.HandleFunc("POST /app/message", h.postMessage)
 	mux.HandleFunc("POST /app/conversation/open", h.openConversation)
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
@@ -840,6 +1116,16 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		h.writeStoreError(w, err, "This conversation is temporarily unavailable.")
 		return
 	}
+	isMember, err := h.Messages.IsConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		h.writeStoreError(w, err, "Your membership in this conversation is temporarily unavailable.")
+		return
+	}
+	workspace, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "The workspace identity is temporarily unavailable.")
+		return
+	}
 	history, err := h.historyWindow(r.Context(), principal, channel, before)
 	if err != nil {
 		if errors.Is(err, domain.ErrInvalidCursor) {
@@ -851,7 +1137,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	names := h.newUserNames(r.Context(), principal)
 	notices := make([]string, 0, 3)
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Names: names})
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -868,7 +1154,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			return
 		}
 		var threadNotice string
-		thread, threadNotice = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: replies.Messages, Thread: threadTimestamp, Before: string(before), ThreadPane: true, Names: names})
+		thread, threadNotice = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: replies.Messages, Thread: threadTimestamp, Before: string(before), ThreadPane: true, Member: isMember, Names: names})
 		if threadNotice != "" && timelineNotice == "" {
 			notices = append(notices, threadNotice)
 		}
@@ -885,6 +1171,15 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		return
 	}
 	username := displayName(current)
+	workspaceName := strings.TrimSpace(workspace.Name)
+	if workspaceName == "" {
+		workspaceName = "SameOldChat"
+	}
+	channelPrefix := "#"
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		channelPrefix = ""
+	}
+	canJoin := !isMember && !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect && principal.HasScope(auth.ScopeChannelsManage)
 
 	data := pageData{
 		Timeline:        timeline,
@@ -894,10 +1189,15 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Directs:         conversations.Directs,
 		Channel:         string(channel),
 		ChannelName:     conversationName(conversation),
+		ChannelPrefix:   channelPrefix,
 		ChannelMeta:     conversationMeta(conversation),
+		WorkspaceName:   workspaceName,
 		CSRFToken:       csrfToken,
 		ShowProfile:     h.canShowIdentity(),
 		ShowAdmin:       h.canShowAuthorizationAdmin(principal),
+		IsMember:        isMember,
+		CanPost:         isMember && principal.HasScope(auth.ScopeChatWrite),
+		CanJoin:         canJoin,
 		Username:        username,
 		UserInitial:     initial(username),
 		AtLatest:        history.AtLatest,
@@ -908,6 +1208,9 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		TimelineURL:     fragmentURL(string(channel), "", string(before)),
 		ThreadURL:       fragmentURL(string(channel), threadTimestamp, ""),
 	}
+	if canJoin {
+		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
+	}
 	if conversations.More != "" {
 		data.MoreChannelsURL = appURL(string(channel), threadTimestamp, string(before), "", string(conversations.More))
 	}
@@ -915,7 +1218,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	// form for it rather than performing it while rendering. The client submits
 	// the form once the timeline has settled; a reader without JavaScript sees
 	// the control and decides for themselves.
-	if history.AtLatest && conversations.CurrentUnread > 0 && len(history.Messages) > 0 {
+	if isMember && history.AtLatest && conversations.CurrentUnread > 0 && len(history.Messages) > 0 {
 		last := history.Messages[len(history.Messages)-1]
 		data.MarkReadURL = mutationURL("/app/read", string(channel), "", threadTimestamp, "")
 		data.MarkReadTimestamp = string(domain.NewMessageTimestamp(last.CreatedAt))
@@ -956,6 +1259,11 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		h.writeFragmentError(w, err, "the conversation is temporarily unavailable")
 		return
 	}
+	isMember, err := h.Messages.IsConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		h.writeFragmentError(w, err, "your conversation membership is temporarily unavailable")
+		return
+	}
 	var messages []domain.Message
 	if threadTimestamp != "" {
 		if _, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); parseErr != nil {
@@ -982,7 +1290,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		}
 		messages = history.Messages
 	}
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Names: h.newUserNames(r.Context(), principal)})
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal)})
 	h.writeFragment(w, list)
 }
 
@@ -1038,6 +1346,7 @@ type messageListRequest struct {
 	Thread       string
 	Before       string
 	ThreadPane   bool
+	Member       bool
 	Names        *userNames
 }
 
@@ -1065,8 +1374,10 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	list := messageList{
 		ChannelName: conversationName(conversation),
 		CSRFToken:   csrfToken,
-		CanReact:    principal.HasScope(auth.ScopeReactionsWrite),
-		CanPin:      principal.HasScope(auth.ScopePinsWrite),
+		IsMember:    request.Member,
+		CanReact:    request.Member && principal.HasScope(auth.ScopeReactionsWrite),
+		CanPin:      request.Member && principal.HasScope(auth.ScopePinsWrite),
+		CanReply:    request.Member && principal.HasScope(auth.ScopeChatWrite),
 		Messages:    make([]messageView, 0, len(messages)),
 	}
 	notice := ""
@@ -1510,6 +1821,40 @@ func (h Handler) currentRole(r *http.Request, principal auth.Principal) (string,
 // Mutations
 // ---------------------------------------------------------------------------
 
+// joinConversation turns the read-only public-channel preview into a joined
+// conversation. The page never submits a speculative message and then asks the
+// user to repair membership after the fact: joining is an explicit, durable
+// action, and a successful enhanced request reloads the membership-dependent
+// controls from the server.
+func (h Handler) joinConversation(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The join request could not be read from the form. Reload the page and try again."); !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	if _, err := h.Messages.JoinConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That channel is not available", "Only a public channel you can see may be joined.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The channel could not be joined", "Your membership was not changed. Try again.")
+		}
+		return
+	}
+	target := h.viewURL(r, strings.TrimSpace(r.URL.Query().Get("thread")))
+	w.Header().Set("Vary", "HX-Request")
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("HX-Redirect", target)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
 func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
 	if err != nil {
@@ -1576,7 +1921,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		thread := strings.TrimSpace(fields["thread_ts"])
-		list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: []domain.Message{message}, Thread: thread, ThreadPane: thread != "", Names: h.newUserNames(r.Context(), principal)})
+		list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: []domain.Message{message}, Thread: thread, ThreadPane: thread != "", Member: true, Names: h.newUserNames(r.Context(), principal)})
 		h.writeFragment(w, list)
 		return
 	}

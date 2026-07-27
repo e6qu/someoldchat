@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -237,6 +238,47 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 	requireMissing(t, "workspace shell", body, "# Cdev", "Message #Cdev", ">U1<")
 	// The machine timestamp stays in datetime= while the reader sees a short time.
 	requireContains(t, "message time", body, `datetime="2023-11-14T22:13:20Z">Nov 14, 22:13 UTC<`)
+}
+
+// A public channel may be read before it is joined, but every conversational
+// mutation requires membership. The workspace used to ignore that distinction:
+// it rendered a working-looking composer, reaction inputs, pin controls, and an
+// automatic read marker, then refused each action after the user tried it.
+func TestPublicChannelPreviewJoinsBeforeOfferingMutationControls(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedMessage(t, s, "M1", "readable before joining", time.Unix(1700000000, 0).UTC())
+	if err := (service.Messages{Store: s}).LeaveConversation(context.Background(), "T1", "U1", "Cdev"); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := get(t, mux, "/app?channel=Cdev")
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body)
+	}
+	requireContains(t, "public-channel preview", preview.Body.String(),
+		"readable before joining",
+		`<span class="membership-pill">Not joined</span>`,
+		`action="/app/join?channel=Cdev"`,
+		"Join channel",
+		"View thread",
+	)
+	requireMissing(t, "public-channel preview", preview.Body.String(),
+		`id="composer"`,
+		`id="mark-read"`,
+		`aria-label="Add reaction"`,
+		`>Pin</button>`,
+	)
+
+	joined := postForm(t, mux, "/app/join?channel=Cdev", url.Values{"_csrf": {auth.CSRFToken("session")}}.Encode(), false)
+	if joined.Code != http.StatusSeeOther {
+		t.Fatalf("join status=%d body=%s", joined.Code, joined.Body)
+	}
+	workspace := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "joined channel", workspace.Body.String(),
+		`<span class="membership-pill joined">Joined</span>`,
+		`id="composer"`,
+		"Reply in thread",
+	)
 }
 
 // TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge covers two

@@ -157,6 +157,24 @@ func memberLeftChannel(delivered Delivered) ([]Inner, error) {
 	return []Inner{inner}, nil
 }
 
+// memberJoinedChannel renders the one-user self-service join record. Invitations
+// use the fan-out builder below because one durable invitation can name many
+// users; a join always names exactly its actor.
+func memberJoinedChannel(delivered Delivered) ([]Inner, error) {
+	values, err := stringFields(delivered, "channel_id", "user_id")
+	if err != nil {
+		return nil, err
+	}
+	inner, err := newInner("member_joined_channel", delivered,
+		String("user", values["user_id"]),
+		String("channel", values["channel_id"]),
+	)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
 // membersJoinedChannel renders one conversation.members_invited record as one
 // member_joined_channel per invited user. This is the fan-out case the []Inner
 // result exists for: Slack has no bulk membership event, so a record that names

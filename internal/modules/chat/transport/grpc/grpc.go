@@ -1794,6 +1794,29 @@ func (r Remote) ConversationMembers(ctx context.Context, workspaceID domain.Work
 	return decodeProtoUserPage(out)
 }
 
+// IsConversationMember is derived from the existing paged member RPC. Keeping
+// this as a client-side projection avoids adding a transport-only RPC for a
+// fact the directory already exposes, while still giving local and distributed
+// web compositions the same exact membership answer.
+func (r Remote) IsConversationMember(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (bool, error) {
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := r.ConversationMembers(ctx, workspaceID, userID, conversationID, request)
+		if err != nil {
+			return false, err
+		}
+		for _, member := range page.Users {
+			if member.ID == userID {
+				return true, nil
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			return false, nil
+		}
+		request.Cursor = page.NextCursor
+	}
+}
+
 func (r Remote) WorkspaceInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.Workspace, error) {
 	in := &chatv1.WorkspaceRequest{WorkspaceId: string(workspaceID), UserId: string(userID)}
 	out, err := r.directory.WorkspaceInfo(ctx, in)

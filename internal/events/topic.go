@@ -158,8 +158,8 @@ var topicRules = []topicRule{
 		note: "pinned topic; inner shape NOT settled, as pin.added"},
 
 	// ---- conversation membership -------------------------------------------
-	{topic: "conversation.member_added", slack: mapped("member_joined_channel", everySurface),
-		note: "pinned topic, but the producer records no user: conversationEvent writes channel_id only and an empty actor (internal/service/messages.go:2291). A member_joined_channel with no user is not the event, so the record is withheld"},
+	{topic: "conversation.member_added", slack: translated("member_joined_channel", everySurface, memberJoinedChannel),
+		note: "pinned topic; a self-service join carries the joining user and channel"},
 	{topic: "conversation.members_invited", slack: translated("member_joined_channel", everySurface, membersJoinedChannel),
 		note: "pinned topic; one record fans out to one member_joined_channel per invited user. Slack also sends inviter, which the payload does not carry, so it is omitted rather than guessed"},
 	{topic: "conversation.member_left", slack: translated("member_left_channel", everySurface, memberLeftChannel),
