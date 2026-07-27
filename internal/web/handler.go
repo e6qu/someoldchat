@@ -139,9 +139,13 @@ type messageView struct {
 	UnreactURL    string
 	PinURL        string
 	UnpinURL      string
+	UpdateURL     string
+	DeleteURL     string
+	CanEdit       bool
 	Permalink     string
 	Channel       string
 	ChannelName   string
+	ChannelPrefix string
 }
 
 type reactionView struct {
@@ -175,6 +179,7 @@ type pageData struct {
 	IsMember          bool
 	CanPost           bool
 	CanJoin           bool
+	CanCreate         bool
 	JoinURL           string
 	Username          string
 	UserInitial       string
@@ -196,16 +201,20 @@ type pageData struct {
 }
 
 type memberView struct {
-	ID       string
-	Name     string
-	RealName string
-	Profile  domain.UserProfile
-	IsSelf   bool
+	ID            string
+	Name          string
+	RealName      string
+	Profile       domain.UserProfile
+	AvatarURL     string
+	AuthorInitial string
+	IsSelf        bool
 }
 
 type membersData struct {
 	Members        []memberView
 	Profile        domain.UserProfile
+	AvatarURL      string
+	UserInitial    string
 	CSRFToken      string
 	Error          string
 	CanMessage     bool
@@ -413,6 +422,18 @@ const workspaceRefinements = `<style>
 .message-actions summary::-webkit-details-marker{display:none}
 .message-actions details[open]{padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .message-actions details[open] summary{margin-bottom:6px;font-weight:700}
+.message-actions .edit-message{width:min(420px,70vw)}
+.message-actions .edit-message textarea{width:min(320px,55vw);min-height:64px;resize:vertical;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:5px 7px}
+.message-actions .delete-message button{color:var(--danger);font-weight:700}
+.new-channel{margin:4px 8px 0}
+.new-channel summary{cursor:pointer;color:#f5eaf6;font-size:13px;font-weight:700;list-style:none;padding:5px 2px}
+.new-channel summary::-webkit-details-marker{display:none}
+.new-channel[open]{padding:8px;border:1px solid #ffffff4a;border-radius:6px;background:#0000001c}
+.new-channel[open] summary{margin-bottom:7px}
+.new-channel label{display:grid;gap:4px;color:#f5eaf6;font-size:12px;margin:6px 0}
+.new-channel input[type=text]{min-width:0;width:100%;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:6px 7px}
+.new-channel .privacy{display:flex;grid-template-columns:none;align-items:center;gap:6px}
+.new-channel button{width:100%;border:0;border-radius:5px;background:#fff;color:var(--accent);font-weight:800;padding:6px 9px}
 .composer-wrap{background:var(--panel-strong);padding-top:10px}
 .composer{border-color:var(--field-line);border-radius:9px;box-shadow:none}
 .composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
@@ -434,6 +455,15 @@ const workspaceRefinements = `<style>
 .membership-pill{display:none}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
+.new-channel{position:relative;margin-left:4px;margin-right:4px}
+.new-channel summary{font-size:0;text-align:center}
+.new-channel summary::before{content:"＋";font-size:22px;line-height:1}
+.new-channel[open]{position:fixed;left:72px;top:64px;width:280px;max-width:calc(100vw - 84px);z-index:4;box-shadow:var(--shadow);background:var(--panel-strong);border-color:var(--line);color:var(--text)}
+.new-channel[open] summary{font-size:13px;text-align:left;color:var(--text)}
+.new-channel[open] summary::before{content:"";font-size:0}
+.new-channel[open] label{color:var(--text)}
+.new-channel[open] input[type=text]{background:var(--bg);border-color:var(--field-line);color:var(--text)}
+.new-channel[open] button{background:var(--ok);color:var(--on-strong)}
 }
 </style>`
 
@@ -484,6 +514,24 @@ const messagesPartial = `{{define "messages"}}
         <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
       </form>
       {{end}}
+      {{if $message.CanEdit}}
+      <details>
+        <summary>Edit</summary>
+        <form class="inline-form edit-message" aria-label="Edit message" method="post" action="{{$message.UpdateURL}}" hx-post="{{$message.UpdateURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
+          <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
+          <button type="submit">Save</button>
+        </form>
+      </details>
+      <details class="delete-message">
+        <summary>Delete</summary>
+        <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <button type="submit">Delete this message</button>
+        </form>
+      </details>
+      {{end}}
     </div>
   </div>
 </article>
@@ -532,6 +580,17 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
           {{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
         </a>
         {{else}}<p class="side-empty">No channels available.</p>{{end}}
+        {{if .CanCreate}}
+        <details class="new-channel">
+          <summary>＋ Add channel</summary>
+          <form method="post" action="/app/conversation/create">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="new-channel-name">Channel name<input id="new-channel-name" type="text" name="name" maxlength="80" placeholder="project-name" required></label>
+            <label class="privacy"><input type="checkbox" name="is_private" value="true"> Private channel</label>
+            <button type="submit">Create</button>
+          </form>
+        </details>
+        {{end}}
       </nav>
       {{if .Directs}}
       <nav class="side-section" aria-label="Direct messages">
@@ -626,7 +685,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
 
 var pageTemplate = mustPage(pageMarkup)
 
-const membersMarkup = `{{define "title"}}Members · SameOldChat{{end}}
+const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
 .bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
@@ -638,17 +697,60 @@ const membersMarkup = `{{define "title"}}Members · SameOldChat{{end}}
 .grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:22px;align-items:start}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
 .card h2{margin-top:0}
+.profile-summary{display:flex;align-items:center;gap:12px;margin-bottom:18px}
+.profile-avatar,.person-avatar{flex:0 0 auto;display:grid;place-items:center;overflow:hidden;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;font-weight:800;text-transform:uppercase}
+.profile-avatar{width:56px;height:56px;border-radius:10px;font-size:22px}
+.person-avatar{width:42px;height:42px;border-radius:8px;font-size:16px}
+.profile-avatar img,.person-avatar img{width:100%;height:100%;object-fit:cover}
+.profile-summary p{margin:3px 0}
 .field{display:grid;gap:5px;margin:12px 0}
 .field input{width:100%;border:1px solid var(--field-line);border-radius:5px;background:var(--bg);color:var(--text);padding:9px}
+.field small{color:var(--muted)}
 .save{background:var(--ok);color:var(--on-strong);border:0;border-radius:5px;padding:9px 14px;font-weight:700}
 .members{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
-.person{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px}
+.person{display:grid;grid-template-columns:42px minmax(0,1fr);gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px}
+.person-copy{min-width:0}
 .person h3{font-size:16px;margin:0}
 .person p{margin:5px 0;color:var(--muted)}
 .person button{border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--text);padding:5px 10px}
 @media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
 </style>{{end}}
-{{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><span>Members</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Workspace members</h1><p class="muted">Manage your profile and see who is here.</p></div><div class="grid"><section class="card" aria-labelledby="profile-heading"><h2 id="profile-heading">Edit profile</h2>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/app/profile"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}" required></label><label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}"></label><label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}"></label><label class="field" for="image_24">Image 24 URL<input id="image_24" type="url" maxlength="2048" name="image_24" value="{{.Profile.Image24}}"></label><label class="field" for="image_32">Image 32 URL<input id="image_32" type="url" maxlength="2048" name="image_32" value="{{.Profile.Image32}}"></label><label class="field" for="image_48">Image 48 URL<input id="image_48" type="url" maxlength="2048" name="image_48" value="{{.Profile.Image48}}"></label><label class="field" for="image_72">Image 72 URL<input id="image_72" type="url" maxlength="2048" name="image_72" value="{{.Profile.Image72}}"></label><label class="field" for="image_192">Image 192 URL<input id="image_192" type="url" maxlength="2048" name="image_192" value="{{.Profile.Image192}}"></label><label class="field" for="image_512">Image 512 URL<input id="image_512" type="url" maxlength="2048" name="image_512" value="{{.Profile.Image512}}"></label><label class="field" for="image_1024">Image 1024 URL<input id="image_1024" type="url" maxlength="2048" name="image_1024" value="{{.Profile.Image1024}}"></label><button class="save" type="submit">Save profile</button></form></section><section class="card" aria-labelledby="people-heading"><h2 id="people-heading">People</h2><div class="members">{{range .Members}}<article class="person"><h3>{{.Name}}</h3><p>{{.RealName}}</p>{{if .Profile.DisplayName}}<p>{{.Profile.DisplayName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit">Message {{.Name}}</button></form>{{end}}</article>{{else}}<p class="muted">No members available.</p>{{end}}</div>{{if .MoreMembersURL}}<p class="pager"><a href="{{.MoreMembersURL}}">Show more members</a></p>{{end}}</section></div></main>{{end}}`
+{{define "content"}}
+<header class="bar"><a href="/app">← Back to chat</a><span>People</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+<main class="layout">
+  <div class="heading"><h1>People</h1><p class="muted">Find teammates, start a direct message, and keep your profile current.</p></div>
+  <div class="grid">
+    <section class="card" aria-labelledby="profile-heading">
+      <h2 id="profile-heading">Your profile</h2>
+      <div class="profile-summary">
+        <span class="profile-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.UserInitial}}{{end}}</span>
+        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong>{{if .Profile.StatusText}}<p class="muted">{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
+      </div>
+      {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
+      <form method="post" action="/app/profile">
+        <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+        <label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}"><small>The name teammates see in messages.</small></label>
+        <label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}" placeholder="What are you working on?"></label>
+        <label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}" placeholder=":wave:"></label>
+        <label class="field" for="avatar_url">Profile photo URL<input id="avatar_url" type="url" maxlength="2048" name="avatar_url" value="{{.AvatarURL}}" placeholder="https://example.com/avatar.jpg"><small>Leave blank to use your initial.</small></label>
+        <button class="save" type="submit">Save changes</button>
+      </form>
+    </section>
+    <section class="card" aria-labelledby="people-heading">
+      <h2 id="people-heading">Workspace members</h2>
+      <div class="members">
+        {{range .Members}}
+        <article class="person">
+          <span class="person-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span>
+          <div class="person-copy"><h3>{{.Name}}</h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}</div>
+        </article>
+        {{else}}<p class="muted">No members available.</p>{{end}}
+      </div>
+      {{if .MoreMembersURL}}<p class="pager"><a href="{{.MoreMembersURL}}">Show more members</a></p>{{end}}
+    </section>
+  </div>
+</main>
+{{end}}`
 
 var membersTemplate = mustPage(membersMarkup)
 
@@ -675,7 +777,7 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 @media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search messages</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages" required><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">Messages matching “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to find messages.</p>{{end}}</div><section class="results" aria-label="Results">{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">#{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if .Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search messages</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">Messages matching “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to find messages.</p>{{end}}</div><section class="results" aria-label="Results">{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if .Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
 
 var searchTemplate = mustPage(searchMarkup)
 
@@ -955,6 +1057,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/join", h.joinConversation)
 	mux.HandleFunc("POST /app/message", h.postMessage)
+	mux.HandleFunc("POST /app/message/update", h.updateMessage)
+	mux.HandleFunc("POST /app/message/delete", h.deleteMessage)
+	mux.HandleFunc("POST /app/conversation/create", h.createConversation)
 	mux.HandleFunc("POST /app/conversation/open", h.openConversation)
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
 	mux.HandleFunc("POST /app/reaction/remove", h.removeReaction)
@@ -1198,6 +1303,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		IsMember:        isMember,
 		CanPost:         isMember && principal.HasScope(auth.ScopeChatWrite),
 		CanJoin:         canJoin,
+		CanCreate:       principal.HasScope(auth.ScopeChannelsManage),
 		Username:        username,
 		UserInitial:     initial(username),
 		AtLatest:        history.AtLatest,
@@ -1415,6 +1521,9 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			UnreactURL:    mutationURL("/app/reaction/remove", channel, timestamp, threadTimestamp, before),
 			PinURL:        mutationURL("/app/pin", channel, timestamp, threadTimestamp, before),
 			UnpinURL:      mutationURL("/app/pin/remove", channel, timestamp, threadTimestamp, before),
+			UpdateURL:     mutationURL("/app/message/update", channel, timestamp, threadTimestamp, before),
+			DeleteURL:     mutationURL("/app/message/delete", channel, timestamp, threadTimestamp, before),
+			CanEdit:       request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite),
 		}
 		if _, ok := pinned[message.ID]; ok {
 			view.Pinned = true
@@ -1577,8 +1686,15 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 	for _, message := range messages {
 		author := names.name(message.AuthorID)
 		channelName := string(message.Conversation)
+		channelPrefix := "#"
 		if conversation, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation); err == nil {
 			channelName = conversationName(conversation)
+			if conversation.IsDirect || conversation.IsGroupDirect {
+				channelPrefix = ""
+				if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
+					channelName = participants
+				}
+			}
 		}
 		// A search hit is opened where it lives: the window that ends at the
 		// message, the message anchored, and the thread pane only when the hit
@@ -1597,6 +1713,7 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 			DisplayTime:   formatTime(message.CreatedAt),
 			Channel:       string(message.Conversation),
 			ChannelName:   channelName,
+			ChannelPrefix: channelPrefix,
 			Permalink:     appURL(string(message.Conversation), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""),
 		})
 	}
@@ -1645,18 +1762,21 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		if user.Deleted {
 			continue
 		}
-		members = append(members, memberView{ID: string(user.ID), Name: displayName(user), RealName: user.RealName, Profile: user.Profile, IsSelf: user.ID == principal.UserID})
+		name := displayName(user)
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
 	}
 	profile := current.Profile
 	if submitted != nil {
 		profile = *submitted
 	}
 	data := membersData{
-		Members:    members,
-		Profile:    profile,
-		CSRFToken:  auth.CSRFToken(sessionCookie.Value),
-		Error:      message,
-		CanMessage: principal.HasScope(auth.ScopeChannelsManage),
+		Members:     members,
+		Profile:     profile,
+		AvatarURL:   profileImageURL(profile),
+		UserInitial: initial(displayName(current)),
+		CSRFToken:   auth.CSRFToken(sessionCookie.Value),
+		Error:       message,
+		CanMessage:  principal.HasScope(auth.ScopeChannelsManage),
 	}
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreMembersURL = "/app/members?" + url.Values{"cursor": {string(page.NextCursor)}}.Encode()
@@ -1674,12 +1794,30 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	profile := domain.UserProfile{DisplayName: fields["display_name"], StatusText: fields["status_text"], StatusEmoji: fields["status_emoji"], Image24: fields["image_24"], Image32: fields["image_32"], Image48: fields["image_48"], Image72: fields["image_72"], Image192: fields["image_192"], Image512: fields["image_512"], Image1024: fields["image_1024"]}
+	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your profile is temporarily unavailable.")
+		return
+	}
+	profile := current.Profile
+	profile.DisplayName = fields["display_name"]
+	profile.StatusText = fields["status_text"]
+	profile.StatusEmoji = fields["status_emoji"]
+	avatarURL := strings.TrimSpace(fields["avatar_url"])
+	if avatarURL != profileImageURL(current.Profile) {
+		profile.Image24 = avatarURL
+		profile.Image32 = avatarURL
+		profile.Image48 = avatarURL
+		profile.Image72 = avatarURL
+		profile.Image192 = avatarURL
+		profile.Image512 = avatarURL
+		profile.Image1024 = avatarURL
+	}
 	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, service.ErrInvalidProfile) {
-			h.renderMembers(w, r, principal, &profile, "Your profile was not saved. A display name is at most 80 characters, a status at most 100, a status emoji at most 64, and each image URL at most 2048.", http.StatusBadRequest)
+			h.renderMembers(w, r, principal, &profile, "Your profile was not saved. A display name is at most 80 characters, a status at most 100, a status emoji at most 64, and the profile photo URL at most 2048.", http.StatusBadRequest)
 			return
 		}
 		h.renderMembers(w, r, principal, &profile, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
@@ -1787,10 +1925,7 @@ func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string
 		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
-	avatarURL := strings.TrimSpace(user.Profile.Image72)
-	if avatarURL == "" {
-		avatarURL = strings.TrimSpace(user.Profile.Image48)
-	}
+	avatarURL := profileImageURL(user.Profile)
 	w.Header().Set("Cache-Control", "no-store")
 	h.writeHTML(w, identityTemplate, identityData{Heading: heading, Username: user.Name, Email: user.Email, Role: role, Release: h.ReleaseRevision, CSRFToken: auth.CSRFToken(sessionCookie.Value), AvatarURL: avatarURL, Avatar: initial(user.Name)}, http.StatusOK, "identity rendering unavailable")
 }
@@ -1928,6 +2063,73 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])), http.StatusSeeOther)
 }
 
+func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
+	principal, fields, channel, timestamp, ok := h.messageMutation(w, r, "The edited message could not be read from the form.")
+	if !ok {
+		return
+	}
+	if _, err := h.Messages.Update(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, fields["text"]); err != nil {
+		h.writeMessageMutationError(w, r, err, "edited")
+		return
+	}
+	h.completeMutation(w, r)
+}
+
+func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
+	principal, _, channel, timestamp, ok := h.messageMutation(w, r, "The delete request could not be read from the form.")
+	if !ok {
+		return
+	}
+	if _, err := h.Messages.Delete(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
+		h.writeMessageMutationError(w, r, err, "deleted")
+		return
+	}
+	h.completeMutation(w, r)
+}
+
+func (h Handler) messageMutation(w http.ResponseWriter, r *http.Request, invalid string) (auth.Principal, map[string]string, domain.ConversationID, domain.MessageTimestamp, bool) {
+	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return auth.Principal{}, nil, "", "", false
+	}
+	fields, ok := h.decodeMutation(w, r, invalid+" Reload the page and try again.")
+	if !ok {
+		return auth.Principal{}, nil, "", "", false
+	}
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
+	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That message link is not valid", "The message was not changed because the link does not identify a message in this conversation.")
+		return auth.Principal{}, nil, "", "", false
+	}
+	return principal, fields, h.requestChannel(r), timestamp, true
+}
+
+func (h Handler) writeMessageMutationError(w http.ResponseWriter, r *http.Request, err error, action string) {
+	status := http.StatusServiceUnavailable
+	heading := "The message was not " + action
+	reason := "The message could not be " + action + " because the workspace store is temporarily unavailable."
+	switch {
+	case errors.Is(err, service.ErrInvalidMessage):
+		status = http.StatusBadRequest
+		reason = "A message needs some text before it can be saved."
+	case errors.Is(err, service.ErrInvalidTimestamp):
+		status = http.StatusBadRequest
+		reason = "That message link is not valid."
+	case errors.Is(err, service.ErrMessageNotOwned):
+		status = http.StatusForbidden
+		reason = "Only the person who posted this message can change it."
+	case errors.Is(err, service.ErrNotInConversation):
+		status = http.StatusForbidden
+		reason = "You are no longer a member of this conversation."
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, service.ErrMessageAlreadyDeleted):
+		status = http.StatusNotFound
+		heading = "That message is no longer available"
+		reason = "The message may already have been deleted."
+	}
+	h.writeMutationError(w, r, status, heading, reason)
+}
+
 func (h Handler) addReaction(w http.ResponseWriter, r *http.Request) {
 	h.mutateReaction(w, r, true)
 }
@@ -2050,6 +2252,36 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusNotFound
 			heading = "That member is no longer here"
 			reason = "One of those members is no longer in the workspace."
+		}
+		h.writeMutationError(w, r, status, heading, reason)
+		return
+	}
+	http.Redirect(w, r, appURL(string(conversation.ID), "", "", "", ""), http.StatusSeeOther)
+}
+
+func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The channel could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	private := strings.EqualFold(strings.TrimSpace(fields["is_private"]), "true")
+	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		heading := "The channel was not created"
+		reason := "The channel could not be created because the workspace store is temporarily unavailable."
+		switch {
+		case errors.Is(err, service.ErrInvalidConversation):
+			status = http.StatusBadRequest
+			reason = "Use a channel name between one and 80 characters."
+		case errors.Is(err, store.ErrAlreadyExists):
+			status = http.StatusConflict
+			reason = "A channel with that name already exists."
 		}
 		h.writeMutationError(w, r, status, heading, reason)
 		return
@@ -2320,6 +2552,18 @@ func displayName(user domain.User) string {
 		}
 	}
 	return string(user.ID)
+}
+
+// profileImageURL chooses the best single image for a human-facing profile
+// form. Slack's API carries size-specific URLs, but asking a person to edit
+// seven storage variants exposed transport detail as product UI.
+func profileImageURL(profile domain.UserProfile) string {
+	for _, candidate := range []string{profile.Image192, profile.Image72, profile.Image48, profile.Image512, profile.Image1024, profile.Image32, profile.Image24} {
+		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func conversationName(conversation domain.Conversation) string {

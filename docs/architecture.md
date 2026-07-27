@@ -295,7 +295,7 @@ them.
 | `GET /healthz`, `GET /readyz` | liveness and end-to-end readiness |
 | `GET /{$}` | redirect to `/app` |
 | `GET /app`, `/app/search`, `/app/members`, `/app/timeline` | HTMX application pages and fragments |
-| `POST /app/message`, `/app/profile`, `/app/conversation/open`, `/app/reaction`, `/app/reaction/remove`, `/app/pin`, `/app/pin/remove`, `/app/session/revoke` | HTMX mutations |
+| `POST /app/message`, `/app/message/update`, `/app/message/delete`, `/app/profile`, `/app/conversation/create`, `/app/conversation/open`, `/app/join`, `/app/reaction`, `/app/reaction/remove`, `/app/pin`, `/app/pin/remove`, `/app/read`, `/app/session/revoke` | Browser workspace mutations |
 | `GET /app/admin/auth` | administrative authorization surface |
 | `GET /login`, `GET /auth/{provider}`, `GET /auth/{provider}/callback`, `POST /logout`, `GET /signed-out`, `GET /me`, `GET /auth/validation` | browser authorization; see [authentication](authentication.md) |
 | `POST /auth/oidc/backchannel-logout`, `GET /auth/shauth/logout/complete` | provider-initiated logout |
