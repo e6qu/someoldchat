@@ -31,7 +31,7 @@ func newAuthAdminTestHandlerWithRole(t *testing.T, scopes []auth.Scope, role dom
 	t.Helper()
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1"})
-	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "Admin", RealName: "Workspace Admin", Email: "admin@example.test"})
 	if err := store.SetWorkspaceRole(context.Background(), "T1", "U1", role, events.Event{}); err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +105,20 @@ func TestAuthAdminPageShowsOnlyAuthorizedSections(t *testing.T) {
 	}
 	if strings.Contains(body, "/api/admin.auth.methods.set") {
 		t.Fatal("authorization-method section was exposed without its scope")
+	}
+	for _, expected := range []string{
+		`<title>Workspace administration · SameOldChat</title>`,
+		`href="/app">Back to chat</a>`,
+		`aria-label="Disable Workspace Admin"`,
+		`aria-label="Save role for Workspace Admin"`,
+		`<meta name="color-scheme" content="light dark">`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("administration page is missing %q: %s", expected, body)
+		}
+	}
+	if strings.Contains(body, `id="authorization-heading"`) {
+		t.Fatal("user-only administrator was shown an empty authorization-method section")
 	}
 }
 

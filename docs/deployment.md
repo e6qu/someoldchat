@@ -234,9 +234,10 @@ three references:
 - `ghcr.io/e6qu/someoldchat:<sha12>-arm64` is a direct Linux arm64 image
   manifest.
 
-Every application image embeds the full immutable commit in the server binary
-and exposes it through `SAMEOLDCHAT_RELEASE_REVISION` for Shauth validation. A
-manual build must supply the same immutable coordinate explicitly:
+Every application image embeds the full immutable commit in the server binary.
+The server exposes its first 12 hexadecimal characters—the same immutable tag
+used by the published image—through `SAMEOLDCHAT_RELEASE_REVISION` for Shauth
+validation. A manual build must supply the immutable commit explicitly:
 
 ```sh
 docker build --build-arg RELEASE_REVISION="$(git rev-parse HEAD)" .

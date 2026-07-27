@@ -91,6 +91,12 @@ the explicit **Sign in with Shauth** action starts another authorization flow. I
 provider logout metadata is incomplete, SameOldChat still revokes its local
 session and reports the incomplete global logout on that application-owned
 page instead of silently claiming success.
+The signed-out page is provider-aware: an OpenID Connect deployment offers the
+direct Shauth action, other provider-backed deployments return to `/login`, and
+a deployment with no browser provider does not invent a dead sign-in link.
+`/login` reads durable provider enablement before rendering, omits disabled
+methods, and reports an explicit unavailable state when no configured method is
+enabled.
 The identity provider also sends a signed OpenID Connect back-channel logout token to
 `POST /auth/oidc/backchannel-logout`. SameOldChat verifies the issuer, audience,
 signature, expiration, exact standard logout event, `iat`, and `jti`, rejects a
@@ -136,8 +142,8 @@ at all.
 Shauth-managed deployments register `/auth/validation` as their authenticated
 validation URL and `/signed-out` as their signed-out URL. `/auth/validation`
 and `/me` expose the verified username, email address, synchronized
-`developer` or `admin` role, and immutable release revision. Anonymous access
-fails closed to the application-owned signed-out page. The repository's
+`developer` or `admin` role, and immutable 12-character commit tag (or complete
+image digest). Anonymous access fails closed to the application-owned signed-out page. The repository's
 `scripts/test-shauth-sso.sh` qualification starts real PostgreSQL, Ory Hydra,
 Shauth, and two isolated SameOldChat relying parties, then runs Shauth's exact
 browser validator for direct and catalog entry, silent SSO, application and

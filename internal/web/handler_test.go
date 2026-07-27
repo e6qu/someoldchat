@@ -699,9 +699,9 @@ func TestTheClientNeverFetchesAnOriginItWasNotGiven(t *testing.T) {
 // It used to visit successful pages and one 404 only, which is how three whole
 // classes of response kept answering with no headers at all: every fragment
 // failure and every insufficient-scope refusal (bare http.Error), and the two
-// signed-out entry pages, /login and /signed-out — the second of which carries
-// a "Sign in with Shauth" link, so framing it starts an authorization flow the
-// victim did not choose. Failures are now covered alongside successes.
+// signed-out entry pages, /login and /signed-out. Provider-backed versions of
+// the second carry a sign-in link, so framing one starts an authorization flow
+// the victim did not choose. Failures are now covered alongside successes.
 func TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
@@ -1364,7 +1364,8 @@ func TestApplicationStartsShauthForUnauthenticatedDirectEntry(t *testing.T) {
 		t.Fatalf("unauthenticated application response = %d location=%q", response.Code, response.Header().Get("Location"))
 	}
 	// A provider the workspace has disabled cannot complete a sign-in, so entry
-	// falls back to the provider list instead of a bare "disabled" page.
+	// falls back to the catalog, which presents an honest unavailable state when
+	// no provider remains, instead of a dead authorization link.
 	if err := store.SetAuthMethod(context.Background(), domain.AuthMethod{WorkspaceID: "T1", Provider: "oidc", Enabled: false}); err != nil {
 		t.Fatal(err)
 	}
@@ -1399,6 +1400,9 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 	if err := handler.SetReleaseRevision("0123456789abcdef0123456789abcdef01234567"); err != nil {
 		t.Fatal(err)
 	}
+	if handler.ReleaseRevision != "0123456789ab" {
+		t.Fatalf("displayed release revision = %q, want the immutable 12-character image tag", handler.ReleaseRevision)
+	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	for _, path := range []string{"/auth/validation", "/me"} {
@@ -1407,7 +1411,7 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
 		body := response.Body.String()
-		for _, expected := range []string{`data-testid="validation-username">developer`, `data-testid="validation-email">developer@example.test`, `data-testid="validation-role">developer`, `data-testid="validation-release">0123456789abcdef0123456789abcdef01234567`, `aria-label="Avatar for developer">D</span>`, `action="/logout"`, `>Sign out</button>`} {
+		for _, expected := range []string{`data-testid="validation-username">developer`, `data-testid="validation-email">developer@example.test`, `data-testid="validation-role">developer`, `data-testid="validation-release">0123456789ab`, `aria-label="Avatar for developer">D</span>`, `action="/logout"`, `>Sign out</button>`} {
 			if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 				t.Fatalf("%s status=%d missing %q body=%s", path, response.Code, expected, body)
 			}
@@ -1437,6 +1441,12 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 	}
 	if err := handler.SetReleaseRevision("latest"); err == nil {
 		t.Fatal("mutable release revision was accepted")
+	}
+	if err := handler.SetReleaseRevision("sha256:" + strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if handler.ReleaseRevision != "sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("image digest was shortened to %q", handler.ReleaseRevision)
 	}
 }
 
@@ -1482,6 +1492,9 @@ func TestAuthorizationAdminIsReachableFromTheShell(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
+	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleAdmin, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
 	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
 	if err := s.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
@@ -1502,10 +1515,15 @@ func TestAuthorizationAdminIsReachableFromTheShell(t *testing.T) {
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	requireContains(t, "workspace shell", get(t, mux, "/app?channel=Cdev").Body.String(), `href="/app/admin/auth"`, "Authorization")
+
+	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleMember, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	requireMissing(t, "member workspace shell", get(t, mux, "/app?channel=Cdev").Body.String(), `href="/app/admin/auth"`)
 }
 
 func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
-	s, mux := browserWorkspace(t, []string{string(auth.ScopeSearchRead)})
+	s, mux := browserWorkspace(t, []string{string(auth.ScopeSearchRead), string(auth.ScopeChannelsHistory)})
 	seedMessage(t, s, "M1", "searchable hello", time.Unix(1700000000, 123456000).UTC())
 	res := get(t, mux, "/app/search?q=hello&channel=Cdev")
 	body := res.Body.String()
@@ -1534,6 +1552,60 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	if !strings.Contains(link, "before=") {
 		t.Fatalf("result link does not position the timeline: %q", link)
 	}
+	opened := get(t, mux, strings.SplitN(link, "#", 2)[0])
+	if opened.Code != http.StatusOK {
+		t.Fatalf("open result status=%d body=%s", opened.Code, opened.Body)
+	}
+	requireContains(t, "opened search result", opened.Body.String(), `id="message-M1"`, "searchable hello")
+}
+
+func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 123456000).UTC()
+	message := domain.Message{
+		ID:           "Mrich",
+		WorkspaceID:  "T1",
+		Conversation: "Cdev",
+		AuthorID:     "U1",
+		Text:         "notification fallback must not be repeated",
+		Blocks:       `[{"type":"header","text":{"type":"plain_text","text":"Deployment complete"}},{"type":"section","text":{"type":"mrkdwn","text":"*Production* is healthy"},"fields":[{"type":"plain_text","text":"Region: eu-west"}]},{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View build"}}]}]`,
+		Attachments:  `[{"author_name":"CI","title":"Build 842","title_link":"https://example.com/build/842","text":"All checks passed","fields":[{"title":"Duration","value":"3m 12s"}],"footer":"Continuous delivery"}]`,
+		Unfurls:      map[string]string{"https://example.com/runbook": `{"title":"Production runbook","text":"Recovery steps"}`},
+		CreatedAt:    created,
+	}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Erich", WorkspaceID: "T1", Topic: "message.created", Payload: "Mrich", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "rich message", body,
+		"Deployment complete",
+		"*Production* is healthy",
+		"Region: eu-west",
+		"View build",
+		"Build 842",
+		"All checks passed",
+		"Duration",
+		"3m 12s",
+		"Production runbook",
+		"Recovery steps",
+		`aria-label="Structured message"`,
+		`aria-label="Attachments"`,
+		`aria-label="Link previews"`,
+	)
+	requireMissing(t, "rich message", body, "notification fallback must not be repeated", `action="/app/message/update?channel=Cdev`)
+	requireContains(t, "rich message deletion", body, `action="/app/message/delete?channel=Cdev`)
+}
+
+func TestMemberDirectoryDoesNotOfferProfileWritesWithoutScope(t *testing.T) {
+	_, mux := browserWorkspace(t, []string{string(auth.ScopeUsersRead)})
+	response := get(t, mux, "/app/members")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	body := response.Body.String()
+	requireContains(t, "read-only member directory", body, "allow viewing profiles but not changing yours")
+	requireMissing(t, "read-only member directory", body, `action="/app/profile"`, "Save changes")
 }
 
 func TestSearchNamesDirectMessagesAfterTheirParticipants(t *testing.T) {

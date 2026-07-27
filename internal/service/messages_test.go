@@ -1557,6 +1557,50 @@ func TestEveryMessageWriteUsesOneUnicodeCharacterLimit(t *testing.T) {
 	}
 }
 
+func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	messages := Messages{Store: s}
+	oversized := `[{"type":"section","text":{"type":"plain_text","text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}}]`
+
+	if _, err := messages.PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", "", ""); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("post oversized body err=%v", err)
+	}
+	plain, err := messages.Post(context.Background(), "T1", "U1", "C1", "before", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.UpdateWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), "", oversized, ""); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("update oversized body err=%v", err)
+	}
+	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("schedule oversized body err=%v", err)
+	}
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, ""); !errors.Is(err, ErrInvalidEphemeral) {
+		t.Fatalf("ephemeral oversized body err=%v", err)
+	}
+	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
+		"https://example.test": `{"text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}`,
+	}); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("unfurl oversized body err=%v", err)
+	}
+
+	stored, err := s.GetMessage(context.Background(), plain.ID)
+	if err != nil || stored.Text != "before" || hasStructuredPayload(stored.Blocks) || hasStructuredPayload(stored.Attachments) || len(stored.Unfurls) != 0 {
+		t.Fatalf("rejected update changed stored message: %+v err=%v", stored, err)
+	}
+}
+
+func hasStructuredPayload(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	return raw != "" && raw != "[]"
+}
+
 func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

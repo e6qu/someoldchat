@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -150,6 +151,129 @@ func TestSQLiteOAuthCodeIsHashedAndExpires(t *testing.T) {
 	}
 	if _, err := s.ExchangeOAuthCode(ctx, "client", "client-secret", fresh.Code, fresh.RedirectURI, "access-replay", domain.OAuthToken{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("replayed code error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// TestSQLiteOAuthCodeConcurrentRedemptionIsSingleUse exercises the transaction
+// race the HTTP authorization-code endpoint sees when two clients redeem the
+// same code together. One caller may mint the token and every loser must get the
+// portable not-found contract; a backend lock error is neither a valid OAuth
+// response nor proof that the code was consumed.
+func TestSQLiteOAuthCodeConcurrentRedemptionIsSingleUse(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "oauth-code-concurrent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	seedConversationFixture(t, ctx, s)
+	if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("client-secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	const callers = 24
+	for iteration := range 8 {
+		grant := domain.OAuthCode{
+			Code:        fmt.Sprintf("concurrent-code-%d", iteration),
+			ClientID:    "client",
+			WorkspaceID: "T1",
+			UserID:      "U1",
+			Scopes:      []string{"chat:write"},
+			RedirectURI: "https://example.test/callback",
+		}
+		if err := s.CreateOAuthCode(ctx, grant); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, callers)
+		var group sync.WaitGroup
+		for caller := range callers {
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				<-start
+				_, err := s.ExchangeOAuthCode(ctx, "client", "client-secret", grant.Code, grant.RedirectURI, fmt.Sprintf("access-%d-%d", iteration, caller), domain.OAuthToken{})
+				results <- err
+			}()
+		}
+		close(start)
+		group.Wait()
+		close(results)
+		succeeded := 0
+		notFound := 0
+		for err := range results {
+			switch {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, store.ErrNotFound):
+				notFound++
+			default:
+				t.Fatalf("concurrent redemption returned backend error: %v", err)
+			}
+		}
+		if succeeded != 1 || notFound != callers-1 {
+			t.Fatalf("successful redemptions=%d not-found redemptions=%d, want 1 and %d", succeeded, notFound, callers-1)
+		}
+	}
+}
+
+// TestSQLiteOpenIDRefreshConcurrentRotationIsSingleUse applies the same
+// portable contention contract to refresh tokens. Rotation consumes the old
+// credential and mints two new credentials atomically, so a racing loser must
+// observe an already-consumed token instead of a storage-engine lock.
+func TestSQLiteOpenIDRefreshConcurrentRotationIsSingleUse(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "openid-refresh-concurrent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	seedConversationFixture(t, ctx, s)
+	if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("client-secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	const callers = 24
+	for iteration := range 8 {
+		oldToken := fmt.Sprintf("old-refresh-%d", iteration)
+		if err := s.CreateOpenIDRefreshToken(ctx, domain.OpenIDRefreshToken{
+			TokenHash:   domain.HashToken(oldToken),
+			ClientID:    "client",
+			WorkspaceID: "T1",
+			UserID:      "U1",
+			Scopes:      []string{"openid"},
+			ExpiresAt:   time.Now().UTC().Add(time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, callers)
+		var group sync.WaitGroup
+		for caller := range callers {
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				<-start
+				_, err := s.ExchangeOpenIDRefreshToken(ctx, "client", oldToken, fmt.Sprintf("openid-access-%d-%d", iteration, caller), fmt.Sprintf("new-refresh-%d-%d", iteration, caller), domain.OpenIDToken{})
+				results <- err
+			}()
+		}
+		close(start)
+		group.Wait()
+		close(results)
+		succeeded := 0
+		notFound := 0
+		for err := range results {
+			switch {
+			case err == nil:
+				succeeded++
+			case errors.Is(err, store.ErrNotFound):
+				notFound++
+			default:
+				t.Fatalf("concurrent refresh rotation returned backend error: %v", err)
+			}
+		}
+		if succeeded != 1 || notFound != callers-1 {
+			t.Fatalf("successful rotations=%d not-found rotations=%d, want 1 and %d", succeeded, notFound, callers-1)
+		}
 	}
 }
 

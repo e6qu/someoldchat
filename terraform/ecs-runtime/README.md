@@ -86,6 +86,6 @@ The OpenID Connect client registration must allow the exact
 `https://<application-host>/auth/shauth/logout/complete` bridge as the
 RP-initiated post-logout redirect URI and register
 `https://<application-host>/auth/oidc/backchannel-logout` as the back-channel
-logout URI. `release_revision` must identify the exact deployed commit or image
-digest; the module exposes it to the task as `SAMEOLDCHAT_RELEASE_REVISION` for
-Shauth validation.
+logout URI. `release_revision` must be the exact 12-character commit tag used by
+the deployed image, or its complete image digest; the module exposes it to the
+task as `SAMEOLDCHAT_RELEASE_REVISION` for Shauth validation.

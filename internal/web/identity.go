@@ -265,7 +265,7 @@ func (h LoginHandler) providerLogoutComplete(w http.ResponseWriter, r *http.Requ
 	http.Redirect(w, r, target.String(), http.StatusSeeOther)
 }
 
-func signedOut(w http.ResponseWriter, r *http.Request) {
+func (h Handler) signedOut(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w, entryContentSecurityPolicy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	message := "Your SameOldChat and organization sign-in sessions have ended."
@@ -273,7 +273,16 @@ func signedOut(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		message = "Your SameOldChat session ended, but the organization identity service could not complete global sign-out."
 	}
-	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Signed out · SameOldChat</title><style>:root{color-scheme:light dark;--bg:#f8f8fa;--panel:#fff;--text:#1d1c1d;--muted:#5e5e65;--line:#d5d5da;--accent:#611f69;--focus:#1264a3}@media(prefers-color-scheme:dark){:root{--bg:#1a1d21;--panel:#222529;--text:#f4f4f5;--muted:#c7c7cc;--line:#4a4e55;--accent:#b869c2;--focus:#5bb8ff}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(480px,100%);padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 42px #0002}h1{margin:0 0 12px;font-size:2rem}p{margin:0 0 24px;color:var(--muted)}a{display:inline-block;padding:11px 16px;border-radius:7px;background:var(--accent);color:#fff;font-weight:700;text-decoration:none}a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}</style></head><body><main class="card"><h1>You’re signed out</h1><p role="status">`+template.HTMLEscapeString(message)+`</p><a href="/auth/oidc">Sign in with Shauth</a></main></body></html>`)
+	signIn := ""
+	switch {
+	case h.Login == nil:
+		signIn = `<p>Ask a workspace administrator how to sign in again.</p>`
+	case h.Login.hasOpenIDConnectProvider():
+		signIn = `<a href="/auth/oidc">Sign in with Shauth</a>`
+	default:
+		signIn = `<a href="/login">Choose a sign-in method</a>`
+	}
+	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Signed out · SameOldChat</title><style>:root{color-scheme:light dark;--bg:#f8f8fa;--panel:#fff;--text:#1d1c1d;--muted:#5e5e65;--line:#d5d5da;--accent:#611f69;--focus:#1264a3}@media(prefers-color-scheme:dark){:root{--bg:#1a1d21;--panel:#222529;--text:#f4f4f5;--muted:#c7c7cc;--line:#4a4e55;--accent:#b869c2;--focus:#5bb8ff}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(480px,100%);padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 42px #0002}h1{margin:0 0 12px;font-size:2rem}p{margin:0 0 24px;color:var(--muted)}a{display:inline-block;padding:11px 16px;border-radius:7px;background:var(--accent);color:#fff;font-weight:700;text-decoration:none}a:focus-visible{outline:3px solid var(--focus);outline-offset:3px}</style></head><body><main class="card"><h1>You’re signed out</h1><p role="status">`+template.HTMLEscapeString(message)+`</p>`+signIn+`</main></body></html>`)
 }
 
 const backchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
@@ -355,27 +364,48 @@ func (h LoginHandler) backchannelLogout(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 }
 
-func (h LoginHandler) login(w http.ResponseWriter, _ *http.Request) {
+func (h LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w, entryContentSecurityPolicy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · SameOldChat</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f8f8fa;color:#1d1c1d;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(420px,calc(100% - 32px));padding:32px;background:#fff;border:1px solid #ddd;border-radius:12px;box-shadow:0 12px 32px #1d1c1d18}h1{margin-top:0}.provider{display:block;margin:12px 0;padding:12px 16px;border-radius:6px;background:#611f69;color:#fff;text-align:center;text-decoration:none;font-weight:700}</style></head><body><main class="card"><h1>Sign in to SameOldChat</h1><p>Choose your organization’s authorization source.</p>`+h.providerLinks()+`</main></body></html>`)
+	links, count, err := h.providerLinks(r.Context())
+	message := "Choose your organization’s authorization source."
+	status := http.StatusOK
+	if err != nil {
+		status = http.StatusServiceUnavailable
+		message = "Sign-in methods are temporarily unavailable. Try again later."
+		links = ""
+	} else if count == 0 {
+		status = http.StatusServiceUnavailable
+		message = "No sign-in methods are enabled for this workspace. Contact a workspace administrator."
+	}
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Sign in · SameOldChat</title><style>:root{color-scheme:light dark;--bg:#f8f8fa;--panel:#fff;--text:#1d1c1d;--muted:#5e5e65;--line:#d5d5da;--accent:#611f69;--focus:#1264a3}@media(prefers-color-scheme:dark){:root{--bg:#1a1d21;--panel:#222529;--text:#f4f4f5;--muted:#c7c7cc;--line:#4a4e55;--accent:#7c2d86;--focus:#5bb8ff}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(440px,100%);padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 42px #0002}h1{margin:0 0 10px;font-size:2rem}p{margin:0 0 22px;color:var(--muted)}.provider{display:block;margin:12px 0;padding:12px 16px;border-radius:7px;background:var(--accent);color:#fff;text-align:center;text-decoration:none;font-weight:800}.provider:focus-visible{outline:3px solid var(--focus);outline-offset:3px}</style></head><body><main class="card"><h1>Sign in to SameOldChat</h1><p role="status">`+template.HTMLEscapeString(message)+`</p>`+links+`</main></body></html>`)
 }
 
-func (h LoginHandler) providerLinks() string {
+func (h LoginHandler) providerLinks(ctx context.Context) (string, int, error) {
 	var result strings.Builder
 	names := make([]string, 0, len(h.providers))
 	for name := range h.providers {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	count := 0
 	for _, name := range names {
+		method, err := h.service.GetAuthMethod(ctx, h.workspace, name)
+		if err != nil {
+			return "", 0, err
+		}
+		if !method.Enabled {
+			continue
+		}
 		result.WriteString(`<a class="provider" href="/auth/`)
 		result.WriteString(name)
 		result.WriteString(`">Continue with `)
 		result.WriteString(providerLabel(name))
 		result.WriteString(`</a>`)
+		count++
 	}
-	return result.String()
+	return result.String(), count, nil
 }
 
 func providerLabel(name string) string {
