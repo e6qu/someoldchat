@@ -2,11 +2,13 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -57,42 +59,85 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator, sess
 	return Handler{Messages: messages, Authenticator: authenticator, SessionRevoker: sessionRevoker, Channel: domain.ConversationID(channel), CookieDomain: strings.TrimSpace(cookieDomain)}, nil
 }
 
-var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{.Channel}} · SameOldChat</title><style>
-:root{color-scheme:light;--bg:#fff;--panel:#f8f8fa;--panel-strong:#fff;--text:#1d1c1d;--muted:#696969;--line:#dedede;--accent:#611f69;--accent-2:#36c5f0;--hover:#f1edf2;--shadow:0 8px 24px #1d1c1d18}*{box-sizing:border-box}html[data-theme=dark]{color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45;--hover:#2c3035;--shadow:0 8px 24px #0006}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input{font:inherit}button{cursor:pointer}.shell{min-height:100vh;display:grid;grid-template-rows:52px 1fr}.topbar{background:var(--accent);color:#fff;display:flex;align-items:center;gap:16px;padding:0 20px;box-shadow:var(--shadow)}.brand{font-weight:800;letter-spacing:.2px}.search{flex:1;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #fff5;border-radius:7px;padding:6px 12px;color:#fff}.search input{width:100%;border:0;outline:0;background:transparent;color:#fff}.search input::placeholder{color:#fff}.top-actions{display:flex;gap:8px;margin-left:auto}.icon-button{border:0;background:transparent;color:inherit;border-radius:6px;padding:7px 9px}.icon-button:hover{background:#fff2}.workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}.sidebar{background:var(--accent);color:#fff;padding:18px 10px;display:flex;flex-direction:column;gap:18px}.workspace-name{font-weight:800;padding:0 10px}.workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}.side-section{display:grid;gap:2px}.side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}.side-link{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:5px;color:#fff;text-decoration:none}.side-link:hover,.side-link[aria-current=page]{background:#ffffff26}.side-link[aria-current=page]{font-weight:700}.badge{margin-left:auto;background:#fff;color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 5px;font-size:12px;font-weight:700}.sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff38;padding-top:12px}.signed-in{display:flex;align-items:center;gap:9px;padding:4px 10px 10px;min-width:0}.signed-in-avatar{flex:0 0 auto;width:24px;height:24px;border-radius:5px;display:grid;place-items:center;background:#ffffff2e;font-size:11px;font-weight:800;text-transform:uppercase;overflow:hidden}.signed-in-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.content{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) {{if .ThreadTimestamp}}360px{{end}};background:var(--bg)}.chat{min-width:0;display:grid;grid-template-rows:64px minmax(0,1fr) auto}.channel-header{display:flex;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:0 26px}.channel-title{font-size:18px;font-weight:800}.channel-meta{color:var(--muted);font-size:13px}.timeline{overflow:auto;padding:24px 26px 12px}.message{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:10px 8px;border-radius:7px}.message:hover{background:var(--hover)}.avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#36c5f0,#2eb67d);color:#fff;display:grid;place-items:center;font-weight:800}.message-head{display:flex;align-items:baseline;gap:8px}.author{font-weight:800}.time{color:var(--muted);font-size:12px}.message-text{margin:2px 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}.message-actions{display:flex;gap:8px;align-items:center}.message-actions a,.message-actions button{color:var(--muted);background:transparent;border:0;padding:2px 0;text-decoration:none;font-size:12px}.message-actions a:hover,.message-actions button:hover{color:var(--accent-2)}.inline-form{display:inline-flex;gap:6px}.inline-form input{width:120px;border:1px solid var(--line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}.composer-wrap{padding:12px 26px 20px;background:linear-gradient(transparent,var(--bg) 15%)}.composer{border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:10px}.composer textarea{width:100%;min-height:44px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text)}.composer-footer{display:flex;justify-content:space-between;align-items:center}.composer-tools{color:var(--muted);font-size:13px}.send{border:0;border-radius:5px;background:#007a5a;color:#fff;font-weight:700;padding:7px 14px}.thread{border-left:1px solid var(--line);background:var(--panel);padding:20px;overflow:auto}.thread h2{margin:0 0 18px;font-size:18px}.empty{color:var(--muted);padding:30px;text-align:center}.theme-toggle{border:1px solid #fff6;border-radius:5px;color:#fff;background:transparent;padding:6px 9px}.theme-toggle:hover{background:#fff2}@media(max-width:800px){.workspace{grid-template-columns:68px minmax(0,1fr)}.sidebar{padding:18px 6px}.workspace-name,.workspace-sub,.side-label,.side-link span:not(.badge),.signed-in-name{display:none}.side-link{justify-content:center}.content{grid-template-columns:minmax(0,1fr)}.thread{display:none}.search{max-width:none}.topbar{padding:0 10px}.timeline,.composer-wrap{padding-left:14px;padding-right:14px}}
-</style></head><body><div class="shell"><header class="topbar"><div class="brand">SameOldChat</div><label class="search" aria-label="Search"><span>⌕</span><input placeholder="Search the workspace" aria-label="Search the workspace"></label><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-label="Toggle dark mode">☾</button>{{if .ShowProfile}}<a class="icon-button" href="/me" aria-label="My profile">●</a>{{end}}<a class="icon-button" href="/app/members" aria-label="Members">◉</a></div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members"><span>♙</span><span>Members</span></a></nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Conversations}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}}><span>#</span><span>{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-label="unread messages">{{.UnreadCount}}</span>{{end}}</a>{{else}}<span class="side-link">No channels available.</span>{{end}}</nav><div class="sidebar-bottom"><div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.Username}}</span><span class="signed-in-name">{{.Username}}</span></div><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit" data-shauth-sign-out><span>↪</span><span>Sign out</span></button></form></div></aside><div class="content"><section class="chat"><header class="channel-header"><div><div class="channel-title"># {{.Channel}}</div><div class="channel-meta">Messages and conversations</div></div></header><section id="timeline" class="timeline" aria-live="polite">{{template "messages" .}}</section><div class="composer-wrap"><form class="composer" method="post" action="/app/message?channel={{.Channel}}" hx-post="/app/message?channel={{.Channel}}" hx-target="#timeline" hx-swap="beforeend"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><textarea id="text" name="text" required autofocus placeholder="Message #{{.Channel}}" aria-label="Message"></textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><div class="composer-tools">Replying in thread</div>{{end}}<div class="composer-footer"><span class="composer-tools">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></section>{{if .ThreadTimestamp}}<aside class="thread" aria-label="Thread"><h2>Thread</h2>{{template "messages" .Thread}}</aside>{{end}}</div></div></div><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')});if(window.EventSource){const events=new EventSource('/events');const refresh=()=>window.location.reload();['message.created','message.updated','message.deleted'].forEach(type=>events.addEventListener(type,refresh))}})();</script></body></html>
-{{define "messages"}}{{range .Messages}}<article class="message" data-message-id="{{.ID}}"><div class="avatar" aria-hidden="true">{{.AuthorID}}</div><div><div class="message-head"><span class="author">{{.AuthorID}}</span><time class="time" datetime="{{.CreatedAt}}">{{.CreatedAt}}</time></div><p class="message-text">{{.Text}}</p><div class="message-actions"><a href="/app?channel={{$.Channel}}&thread={{.Timestamp}}">Reply in thread</a><form class="inline-form" aria-label="Add reaction" method="post" action="/app/reaction?channel={{$.Channel}}&ts={{.Timestamp}}" hx-post="/app/reaction?channel={{$.Channel}}&ts={{.Timestamp}}" hx-target="#timeline" hx-swap="outerHTML"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label for="reaction-{{.ID}}" hidden>Reaction</label><input id="reaction-{{.ID}}" name="name" maxlength="64" placeholder="Add reaction" required><button type="submit">Add</button></form><form method="post" action="/app/pin?channel={{$.Channel}}&ts={{.Timestamp}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Pin</button></form></div></div></article>{{else}}<p class="empty">No messages yet. Start the conversation.</p>{{end}}{{end}}`))
+const (
+	// timelineWindow is how many messages one timeline view renders.
+	timelineWindow = 50
+	// timelineScan is the page size used while walking a conversation. The chat
+	// service only pages a conversation forward from its first message, so the
+	// newest window is reached by scanning; a large scan page keeps the walk to a
+	// few service calls for ordinary conversations.
+	timelineScan = 200
+	// conversationWindow bounds the sidebar; the remainder is reachable through
+	// the sidebar pager.
+	conversationWindow = 50
+	// directNameWindow bounds how many direct conversations resolve participant
+	// names, so a large sidebar cannot turn into an unbounded member lookup.
+	directNameWindow = 20
+	searchWindow     = 25
+	memberWindow     = 100
+	// reactionWindow bounds the reactions rendered for one message.
+	reactionWindow = 50
+	// pinWindow bounds the pins loaded for one conversation view.
+	pinWindow = 100
+)
 
-var membersTemplate = template.Must(template.New("members").Parse(`<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Members · SameOldChat</title><style>:root{--bg:#fff;--panel:#f8f8fa;--text:#1d1c1d;--muted:#696969;--line:#dedede;--accent:#611f69;--green:#007a5a}html[data-theme=dark]{--bg:#1a1d21;--panel:#222529;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{height:52px;background:var(--accent);color:#fff;display:flex;align-items:center;padding:0 22px;gap:18px}.bar a{color:#fff;text-decoration:none;font-weight:700}.bar button{margin-left:auto;border:1px solid #fff6;background:transparent;color:#fff;border-radius:5px;padding:6px 10px}.layout{max-width:1100px;margin:0 auto;padding:32px 24px}.heading{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:minmax(280px,380px) 1fr;gap:24px}.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:22px}.card h2{margin-top:0}.field{display:grid;gap:5px;margin:14px 0}.field input{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--text);padding:9px}.save{background:var(--green);color:#fff;border:0;border-radius:5px;padding:9px 14px;font-weight:700}.members{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}.person{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:15px}.person h2{font-size:16px;margin:0}.person p{margin:5px 0;color:var(--muted)}@media(max-width:720px){.grid{grid-template-columns:1fr}.layout{padding:22px 14px}}</style></head><body><header class="bar"><a href="/app">← Back to chat</a><span>Members</span><button id="theme-toggle" type="button">☾ Theme</button></header><main class="layout"><div class="heading"><h1>Workspace members</h1><div class="muted">Manage your profile and see who is here.</div></div><div class="grid"><section class="card" aria-label="Your profile"><h2>Edit profile</h2><form method="post" action="/app/profile"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="field" for="display_name">Display name<input id="display_name" name="display_name" value="{{.Current.Profile.DisplayName}}" required></label><label class="field" for="status_text">Status<input id="status_text" name="status_text" value="{{.Current.Profile.StatusText}}"></label><label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" value="{{.Current.Profile.StatusEmoji}}"></label><label class="field" for="image_24">Image 24 URL<input id="image_24" name="image_24" value="{{.Current.Profile.Image24}}"></label><label class="field" for="image_32">Image 32 URL<input id="image_32" name="image_32" value="{{.Current.Profile.Image32}}"></label><label class="field" for="image_48">Image 48 URL<input id="image_48" name="image_48" value="{{.Current.Profile.Image48}}"></label><label class="field" for="image_72">Image 72 URL<input id="image_72" name="image_72" value="{{.Current.Profile.Image72}}"></label><label class="field" for="image_192">Image 192 URL<input id="image_192" name="image_192" value="{{.Current.Profile.Image192}}"></label><label class="field" for="image_512">Image 512 URL<input id="image_512" name="image_512" value="{{.Current.Profile.Image512}}"></label><label class="field" for="image_1024">Image 1024 URL<input id="image_1024" name="image_1024" value="{{.Current.Profile.Image1024}}"></label><button class="save" type="submit">Save profile</button></form></section><section class="card" aria-label="Workspace members"><h2>People</h2><div class="members">{{range .Members}}<article class="person"><h2>{{.Name}}</h2><p>{{.RealName}}</p>{{if .Profile.DisplayName}}<p>{{.Profile.DisplayName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{end}}</article>{{else}}<p class="muted">No members available.</p>{{end}}</div></section></div></main><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')})})();</script></body></html>`))
+// liveEventTopics are the durable event topics the workspace page reacts to.
+// They have to match the topics the chat service actually publishes
+// (internal/service/messages.go): an edit is published as "message.changed",
+// and no component publishes "message.updated".
+var liveEventTopics = []string{
+	"message.created",
+	"message.changed",
+	"message.deleted",
+	"message.unfurled",
+	"reaction.added",
+	"reaction.removed",
+	"pin.added",
+	"pin.removed",
+}
 
-var searchTemplate = template.Must(template.New("search").Parse(`<!doctype html>
-<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Search · SameOldChat</title><style>:root{--bg:#fff;--panel:#f8f8fa;--text:#1d1c1d;--muted:#696969;--line:#dedede;--accent:#611f69}html[data-theme=dark]{--bg:#1a1d21;--panel:#222529;--text:#e8e8e8;--muted:#a7a7a7;--line:#3b3f45}*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{height:52px;background:var(--accent);color:#fff;display:flex;align-items:center;padding:0 22px;gap:18px}.bar a{color:#fff;text-decoration:none;font-weight:700}.bar form{display:flex;flex:1;max-width:600px;margin:auto;gap:8px}.bar input{width:100%;border:1px solid #fff6;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:#fff}.bar input::placeholder{color:#fff}.bar button{border:1px solid #fff6;background:transparent;color:#fff;border-radius:5px;padding:6px 10px}.layout{max-width:900px;margin:0 auto;padding:32px 24px}.heading{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:24px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}.results{display:grid;gap:8px}.result{display:block;padding:16px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:inherit;text-decoration:none}.result:hover{border-color:var(--accent)}.author{font-weight:700}.time{color:var(--muted);font-size:12px;margin-left:8px}.text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.empty{color:var(--muted);padding:24px;text-align:center}@media(max-width:720px){.layout{padding:22px 14px}.bar{padding:0 12px}.bar>a{font-size:13px}}
-</style></head><body><header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" aria-label="Search the workspace"><input name="q" value="{{.Query}}" placeholder="Search messages" aria-label="Search messages" required><button type="submit">Search</button></form><button id="theme-toggle" type="button">☾ Theme</button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Query}}<div class="muted">Messages matching “{{.Query}}”</div>{{else}}<div class="muted">Enter a search term to find messages.</div>{{end}}</div><section class="results" aria-live="polite">{{range .Messages}}<a class="result" href="/app?channel={{.Channel}}&thread={{.Timestamp}}"><span class="author">{{.AuthorID}}</span><time class="time" datetime="{{.CreatedAt}}">{{.CreatedAt}}</time><p class="text">{{.Text}}</p></a>{{else}}<p class="empty">No matching messages.</p>{{end}}</section></main><script>(function(){const root=document.documentElement;const saved=localStorage.getItem('sameoldchat-theme');if(saved==='dark')root.dataset.theme='dark';document.getElementById('theme-toggle').addEventListener('click',function(){const dark=root.dataset.theme==='dark';root.dataset.theme=dark?'light':'dark';localStorage.setItem('sameoldchat-theme',dark?'light':'dark')})})();</script></body></html>`))
+// ---------------------------------------------------------------------------
+// View models
+// ---------------------------------------------------------------------------
 
-type pageData struct {
-	Messages        []messageView
-	Conversations   []conversationView
-	Channel         string
-	Thread          messagePage
-	ThreadTimestamp string
-	CSRFToken       string
-	ShowProfile     bool
-	// The signed-in username, shown in the workspace shell beside the sign-out
-	// control so the chat interface itself says who is signed in.
-	Username string
+// messageList is the only type the "messages" partial is ever invoked with. The
+// main timeline, the thread pane and both mutation fragments render through it,
+// so the partial cannot be reached with a value that is missing a field it
+// needs: that mismatch is what made every thread view fail to render.
+type messageList struct {
+	Messages    []messageView
+	ChannelName string
+	CSRFToken   string
+	CanReact    bool
+	CanPin      bool
 }
-type membersData struct {
-	Members   []memberView
-	Current   memberView
-	CSRFToken string
+
+type messageView struct {
+	ID            string
+	Anchor        string
+	AuthorName    string
+	AuthorInitial string
+	Text          string
+	MachineTime   string
+	DisplayTime   string
+	Pinned        bool
+	Reactions     []reactionView
+	ReplyURL      string
+	ReactionURL   string
+	UnreactURL    string
+	PinURL        string
+	UnpinURL      string
+	Permalink     string
+	Channel       string
+	ChannelName   string
 }
-type messageView struct{ ID, AuthorID, Text, CreatedAt, Timestamp, Channel string }
-type memberView struct {
-	Name     string
-	RealName string
-	Profile  domain.UserProfile
+
+type reactionView struct {
+	Name  string
+	Count int
+	Mine  bool
 }
+
 type conversationView struct {
 	ID          string
 	Name        string
@@ -100,10 +145,56 @@ type conversationView struct {
 	UnreadCount int
 }
 
+type pageData struct {
+	Timeline        messageList
+	Thread          messageList
+	ThreadTimestamp string
+	Channels        []conversationView
+	Directs         []conversationView
+	MoreChannelsURL string
+	Channel         string
+	ChannelName     string
+	ChannelMeta     string
+	CSRFToken       string
+	ShowProfile     bool
+	ShowAdmin       bool
+	Username        string
+	UserInitial     string
+	OlderURL        string
+	LatestURL       string
+	AtLatest        bool
+	Notice          string
+	Error           string
+	Draft           string
+	ComposeURL      string
+	TimelineURL     string
+	ThreadURL       string
+}
+
+type memberView struct {
+	ID       string
+	Name     string
+	RealName string
+	Profile  domain.UserProfile
+	IsSelf   bool
+}
+
+type membersData struct {
+	Members        []memberView
+	Profile        domain.UserProfile
+	CSRFToken      string
+	Error          string
+	CanMessage     bool
+	MoreMembersURL string
+}
+
 type searchData struct {
 	Query    string
 	Channel  string
 	Messages []messageView
+	Error    string
+	MoreURL  string
+	Searched bool
 }
 
 type identityData struct {
@@ -117,16 +208,340 @@ type identityData struct {
 	Avatar    string
 }
 
-var identityTemplate = template.Must(template.New("identity").Parse(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>{{.Heading}} · SameOldChat</title><style>
-:root{color-scheme:light;--bg:#f7f3f8;--panel:#fff;--text:#211b24;--muted:#665c69;--line:#d8cddd;--accent:#7f1689;--accent-hover:#65106e;--focus:#087db6;--danger:#b4234b}@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#17131a;--panel:#241e28;--text:#faf6fb;--muted:#c9bccd;--line:#4d4053;--accent:#d152de;--accent-hover:#e57bef;--focus:#5dc8ff;--danger:#ff6d91}}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 0%,color-mix(in srgb,var(--accent) 18%,transparent),transparent 34%),var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.bar{display:flex;align-items:center;gap:16px;padding:16px 24px;background:var(--panel);border-bottom:1px solid var(--line)}.bar a{color:var(--accent);font-weight:750;text-decoration:none}.bar a:focus-visible,.button:focus-visible{outline:3px solid var(--focus);outline-offset:3px}.layout{width:min(760px,calc(100% - 32px));margin:48px auto}.card{padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:0 18px 52px #0002}.identity-heading{display:grid;grid-template-columns:72px 1fr;align-items:center;gap:18px;margin-bottom:8px}.avatar{width:72px;height:72px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#36c5f0);color:#fff;font-size:1.8rem;font-weight:850;object-fit:cover}h1{margin:0;font-size:clamp(2rem,6vw,3.4rem);line-height:1.05}.lede{margin:0 0 28px;color:var(--muted)}dl{display:grid;grid-template-columns:minmax(120px,180px) 1fr;margin:0 0 28px;border-top:1px solid var(--line)}dt,dd{margin:0;padding:13px 0;border-bottom:1px solid var(--line)}dt{color:var(--muted);font-weight:700}dd{overflow-wrap:anywhere}.button{border:0;border-radius:8px;padding:11px 17px;background:var(--danger);color:#fff;font:inherit;font-weight:800;cursor:pointer}@media(max-width:540px){.layout{margin:24px auto}.card{padding:24px}.identity-heading{grid-template-columns:56px 1fr}.avatar{width:56px;height:56px;border-radius:12px}dl{grid-template-columns:1fr}dt{padding-bottom:0;border-bottom:0}dd{padding-top:3px}}</style></head><body><header class="bar"><strong>SameOldChat</strong><a href="/app">Back to chat</a></header><main class="layout"><section class="card" aria-labelledby="identity-heading"><div class="identity-heading">{{if .AvatarURL}}<img class="avatar" src="{{.AvatarURL}}" alt="Avatar for {{.Username}}">{{else}}<span class="avatar" role="img" aria-label="Avatar for {{.Username}}">{{.Avatar}}</span>{{end}}<h1 id="identity-heading">{{.Heading}}</h1></div><p class="lede">Your verified Shauth identity and this immutable application release.</p><dl><dt>Username</dt><dd data-testid="validation-username">{{.Username}}</dd><dt>Email</dt><dd data-testid="validation-email">{{.Email}}</dd><dt>Role</dt><dd data-testid="validation-role">{{.Role}}</dd><dt>Release</dt><dd data-testid="validation-release">{{.Release}}</dd></dl><form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="button" type="submit">Sign out</button></form></section></main></body></html>`))
-
-const progressiveEnhancementScript = `<script>(function(){var suppressRefresh=false;var events=null;document.addEventListener('submit',function(event){var form=event.target.closest('form');if(!form)return;if(!form.hasAttribute('hx-post')){suppressRefresh=true;if(events)events.close();return}event.preventDefault();suppressRefresh=true;if(events)events.close();form.classList.remove('is-error');fetch(form.getAttribute('hx-post'),{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'}}).then(function(response){if(!response.ok)throw new Error('request failed');var redirect=response.headers.get('HX-Redirect');if(redirect){window.location.assign(redirect);return null}if(response.status===204)return null;return response.text()}).then(function(html){if(html===null)return;var target=document.querySelector(form.getAttribute('hx-target'));if(!target)throw new Error('update target missing');if(form.getAttribute('hx-swap')==='outerHTML')target.outerHTML=html;else target.insertAdjacentHTML('beforeend',html)}).catch(function(){form.classList.add('is-error')}).finally(function(){suppressRefresh=false})});if(window.EventSource){var cursor=sessionStorage.getItem('sameoldchat-last-event')||'';events=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));var refresh=function(event){if(event.lastEventId)sessionStorage.setItem('sameoldchat-last-event',event.lastEventId);if(suppressRefresh||(document.activeElement&&document.activeElement.form))return;events.close();window.location.reload()};['message.created','message.updated','message.deleted'].forEach(function(type){events.addEventListener(type,refresh)})}})();</script>`
-
-type messagePage struct {
-	Messages []messageView
-	Channel  string
+type errorData struct {
+	Heading string
+	Message string
 }
+
+// ---------------------------------------------------------------------------
+// Templates
+//
+// Every page is rendered from one layout with one palette and one theme
+// bootstrap. The layout owns the document, the shared stylesheet and the theme
+// script; each page contributes a "title", a "content" and optionally "styles"
+// and "scripts". Nothing is patched into the rendered HTML afterwards, so a
+// template edit can no longer take a page out of service.
+// ---------------------------------------------------------------------------
+
+const lightTokens = `color-scheme:light;--bg:#fff;--panel:#f7f5f8;--panel-strong:#fff;--text:#1d1c1d;--muted:#5b565c;--line:#d9d4da;--accent:#611f69;--on-accent:#fff;--action:#5c1a64;--hover:#f1edf2;--focus:#0b5cad;--danger:#a01133;--danger-bg:#fdeef1;--ok:#0a6b4f;--shadow:0 8px 24px #1d1c1d1f`
+
+const darkTokens = `color-scheme:dark;--bg:#1a1d21;--panel:#222529;--panel-strong:#1e2125;--text:#e9e7ea;--muted:#aca7ae;--line:#3b3f45;--accent:#4a1750;--on-accent:#fff;--action:#8fd7f4;--hover:#2c3035;--focus:#7cc4ff;--danger:#ff9db4;--danger-bg:#3a1622;--ok:#3fbf95;--shadow:0 8px 24px #0006`
+
+const sharedStyle = `*{box-sizing:border-box}
+:root{` + lightTokens + `}
+html[data-theme=dark]{` + darkTokens + `}
+@media(prefers-color-scheme:dark){html[data-theme=light]:not([data-theme-explicit]){` + darkTokens + `}}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+button,input,textarea{font:inherit}
+button{cursor:pointer}
+a{color:var(--action)}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;border:0}
+.skip-link{position:absolute;left:8px;top:-48px;z-index:9;background:var(--panel-strong);color:var(--action);border:1px solid var(--line);border-radius:0 0 6px 6px;padding:8px 12px;text-decoration:none}
+.skip-link:focus{top:0}
+.notice{margin:0;padding:8px 12px;background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--text);font-size:13px}
+.form-error{margin:0 0 10px;padding:10px 12px;background:var(--danger-bg);border:1px solid var(--danger);border-radius:6px;color:var(--danger);font-weight:700}
+.theme-toggle{border:1px solid #ffffff6b;border-radius:5px;color:inherit;background:transparent;padding:6px 9px}
+.theme-toggle:hover{background:#ffffff2b}
+.theme-toggle[aria-pressed=true]{background:#ffffff42}
+.pager{margin:0;padding:6px 0;text-align:center;font-size:13px}
+@media(prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important}}`
+
+// themeBootstrap resolves the theme before the first paint, so a stored or
+// operating-system dark preference never flashes the light palette.
+const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored?stored==='dark':!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')})();</script>`
+
+const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
+
+const layoutMarkup = `<!doctype html>
+<html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{template "title" .}}</title><style>` + sharedStyle + `</style>{{block "styles" .}}{{end}}` + themeBootstrap + `</head><body>{{template "content" .}}` + themeToggleScript + `{{block "scripts" .}}{{end}}</body></html>`
+
+var layoutTemplate = template.Must(template.New("layout").Parse(layoutMarkup))
+
+func mustPage(markup string) *template.Template {
+	return template.Must(template.Must(layoutTemplate.Clone()).Parse(markup))
+}
+
+const pageStyle = `<style>
+.shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr)}
+.topbar{background:var(--accent);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:var(--shadow)}
+.brand{font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.search{flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
+.search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
+.search input[name=q]::placeholder{color:#ffffffd6}
+.search-submit{border:0;background:transparent;color:var(--on-accent);font-weight:700;padding:2px 2px}
+.top-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto}
+.icon-button{border:0;background:transparent;color:var(--on-accent);border-radius:6px;padding:7px 9px;text-decoration:none}
+.icon-button:hover{background:#ffffff2b}
+.workspace{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:0}
+.sidebar{background:var(--accent);color:var(--on-accent);padding:16px 10px;display:flex;flex-direction:column;gap:14px;overflow:auto}
+.workspace-name{font-weight:800;padding:0 10px}
+.workspace-sub{color:#e8cbe9;font-size:12px;padding:2px 10px}
+.side-section{display:grid;gap:2px}
+.side-label{color:#e8cbe9;font-size:12px;font-weight:700;padding:6px 10px;text-transform:uppercase;letter-spacing:.06em}
+.side-link{display:flex;align-items:center;gap:9px;width:100%;padding:7px 10px;border:0;border-radius:5px;background:transparent;color:var(--on-accent);font:inherit;text-align:left;text-decoration:none}
+.side-link:hover,.side-link[aria-current=page]{background:#ffffff2b}
+.side-link[aria-current=page]{font-weight:700}
+.side-icon{flex:0 0 auto;display:inline-block;min-width:1em;text-align:center}
+.side-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.side-empty{margin:0;padding:6px 10px;color:#e8cbe9;font-size:13px}
+.side-more{padding:6px 10px;color:var(--on-accent);font-size:13px}
+.badge{margin-left:auto;background:var(--on-accent);color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 6px;font-size:12px;font-weight:800}
+.sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff5c;padding-top:12px}
+.signed-in{display:flex;align-items:center;gap:9px;padding:4px 10px 10px;min-width:0}
+.signed-in-avatar{flex:0 0 auto;width:24px;height:24px;border-radius:5px;display:grid;place-items:center;background:#ffffff42;font-size:11px;font-weight:800;text-transform:uppercase;overflow:hidden}
+.signed-in-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.content{min-width:0;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;{{if .ThreadTimestamp}}grid-template-columns:minmax(0,1fr) minmax(0,360px);grid-template-areas:"head thread" "timeline thread" "composer thread"{{else}}grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "timeline" "composer"{{end}}}
+.channel-header{grid-area:head;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:12px 26px}
+.channel-title{margin:0;font-size:18px;font-weight:800}
+.channel-meta{margin:2px 0 0;color:var(--muted);font-size:13px}
+.channel-actions{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px}
+.timeline-wrap{grid-area:timeline;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
+.pager-older{grid-row:1}
+.timeline{grid-row:2;overflow:auto;padding:18px 26px 12px;scroll-behavior:smooth}
+.pager-newer{grid-row:3}
+.message{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:10px 8px;border-radius:7px}
+.message:hover{background:var(--hover)}
+.message:target{background:var(--hover);outline:2px solid var(--focus)}
+.avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}
+.message-body{min-width:0}
+.message-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.author{font-weight:800}
+.time{color:var(--muted);font-size:12px}
+.pinned{color:var(--muted);font-size:12px;font-weight:700}
+.message-text{margin:2px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.reactions{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0;list-style:none}
+.chip{display:inline-flex;gap:5px;align-items:center;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:1px 9px;font-size:12px}
+.chip[aria-pressed=true]{border-color:var(--action);font-weight:800}
+.message-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.message-actions a,.message-actions button{color:var(--muted);background:transparent;border:0;padding:2px 0;text-decoration:none;font-size:12px}
+.message-actions a:hover,.message-actions button:hover{color:var(--action);text-decoration:underline}
+.inline-form{display:inline-flex;gap:6px;align-items:center}
+.inline-form input[type=text]{width:130px;border:1px solid var(--line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:3px 6px}
+.empty{color:var(--muted);padding:26px;text-align:center}
+.composer-wrap{grid-area:composer;padding:8px 26px 18px}
+.live-status{margin:0 0 6px;min-height:18px;color:var(--muted);font-size:12px}
+.composer{border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:10px}
+.composer.is-error{border-color:var(--danger)}
+.composer textarea{width:100%;min-height:44px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text)}
+.composer-footer{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.composer-tools{margin:0;color:var(--muted);font-size:13px}
+.send{border:0;border-radius:5px;background:var(--ok);color:#fff;font-weight:700;padding:7px 14px}
+.thread{grid-area:thread;min-height:0;border-left:1px solid var(--line);background:var(--panel);padding:16px 18px;overflow:auto}
+.thread h2{margin:0 0 12px;font-size:16px}
+@media(max-width:800px){
+.workspace{grid-template-columns:64px minmax(0,1fr)}
+.sidebar{padding:16px 6px}
+.workspace-name,.workspace-sub,.side-label,.side-text,.signed-in-name{display:none}
+.side-link{justify-content:center;padding:9px 4px}
+.side-more{padding:6px 2px;text-align:center;font-size:11px}
+.side-icon{font-size:18px}
+.search{max-width:none}
+.topbar{padding:0 8px;gap:8px}
+.timeline,.composer-wrap,.channel-header{padding-left:12px;padding-right:12px}
+{{if .ThreadTimestamp}}.content{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "thread" "composer"}
+.timeline-wrap{display:none}
+.thread{border-left:0;border-top:1px solid var(--line)}{{end}}
+}
+</style>`
+
+const messagesPartial = `{{define "messages"}}{{range $message := .Messages}}<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}"><div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div><div class="message-body"><div class="message-head"><span class="author">{{$message.AuthorName}}</span><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}</div><p class="message-text">{{$message.Text}}</p>{{if $message.Reactions}}<ul class="reactions">{{range $reaction := $message.Reactions}}<li><form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="name" value="{{$reaction.Name}}"><button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></button></form></li>{{end}}</ul>{{end}}<div class="message-actions"><a href="{{$message.ReplyURL}}">Reply in thread</a>{{if $.CanReact}}<form class="inline-form" aria-label="Add reaction" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="reaction-{{$message.ID}}">Add a reaction to the message from {{$message.AuthorName}}</label><input id="reaction-{{$message.ID}}" type="text" name="name" maxlength="255" placeholder=":wave:" required><button type="submit">Add</button></form>{{end}}{{if $.CanPin}}<form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button></form>{{end}}</div></div></article>{{else}}<p class="empty">No messages yet. Start the conversation.</p>{{end}}{{end}}`
+
+var pageMarkup = `{{define "title"}}#{{.ChannelName}} · SameOldChat{{end}}
+{{define "styles"}}` + pageStyle + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + `{{end}}
+{{define "content"}}<a class="skip-link" href="#timeline">Skip to the messages</a><div class="shell"><header class="topbar"><span class="brand">SameOldChat</span><form class="search" method="get" action="/app/search" role="search" aria-label="Search the workspace"><span aria-hidden="true">⌕</span><label class="visually-hidden" for="workspace-search">Search the workspace</label><input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search the workspace" required><button class="search-submit" type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">☾<span class="visually-hidden"> Dark theme</span></button>{{if .ShowProfile}}<a class="icon-button" href="/me" aria-label="My profile">●</a>{{end}}</div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">☰</span><span class="side-text">Members</span></a>{{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">⚙</span><span class="side-text">Authorization</span></a>{{end}}</nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Channels}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{else}}<p class="side-empty">No channels available.</p>{{end}}</nav>{{if .Directs}}<nav class="side-section" aria-label="Direct messages"><div class="side-label">Direct messages</div>{{range .Directs}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">◍</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{end}}</nav>{{end}}{{if .MoreChannelsURL}}<a class="side-more" href="{{.MoreChannelsURL}}">More conversations</a>{{end}}<div class="sidebar-bottom"><div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.UserInitial}}</span><span class="signed-in-name">{{.Username}}</span></div><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit" data-shauth-sign-out aria-label="Sign out"><span class="side-icon" aria-hidden="true">↪</span><span class="side-text">Sign out</span></button></form></div></aside><main class="content" id="content"><header class="channel-header"><div><h1 class="channel-title"># {{.ChannelName}}</h1><p class="channel-meta">{{.ChannelMeta}}</p></div><div class="channel-actions">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}{{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to the channel</a>{{end}}</div></header><div class="timeline-wrap">{{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}<section id="timeline" class="timeline" tabindex="-1" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}</div>{{if .ThreadTimestamp}}<aside class="thread" aria-labelledby="thread-heading"><h2 id="thread-heading">Thread</h2><div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div></aside>{{end}}<div class="composer-wrap"><p class="live-status" id="live-status" role="status" aria-live="polite"></p><form class="composer" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" hx-swap="beforeend"><p class="form-error" id="composer-error" role="alert"{{if not .Error}} hidden{{end}}>{{.Error}}</p><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}</label><textarea id="text" name="text" required autofocus aria-describedby="composer-hint" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}">{{.Draft}}</textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><p class="composer-tools">Replying in thread</p>{{end}}<div class="composer-footer"><span class="composer-tools" id="composer-hint">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></main></div></div>{{end}}
+` + messagesPartial
+
+var pageTemplate = mustPage(pageMarkup)
+
+const membersMarkup = `{{define "title"}}Members · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
+.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
+.bar .theme-toggle{margin-left:auto}
+.layout{max-width:1100px;margin:0 auto;padding:28px 22px}
+.heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
+.heading h1{margin:0 0 4px;font-size:26px}
+.muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:minmax(280px,380px) minmax(0,1fr);gap:22px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:20px}
+.card h2{margin-top:0}
+.field{display:grid;gap:5px;margin:12px 0}
+.field input{width:100%;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--text);padding:9px}
+.save{background:var(--ok);color:#fff;border:0;border-radius:5px;padding:9px 14px;font-weight:700}
+.members{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.person{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px}
+.person h3{font-size:16px;margin:0}
+.person p{margin:5px 0;color:var(--muted)}
+.person button{border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--text);padding:5px 10px}
+@media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
+</style>{{end}}
+{{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><span>Members</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">☾<span class="visually-hidden"> Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Workspace members</h1><p class="muted">Manage your profile and see who is here.</p></div><div class="grid"><section class="card" aria-labelledby="profile-heading"><h2 id="profile-heading">Edit profile</h2>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/app/profile"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}" required></label><label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}"></label><label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}"></label><label class="field" for="image_24">Image 24 URL<input id="image_24" type="url" maxlength="2048" name="image_24" value="{{.Profile.Image24}}"></label><label class="field" for="image_32">Image 32 URL<input id="image_32" type="url" maxlength="2048" name="image_32" value="{{.Profile.Image32}}"></label><label class="field" for="image_48">Image 48 URL<input id="image_48" type="url" maxlength="2048" name="image_48" value="{{.Profile.Image48}}"></label><label class="field" for="image_72">Image 72 URL<input id="image_72" type="url" maxlength="2048" name="image_72" value="{{.Profile.Image72}}"></label><label class="field" for="image_192">Image 192 URL<input id="image_192" type="url" maxlength="2048" name="image_192" value="{{.Profile.Image192}}"></label><label class="field" for="image_512">Image 512 URL<input id="image_512" type="url" maxlength="2048" name="image_512" value="{{.Profile.Image512}}"></label><label class="field" for="image_1024">Image 1024 URL<input id="image_1024" type="url" maxlength="2048" name="image_1024" value="{{.Profile.Image1024}}"></label><button class="save" type="submit">Save profile</button></form></section><section class="card" aria-labelledby="people-heading"><h2 id="people-heading">People</h2><div class="members">{{range .Members}}<article class="person"><h3>{{.Name}}</h3><p>{{.RealName}}</p>{{if .Profile.DisplayName}}<p>{{.Profile.DisplayName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit">Message {{.Name}}</button></form>{{end}}</article>{{else}}<p class="muted">No members available.</p>{{end}}</div>{{if .MoreMembersURL}}<p class="pager"><a href="{{.MoreMembersURL}}">Show more members</a></p>{{end}}</section></div></main>{{end}}`
+
+var membersTemplate = mustPage(membersMarkup)
+
+const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
+.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
+.bar form{display:flex;flex:1 1 auto;min-width:0;max-width:600px;margin:auto;gap:8px}
+.bar input{flex:1 1 auto;min-width:0;border:1px solid #ffffff8a;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:var(--on-accent)}
+.bar input::placeholder{color:#ffffffd6}
+.bar button{border:1px solid #ffffff6b;background:transparent;color:var(--on-accent);border-radius:5px;padding:6px 10px}
+.layout{max-width:900px;margin:0 auto;padding:28px 22px}
+.heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
+.heading h1{margin:0 0 4px;font-size:26px}
+.muted{color:var(--muted)}
+.results{display:grid;gap:8px}
+.result{display:block;padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:inherit;text-decoration:none}
+.result:hover{border-color:var(--action)}
+.author{font-weight:700}
+.time{color:var(--muted);font-size:12px;margin-left:8px}
+.channel{color:var(--muted);font-size:12px;margin-left:8px}
+.text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.empty{color:var(--muted);padding:22px;text-align:center}
+@media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search messages</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages" required><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">☾<span class="visually-hidden"> Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">Messages matching “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to find messages.</p>{{end}}</div><section class="results" aria-label="Results">{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">#{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if .Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
+
+var searchTemplate = mustPage(searchMarkup)
+
+const identityMarkup = `{{define "title"}}{{.Heading}} · SameOldChat{{end}}
+{{define "styles"}}<style>
+body{min-height:100vh}
+.bar{display:flex;align-items:center;gap:16px;padding:14px 22px;background:var(--panel);border-bottom:1px solid var(--line)}
+.bar a{color:var(--action);font-weight:700;text-decoration:none}
+.bar .theme-toggle{margin-left:auto;border-color:var(--line);color:var(--text)}
+.bar .theme-toggle:hover{background:var(--hover)}
+.layout{width:min(760px,calc(100% - 32px));margin:40px auto}
+.card{padding:28px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.identity-heading{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:18px;margin-bottom:8px}
+.avatar{width:72px;height:72px;border-radius:16px;display:grid;place-items:center;background:linear-gradient(135deg,var(--accent),#2f7f9c);color:#fff;font-size:1.8rem;font-weight:800;object-fit:cover;overflow:hidden;text-transform:uppercase}
+h1{margin:0;font-size:clamp(1.8rem,5vw,2.8rem);line-height:1.1}
+.lede{margin:0 0 24px;color:var(--muted)}
+dl{display:grid;grid-template-columns:minmax(120px,180px) minmax(0,1fr);margin:0 0 24px;border-top:1px solid var(--line)}
+dt,dd{margin:0;padding:12px 0;border-bottom:1px solid var(--line)}
+dt{color:var(--muted);font-weight:700}
+dd{overflow-wrap:anywhere}
+.button{border:0;border-radius:8px;padding:11px 17px;background:var(--danger);color:#fff;font-weight:800}
+@media(max-width:540px){.layout{margin:22px auto}.card{padding:20px}.identity-heading{grid-template-columns:56px minmax(0,1fr)}.avatar{width:56px;height:56px;border-radius:12px}dl{grid-template-columns:minmax(0,1fr)}dt{padding-bottom:0;border-bottom:0}dd{padding-top:3px}}
+</style>{{end}}
+{{define "content"}}<header class="bar"><strong>SameOldChat</strong><a href="/app">Back to chat</a><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">☾<span class="visually-hidden"> Dark theme</span></button></header><main class="layout"><section class="card" aria-labelledby="identity-heading"><div class="identity-heading">{{if .AvatarURL}}<img class="avatar" src="{{.AvatarURL}}" alt="Avatar for {{.Username}}">{{else}}<span class="avatar" role="img" aria-label="Avatar for {{.Username}}">{{.Avatar}}</span>{{end}}<h1 id="identity-heading">{{.Heading}}</h1></div><p class="lede">Your verified Shauth identity and this immutable application release.</p><dl><dt>Username</dt><dd data-testid="validation-username">{{.Username}}</dd><dt>Email</dt><dd data-testid="validation-email">{{.Email}}</dd><dt>Role</dt><dd data-testid="validation-role">{{.Role}}</dd><dt>Release</dt><dd data-testid="validation-release">{{.Release}}</dd></dl><form method="post" action="/logout"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="button" type="submit">Sign out</button></form></section></main>{{end}}`
+
+var identityTemplate = mustPage(identityMarkup)
+
+const errorMarkup = `{{define "title"}}{{.Heading}} · SameOldChat{{end}}
+{{define "styles"}}<style>
+.layout{width:min(640px,calc(100% - 32px));margin:64px auto;padding:26px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+h1{margin:0 0 10px;font-size:24px}
+p{margin:0 0 18px;color:var(--muted)}
+a{font-weight:700}
+</style>{{end}}
+{{define "content"}}<main class="layout"><h1>{{.Heading}}</h1><p>{{.Message}}</p><a href="/app">Back to chat</a></main>{{end}}`
+
+var errorTemplate = mustPage(errorMarkup)
+
+// localTimeScript renders machine timestamps in the reader's own locale and
+// zone. The server keeps the machine value in datetime= so the page is still
+// readable without JavaScript.
+const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=function(root){if(!root||!window.Intl)return;var nodes=root.querySelectorAll('time[datetime]');for(var index=0;index<nodes.length;index++){var value=new Date(nodes[index].getAttribute('datetime'));if(isNaN(value.getTime()))continue;nodes[index].textContent=value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}};window.sameoldchatLocalTimes(document)})();</script>`
+
+// progressiveEnhancementScript is the whole client budget for the workspace
+// page: submit forms without losing the page, keep the composer usable, keep
+// the live stream open, and re-render the message regions the server owns.
+var progressiveEnhancementScript = localTimeScript + `<script>(function(){
+var topics=` + liveEventTopicsLiteral() + `;
+var composer=document.getElementById('composer');
+var text=document.getElementById('text');
+var errorBox=document.getElementById('composer-error');
+var status=document.getElementById('live-status');
+function localize(root){if(window.sameoldchatLocalTimes)window.sameoldchatLocalTimes(root)}
+function announce(message){if(status)status.textContent=message}
+function showError(message){if(!errorBox){window.alert(message);return}errorBox.textContent=message;errorBox.hidden=false;if(composer)composer.classList.add('is-error');errorBox.scrollIntoView({block:'nearest'})}
+function clearError(){if(!errorBox)return;errorBox.textContent='';errorBox.hidden=true;if(composer)composer.classList.remove('is-error')}
+function failure(error){var message=error&&error.message?String(error.message).trim():'';if(message.length>200)message=message.slice(0,200);return message||'The request could not be completed. Your message was kept in the composer.'}
+function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
+function toBottom(region){if(region)region.scrollTop=region.scrollHeight}
+function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
+// force marks a refresh the reader asked for: it re-renders every message region
+// even one that is not following the live conversation, and it does not step
+// aside for focus, because the reader is waiting for their own change. A refresh
+// caused by somebody else's event leaves a focused region alone.
+function refresh(force){
+var pending=[];
+var live=regions(force);
+for(var index=0;index<live.length;index++){(function(region){
+var focused=!!(document.activeElement&&region.contains(document.activeElement));
+if(focused&&!force)return;
+var stick=atBottom(region);
+pending.push(fetch(region.getAttribute('data-fragment'),{headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){region.innerHTML=html;localize(region);if(stick)toBottom(region);if(focused&&region.hasAttribute('tabindex'))region.focus()}));
+})(live[index])}
+return Promise.all(pending);
+}
+document.addEventListener('submit',function(event){
+var form=event.target.closest('form');
+if(!form||!form.hasAttribute('hx-post'))return;
+event.preventDefault();
+clearError();
+var draft=new FormData(form);
+fetch(form.getAttribute('hx-post'),{method:'POST',body:draft,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
+if(!response.ok)return response.text().then(function(body){throw new Error(body)});
+var redirect=response.headers.get('HX-Redirect');
+if(redirect){window.location.assign(redirect);return null}
+if(response.status===204)return '';
+return response.text();
+}).then(function(html){
+if(html===null)return null;
+if(html===''){return refresh(true).then(function(){announce('The conversation was updated.')})}
+var target=document.querySelector(form.getAttribute('hx-target'));
+if(!target)throw new Error('The page could not be updated. Reload to see the message.');
+target.insertAdjacentHTML('beforeend',html);
+localize(target);
+form.reset();
+if(form===composer&&text)text.focus();
+toBottom(target);
+toBottom(document.getElementById('timeline'));
+return refresh(true);
+}).catch(function(error){showError(failure(error))});
+});
+if(text&&composer){text.addEventListener('keydown',function(event){
+if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.metaKey||event.altKey||event.isComposing)return;
+event.preventDefault();
+if(typeof composer.requestSubmit==='function'){composer.requestSubmit();return}
+composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+})}
+if(window.EventSource){
+var cursor='';
+try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
+var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
+var deliver=function(event){
+if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
+var live=regions(false);
+if(!live.length){announce('New activity is available in this conversation.');return}
+refresh(false).then(function(){announce('The conversation was updated.')}).catch(function(){announce('New activity could not be loaded. Reload the page.')});
+};
+topics.forEach(function(topic){stream.addEventListener(topic,deliver)});
+}
+toBottom(document.getElementById('timeline'));
+if(text)text.focus();
+})();</script>`
+
+func liveEventTopicsLiteral() string {
+	quoted := make([]string, 0, len(liveEventTopics))
+	for _, topic := range liveEventTopics {
+		if strings.ContainsAny(topic, `'"\<>`) {
+			panic("live event topic must be a plain identifier: " + topic)
+		}
+		quoted = append(quoted, "'"+topic+"'")
+	}
+	return "[" + strings.Join(quoted, ",") + "]"
+}
+
+// ---------------------------------------------------------------------------
+// Routing
+// ---------------------------------------------------------------------------
 
 func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /signed-out", signedOut)
@@ -143,13 +558,16 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
 	}
 	mux.HandleFunc("GET /app", h.index)
+	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/members", h.members)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/message", h.postMessage)
 	mux.HandleFunc("POST /app/conversation/open", h.openConversation)
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
+	mux.HandleFunc("POST /app/reaction/remove", h.removeReaction)
 	mux.HandleFunc("POST /app/pin", h.addPin)
+	mux.HandleFunc("POST /app/pin/remove", h.removePin)
 	mux.HandleFunc("POST /app/session/revoke", h.revokeSession)
 	mux.HandleFunc("POST /logout", h.revokeSession)
 }
@@ -170,6 +588,438 @@ func (h Handler) requireCSRF(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+// ---------------------------------------------------------------------------
+// Workspace page
+// ---------------------------------------------------------------------------
+
+// composerState carries a rejected submission back into the page so a failed
+// post keeps the text the user typed and says what went wrong.
+type composerState struct {
+	Draft   string
+	Message string
+	Status  int
+}
+
+func (h Handler) index(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		if errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
+			http.Redirect(w, r, h.signInTarget(r), http.StatusSeeOther)
+			return
+		}
+		h.writeAuthError(w, err)
+		return
+	}
+	h.setCSRFCookie(w, r)
+	h.renderApp(w, r, principal, composerState{Status: http.StatusOK})
+}
+
+// signInTarget starts the exact provider the deployment can complete. A
+// configured provider that the workspace has disabled would answer the bare
+// "authorization method is disabled" page, so entry falls back to the provider
+// list in that case.
+func (h Handler) signInTarget(r *http.Request) string {
+	if h.Login == nil || !h.Login.hasOpenIDConnectProvider() {
+		return "/login"
+	}
+	if method, err := h.Messages.GetAuthMethod(r.Context(), h.Login.workspace, "oidc"); err == nil && !method.Enabled {
+		return "/login"
+	}
+	return "/auth/oidc"
+}
+
+func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, principal auth.Principal, state composerState) {
+	channel := h.requestChannel(r)
+	before := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("before")))
+	threadTimestamp := strings.TrimSpace(r.URL.Query().Get("thread"))
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	csrfToken := auth.CSRFToken(sessionCookie.Value)
+
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		h.writeStoreError(w, err, "This conversation is temporarily unavailable.")
+		return
+	}
+	history, err := h.historyWindow(r.Context(), principal, channel, before)
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidCursor) {
+			h.writePageError(w, http.StatusBadRequest, "That history link is not valid", "The link you followed does not point at a place in this conversation. Open the channel to read the latest messages.")
+			return
+		}
+		h.writeStoreError(w, err, "The message store is temporarily unavailable.")
+		return
+	}
+	names := h.newUserNames(r.Context(), principal)
+	notices := make([]string, 0, 3)
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Names: names})
+	if timelineNotice != "" {
+		notices = append(notices, timelineNotice)
+	}
+
+	var thread messageList
+	if threadTimestamp != "" {
+		if _, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); parseErr != nil {
+			h.writePageError(w, http.StatusBadRequest, "That thread link is not valid", "The link you followed does not identify a message in this conversation.")
+			return
+		}
+		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: timelineWindow})
+		if repliesErr != nil {
+			h.writeStoreError(w, repliesErr, "The thread is temporarily unavailable.")
+			return
+		}
+		var threadNotice string
+		thread, threadNotice = h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: replies.Messages, Thread: threadTimestamp, Before: string(before), ThreadPane: true, Names: names})
+		if threadNotice != "" && timelineNotice == "" {
+			notices = append(notices, threadNotice)
+		}
+	}
+
+	if history.AtLatest && len(history.Messages) > 0 {
+		last := history.Messages[len(history.Messages)-1]
+		if _, markErr := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.NewMessageTimestamp(last.CreatedAt)); markErr != nil {
+			// Unread bookkeeping is not a precondition for reading: degrade the
+			// unread state instead of refusing to render the conversation.
+			notices = append(notices, "Unread counts are temporarily out of date.")
+		}
+	}
+
+	channels, directs, moreConversations, conversationNotice := h.sidebar(r.Context(), principal, channel, history.AtLatest, domain.Cursor(strings.TrimSpace(r.URL.Query().Get("conversations"))))
+	if conversationNotice != "" {
+		notices = append(notices, conversationNotice)
+	}
+
+	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your identity is temporarily unavailable.")
+		return
+	}
+	username := displayName(current)
+
+	data := pageData{
+		Timeline:        timeline,
+		Thread:          thread,
+		ThreadTimestamp: threadTimestamp,
+		Channels:        channels,
+		Directs:         directs,
+		Channel:         string(channel),
+		ChannelName:     conversationName(conversation),
+		ChannelMeta:     conversationMeta(conversation),
+		CSRFToken:       csrfToken,
+		ShowProfile:     h.canShowIdentity(),
+		ShowAdmin:       h.canShowAuthorizationAdmin(principal),
+		Username:        username,
+		UserInitial:     initial(username),
+		AtLatest:        history.AtLatest,
+		Notice:          strings.Join(notices, " "),
+		Error:           state.Message,
+		Draft:           state.Draft,
+		ComposeURL:      mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
+		TimelineURL:     fragmentURL(string(channel), "", string(before)),
+		ThreadURL:       fragmentURL(string(channel), threadTimestamp, ""),
+	}
+	if moreConversations != "" {
+		data.MoreChannelsURL = appURL(string(channel), threadTimestamp, string(before), "", string(moreConversations))
+	}
+	if history.OlderCursor != "" {
+		data.OlderURL = appURL(string(channel), threadTimestamp, string(history.OlderCursor), "", "")
+	}
+	if !history.AtLatest {
+		data.LatestURL = appURL(string(channel), threadTimestamp, "", "", "")
+	}
+	status := state.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	h.writeHTML(w, pageTemplate, data, status, "page rendering unavailable")
+}
+
+// timeline renders the message region on its own so live updates and mutations
+// re-render exactly what the server owns, instead of reloading the page and
+// discarding the composer draft, the scroll position and the focus ring.
+func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
+	if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	channel := h.requestChannel(r)
+	threadTimestamp := strings.TrimSpace(r.URL.Query().Get("thread"))
+	before := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("before")))
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		h.writeFragmentError(w, err, "the conversation is temporarily unavailable")
+		return
+	}
+	var messages []domain.Message
+	if threadTimestamp != "" {
+		if _, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); parseErr != nil {
+			http.Error(w, "that thread link is not valid", http.StatusBadRequest)
+			return
+		}
+		replies, repliesErr := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: timelineWindow})
+		if repliesErr != nil {
+			h.writeFragmentError(w, repliesErr, "the thread is temporarily unavailable")
+			return
+		}
+		messages = replies.Messages
+	} else {
+		history, historyErr := h.historyWindow(r.Context(), principal, channel, before)
+		if historyErr != nil {
+			if errors.Is(historyErr, domain.ErrInvalidCursor) {
+				http.Error(w, "that history link is not valid", http.StatusBadRequest)
+				return
+			}
+			h.writeFragmentError(w, historyErr, "the message store is temporarily unavailable")
+			return
+		}
+		messages = history.Messages
+	}
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Names: h.newUserNames(r.Context(), principal)})
+	h.writeFragment(w, list)
+}
+
+// historyWindow is the newest window of a conversation, or the window ending at
+// end when the reader has navigated into older history.
+//
+// The chat service pages a conversation forward from its first message
+// (domain.PageRequest carries one cursor and store.ListMessages orders
+// ascending), so the newest window is reached by walking forward and keeping a
+// rolling tail. Every walk is bounded by the conversation length; a reverse
+// page request in the store would make it constant.
+type historyView struct {
+	Messages    []domain.Message
+	OlderCursor domain.Cursor
+	AtLatest    bool
+}
+
+func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, channel domain.ConversationID, end domain.Cursor) (historyView, error) {
+	endTime, endID, err := domain.DecodeMessageCursor(end)
+	if err != nil {
+		return historyView{}, err
+	}
+	tail := make([]domain.Message, 0, timelineWindow+1)
+	view := historyView{AtLatest: true}
+	var cursor domain.Cursor
+	for {
+		page, pageErr := h.Messages.History(ctx, principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{Limit: timelineScan, Cursor: cursor})
+		if pageErr != nil {
+			return historyView{}, pageErr
+		}
+		stopped := false
+		for _, message := range page.Messages {
+			if end != "" && afterCursor(message, endTime, endID) {
+				stopped = true
+				view.AtLatest = false
+				break
+			}
+			tail = append(tail, message)
+			if len(tail) > timelineWindow+1 {
+				tail = tail[1:]
+			}
+		}
+		if stopped || !page.HasMore {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	start := 0
+	if len(tail) > timelineWindow {
+		start = len(tail) - timelineWindow
+	}
+	if start > 0 {
+		boundary, boundaryErr := domain.NewMessageCursor(tail[start-1])
+		if boundaryErr != nil {
+			return historyView{}, boundaryErr
+		}
+		view.OlderCursor = boundary
+	}
+	view.Messages = tail[start:]
+	return view, nil
+}
+
+func afterCursor(message domain.Message, createdAt time.Time, id domain.MessageID) bool {
+	if message.CreatedAt.After(createdAt) {
+		return true
+	}
+	return message.CreatedAt.Equal(createdAt) && string(message.ID) > string(id)
+}
+
+// messageListRequest is everything a message region needs to render: the
+// conversation it belongs to, the messages in it, and the view state that its
+// controls have to return to.
+type messageListRequest struct {
+	Conversation domain.Conversation
+	CSRFToken    string
+	Messages     []domain.Message
+	Thread       string
+	Before       string
+	ThreadPane   bool
+	Names        *userNames
+}
+
+// newMessageList builds the single type the message partial renders. It also
+// reports a user-facing notice when an adjacent read (reactions, pins) is
+// degraded, instead of failing the whole conversation view.
+func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, request messageListRequest) (messageList, string) {
+	conversation := request.Conversation
+	csrfToken := request.CSRFToken
+	messages := request.Messages
+	threadTimestamp := request.Thread
+	before := request.Before
+	names := request.Names
+	// The thread pane repeats messages that the timeline already shows, so its
+	// anchors are namespaced: one document cannot carry the same id twice.
+	anchorPrefix := ""
+	if request.ThreadPane {
+		anchorPrefix = "thread-"
+	}
+	channel := string(conversation.ID)
+	list := messageList{
+		ChannelName: conversationName(conversation),
+		CSRFToken:   csrfToken,
+		CanReact:    principal.HasScope(auth.ScopeReactionsWrite),
+		CanPin:      principal.HasScope(auth.ScopePinsWrite),
+		Messages:    make([]messageView, 0, len(messages)),
+	}
+	notice := ""
+	pinned := map[domain.MessageID]struct{}{}
+	if principal.HasScope(auth.ScopePinsRead) || principal.HasScope(auth.ScopePinsWrite) {
+		pins, _, _, err := h.Messages.Pins(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: pinWindow})
+		if err != nil {
+			notice = "Pinned messages are temporarily unavailable."
+		}
+		for _, pin := range pins {
+			pinned[pin.Message] = struct{}{}
+		}
+	}
+	readReactions := principal.HasScope(auth.ScopeReactionsRead) || principal.HasScope(auth.ScopeReactionsWrite)
+	for _, message := range messages {
+		timestamp := string(domain.NewMessageTimestamp(message.CreatedAt))
+		author := names.name(message.AuthorID)
+		view := messageView{
+			ID:            string(message.ID),
+			Anchor:        anchorPrefix + messageAnchor(message.ID),
+			AuthorName:    author,
+			AuthorInitial: initial(author),
+			Text:          message.Text,
+			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
+			DisplayTime:   formatTime(message.CreatedAt),
+			Channel:       channel,
+			ChannelName:   list.ChannelName,
+			ReplyURL:      appURL(channel, timestamp, before, "", ""),
+			ReactionURL:   mutationURL("/app/reaction", channel, timestamp, threadTimestamp, before),
+			UnreactURL:    mutationURL("/app/reaction/remove", channel, timestamp, threadTimestamp, before),
+			PinURL:        mutationURL("/app/pin", channel, timestamp, threadTimestamp, before),
+			UnpinURL:      mutationURL("/app/pin/remove", channel, timestamp, threadTimestamp, before),
+		}
+		if _, ok := pinned[message.ID]; ok {
+			view.Pinned = true
+		}
+		if readReactions {
+			reactions, _, _, err := h.Messages.Reactions(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.MessageTimestamp(timestamp), domain.PageRequest{Limit: reactionWindow})
+			if err != nil && notice == "" {
+				notice = "Reactions are temporarily unavailable."
+			}
+			view.Reactions = summarizeReactions(reactions, principal.UserID)
+		}
+		list.Messages = append(list.Messages, view)
+	}
+	return list, notice
+}
+
+func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID) []reactionView {
+	if len(reactions) == 0 {
+		return nil
+	}
+	order := make([]string, 0, len(reactions))
+	counts := map[string]int{}
+	mine := map[string]bool{}
+	for _, reaction := range reactions {
+		if _, seen := counts[reaction.Name]; !seen {
+			order = append(order, reaction.Name)
+		}
+		counts[reaction.Name]++
+		if reaction.UserID == viewer {
+			mine[reaction.Name] = true
+		}
+	}
+	sort.Strings(order)
+	views := make([]reactionView, 0, len(order))
+	for _, name := range order {
+		views = append(views, reactionView{Name: name, Count: counts[name], Mine: mine[name]})
+	}
+	return views
+}
+
+func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel domain.ConversationID, atLatest bool, cursor domain.Cursor) ([]conversationView, []conversationView, domain.Cursor, string) {
+	page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{Limit: conversationWindow, Cursor: cursor})
+	if err != nil {
+		return nil, nil, "", "The conversation list is temporarily out of date."
+	}
+	channels := make([]conversationView, 0, len(page.Conversations))
+	directs := make([]conversationView, 0, len(page.Conversations))
+	resolved := 0
+	for _, conversation := range page.Conversations {
+		view := conversationView{ID: string(conversation.ID), Name: conversationName(conversation), Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount}
+		if view.Current && atLatest {
+			// The page just rendered every message in this conversation; showing
+			// its own unread badge tells the reader to read what they are reading.
+			view.UnreadCount = 0
+		}
+		if !conversation.IsDirect && !conversation.IsGroupDirect {
+			channels = append(channels, view)
+			continue
+		}
+		if resolved < directNameWindow {
+			resolved++
+			if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
+				view.Name = participants
+			}
+		}
+		directs = append(directs, view)
+	}
+	next := domain.Cursor("")
+	if page.HasMore {
+		next = page.NextCursor
+	}
+	return channels, directs, next, ""
+}
+
+// participantNames names a direct conversation after the people in it: the
+// stored name of every direct conversation is "direct", which is neither
+// distinguishable nor useful in a sidebar.
+func (h Handler) participantNames(ctx context.Context, principal auth.Principal, conversation domain.ConversationID) string {
+	page, err := h.Messages.ConversationMembers(ctx, principal.WorkspaceID, principal.UserID, conversation, domain.PageRequest{Limit: 10})
+	if err != nil {
+		return ""
+	}
+	names := make([]string, 0, len(page.Users))
+	for _, user := range page.Users {
+		if user.ID == principal.UserID {
+			continue
+		}
+		names = append(names, displayName(user))
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
+}
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
 func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
 	if err != nil {
@@ -178,22 +1028,75 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	h.setCSRFCookie(w, r)
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	results := domain.MessagePage{}
-	if query != "" {
-		results, err = h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: 100})
-		if err != nil {
-			http.Error(w, "search unavailable", http.StatusServiceUnavailable)
-			return
-		}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
 	}
-	var output bytes.Buffer
-	if err := searchTemplate.Execute(&output, searchData{Query: query, Channel: string(h.Channel), Messages: toViews(results.Messages)}); err != nil {
-		http.Error(w, "search rendering unavailable", http.StatusServiceUnavailable)
+	data := searchData{Query: query, Channel: channel, Searched: query != ""}
+	if query == "" {
+		h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(output.Bytes())
+	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
+	results, err := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: searchWindow, Cursor: cursor})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidSearch):
+			data.Error = "Enter between one and 500 characters to search."
+			data.Searched = false
+			h.writeHTML(w, searchTemplate, data, http.StatusBadRequest, "search rendering unavailable")
+		case errors.Is(err, domain.ErrInvalidCursor):
+			data.Error = "That results link is no longer valid. Search again to see matches."
+			data.Searched = false
+			h.writeHTML(w, searchTemplate, data, http.StatusBadRequest, "search rendering unavailable")
+		default:
+			h.writeStoreError(w, err, "Search is temporarily unavailable.")
+		}
+		return
+	}
+	names := h.newUserNames(r.Context(), principal)
+	data.Messages = h.newResultViews(r.Context(), principal, results.Messages, names)
+	if results.HasMore && results.NextCursor != "" {
+		values := url.Values{"q": {query}, "channel": {channel}, "cursor": {string(results.NextCursor)}}
+		data.MoreURL = "/app/search?" + values.Encode()
+	}
+	h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 }
+
+func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, messages []domain.Message, names *userNames) []messageView {
+	views := make([]messageView, 0, len(messages))
+	for _, message := range messages {
+		author := names.name(message.AuthorID)
+		channelName := string(message.Conversation)
+		if conversation, err := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation); err == nil {
+			channelName = conversationName(conversation)
+		}
+		// A search hit is opened where it lives: the window that ends at the
+		// message, the message anchored, and the thread pane only when the hit
+		// really is a threaded reply.
+		before := ""
+		if cursor, err := domain.NewMessageCursor(message); err == nil {
+			before = string(cursor)
+		}
+		views = append(views, messageView{
+			ID:            string(message.ID),
+			Anchor:        messageAnchor(message.ID),
+			AuthorName:    author,
+			AuthorInitial: initial(author),
+			Text:          message.Text,
+			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
+			DisplayTime:   formatTime(message.CreatedAt),
+			Channel:       string(message.Conversation),
+			ChannelName:   channelName,
+			Permalink:     appURL(string(message.Conversation), string(message.ThreadTimestamp), before, messageAnchor(message.ID), ""),
+		})
+	}
+	return views
+}
+
+// ---------------------------------------------------------------------------
+// Members and profile
+// ---------------------------------------------------------------------------
 
 func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
@@ -202,32 +1105,49 @@ func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.setCSRFCookie(w, r)
-	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 100})
+	h.renderMembers(w, r, principal, nil, "", http.StatusOK)
+}
+
+func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal auth.Principal, submitted *domain.UserProfile, message string, status int) {
+	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
+	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
 	if err != nil {
-		http.Error(w, "member store unavailable", http.StatusServiceUnavailable)
+		if errors.Is(err, domain.ErrInvalidCursor) {
+			h.writePageError(w, http.StatusBadRequest, "That members link is not valid", "Open the member directory again to see who is here.")
+			return
+		}
+		h.writeStoreError(w, err, "The member directory is temporarily unavailable.")
+		return
+	}
+	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your profile is temporarily unavailable.")
+		return
+	}
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
 		return
 	}
 	members := make([]memberView, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, memberView{Name: user.Name, RealName: user.RealName, Profile: user.Profile})
+		members = append(members, memberView{ID: string(user.ID), Name: displayName(user), RealName: user.RealName, Profile: user.Profile, IsSelf: user.ID == principal.UserID})
 	}
-	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
-	if err != nil {
-		http.Error(w, "profile unavailable", http.StatusServiceUnavailable)
-		return
+	profile := current.Profile
+	if submitted != nil {
+		profile = *submitted
 	}
-	var output bytes.Buffer
-	sessionCookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		http.Error(w, "session unavailable", http.StatusUnauthorized)
-		return
+	data := membersData{
+		Members:    members,
+		Profile:    profile,
+		CSRFToken:  auth.CSRFToken(sessionCookie.Value),
+		Error:      message,
+		CanMessage: principal.HasScope(auth.ScopeChannelsManage),
 	}
-	if err := membersTemplate.Execute(&output, membersData{Members: members, Current: memberView{Name: current.Name, RealName: current.RealName, Profile: current.Profile}, CSRFToken: auth.CSRFToken(sessionCookie.Value)}); err != nil {
-		http.Error(w, "member rendering unavailable", http.StatusServiceUnavailable)
-		return
+	if page.HasMore && page.NextCursor != "" {
+		data.MoreMembersURL = "/app/members?" + url.Values{"cursor": {string(page.NextCursor)}}.Encode()
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(output.Bytes())
+	h.writeHTML(w, membersTemplate, data, status, "member rendering unavailable")
 }
 
 func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
@@ -236,32 +1156,34 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, err)
 		return
 	}
-	if !h.requireCSRF(w, r) {
-		return
-	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
-		http.Error(w, "invalid profile form", http.StatusBadRequest)
+	fields, ok := h.decodeMutation(w, r, "invalid profile form")
+	if !ok {
 		return
 	}
 	profile := domain.UserProfile{DisplayName: fields["display_name"], StatusText: fields["status_text"], StatusEmoji: fields["status_emoji"], Image24: fields["image_24"], Image32: fields["image_32"], Image48: fields["image_48"], Image72: fields["image_72"], Image192: fields["image_192"], Image512: fields["image_512"], Image1024: fields["image_1024"]}
 	if _, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile); err != nil {
-		status := http.StatusServiceUnavailable
+		// A rejected save keeps every submitted value and says which limit it
+		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, service.ErrInvalidProfile) {
-			status = http.StatusBadRequest
+			h.renderMembers(w, r, principal, &profile, "Your profile was not saved. A display name is at most 80 characters, a status at most 100, a status emoji at most 64, and each image URL at most 2048.", http.StatusBadRequest)
+			return
 		}
-		http.Error(w, "profile update unavailable", status)
+		h.renderMembers(w, r, principal, &profile, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
 		return
 	}
 	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
 }
+
+// ---------------------------------------------------------------------------
+// Session
+// ---------------------------------------------------------------------------
 
 func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	if _, err := h.Authenticator.Authenticate(r); err != nil {
 		h.writeAuthError(w, err)
 		return
 	}
-	if !h.requireCSRF(w, r) {
+	if _, ok := h.decodeMutation(w, r, "invalid sign-out form"); !ok {
 		return
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
@@ -274,109 +1196,26 @@ func (h Handler) revokeSession(w http.ResponseWriter, r *http.Request) {
 	if h.Login != nil {
 		redirectURL, logoutErr = h.Login.logoutRedirectURL(r.Context(), sessionCookie.Value)
 	}
-	if err := h.SessionRevoker.RevokeSession(r.Context(), sessionCookie.Value); err != nil {
-		status := http.StatusServiceUnavailable
-		if errors.Is(err, store.ErrNotFound) {
-			status = http.StatusNotFound
-		}
-		http.Error(w, "session revocation unavailable", status)
-		return
-	}
+	// The browser stops being signed in here, whatever the durable record does
+	// next: leaving the cookie in place on a failed revocation strands the user
+	// with a session they asked to end.
 	cookie := auth.SessionCookie("", -1, h.CookieDomain)
 	cookie.Expires = time.Unix(1, 0).UTC()
 	http.SetCookie(w, cookie)
 	w.Header().Set("Cache-Control", "no-store")
+	if err := h.SessionRevoker.RevokeSession(r.Context(), sessionCookie.Value); err != nil && !errors.Is(err, store.ErrNotFound) {
+		h.writePageError(w, http.StatusServiceUnavailable, "Sign-out is incomplete", "You are signed out of this browser, but the session record could not be revoked. Tell an administrator if this keeps happening.")
+		return
+	}
 	if h.Login != nil && logoutErr != nil {
 		redirectURL = "/signed-out?global=failed"
 	}
 	http.Redirect(w, r, redirectURL, http.StatusSeeOther)
 }
 
-func (h Handler) index(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
-	if err != nil {
-		if errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
-			target := "/login"
-			if h.Login.hasOpenIDConnectProvider() {
-				target = "/auth/oidc"
-			}
-			http.Redirect(w, r, target, http.StatusSeeOther)
-			return
-		}
-		h.writeAuthError(w, err)
-		return
-	}
-	h.setCSRFCookie(w, r)
-	channel := h.requestChannel(r)
-	conversations, err := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{Limit: 100})
-	if err != nil {
-		http.Error(w, "conversation store unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	page, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{Limit: 100})
-	if err != nil {
-		http.Error(w, "message store unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	views := make([]conversationView, 0, len(conversations.Conversations))
-	for _, conversation := range conversations.Conversations {
-		views = append(views, conversationView{ID: string(conversation.ID), Name: conversation.Name, Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount})
-	}
-	if len(page.Messages) > 0 {
-		last := page.Messages[len(page.Messages)-1]
-		if _, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.NewMessageTimestamp(last.CreatedAt)); err != nil {
-			http.Error(w, "read cursor unavailable", http.StatusServiceUnavailable)
-			return
-		}
-	}
-	threadTimestamp := strings.TrimSpace(r.URL.Query().Get("thread"))
-	var thread messagePage
-	if threadTimestamp != "" {
-		if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); err != nil {
-			http.Error(w, "invalid thread", http.StatusBadRequest)
-			return
-		}
-		replies, err := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp), domain.PageRequest{Limit: 100})
-		if err != nil {
-			http.Error(w, "thread unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		thread = messagePage{Messages: toViews(replies.Messages), Channel: string(channel)}
-	}
-	var output bytes.Buffer
-	sessionCookie, err := r.Cookie(auth.SessionCookieName)
-	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-		http.Error(w, "session unavailable", http.StatusUnauthorized)
-		return
-	}
-	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
-	if err != nil {
-		http.Error(w, "identity is unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	if err := pageTemplate.Execute(&output, pageData{Messages: toViews(page.Messages), Conversations: views, Channel: string(channel), Thread: thread, ThreadTimestamp: threadTimestamp, CSRFToken: auth.CSRFToken(sessionCookie.Value), ShowProfile: h.Login != nil, Username: current.Name}); err != nil {
-		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	rendered := output.String()
-	if !strings.Contains(rendered, "</body>") {
-		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	rendered, err = normalizeSearchControl(rendered)
-	if err != nil {
-		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	rendered, err = removeLegacyEventStream(rendered)
-	if err != nil {
-		http.Error(w, "page rendering unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	rendered = strings.Replace(rendered, "</body>", progressiveEnhancementScript+"</body>", 1)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(rendered))
-}
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
 
 func (h Handler) validation(w http.ResponseWriter, r *http.Request) {
 	h.identity(w, r, "SameOldChat is authenticated")
@@ -384,6 +1223,25 @@ func (h Handler) validation(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) me(w http.ResponseWriter, r *http.Request) {
 	h.identity(w, r, "My profile")
+}
+
+// canShowIdentity is the one predicate behind both the identity page and the
+// control that leads to it, so the workspace shell cannot advertise a page that
+// answers "unavailable".
+func (h Handler) canShowIdentity() bool {
+	return h.Login != nil && h.Login.hasOpenIDConnectProvider() && immutableReleaseRevision.MatchString(h.ReleaseRevision)
+}
+
+func (h Handler) canShowAuthorizationAdmin(principal auth.Principal) bool {
+	if h.Login == nil {
+		return false
+	}
+	for _, scope := range []auth.Scope{auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite} {
+		if principal.HasScope(scope) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string) {
@@ -396,18 +1254,18 @@ func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string
 		h.writeAuthError(w, err)
 		return
 	}
-	if h.Login == nil || !h.Login.hasOpenIDConnectProvider() || !immutableReleaseRevision.MatchString(h.ReleaseRevision) {
-		http.Error(w, "Shauth identity validation is unavailable", http.StatusServiceUnavailable)
+	if !h.canShowIdentity() {
+		h.writePageError(w, http.StatusServiceUnavailable, "Identity validation is unavailable", "This deployment does not have a Shauth provider and an immutable release revision, so a verified identity cannot be shown.")
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil {
-		http.Error(w, "identity is unavailable", http.StatusServiceUnavailable)
+		h.writeStoreError(w, err, "Your identity is temporarily unavailable.")
 		return
 	}
 	role, err := h.currentRole(r, principal)
 	if err != nil {
-		http.Error(w, "identity role is unavailable", http.StatusServiceUnavailable)
+		h.writeStoreError(w, err, "Your workspace role is temporarily unavailable.")
 		return
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
@@ -416,82 +1274,39 @@ func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string
 		return
 	}
 	h.setCSRFCookie(w, r)
-	avatar := "?"
-	for _, character := range strings.TrimSpace(user.Name) {
-		avatar = strings.ToUpper(string(character))
-		break
-	}
 	avatarURL := strings.TrimSpace(user.Profile.Image72)
 	if avatarURL == "" {
 		avatarURL = strings.TrimSpace(user.Profile.Image48)
 	}
-	var rendered bytes.Buffer
-	if err := identityTemplate.Execute(&rendered, identityData{Heading: heading, Username: user.Name, Email: user.Email, Role: role, Release: h.ReleaseRevision, CSRFToken: auth.CSRFToken(sessionCookie.Value), AvatarURL: avatarURL, Avatar: avatar}); err != nil {
-		http.Error(w, "identity rendering unavailable", http.StatusServiceUnavailable)
-		return
-	}
 	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(rendered.Bytes())
+	h.writeHTML(w, identityTemplate, identityData{Heading: heading, Username: user.Name, Email: user.Email, Role: role, Release: h.ReleaseRevision, CSRFToken: auth.CSRFToken(sessionCookie.Value), AvatarURL: avatarURL, Avatar: initial(user.Name)}, http.StatusOK, "identity rendering unavailable")
 }
 
+// currentRole reports the signed-in user's own workspace role in the vocabulary
+// the identity page renders.
+//
+// It reads one membership as the user it is about, which is authority the user
+// always holds over themselves. It used to page the whole workspace through
+// AdminListUsers as the signed-in member, so /me and /auth/validation depended on
+// an administrative read that a member must not be allowed to perform.
 func (h Handler) currentRole(r *http.Request, principal auth.Principal) (string, error) {
-	request := domain.PageRequest{Limit: 100}
-	for {
-		page, err := h.Messages.AdminListUsers(r.Context(), principal.WorkspaceID, principal.UserID, request)
-		if err != nil {
-			return "", err
-		}
-		for _, item := range page.Users {
-			if item.User.ID != principal.UserID {
-				continue
-			}
-			switch item.Membership.Role {
-			case domain.WorkspaceRoleMember:
-				return "developer", nil
-			case domain.WorkspaceRoleAdmin, domain.WorkspaceRoleOwner:
-				return "admin", nil
-			default:
-				return "", errors.New("identity has an unsupported workspace role")
-			}
-		}
-		if !page.HasMore {
-			return "", store.ErrNotFound
-		}
-		request.Cursor = page.NextCursor
+	membership, err := h.Messages.WorkspaceMembership(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		return "", err
+	}
+	switch membership.Role {
+	case domain.WorkspaceRoleMember:
+		return "developer", nil
+	case domain.WorkspaceRoleAdmin, domain.WorkspaceRoleOwner:
+		return "admin", nil
+	default:
+		return "", errors.New("identity has an unsupported workspace role")
 	}
 }
 
-func normalizeSearchControl(rendered string) (string, error) {
-	const start = `<label class="search" aria-label="Search">`
-	const end = `</label>`
-	if strings.Count(rendered, start) != 1 {
-		return "", errors.New("page search control is missing or duplicated")
-	}
-	startIndex := strings.Index(rendered, start)
-	endOffset := strings.Index(rendered[startIndex+len(start):], end)
-	if endOffset < 0 {
-		return "", errors.New("page search control is not closed")
-	}
-	endIndex := startIndex + len(start) + endOffset
-	content := rendered[startIndex+len(start) : endIndex]
-	const input = `<input placeholder="Search the workspace" aria-label="Search the workspace">`
-	if strings.Count(content, input) != 1 {
-		return "", errors.New("page search input is missing or duplicated")
-	}
-	content = strings.Replace(content, input, `<input name="q" placeholder="Search the workspace" aria-label="Search the workspace">`, 1)
-	control := `<form class="search" method="get" action="/app/search" aria-label="Search the workspace">` + content + `<button type="submit" hidden>Search</button></form>`
-	return rendered[:startIndex] + control + rendered[endIndex+len(end):], nil
-}
-
-const legacyEventStream = `if(window.EventSource){const events=new EventSource('/events');const refresh=()=>window.location.reload();['message.created','message.updated','message.deleted'].forEach(type=>events.addEventListener(type,refresh))}`
-
-func removeLegacyEventStream(rendered string) (string, error) {
-	if strings.Count(rendered, legacyEventStream) != 1 {
-		return "", errors.New("page event stream is missing or duplicated")
-	}
-	return strings.Replace(rendered, legacyEventStream, "", 1), nil
-}
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
 
 func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChatWrite)
@@ -499,79 +1314,143 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, err)
 		return
 	}
-	if !h.requireCSRF(w, r) {
+	fields, ok := h.decodeMutation(w, r, "invalid form data")
+	if !ok {
 		return
 	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
-		http.Error(w, "invalid form data", http.StatusBadRequest)
-		return
-	}
-	message, err := h.Messages.Post(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), fields["text"], domain.MessageTimestamp(fields["thread_ts"]), "")
+	channel := h.requestChannel(r)
+	message, err := h.Messages.Post(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["text"], domain.MessageTimestamp(fields["thread_ts"]), "")
 	if err != nil {
 		status := http.StatusServiceUnavailable
-		if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) {
+		reason := "The message could not be sent because the workspace store is temporarily unavailable."
+		if errors.Is(err, service.ErrInvalidMessage) {
 			status = http.StatusBadRequest
+			reason = "A message needs some text before it can be sent."
+		}
+		if errors.Is(err, service.ErrInvalidTimestamp) {
+			status = http.StatusBadRequest
+			reason = "That thread is not a message in this conversation."
 		}
 		if errors.Is(err, store.ErrNotFound) {
 			status = http.StatusNotFound
+			reason = "That conversation is no longer available."
 		}
-		http.Error(w, "unable to post message: "+err.Error(), status)
+		if r.Header.Get("HX-Request") == "true" {
+			// The composer renders this text next to the field and keeps the
+			// draft, so a failure is never silent and never loses the message.
+			http.Error(w, reason, status)
+			return
+		}
+		h.renderApp(w, r, principal, composerState{Draft: fields["text"], Message: reason, Status: status})
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		var output bytes.Buffer
 		sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
 		if cookieErr != nil || strings.TrimSpace(sessionCookie.Value) == "" {
-			http.Error(w, "session unavailable", http.StatusUnauthorized)
+			h.writeAuthError(w, auth.ErrNotAuthenticated)
 			return
 		}
-		if err := pageTemplate.ExecuteTemplate(&output, "messages", pageData{Messages: toViews([]domain.Message{message}), Channel: string(h.requestChannel(r)), CSRFToken: auth.CSRFToken(sessionCookie.Value)}); err != nil {
-			http.Error(w, "fragment rendering unavailable", http.StatusServiceUnavailable)
+		conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+		if conversationErr != nil {
+			h.writeFragmentError(w, conversationErr, "the conversation is temporarily unavailable")
 			return
 		}
-		_, _ = w.Write(output.Bytes())
+		thread := strings.TrimSpace(fields["thread_ts"])
+		list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: []domain.Message{message}, Thread: thread, ThreadPane: thread != "", Names: h.newUserNames(r.Context(), principal)})
+		h.writeFragment(w, list)
 		return
 	}
-	query := url.Values{"channel": {string(h.requestChannel(r))}}
-	if thread := strings.TrimSpace(fields["thread_ts"]); thread != "" {
-		query.Set("thread", thread)
-	}
-	http.Redirect(w, r, "/app?"+query.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])), http.StatusSeeOther)
 }
 
 func (h Handler) addReaction(w http.ResponseWriter, r *http.Request) {
+	h.mutateReaction(w, r, true)
+}
+
+func (h Handler) removeReaction(w http.ResponseWriter, r *http.Request) {
+	h.mutateReaction(w, r, false)
+}
+
+func (h Handler) mutateReaction(w http.ResponseWriter, r *http.Request, add bool) {
 	principal, err := h.authenticate(r, auth.ScopeReactionsWrite)
 	if err != nil {
 		h.writeAuthError(w, err)
 		return
 	}
-	if !h.requireCSRF(w, r) {
+	fields, ok := h.decodeMutation(w, r, "invalid reaction")
+	if !ok {
 		return
 	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil || strings.TrimSpace(fields["name"]) == "" {
-		http.Error(w, "invalid reaction", http.StatusBadRequest)
+	name := strings.TrimSpace(fields["name"])
+	if name == "" {
+		http.Error(w, "a reaction needs a name", http.StatusBadRequest)
 		return
 	}
 	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
 	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
-		http.Error(w, "invalid message timestamp", http.StatusBadRequest)
+		http.Error(w, "that message timestamp is not valid", http.StatusBadRequest)
 		return
 	}
-	if err := h.Messages.AddReaction(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp, strings.TrimSpace(fields["name"])); err != nil {
+	if add {
+		err = h.Messages.AddReaction(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp, name)
+	} else {
+		err = h.Messages.RemoveReaction(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp, name)
+	}
+	if err != nil {
 		status := http.StatusServiceUnavailable
+		reason := "The reaction could not be saved because the workspace store is temporarily unavailable."
 		if errors.Is(err, service.ErrInvalidReaction) {
 			status = http.StatusBadRequest
+			reason = "That reaction name is not valid."
 		}
 		if errors.Is(err, store.ErrNotFound) {
 			status = http.StatusNotFound
+			reason = "That message or reaction is no longer available."
 		}
-		http.Error(w, "unable to add reaction", status)
+		http.Error(w, reason, status)
 		return
 	}
-	h.redirectToChannel(w, r)
+	h.completeMutation(w, r)
+}
+
+func (h Handler) addPin(w http.ResponseWriter, r *http.Request) {
+	h.mutatePin(w, r, true)
+}
+
+func (h Handler) removePin(w http.ResponseWriter, r *http.Request) {
+	h.mutatePin(w, r, false)
+}
+
+func (h Handler) mutatePin(w http.ResponseWriter, r *http.Request, add bool) {
+	principal, err := h.authenticate(r, auth.ScopePinsWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "invalid pin form"); !ok {
+		return
+	}
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
+	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
+		http.Error(w, "that message timestamp is not valid", http.StatusBadRequest)
+		return
+	}
+	if add {
+		err = h.Messages.AddPin(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp)
+	} else {
+		err = h.Messages.RemovePin(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp)
+	}
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		reason := "The pin could not be saved because the workspace store is temporarily unavailable."
+		if errors.Is(err, store.ErrNotFound) {
+			status = http.StatusNotFound
+			reason = "That message or pin is no longer available."
+		}
+		http.Error(w, reason, status)
+		return
+	}
+	h.completeMutation(w, r)
 }
 
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
@@ -580,32 +1459,31 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, err)
 		return
 	}
-	if !h.requireCSRF(w, r) {
-		return
-	}
-	fields, err := decodeFormFields(w, r)
-	if err != nil {
-		http.Error(w, "invalid conversation form", http.StatusBadRequest)
+	fields, ok := h.decodeMutation(w, r, "invalid conversation form")
+	if !ok {
 		return
 	}
 	users, err := normalizeUserIDs(fields["users"])
 	if err != nil {
-		http.Error(w, "invalid conversation users", http.StatusBadRequest)
+		http.Error(w, "a direct conversation needs at least one member", http.StatusBadRequest)
 		return
 	}
 	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
 	if err != nil {
 		status := http.StatusServiceUnavailable
+		reason := "The conversation could not be opened because the workspace store is temporarily unavailable."
 		if errors.Is(err, service.ErrInvalidConversation) {
 			status = http.StatusBadRequest
+			reason = "That set of members cannot be opened as a conversation."
 		}
 		if errors.Is(err, store.ErrNotFound) {
 			status = http.StatusNotFound
+			reason = "One of those members is no longer in the workspace."
 		}
-		http.Error(w, "unable to open conversation", status)
+		http.Error(w, reason, status)
 		return
 	}
-	http.Redirect(w, r, "/app?"+url.Values{"channel": {string(conversation.ID)}}.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, appURL(string(conversation.ID), "", "", "", ""), http.StatusSeeOther)
 }
 
 func normalizeUserIDs(raw string) ([]domain.UserID, error) {
@@ -629,40 +1507,20 @@ func normalizeUserIDs(raw string) ([]domain.UserID, error) {
 	return users, nil
 }
 
-func (h Handler) addPin(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopePinsWrite)
-	if err != nil {
-		h.writeAuthError(w, err)
-		return
-	}
-	if !h.requireCSRF(w, r) {
-		return
-	}
-	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
-	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
-		http.Error(w, "invalid message timestamp", http.StatusBadRequest)
-		return
-	}
-	if err := h.Messages.AddPin(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp); err != nil {
-		status := http.StatusServiceUnavailable
-		if errors.Is(err, store.ErrNotFound) {
-			status = http.StatusNotFound
-		}
-		http.Error(w, "unable to pin message", status)
-		return
-	}
-	h.redirectToChannel(w, r)
-}
-
-func (h Handler) redirectToChannel(w http.ResponseWriter, r *http.Request) {
-	query := url.Values{"channel": {string(h.requestChannel(r))}}
-	hx := r.Header.Get("HX-Request") == "true"
-	if hx {
-		w.Header().Set("HX-Redirect", "/app?"+query.Encode())
+// completeMutation answers a state change that has no fragment of its own. The
+// enhanced client re-renders the live message regions on 204, so the reader
+// keeps their draft, their scroll position and the thread they had open; a
+// browser without JavaScript returns to exactly the view it submitted from.
+func (h Handler) completeMutation(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("HX-Request") == "true" {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	http.Redirect(w, r, "/app?"+query.Encode(), http.StatusSeeOther)
+	http.Redirect(w, r, h.viewURL(r, strings.TrimSpace(r.URL.Query().Get("thread"))), http.StatusSeeOther)
+}
+
+func (h Handler) viewURL(r *http.Request, thread string) string {
+	return appURL(string(h.requestChannel(r)), thread, strings.TrimSpace(r.URL.Query().Get("before")), "", "")
 }
 
 func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
@@ -670,6 +1528,60 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 		return domain.ConversationID(channel)
 	}
 	return h.Channel
+}
+
+// ---------------------------------------------------------------------------
+// Rendering helpers
+// ---------------------------------------------------------------------------
+
+func (h Handler) writeHTML(w http.ResponseWriter, page *template.Template, data any, status int, unavailable string) {
+	var output bytes.Buffer
+	if err := page.Execute(&output, data); err != nil {
+		http.Error(w, unavailable, http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(output.Bytes())
+}
+
+func (h Handler) writeFragment(w http.ResponseWriter, list messageList) {
+	var output bytes.Buffer
+	if err := pageTemplate.ExecuteTemplate(&output, "messages", list); err != nil {
+		http.Error(w, "the conversation could not be rendered", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write(output.Bytes())
+}
+
+func (h Handler) writePageError(w http.ResponseWriter, status int, heading, message string) {
+	var output bytes.Buffer
+	if err := errorTemplate.Execute(&output, errorData{Heading: heading, Message: message}); err != nil {
+		http.Error(w, heading, status)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(output.Bytes())
+}
+
+// writeStoreError separates a missing or forbidden conversation from an outage:
+// a stale bookmark is a 404 page, not a 503 that blames the store.
+func (h Handler) writeStoreError(w http.ResponseWriter, err error, unavailable string) {
+	if errors.Is(err, store.ErrNotFound) {
+		h.writePageError(w, http.StatusNotFound, "That conversation is not available", "It may have been deleted, or you may not be a member of it. Pick a conversation from the sidebar to keep reading.")
+		return
+	}
+	h.writePageError(w, http.StatusServiceUnavailable, "Temporarily unavailable", unavailable)
+}
+
+func (h Handler) writeFragmentError(w http.ResponseWriter, err error, unavailable string) {
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "that conversation is not available", http.StatusNotFound)
+		return
+	}
+	http.Error(w, unavailable, http.StatusServiceUnavailable)
 }
 
 func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal, error) {
@@ -682,6 +1594,7 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 	}
 	return principal, nil
 }
+
 func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
 	if errors.Is(err, auth.ErrMissingScope) {
 		http.Error(w, "forbidden", http.StatusForbidden)
@@ -690,15 +1603,148 @@ func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
 	http.Error(w, "not authenticated", http.StatusUnauthorized)
 }
 
-func toViews(values []domain.Message) []messageView {
-	result := make([]messageView, 0, len(values))
-	for _, value := range values {
-		result = append(result, messageView{ID: string(value.ID), AuthorID: string(value.AuthorID), Text: value.Text, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Timestamp: string(domain.NewMessageTimestamp(value.CreatedAt)), Channel: string(value.Conversation)})
+// userNames resolves author display names once per request. Message authors are
+// people, and the timeline shows their names; a raw user identifier is only the
+// last resort for a record that carries no name at all.
+type userNames struct {
+	handler   Handler
+	ctx       context.Context
+	principal auth.Principal
+	cache     map[domain.UserID]string
+}
+
+func (h Handler) newUserNames(ctx context.Context, principal auth.Principal) *userNames {
+	return &userNames{handler: h, ctx: ctx, principal: principal, cache: map[domain.UserID]string{}}
+}
+
+func (n *userNames) name(id domain.UserID) string {
+	if id == "" {
+		return "Unknown member"
+	}
+	if cached, ok := n.cache[id]; ok {
+		return cached
+	}
+	resolved := string(id)
+	if user, err := n.handler.Messages.UserInfo(n.ctx, n.principal.WorkspaceID, n.principal.UserID, id); err == nil {
+		resolved = displayName(user)
+	}
+	n.cache[id] = resolved
+	return resolved
+}
+
+func displayName(user domain.User) string {
+	for _, candidate := range []string{user.Profile.DisplayName, user.RealName, user.Name} {
+		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
+			return trimmed
+		}
+	}
+	return string(user.ID)
+}
+
+func conversationName(conversation domain.Conversation) string {
+	if name := strings.TrimSpace(conversation.Name); name != "" {
+		return name
+	}
+	return string(conversation.ID)
+}
+
+func conversationMeta(conversation domain.Conversation) string {
+	if topic := strings.TrimSpace(conversation.Topic); topic != "" {
+		return topic
+	}
+	if purpose := strings.TrimSpace(conversation.Purpose); purpose != "" {
+		return purpose
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		return "Direct message"
+	}
+	if conversation.IsPrivate {
+		return "Private channel"
+	}
+	return "Channel"
+}
+
+// initial is the single uppercase letter an avatar tile can hold. The tile is
+// 24 to 72 pixels wide; a name or an identifier does not fit in it.
+func initial(name string) string {
+	for _, character := range strings.TrimSpace(name) {
+		return strings.ToUpper(string(character))
+	}
+	return "?"
+}
+
+func messageAnchor(id domain.MessageID) string {
+	return "message-" + string(id)
+}
+
+func formatTime(value time.Time) string {
+	return value.UTC().Format("Jan 2, 15:04 UTC")
+}
+
+func appURL(channel, thread, before, anchor, conversations string) string {
+	query := url.Values{"channel": {channel}}
+	if thread != "" {
+		query.Set("thread", thread)
+	}
+	if before != "" {
+		query.Set("before", before)
+	}
+	if conversations != "" {
+		query.Set("conversations", conversations)
+	}
+	result := "/app?" + query.Encode()
+	if anchor != "" {
+		result += "#" + anchor
 	}
 	return result
 }
 
+func mutationURL(path, channel, timestamp, thread, before string) string {
+	query := url.Values{"channel": {channel}}
+	if timestamp != "" {
+		query.Set("ts", timestamp)
+	}
+	if thread != "" {
+		query.Set("thread", thread)
+	}
+	if before != "" {
+		query.Set("before", before)
+	}
+	return path + "?" + query.Encode()
+}
+
+func fragmentURL(channel, thread, before string) string {
+	query := url.Values{"channel": {channel}}
+	if thread != "" {
+		query.Set("thread", thread)
+	}
+	if before != "" {
+		query.Set("before", before)
+	}
+	return "/app/timeline?" + query.Encode()
+}
+
+// ---------------------------------------------------------------------------
+// Form decoding
+// ---------------------------------------------------------------------------
+
 const maxFormBody = 4 << 20
+
+// decodeMutation bounds and parses the body before anything reads a form value.
+// CSRF validation falls back to the token form field, and reading that field
+// parses the whole body: validating first would let net/http buffer its own 32
+// MB default and leave maxFormBody unreachable.
+func (h Handler) decodeMutation(w http.ResponseWriter, r *http.Request, invalid string) (map[string]string, bool) {
+	fields, err := decodeFormFields(w, r)
+	if err != nil {
+		http.Error(w, invalid, http.StatusBadRequest)
+		return nil, false
+	}
+	if !h.requireCSRF(w, r) {
+		return nil, false
+	}
+	return fields, true
+}
 
 func decodeFormFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
