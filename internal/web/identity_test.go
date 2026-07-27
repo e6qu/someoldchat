@@ -1056,3 +1056,131 @@ func TestAssertedEmailVerifiedFailsClosed(t *testing.T) {
 		}
 	}
 }
+
+// signInThroughProvider drives the full authorization round trip and reports the
+// callback response, so a provider's sign-in can be asserted end to end.
+func signInThroughProvider(t *testing.T, handler LoginHandler, provider string) *httptest.ResponseRecorder {
+	t.Helper()
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	begin := httptest.NewRecorder()
+	mux.ServeHTTP(begin, httptest.NewRequest(http.MethodGet, "/auth/"+provider, nil))
+	if begin.Code != http.StatusFound {
+		t.Fatalf("begin status=%d body=%s", begin.Code, begin.Body.String())
+	}
+	location, err := url.Parse(begin.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/auth/"+provider+"/callback?code=one-time-code&state="+url.QueryEscape(location.Query().Get("state")), nil)
+	for _, cookie := range begin.Result().Cookies() {
+		request.AddCookie(cookie)
+	}
+	callback := httptest.NewRecorder()
+	mux.ServeHTTP(callback, request)
+	return callback
+}
+
+// GitHub's /user returns a profile address for any account that made one public,
+// and carries no email_verified claim. Requiring that claim therefore refused
+// every such account, because the one call that actually proves ownership —
+// /user/emails, which reports `verified` per address — was skipped whenever
+// /user had already supplied an address.
+func TestGitHubSignInResolvesTheVerifiedAddressEvenWhenTheProfileHasOne(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+	emailEndpointCalled := false
+	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/token":
+			return providerResponse(r, `{"access_token":"provider-token"}`), nil
+		case "/userinfo":
+			// A public profile address, and no email_verified anywhere.
+			return providerResponse(r, `{"id":4242,"login":"alice","email":"public@example.invalid","name":"Alice"}`), nil
+		case "/emails":
+			emailEndpointCalled = true
+			return providerResponse(r, `[{"email":"alice@example.com","primary":true,"verified":true},{"email":"public@example.invalid","primary":false,"verified":false}]`), nil
+		default:
+			return providerResponse(r, "not found"), nil
+		}
+	})}
+	handler, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "github", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", EmailURL: "https://provider.test/emails", Scopes: []string{"read:user", "user:email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.client = client
+
+	callback := signInThroughProvider(t, handler, "github")
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("github sign-in was refused: status=%d body=%s", callback.Code, callback.Body.String())
+	}
+	if !emailEndpointCalled {
+		t.Fatal("the verified-address endpoint was never called, so ownership was never proven")
+	}
+	// The account linked is the one holding the VERIFIED address, not the public
+	// profile address.
+	for _, cookie := range callback.Result().Cookies() {
+		if cookie.Name == auth.SessionCookieName {
+			session, err := store.LookupSession(context.Background(), cookie.Value)
+			if err != nil || session.UserID != "U1" {
+				t.Fatalf("session=%+v err=%v, want the user holding the verified address", session, err)
+			}
+			return
+		}
+	}
+	t.Fatal("no session cookie was issued")
+}
+
+// Entra emits no email_verified either, so requiring it refused every first
+// sign-in. A deployment pinned to one tenant is reading an address out of a
+// directory it administers; a multi-tenant endpoint is the nOAuth position and
+// must still be refused.
+func TestEntraSignInTrustsAPinnedTenantAndRefusesAMultiTenantEndpoint(t *testing.T) {
+	newHandler := func(t *testing.T, authorizeURL string) (LoginHandler, *memory.Store) {
+		t.Helper()
+		store := memory.New()
+		store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+		store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
+		client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			switch r.URL.Path {
+			case "/token":
+				return providerResponse(r, `{"access_token":"provider-token"}`), nil
+			case "/userinfo":
+				return providerResponse(r, `{"sub":"entra-subject","email":"alice@example.com","name":"Alice"}`), nil
+			default:
+				return providerResponse(r, "not found"), nil
+			}
+		})}
+		handler, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+			Name: "entra", ClientID: "client", ClientSecret: "secret", AuthorizeURL: authorizeURL, TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler.client = client
+		return handler, store
+	}
+
+	pinned, _ := newHandler(t, "https://login.microsoftonline.com/8f4c1e2a-0000-0000-0000-abcdefabcdef/oauth2/v2.0/authorize")
+	if callback := signInThroughProvider(t, pinned, "entra"); callback.Code != http.StatusSeeOther {
+		t.Fatalf("a pinned-tenant Entra sign-in was refused: status=%d body=%s", callback.Code, callback.Body.String())
+	}
+
+	for _, tenant := range []string{"common", "organizations", "consumers"} {
+		multi, store := newHandler(t, "https://login.microsoftonline.com/"+tenant+"/oauth2/v2.0/authorize")
+		callback := signInThroughProvider(t, multi, "entra")
+		if callback.Code == http.StatusSeeOther {
+			t.Fatalf("%s: a multi-tenant endpoint linked an account on an unproven address", tenant)
+		}
+		for _, cookie := range callback.Result().Cookies() {
+			if cookie.Name == auth.SessionCookieName && cookie.Value != "" {
+				if _, err := store.LookupSession(context.Background(), cookie.Value); err == nil {
+					t.Fatalf("%s: a session was created from an unproven address", tenant)
+				}
+			}
+		}
+	}
+}
