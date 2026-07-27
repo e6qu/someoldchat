@@ -121,14 +121,13 @@ func (c *queryConn) CheckNamedValue(value *driver.NamedValue) error {
 var (
 	tableInfoPattern     = regexp.MustCompile(`(?i)^\s*PRAGMA\s+table_info\(([^)]+)\)\s*$`)
 	autoincrementPattern = regexp.MustCompile(`(?i)INTEGER\s+PRIMARY\s+KEY\s+AUTOINCREMENT`)
-	insertIgnorePattern  = regexp.MustCompile(`(?i)^(\s*)INSERT\s+OR\s+IGNORE\s+`)
 )
 
 func rewrite(query string) string {
 	trimmed := strings.TrimSpace(query)
-	if strings.EqualFold(trimmed, "PRAGMA integrity_check") {
-		return `SELECT 'ok'`
-	}
+	// PRAGMA integrity_check is deliberately not rewritten. It used to become
+	// SELECT 'ok', a check that could never fail; the shared repository now reports
+	// ErrIntegrityCheckUnsupported for this profile instead of pretending.
 	if match := tableInfoPattern.FindStringSubmatch(trimmed); match != nil {
 		table := strings.TrimSpace(match[1])
 		return fmt.Sprintf("SELECT ordinal_position - 1, column_name, data_type, CASE WHEN is_nullable = 'NO' THEN 1 ELSE 0 END, column_default, 0 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '%s' ORDER BY ordinal_position", strings.ReplaceAll(table, "'", "''"))
@@ -140,15 +139,12 @@ func rewrite(query string) string {
 	// Preserve the shared schema's range instead of allowing PostgreSQL to
 	// reject valid values during migration or a later write.
 	query = replaceUnquotedWord(query, "INTEGER", "BIGINT")
-	if insertIgnorePattern.MatchString(query) {
-		query = insertIgnorePattern.ReplaceAllString(query, "${1}INSERT ")
-		trimmed = strings.TrimSpace(query)
-		if strings.HasSuffix(trimmed, ";") {
-			query = strings.TrimSpace(strings.TrimSuffix(trimmed, ";")) + " ON CONFLICT DO NOTHING;"
-		} else {
-			query = trimmed + " ON CONFLICT DO NOTHING"
-		}
-	}
+	// INSERT OR IGNORE is no longer rewritten because the shared schema no longer
+	// uses it. The rewrite silently narrowed the ignored error class: SQLite's OR
+	// IGNORE suppresses every constraint violation, while ON CONFLICT DO NOTHING
+	// suppresses only unique and exclusion conflicts, so a migration backfill over
+	// the same data succeeded on SQLite and aborted here. Every such statement is
+	// now written as an explicit ON CONFLICT target in the portable dialect.
 	return positionalParameters(query)
 }
 

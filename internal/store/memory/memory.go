@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"crypto/hmac"
 	"errors"
 	"fmt"
 	"slices"
@@ -36,7 +37,7 @@ type Store struct {
 	bots                   map[domain.BotID]domain.Bot
 	migrations             map[string]domain.UserMigration
 	oauthClients           map[string]domain.OAuthClient
-	oauthCodes             map[string]domain.OAuthCode
+	oauthCodes             map[string]memoryOAuthCode
 	rtmConnections         map[string]domain.RTMConnection
 	socketConnections      map[string]domain.SocketModeConnection
 	socketConnectionActive map[string]bool
@@ -76,7 +77,6 @@ type Store struct {
 	canvases               map[domain.CanvasID]domain.Canvas
 	canvasAccess           map[string]domain.CanvasAccess
 	accessLogs             []domain.AccessLog
-	eventSequence          uint64
 	lists                  map[domain.ListID]domain.List
 	listItems              map[domain.ListID]map[domain.ListItemID]domain.ListItem
 	listAccess             map[string]domain.ListAccess
@@ -93,7 +93,6 @@ func (s *Store) AppendEvent(_ context.Context, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -143,7 +142,7 @@ type memoryLease struct {
 }
 
 func New() *Store {
-	return &Store{fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appInstallations: make(map[string]domain.AppInstallation), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]domain.OAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appInstallations: make(map[string]domain.AppInstallation), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -168,7 +167,6 @@ func (s *Store) CreateCanvas(_ context.Context, canvas domain.Canvas, event even
 	}
 	s.canvases[canvas.ID] = canvas
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -192,7 +190,6 @@ func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event even
 	canvas.CreatedAt = current.CreatedAt
 	s.canvases[canvas.ID] = canvas
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -210,7 +207,6 @@ func (s *Store) DeleteCanvas(_ context.Context, workspace domain.WorkspaceID, id
 		}
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -222,7 +218,6 @@ func (s *Store) SetCanvasAccess(_ context.Context, access domain.CanvasAccess, e
 	}
 	s.canvasAccess[canvasAccessKey(access)] = access
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -238,7 +233,6 @@ func (s *Store) DeleteCanvasAccess(_ context.Context, access domain.CanvasAccess
 	}
 	delete(s.canvasAccess, key)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -251,7 +245,6 @@ func (s *Store) AddEmoji(_ context.Context, value domain.CustomEmoji, event even
 	}
 	s.emojis[key] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -277,7 +270,6 @@ func (s *Store) RemoveEmoji(_ context.Context, workspace domain.WorkspaceID, nam
 	}
 	delete(s.emojis, key)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -296,50 +288,95 @@ func (s *Store) RenameEmoji(_ context.Context, workspace domain.WorkspaceID, old
 	s.emojis[newKey] = value
 	delete(s.emojis, oldKey)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
-func (s *Store) SeedWorkspace(workspace domain.Workspace) {
+// The Seed helpers report invalid input rather than panicking or silently doing
+// nothing, which is what the SQL repositories do. A rejected workspace
+// discoverability used to panic here and return an error there, and a rejected
+// presence used to be a silent no-op here, so a seeded fixture diverged between
+// storage profiles before any request was served.
+func (s *Store) SeedWorkspace(workspace domain.Workspace) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if workspace.Discoverability == "" {
 		workspace.Discoverability = domain.WorkspaceDiscoverabilityOpen
 	}
 	if !workspace.Discoverability.Valid() {
-		panic("invalid workspace discoverability")
+		return errors.New("invalid workspace discoverability")
 	}
 	s.workspaces[workspace.ID] = workspace
+	return nil
 }
-func (s *Store) SeedUser(user domain.User) {
+
+// SeedUser creates the bootstrap identity and then leaves it alone, matching the
+// SQL repositories. Seeding used to replace the whole record, so a second seed
+// with an empty e-mail blanked the administrator's address and profile and a
+// second seed with Deleted: false undid an administrative deactivation. Only an
+// e-mail that is still unset is filled in, because no other writer can attach an
+// address to an already seeded identity.
+func (s *Store) SeedUser(user domain.User) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if user.Presence == "" {
 		user.Presence = domain.PresenceAuto
 	}
 	if user.Presence != domain.PresenceAuto && user.Presence != domain.PresenceAway {
-		return
+		return errors.New("invalid user presence")
 	}
-	s.users[user.ID] = user
+	user.Email = domain.NormalizeEmail(user.Email)
+	if existing, exists := s.users[user.ID]; exists {
+		if existing.Email == "" {
+			existing.Email = user.Email
+			s.users[user.ID] = existing
+		}
+	} else {
+		s.users[user.ID] = user
+	}
 	key := string(user.WorkspaceID) + "\x00" + string(user.ID)
 	if _, exists := s.members[key]; !exists {
 		s.members[key] = domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRoleMember, Active: true}
 	}
+	return nil
 }
-func (s *Store) SeedConversation(conversation domain.Conversation) {
+
+// SeedWorkspaceRole establishes a membership role directly, for fixtures whose
+// subject is an administrator. It exists so a test never has to obtain
+// administrative authority by calling an administrative mutation with an actor
+// that does not hold it — doing that grants fake authority and conceals exactly
+// the class of defect the role checks exist to prevent.
+func (s *Store) SeedWorkspaceRole(workspaceID domain.WorkspaceID, userID domain.UserID, role domain.WorkspaceRole) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
+		return errors.New("invalid workspace role")
+	}
+	key := string(workspaceID) + "\x00" + string(userID)
+	membership, ok := s.members[key]
+	if !ok {
+		return store.ErrNotFound
+	}
+	membership.Role, membership.Active = role, true
+	s.members[key] = membership
+	return nil
+}
+
+func (s *Store) SeedConversation(conversation domain.Conversation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.conversations[conversation.ID] = conversation
 	s.conversationTeams[conversation.ID] = map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
 	s.conversationOrg[conversation.ID] = false
+	return nil
 }
-func (s *Store) SeedConversationMember(conversation domain.ConversationID, user domain.UserID) {
+func (s *Store) SeedConversationMember(conversation domain.ConversationID, user domain.UserID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.memberships[conversation] == nil {
 		s.memberships[conversation] = make(map[domain.UserID]struct{})
 	}
 	s.memberships[conversation][user] = struct{}{}
+	return nil
 }
 
 func (s *Store) SeedToken(_ context.Context, token string, record domain.TokenRecord) error {
@@ -469,11 +506,20 @@ func authMethodKey(workspace domain.WorkspaceID, provider string) string {
 	return string(workspace) + "\x00" + provider
 }
 
+// GetAuthMethod reports the stored enablement of an authorization provider. A
+// provider with no row reports store.ErrNotFound: the repository holds no
+// decision for it and must not invent one. Both repositories used to synthesise
+// Enabled: true, so a provider nobody had configured read as enabled. The value
+// returned with the sentinel is disabled, so a caller that ignores the error
+// still fails closed.
 func (s *Store) GetAuthMethod(_ context.Context, workspace domain.WorkspaceID, provider string) (domain.AuthMethod, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	value, ok := s.authMethods[authMethodKey(workspace, provider)]
 	if !ok {
+		// Absence means "no administrative override", matching the SQL backends.
+		// See the note on sqlstore.Store.GetAuthMethod for why this must not be
+		// inverted to fail closed.
 		return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: true}, nil
 	}
 	return value, nil
@@ -524,6 +570,16 @@ func (s *Store) CreateExternalIdentity(_ context.Context, value domain.ExternalI
 	return nil
 }
 
+// revokeSessionLocked is the only way a session is revoked. Revocation clears the
+// provider identity token: a revoked session must retain no provider credential,
+// and the identity token left behind was a signed bearer assertion for the user
+// that outlived the session it belonged to.
+func revokeSessionLocked(record domain.SessionRecord) domain.SessionRecord {
+	record.Revoked = true
+	record.OIDCIDToken = ""
+	return record
+}
+
 func (s *Store) RevokeSession(_ context.Context, token string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -532,8 +588,7 @@ func (s *Store) RevokeSession(_ context.Context, token string) error {
 	if !ok {
 		return store.ErrNotFound
 	}
-	record.Revoked = true
-	s.sessions[key] = record
+	s.sessions[key] = revokeSessionLocked(record)
 	return nil
 }
 
@@ -549,6 +604,14 @@ func (s *Store) RevokeOIDCSessions(_ context.Context, workspaceID domain.Workspa
 			delete(s.oidcLogoutTokens, key)
 		}
 	}
+	// Expired sessions are dropped on the same schedule as the logout tokens,
+	// which is the only maintenance schedule this state has. An expired session
+	// is unusable, so retaining its provider metadata serves nothing.
+	for key, record := range s.sessions {
+		if !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(now) {
+			delete(s.sessions, key)
+		}
+	}
 	tokenKey := string(workspaceID) + "\x00" + provider + "\x00" + tokenID
 	if _, exists := s.oidcLogoutTokens[tokenKey]; exists {
 		return store.ErrConflict
@@ -562,13 +625,11 @@ func (s *Store) RevokeOIDCSessions(_ context.Context, workspaceID domain.Workspa
 		if (sid != "" && record.OIDCSID != sid) || (subject != "" && record.OIDCSubject != subject) {
 			continue
 		}
-		record.Revoked = true
-		s.sessions[key] = record
+		s.sessions[key] = revokeSessionLocked(record)
 		found = true
 	}
 	if found {
 		s.outbox = append(s.outbox, event)
-		s.eventSequence++
 	}
 	return nil
 }
@@ -579,8 +640,7 @@ func (s *Store) RevokeUserSessions(_ context.Context, workspaceID domain.Workspa
 	found := false
 	for key, record := range s.sessions {
 		if record.WorkspaceID == workspaceID && record.UserID == userID {
-			record.Revoked = true
-			s.sessions[key] = record
+			s.sessions[key] = revokeSessionLocked(record)
 			found = true
 		}
 	}
@@ -588,7 +648,6 @@ func (s *Store) RevokeUserSessions(_ context.Context, workspaceID domain.Workspa
 		return store.ErrNotFound
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -599,7 +658,7 @@ func (s *Store) GetWorkspace(_ context.Context, id domain.WorkspaceID) (domain.W
 	if !ok {
 		return domain.Workspace{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneWorkspace(value), nil
 }
 
 func (s *Store) CreateWorkspace(_ context.Context, value domain.Workspace, event events.Event) error {
@@ -613,7 +672,6 @@ func (s *Store) CreateWorkspace(_ context.Context, value domain.Workspace, event
 	}
 	s.workspaces[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -627,7 +685,6 @@ func (s *Store) SetWorkspaceName(_ context.Context, id domain.WorkspaceID, name 
 	value.Name = name
 	s.workspaces[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -641,7 +698,6 @@ func (s *Store) SetWorkspaceDescription(_ context.Context, id domain.WorkspaceID
 	value.Description = description
 	s.workspaces[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -655,7 +711,6 @@ func (s *Store) SetWorkspaceDiscoverability(_ context.Context, id domain.Workspa
 	value.Discoverability = discoverability
 	s.workspaces[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -669,7 +724,6 @@ func (s *Store) SetWorkspaceIcon(_ context.Context, id domain.WorkspaceID, iconU
 	value.IconURL = iconURL
 	s.workspaces[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -689,7 +743,6 @@ func (s *Store) SetWorkspaceDefaultChannels(_ context.Context, id domain.Workspa
 	value.DefaultChannelIDs = append([]domain.ConversationID(nil), channels...)
 	s.workspaces[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -738,7 +791,6 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	s.users[user.ID] = user
 	s.members[string(user.WorkspaceID)+"\x00"+string(user.ID)] = membership
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -768,18 +820,23 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 	user.Profile = profile
 	s.users[userID] = user
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return user, nil
 }
 
 func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence, event events.Event) (domain.User, error) {
+	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
+		return domain.User{}, errors.New("invalid user presence")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	user, ok := s.users[userID]
 	if !ok || user.WorkspaceID != workspaceID || user.Deleted {
 		return domain.User{}, store.ErrNotFound
 	}
-	if _, ok := s.members[string(workspaceID)+"\x00"+string(userID)]; !ok {
+	// An inactive membership must not be able to change presence, which is what
+	// the SQL repositories enforce with AND active = 1.
+	membership, ok := s.members[string(workspaceID)+"\x00"+string(userID)]
+	if !ok || !membership.Active {
 		return domain.User{}, store.ErrNotFound
 	}
 	user.Presence = presence
@@ -801,7 +858,6 @@ func (s *Store) SetUserExpiration(_ context.Context, workspaceID domain.Workspac
 		s.userExpirations[userID] = expiration.UTC()
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -829,13 +885,11 @@ func (s *Store) SetUserDeleted(_ context.Context, workspaceID domain.WorkspaceID
 		}
 		for sessionKey, session := range s.sessions {
 			if session.WorkspaceID == workspaceID && session.UserID == userID {
-				session.Revoked = true
-				s.sessions[sessionKey] = session
+				s.sessions[sessionKey] = revokeSessionLocked(session)
 			}
 		}
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -870,7 +924,6 @@ func (s *Store) AssignUser(_ context.Context, workspaceID domain.WorkspaceID, us
 		s.memberships[channelID] = members
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -888,7 +941,6 @@ func (s *Store) SetWorkspaceRole(_ context.Context, workspaceID domain.Workspace
 	membership.Role, membership.Active = role, true
 	s.members[key] = membership
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -915,7 +967,6 @@ func (s *Store) SetDoNotDisturb(_ context.Context, value domain.DoNotDisturb, ev
 	}
 	s.dnd[value.UserID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -935,10 +986,6 @@ func messageBefore(left, right domain.Message) bool {
 		return left.ID < right.ID
 	}
 	return left.CreatedAt.Before(right.CreatedAt)
-}
-
-func messageBeforeOrEqual(message domain.Message, createdAt time.Time, id domain.MessageID) bool {
-	return message.CreatedAt.Before(createdAt) || (message.CreatedAt.Equal(createdAt) && message.ID <= id)
 }
 
 func (s *Store) ListUsers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.UserPage, error) {
@@ -1154,7 +1201,6 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	s.conversationTeams[conversation.ID] = map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
 	s.conversationOrg[conversation.ID] = false
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1162,7 +1208,7 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.conversations[conversation.ID]; exists {
-		return errors.New("conversation already exists")
+		return store.ErrAlreadyExists
 	}
 	s.conversations[conversation.ID] = conversation
 	s.conversationTeams[conversation.ID] = map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
@@ -1174,7 +1220,6 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 		s.memberships[conversation.ID][creator] = struct{}{}
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1188,7 +1233,6 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	value.Name = name
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -1202,7 +1246,6 @@ func (s *Store) SetConversationTopic(_ context.Context, conversation domain.Conv
 	value.Topic = topic
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -1216,7 +1259,6 @@ func (s *Store) SetConversationPurpose(_ context.Context, conversation domain.Co
 	value.Purpose = purpose
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -1230,7 +1272,6 @@ func (s *Store) SetConversationArchived(_ context.Context, conversation domain.C
 	value.Archived = archived
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -1308,7 +1349,6 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 	delete(s.conversationTeams, conversation)
 	delete(s.conversationOrg, conversation)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1327,7 +1367,6 @@ func (s *Store) SetConversationAccessGroups(_ context.Context, workspace domain.
 	}
 	s.conversationAccess[conversation] = append([]domain.UserGroupID(nil), groups...)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1350,9 +1389,8 @@ func (s *Store) CreateInviteRequest(_ context.Context, value domain.InviteReques
 	if _, exists := s.inviteRequests[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
-	s.inviteRequests[value.ID] = value
+	s.inviteRequests[value.ID] = cloneInviteRequest(value)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1363,7 +1401,7 @@ func (s *Store) GetInviteRequest(_ context.Context, workspace domain.WorkspaceID
 	if !ok || value.WorkspaceID != workspace {
 		return domain.InviteRequest{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneInviteRequest(value), nil
 }
 
 func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.WorkspaceID, id domain.InviteRequestID, status domain.InviteRequestStatus, reviewedAt time.Time, event events.Event) error {
@@ -1380,7 +1418,6 @@ func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.Works
 	value.ReviewedAt = reviewedAt.UTC()
 	s.inviteRequests[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1396,7 +1433,7 @@ func (s *Store) ListInviteRequests(_ context.Context, workspace domain.Workspace
 	values := make([]domain.InviteRequest, 0, request.Limit+1)
 	for _, value := range s.inviteRequests {
 		if value.WorkspaceID == workspace && value.Status == status && string(value.ID) > after {
-			values = appendSorted(values, value, request.Limit+1, func(left, right domain.InviteRequest) bool { return left.ID < right.ID })
+			values = appendSorted(values, cloneInviteRequest(value), request.Limit+1, func(left, right domain.InviteRequest) bool { return left.ID < right.ID })
 		}
 	}
 	s.mu.RUnlock()
@@ -1478,7 +1515,6 @@ func (s *Store) SetAppApproval(_ context.Context, workspace domain.WorkspaceID, 
 	value.UpdatedAt = updatedAt.UTC()
 	s.appApprovals[appID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1519,7 +1555,6 @@ func (s *Store) CreateAppPermissionRequest(_ context.Context, value domain.AppPe
 	value.Scopes = domain.NormalizeScopes(value.Scopes)
 	s.permissionRequests[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1539,7 +1574,6 @@ func (s *Store) CreateView(_ context.Context, value domain.View, event events.Ev
 	}
 	s.views[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1617,7 +1651,6 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 	}
 	s.views[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -1638,7 +1671,6 @@ func (s *Store) SetWorkflowStep(_ context.Context, value domain.WorkflowStep, ev
 	}
 	s.workflowSteps[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1663,7 +1695,6 @@ func (s *Store) CreateDialog(_ context.Context, value domain.Dialog, event event
 	}
 	s.dialogs[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1718,7 +1749,6 @@ func (s *Store) CreateUserMigration(_ context.Context, value domain.UserMigratio
 	s.migrations[migrationKey(value.WorkspaceID, value.OldID)] = value
 	s.migrations[migrationKey(value.WorkspaceID, value.GlobalID)] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1755,7 +1785,6 @@ func (s *Store) SetConversationTeams(_ context.Context, workspace domain.Workspa
 	s.conversationTeams[conversation] = set
 	s.conversationOrg[conversation] = orgChannel
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1791,7 +1820,6 @@ func (s *Store) DisconnectConversationTeams(_ context.Context, workspace domain.
 		}
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -1880,6 +1908,18 @@ func (s *Store) GetOAuthClient(_ context.Context, id string) (domain.OAuthClient
 	return value, nil
 }
 
+// memoryOAuthCode holds a grant beside the instant it stops being redeemable.
+// The expiry lives here rather than on domain.OAuthCode so that no caller can
+// choose it: the repository derives it from store.OAuthCodeLifetime.
+type memoryOAuthCode struct {
+	grant     domain.OAuthCode
+	expiresAt time.Time
+}
+
+// CreateOAuthCode keys the grant by domain.HashToken of the code and never keeps
+// the code itself, matching every other credential in this repository, and bounds
+// redemption to store.OAuthCodeLifetime. Codes used to be stored verbatim and
+// never expired.
 func (s *Store) CreateOAuthCode(_ context.Context, value domain.OAuthCode) error {
 	if value.Code == "" || value.ClientID == "" || value.WorkspaceID == "" || value.UserID == "" {
 		return errors.New("invalid oauth code")
@@ -1895,11 +1935,13 @@ func (s *Store) CreateOAuthCode(_ context.Context, value domain.OAuthCode) error
 	if user, exists := s.users[value.UserID]; !exists || user.WorkspaceID != value.WorkspaceID || user.Deleted {
 		return store.ErrNotFound
 	}
-	if _, exists := s.oauthCodes[value.Code]; exists {
+	codeHash := domain.HashToken(value.Code)
+	if _, exists := s.oauthCodes[codeHash]; exists {
 		return store.ErrAlreadyExists
 	}
 	value.Scopes = domain.NormalizeScopes(value.Scopes)
-	s.oauthCodes[value.Code] = value
+	value.Code = codeHash
+	s.oauthCodes[codeHash] = memoryOAuthCode{grant: value, expiresAt: time.Now().UTC().Add(store.OAuthCodeLifetime)}
 	return nil
 }
 
@@ -1907,17 +1949,27 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	client, exists := s.oauthClients[clientID]
-	if !exists || client.SecretHash != domain.HashToken(secret) {
+	if !exists || !hmac.Equal([]byte(client.SecretHash), []byte(domain.HashToken(secret))) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
-	grant, exists := s.oauthCodes[code]
-	if !exists || grant.ClientID != clientID || grant.RedirectURI != redirect {
+	now := time.Now().UTC()
+	// Expired codes are dropped on the redemption path, the only schedule this
+	// state has.
+	for key, stored := range s.oauthCodes {
+		if !stored.expiresAt.After(now) {
+			delete(s.oauthCodes, key)
+		}
+	}
+	codeHash := domain.HashToken(code)
+	stored, exists := s.oauthCodes[codeHash]
+	grant := stored.grant
+	if !exists || !stored.expiresAt.After(now) || grant.ClientID != clientID || grant.RedirectURI != redirect {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
-	delete(s.oauthCodes, code)
+	delete(s.oauthCodes, codeHash)
 	grant.Scopes = domain.NormalizeScopes(grant.Scopes)
 	s.tokens[domain.HashToken(accessToken)] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, Scopes: append([]string(nil), grant.Scopes...)}
 	token.AccessToken = accessToken
@@ -2019,12 +2071,14 @@ func (s *Store) ConsumeSocketModeConnection(_ context.Context, id string) (domai
 func (s *Store) RenewSocketModeConnection(_ context.Context, id string, expiresAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	value, exists := s.socketConnections[id]
-	if !exists || !s.socketConnectionActive[id] {
-		return store.ErrNotFound
-	}
 	if !expiresAt.After(time.Now().UTC()) {
 		return errors.New("invalid Socket Mode connection renewal")
+	}
+	value, exists := s.socketConnections[id]
+	// An expired connection has already given up its slot, so a replacement may
+	// have been admitted; reviving it would exceed the concurrency limit.
+	if !exists || !s.socketConnectionActive[id] || !value.ExpiresAt.After(time.Now().UTC()) {
+		return store.ErrNotFound
 	}
 	value.ExpiresAt = expiresAt.UTC()
 	s.socketConnections[id] = value
@@ -2128,16 +2182,23 @@ func (s *Store) ClaimSocketModeResponses(_ context.Context, appID domain.AppID, 
 	return values, nil
 }
 
+// AckSocketModeResponses validates the whole batch before applying any of it, so
+// a rejected envelope leaves no earlier envelope acknowledged. The SQL
+// repositories acknowledge the batch in one transaction for the same reason.
 func (s *Store) AckSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse) error {
-	if strings.TrimSpace(owner) == "" {
-		return errors.New("Socket Mode response owner is required")
+	if strings.TrimSpace(owner) == "" || len(values) == 0 {
+		return errors.New("Socket Mode response owner and a non-empty batch are required")
+	}
+	for _, value := range values {
+		if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" {
+			return errors.New("invalid Socket Mode response key")
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := time.Now().UTC()
 	for _, value := range values {
-		key := socketModeResponseKey(value.AppID, value.EnvelopeID)
-		stored, ok := s.socketResponses[key]
+		stored, ok := s.socketResponses[socketModeResponseKey(value.AppID, value.EnvelopeID)]
 		if !ok {
 			return store.ErrNotFound
 		}
@@ -2146,6 +2207,13 @@ func (s *Store) AckSocketModeResponses(_ context.Context, owner string, values [
 		}
 		if stored.LeaseOwner != owner || !stored.LeaseExpiresAt.After(now) {
 			return store.ErrConflict
+		}
+	}
+	for _, value := range values {
+		key := socketModeResponseKey(value.AppID, value.EnvelopeID)
+		stored := s.socketResponses[key]
+		if !stored.AcknowledgedAt.IsZero() {
+			continue
 		}
 		stored.AcknowledgedAt = now
 		stored.LeaseOwner = ""
@@ -2243,7 +2311,6 @@ func (s *Store) SetConversationPrivate(_ context.Context, conversation domain.Co
 	value.IsPrivate = true
 	s.conversations[conversation] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -2275,7 +2342,6 @@ func (s *Store) SetConversationPrefs(_ context.Context, conversation domain.Conv
 	value.WhoCanPost.Users = append([]domain.UserID(nil), value.WhoCanPost.Users...)
 	s.conversationPrefs[conversation] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -2297,7 +2363,6 @@ func (s *Store) AddConversationMember(_ context.Context, conversation domain.Con
 	}
 	s.memberships[conversation][user] = struct{}{}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2321,7 +2386,6 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 		s.memberships[conversation][user] = struct{}{}
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2337,7 +2401,6 @@ func (s *Store) RemoveConversationMember(_ context.Context, conversation domain.
 	}
 	delete(members, user)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2360,7 +2423,6 @@ func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event
 	defer s.mu.Unlock()
 	s.readCursors[readCursorKey(cursor.WorkspaceID, cursor.UserID, cursor.Conversation)] = cursor
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2415,7 +2477,12 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 				return domain.ConversationPage{}, err
 			}
 			for _, message := range s.messages[conversation.ID] {
-				if !message.Deleted && domain.NewMessageTimestamp(message.CreatedAt) > domain.NewMessageTimestamp(lastRead) {
+				// Compare instants, not MessageTimestamp text: the textual form has
+				// an unpadded seconds field, so string comparison is only accidentally
+				// monotonic and breaks for imported pre-2001 timestamps. Both sides are
+				// truncated to the microsecond the wire format carries so the SQL
+				// repositories and this one count the same messages.
+				if !message.Deleted && message.CreatedAt.Truncate(time.Microsecond).After(lastRead.Truncate(time.Microsecond)) {
 					conversation.UnreadCount++
 				}
 			}
@@ -2483,16 +2550,45 @@ func (s *Store) IsConversationMember(_ context.Context, conversation domain.Conv
 	_, ok := s.memberships[conversation][user]
 	return ok, nil
 }
+
+// CreateMessage applies the same normalization and referential checks the SQL
+// repositories enforce. Skipping them meant a payload rejected on SQLite was
+// persisted verbatim here, an empty attachments field read back as "" instead of
+// "[]", a duplicate message identifier silently inserted a second row, and a
+// message could reference a conversation that does not exist.
 func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
+	if err != nil {
+		return err
+	}
+	attachments, err := domain.NormalizeAttachments([]byte(message.Attachments))
+	if err != nil {
+		return err
+	}
+	if attachments == "" {
+		attachments = "[]"
+	}
+	unfurls, err := domain.NormalizeUnfurls(message.Unfurls)
+	if err != nil {
+		return err
+	}
+	message.Blocks = blocks
+	message.Attachments = attachments
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.conversations[message.Conversation]; !exists {
+		return store.ErrNotFound
+	}
+	if _, exists := s.messageLocked(message.ID); exists == nil {
+		return store.ErrAlreadyExists
+	}
 	key := idempotencyKeyFor(message.WorkspaceID, message.AuthorID, idempotencyKey)
 	if idempotencyKey != "" {
 		if _, exists := s.idempotency[key]; exists {
 			return store.ErrIdempotencyConflict
 		}
 	}
-	message.Unfurls = copyUnfurls(message.Unfurls)
+	message.Unfurls = copyUnfurls(unfurls)
 	values := s.messages[message.Conversation]
 	index := sort.Search(len(values), func(index int) bool {
 		current := values[index]
@@ -2503,7 +2599,6 @@ func (s *Store) CreateMessage(_ context.Context, message domain.Message, event e
 	values[index] = message
 	s.messages[message.Conversation] = values
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	if idempotencyKey != "" {
 		s.idempotency[key] = message.ID
 	}
@@ -2520,7 +2615,7 @@ func (s *Store) GetMessage(_ context.Context, id domain.MessageID) (domain.Messa
 	for _, values := range s.messages {
 		for _, message := range values {
 			if message.ID == id {
-				return message, nil
+				return cloneMessage(message), nil
 			}
 		}
 	}
@@ -2565,7 +2660,6 @@ func (s *Store) AddReaction(_ context.Context, reaction domain.Reaction, event e
 	}
 	s.reactions[reaction.Message][key] = reaction
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2581,7 +2675,6 @@ func (s *Store) RemoveReaction(_ context.Context, reaction domain.Reaction, even
 	}
 	delete(s.reactions[reaction.Message], key)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2679,7 +2772,6 @@ func (s *Store) AddPin(_ context.Context, pin domain.Pin, event events.Event) er
 	}
 	s.pins[pin.Message][pin.UserID] = pin
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2694,7 +2786,6 @@ func (s *Store) RemovePin(_ context.Context, pin domain.Pin, event events.Event)
 	}
 	delete(s.pins[pin.Message], pin.UserID)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2750,7 +2841,6 @@ func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event)
 	}
 	s.stars[star.UserID][star.Message.ID] = star
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2765,7 +2855,6 @@ func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Eve
 	}
 	delete(s.stars[star.UserID], star.Message.ID)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2823,7 +2912,6 @@ func (s *Store) CreateBookmark(_ context.Context, bookmark domain.Bookmark, even
 	}
 	s.bookmarks[bookmark.ID] = bookmark
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2871,7 +2959,6 @@ func (s *Store) UpdateBookmark(_ context.Context, bookmark domain.Bookmark, even
 	bookmark.CreatedAt = current.CreatedAt
 	s.bookmarks[bookmark.ID] = bookmark
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return bookmark, nil
 }
 
@@ -2884,7 +2971,6 @@ func (s *Store) DeleteBookmark(_ context.Context, workspace domain.WorkspaceID, 
 	}
 	delete(s.bookmarks, id)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2900,7 +2986,6 @@ func (s *Store) CreateReminder(_ context.Context, reminder domain.Reminder, even
 	}
 	s.reminders[reminder.ID] = reminder
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2950,7 +3035,6 @@ func (s *Store) CompleteReminder(_ context.Context, workspace domain.WorkspaceID
 	reminder.CompleteAt = completed
 	s.reminders[id] = reminder
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2963,7 +3047,6 @@ func (s *Store) DeleteReminder(_ context.Context, workspace domain.WorkspaceID, 
 	}
 	delete(s.reminders, id)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -2982,7 +3065,6 @@ func (s *Store) CreateScheduledMessage(_ context.Context, value domain.Scheduled
 	}
 	s.scheduled[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3043,7 +3125,6 @@ func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.Works
 	}
 	delete(s.scheduled, id)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3126,10 +3207,24 @@ func (s *Store) CreateUserGroup(_ context.Context, value domain.UserGroup, event
 	if _, exists := s.userGroups[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
+		return store.ErrAlreadyExists
+	}
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
+}
+
+// userGroupHandleTakenLocked mirrors the user_groups_workspace_handle unique
+// index. Without it a workspace could hold two groups answering to the same
+// @handle here while the SQL profiles rejected the second one.
+func (s *Store) userGroupHandleTakenLocked(workspace domain.WorkspaceID, handle string, exclude domain.UserGroupID) bool {
+	for id, group := range s.userGroups {
+		if id != exclude && group.WorkspaceID == workspace && group.Handle == handle {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) GetUserGroup(_ context.Context, workspace domain.WorkspaceID, id domain.UserGroupID) (domain.UserGroup, error) {
@@ -3175,11 +3270,13 @@ func (s *Store) UpdateUserGroup(_ context.Context, value domain.UserGroup, event
 	if !ok || current.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
 	}
+	if s.userGroupHandleTakenLocked(value.WorkspaceID, value.Handle, value.ID) {
+		return store.ErrAlreadyExists
+	}
 	value.Users = append([]domain.UserID(nil), current.Users...)
 	value.Channels = append([]domain.ConversationID(nil), current.Channels...)
 	s.userGroups[value.ID] = cloneUserGroup(value)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3200,7 +3297,6 @@ func (s *Store) SetUserGroupEnabled(_ context.Context, workspace domain.Workspac
 	}
 	s.userGroups[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3216,7 +3312,6 @@ func (s *Store) SetUserGroupUsers(_ context.Context, workspace domain.WorkspaceI
 	value.UpdatedAt = time.Now().UTC()
 	s.userGroups[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3238,7 +3333,6 @@ func (s *Store) SetUserGroupChannels(_ context.Context, workspace domain.Workspa
 	value.UpdatedAt = time.Now().UTC()
 	s.userGroups[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3257,7 +3351,6 @@ func (s *Store) CreateCall(_ context.Context, value domain.Call, event events.Ev
 	}
 	s.calls[value.ID] = cloneCall(value)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3289,7 +3382,6 @@ func (s *Store) UpdateCall(_ context.Context, value domain.Call, event events.Ev
 	}
 	s.calls[value.ID] = existing
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3307,7 +3399,6 @@ func (s *Store) EndCall(_ context.Context, workspace domain.WorkspaceID, id doma
 	value.DurationSeconds = duration
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3321,7 +3412,6 @@ func (s *Store) SetCallParticipants(_ context.Context, workspace domain.Workspac
 	value.Participants = append([]domain.UserID(nil), users...)
 	s.calls[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3333,7 +3423,6 @@ func (s *Store) CreateFile(_ context.Context, file domain.File, event events.Eve
 	}
 	s.files[file.ID] = file
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3354,7 +3443,6 @@ func (s *Store) DeleteFileComment(_ context.Context, workspace domain.WorkspaceI
 	comment.Deleted = true
 	s.fileComments[commentID] = comment
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3379,7 +3467,6 @@ func (s *Store) DeleteFile(_ context.Context, id domain.FileID, event events.Eve
 	file.Deleted = true
 	s.files[id] = file
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3398,7 +3485,6 @@ func (s *Store) ShareFilePublic(_ context.Context, workspace domain.WorkspaceID,
 	file.PublicToken = token
 	s.files[id] = file
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3412,7 +3498,6 @@ func (s *Store) RevokeFilePublic(_ context.Context, workspace domain.WorkspaceID
 	file.PublicToken = ""
 	s.files[id] = file
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3517,7 +3602,6 @@ func (s *Store) AddRemoteFile(_ context.Context, value domain.RemoteFile, event 
 	}
 	s.remoteFiles[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3573,7 +3657,6 @@ func (s *Store) RemoveRemoteFile(_ context.Context, workspace domain.WorkspaceID
 			value.Deleted = true
 			s.remoteFiles[id] = value
 			s.outbox = append(s.outbox, event)
-			s.eventSequence++
 			return nil
 		}
 	}
@@ -3597,7 +3680,6 @@ func (s *Store) SetRemoteFileShares(_ context.Context, workspace domain.Workspac
 		value.SharedChannels = append([]domain.ConversationID(nil), channels...)
 		s.remoteFiles[id] = value
 		s.outbox = append(s.outbox, event)
-		s.eventSequence++
 		return value, nil
 	}
 	return domain.RemoteFile{}, store.ErrNotFound
@@ -3617,7 +3699,6 @@ func (s *Store) UpdateRemoteFile(_ context.Context, workspace domain.WorkspaceID
 	value.SharedChannels = append([]domain.ConversationID(nil), s.remoteFileShares[value.ID]...)
 	s.remoteFiles[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return value, nil
 }
 
@@ -3642,11 +3723,32 @@ func (s *Store) UpdateMessage(_ context.Context, message domain.Message, event e
 			values[index] = message
 			s.messages[message.Conversation] = values
 			s.outbox = append(s.outbox, event)
-			s.eventSequence++
 			return nil
 		}
 	}
 	return store.ErrNotFound
+}
+
+// cloneInviteRequest, cloneWorkspace and cloneMessage exist for the same reason
+// cloneUserGroup and cloneCall do: a value returned from this repository must not
+// alias the slice or map that still lives inside it, or a caller can mutate store
+// state without the lock. These three aggregates were the ones still handed out
+// by reference.
+func cloneInviteRequest(value domain.InviteRequest) domain.InviteRequest {
+	value.ChannelIDs = append([]domain.ConversationID(nil), value.ChannelIDs...)
+	return value
+}
+
+func cloneWorkspace(value domain.Workspace) domain.Workspace {
+	value.DefaultChannelIDs = append([]domain.ConversationID(nil), value.DefaultChannelIDs...)
+	return value
+}
+
+func cloneMessage(value domain.Message) domain.Message {
+	if value.Unfurls != nil {
+		value.Unfurls = copyUnfurls(value.Unfurls)
+	}
+	return value
 }
 
 func copyUnfurls(value map[string]string) map[string]string {
@@ -3671,7 +3773,7 @@ func (s *Store) ListEventsAfter(_ context.Context, workspace domain.WorkspaceID,
 	result := make([]events.Record, 0, limit)
 	for sequence, event := range s.outbox {
 		current := uint64(sequence + 1)
-		if current <= after || event.WorkspaceID != workspace || event.Topic == events.FileBlobDeleteTopic {
+		if current <= after || event.WorkspaceID != workspace || store.InternalTopic(event.Topic) {
 			continue
 		}
 		result = append(result, events.Record{Sequence: current, Event: event})
@@ -3696,7 +3798,7 @@ func (s *Store) ListAppEventsAfter(_ context.Context, appID domain.AppID, after 
 	result := make([]events.Record, 0, limit)
 	for sequence, event := range s.outbox {
 		current := uint64(sequence + 1)
-		if current <= after || event.Topic == events.FileBlobDeleteTopic {
+		if current <= after || store.InternalTopic(event.Topic) {
 			continue
 		}
 		if _, ok := workspaces[event.WorkspaceID]; !ok {
@@ -3733,7 +3835,7 @@ func (s *Store) claimEvents(_ context.Context, workspace domain.WorkspaceID, top
 	result := make([]events.Record, 0, limit)
 	for sequence, event := range s.outbox {
 		current := uint64(sequence + 1)
-		if len(result) == limit || event.WorkspaceID != workspace || (topic == "" && event.Topic == events.FileBlobDeleteTopic) || (topic != "" && event.Topic != topic) || s.delivered[current] {
+		if len(result) == limit || event.WorkspaceID != workspace || (topic == "" && store.InternalTopic(event.Topic)) || (topic != "" && event.Topic != topic) || s.delivered[current] {
 			continue
 		}
 		if next, ok := s.nextAttempt[current]; ok && next.After(now) {
@@ -3830,7 +3932,10 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 	if end > len(values) {
 		end = len(values)
 	}
-	window := append([]domain.Message(nil), values[start:end]...)
+	window := make([]domain.Message, 0, end-start)
+	for _, message := range values[start:end] {
+		window = append(window, cloneMessage(message))
+	}
 	hasMore := len(window) > request.Limit
 	if hasMore {
 		window = window[:request.Limit]
@@ -3883,7 +3988,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 				}
 			}
 			if matches {
-				values = appendSorted(values, message, request.Limit+1, messageBefore)
+				values = appendSorted(values, cloneMessage(message), request.Limit+1, messageBefore)
 			}
 		}
 	}
@@ -3957,32 +4062,15 @@ func listAccessKey(value domain.ListAccess) string {
 	return string(value.ListID) + "\x00" + value.EntityType + "\x00" + value.EntityID
 }
 
-func (s *Store) ensureListsLocked() {
-	if s.lists == nil {
-		s.lists = make(map[domain.ListID]domain.List)
-	}
-	if s.listItems == nil {
-		s.listItems = make(map[domain.ListID]map[domain.ListItemID]domain.ListItem)
-	}
-	if s.listAccess == nil {
-		s.listAccess = make(map[string]domain.ListAccess)
-	}
-	if s.listDownloads == nil {
-		s.listDownloads = make(map[domain.ListDownloadID]domain.ListDownload)
-	}
-}
-
 func (s *Store) CreateList(_ context.Context, value domain.List, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	if _, exists := s.lists[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
 	s.lists[value.ID] = value
 	s.listItems[value.ID] = make(map[domain.ListItemID]domain.ListItem)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -3999,7 +4087,6 @@ func (s *Store) GetList(_ context.Context, workspace domain.WorkspaceID, id doma
 func (s *Store) UpdateList(_ context.Context, value domain.List, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	previous, exists := s.lists[value.ID]
 	if !exists || previous.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
@@ -4007,14 +4094,12 @@ func (s *Store) UpdateList(_ context.Context, value domain.List, event events.Ev
 	value.CreatedAt = previous.CreatedAt
 	s.lists[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
 func (s *Store) CreateListItem(_ context.Context, value domain.ListItem, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	list, exists := s.lists[value.ListID]
 	if !exists || list.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
@@ -4029,7 +4114,6 @@ func (s *Store) CreateListItem(_ context.Context, value domain.ListItem, event e
 	}
 	s.listItems[value.ListID][value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -4086,7 +4170,6 @@ func (s *Store) ListItems(_ context.Context, workspace domain.WorkspaceID, listI
 func (s *Store) UpdateListItem(_ context.Context, value domain.ListItem, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	list, exists := s.lists[value.ListID]
 	if !exists || list.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
@@ -4099,7 +4182,6 @@ func (s *Store) UpdateListItem(_ context.Context, value domain.ListItem, event e
 	value.CreatedBy = previous.CreatedBy
 	s.listItems[value.ListID][value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -4110,7 +4192,6 @@ func (s *Store) DeleteListItem(ctx context.Context, workspace domain.WorkspaceID
 func (s *Store) DeleteListItems(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, ids []domain.ListItemID, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	list, exists := s.lists[listID]
 	if !exists || list.WorkspaceID != workspace {
 		return store.ErrNotFound
@@ -4127,27 +4208,110 @@ func (s *Store) DeleteListItems(_ context.Context, workspace domain.WorkspaceID,
 		delete(s.listItems[listID], id)
 	}
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
 func (s *Store) SetListAccess(_ context.Context, value domain.ListAccess, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	if _, exists := s.lists[value.ListID]; !exists {
 		return store.ErrNotFound
 	}
 	s.listAccess[listAccessKey(value)] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
+}
+
+// resolveAccessLocked reports the highest ranked grant a user holds on one
+// document. Ownership counts as an owner grant, a grant recorded for the user
+// counts directly, and a grant recorded for a channel counts when the user is a
+// member of that channel in the document's workspace. It reports false when no
+// grant applies, so a caller cannot mistake an absent grant for an empty one.
+// Lists and canvases share it because they share the model.
+func (s *Store) resolveAccessLocked(workspace domain.WorkspaceID, owner, userID domain.UserID, grants func(func(entityType, entityID, level string))) (string, string, string, bool) {
+	user, exists := s.users[userID]
+	if !exists || user.WorkspaceID != workspace || user.Deleted {
+		return "", "", "", false
+	}
+	bestType, bestID, bestLevel := "", "", ""
+	if owner == userID {
+		bestType, bestID, bestLevel = "user", string(userID), store.AccessOwner
+	}
+	grants(func(entityType, entityID, level string) {
+		switch entityType {
+		case "user":
+			if domain.UserID(entityID) != userID {
+				return
+			}
+		case "channel":
+			conversation, ok := s.conversations[domain.ConversationID(entityID)]
+			if !ok || conversation.WorkspaceID != workspace {
+				return
+			}
+			if _, member := s.memberships[domain.ConversationID(entityID)][userID]; !member {
+				return
+			}
+		default:
+			return
+		}
+		if store.AccessRank(level) > store.AccessRank(bestLevel) {
+			bestType, bestID, bestLevel = entityType, entityID, level
+		}
+	})
+	if bestLevel == "" {
+		return "", "", "", false
+	}
+	return bestType, bestID, bestLevel, true
+}
+
+// GetListAccess resolves the effective access one user has to one list. The
+// grants written by SetListAccess had no reader, so nothing could enforce them
+// and every workspace member could read and delete every other member's list.
+func (s *Store) GetListAccess(_ context.Context, listID domain.ListID, userID domain.UserID) (domain.ListAccess, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	list, exists := s.lists[listID]
+	if !exists {
+		return domain.ListAccess{}, store.ErrNotFound
+	}
+	entityType, entityID, level, ok := s.resolveAccessLocked(list.WorkspaceID, list.OwnerID, userID, func(visit func(string, string, string)) {
+		for _, grant := range s.listAccess {
+			if grant.ListID == listID {
+				visit(grant.EntityType, grant.EntityID, grant.Access)
+			}
+		}
+	})
+	if !ok {
+		return domain.ListAccess{}, store.ErrNotFound
+	}
+	return domain.ListAccess{ListID: listID, EntityType: entityType, EntityID: entityID, Access: level}, nil
+}
+
+// GetCanvasAccess resolves the effective access one user has to one canvas, by
+// the same rules as GetListAccess.
+func (s *Store) GetCanvasAccess(_ context.Context, canvasID domain.CanvasID, userID domain.UserID) (domain.CanvasAccess, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	canvas, exists := s.canvases[canvasID]
+	if !exists {
+		return domain.CanvasAccess{}, store.ErrNotFound
+	}
+	entityType, entityID, level, ok := s.resolveAccessLocked(canvas.WorkspaceID, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+		for _, grant := range s.canvasAccess {
+			if grant.CanvasID == canvasID {
+				visit(grant.EntityType, grant.EntityID, grant.Access)
+			}
+		}
+	})
+	if !ok {
+		return domain.CanvasAccess{}, store.ErrNotFound
+	}
+	return domain.CanvasAccess{CanvasID: canvasID, EntityType: entityType, EntityID: entityID, Access: level}, nil
 }
 
 func (s *Store) DeleteListAccess(_ context.Context, value domain.ListAccess, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	if _, exists := s.lists[value.ListID]; !exists {
 		return store.ErrNotFound
 	}
@@ -4157,14 +4321,12 @@ func (s *Store) DeleteListAccess(_ context.Context, value domain.ListAccess, eve
 	}
 	delete(s.listAccess, key)
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
 func (s *Store) CreateListDownload(_ context.Context, value domain.ListDownload, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.ensureListsLocked()
 	list, exists := s.lists[value.ListID]
 	if !exists || list.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
@@ -4174,7 +4336,6 @@ func (s *Store) CreateListDownload(_ context.Context, value domain.ListDownload,
 	}
 	s.listDownloads[value.ID] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -4212,6 +4373,10 @@ func (s *Store) ExchangeOpenIDRefreshToken(_ context.Context, clientID, oldToken
 	value.TokenHash = domain.HashToken(refreshToken)
 	value.ExpiresAt = time.Now().UTC().Add(30 * 24 * time.Hour)
 	s.openidRefreshTokens[value.TokenHash] = value
+	// The minted access token has to be recorded with the rotation. It was not,
+	// so the token this method returned authenticated nothing: the bearer is
+	// resolved through LookupToken, which reads this map.
+	s.tokens[domain.HashToken(accessToken)] = domain.TokenRecord{WorkspaceID: value.WorkspaceID, UserID: value.UserID, Scopes: domain.NormalizeScopes(value.Scopes)}
 	token.AccessToken = accessToken
 	token.RefreshToken = refreshToken
 	token.ClientID = value.ClientID
@@ -4261,7 +4426,6 @@ func (s *Store) SetIncomingWebhookEnabled(_ context.Context, workspaceID domain.
 	value.Enabled = enabled
 	s.incomingWebhooks[id] = value
 	s.outbox = append(s.outbox, event)
-	s.eventSequence++
 	return nil
 }
 
@@ -4344,6 +4508,5 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 		s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
 		s.outbox = append(s.outbox, emitted[index])
 	}
-	s.eventSequence += uint64(len(emitted))
 	return nil
 }

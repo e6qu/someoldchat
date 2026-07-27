@@ -805,13 +805,13 @@ func TestSQLiteRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	var foreignKeys int
-	if err := s.db.QueryRow(`PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
-		t.Fatal(err)
-	}
-	if foreignKeys != 1 {
-		t.Fatalf("foreign_keys = %d", foreignKeys)
-	}
+	// Reading PRAGMA foreign_keys through the pooled handle asserted nothing: it
+	// reported whichever connection the pool happened to hand out, which is the
+	// exact defect that left every other connection with foreign keys OFF. The
+	// contract is that a referencing row without its parent is rejected, and that
+	// it is rejected no matter which connection serves the statement, so hold
+	// several connections at once and assert enforcement on each of them.
+	assertForeignKeysEnforced(t, s)
 	if err := s.IntegrityCheck(context.Background()); err != nil {
 		t.Fatal(err)
 	}
