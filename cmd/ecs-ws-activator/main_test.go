@@ -248,18 +248,15 @@ func TestConnectionLeaseExpiryTracksTheConfiguredTTL(t *testing.T) {
 func TestBackendDialSucceedsWithClientHandshakeHeadersPresent(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	// The handler runs on the server's goroutine while the assertions run on the
-	// test's, so the negotiated subprotocol has to cross that boundary under a
-	// lock rather than through a bare captured variable.
-	var mu sync.Mutex
-	negotiated := ""
+	// test's. Passing the negotiated subprotocol through a channel both protects
+	// the value and waits for the handler to record it before asserting.
+	negotiated := make(chan string, 1)
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
-		mu.Lock()
-		negotiated = conn.Subprotocol()
-		mu.Unlock()
+		negotiated <- conn.Subprotocol()
 		_ = conn.Close()
 	}))
 	defer backend.Close()
@@ -283,9 +280,7 @@ func TestBackendDialSucceedsWithClientHandshakeHeadersPresent(t *testing.T) {
 	if response.StatusCode != http.StatusSwitchingProtocols {
 		t.Fatalf("status=%d", response.StatusCode)
 	}
-	mu.Lock()
-	observed := negotiated
-	mu.Unlock()
+	observed := <-negotiated
 	if observed != "chat" {
 		t.Fatalf("subprotocol=%q, want the client's requested subprotocol forwarded through the dialer", observed)
 	}
