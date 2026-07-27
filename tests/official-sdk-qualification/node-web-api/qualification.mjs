@@ -572,7 +572,12 @@ assert.equal(user.user.id, "U1");
 const profile = await client.users.profile.get({ user: "U1" });
 assert.equal(profile.ok, true);
 assert.equal(profile.profile.display_name, "alice");
-const image = Readable.from(Buffer.from("qualification-photo"));
+// A real one-pixel PNG. The fixture used to send the ASCII string
+// "qualification-photo" named .png; the product now reads the bytes and refuses
+// a stream that is not the image it claims to be, which is what stops an
+// uploaded document being served back from this origin. A fixture that sends a
+// lie asserts the product accepts one.
+const image = Readable.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64"));
 image.path = "qualification.png";
 const photo = await client.users.setPhoto({ image });
 assert.equal(photo.ok, true);

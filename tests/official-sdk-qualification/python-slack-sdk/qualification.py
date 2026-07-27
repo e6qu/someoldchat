@@ -1,3 +1,4 @@
+import base64
 import io
 import json
 import os
@@ -534,7 +535,9 @@ assert user["user"]["id"] == "U1"
 profile = client.users_profile_get(user="U1")
 assert profile["ok"] is True
 assert profile["profile"]["display_name"] == "alice"
-image = io.BytesIO(b"qualification-photo")
+# A real one-pixel PNG; see the note in the Node suite. The product reads the
+# bytes and refuses a stream that is not the image it claims to be.
+image = io.BytesIO(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="))
 image.name = "qualification.png"
 photo = client.users_setPhoto(image=image)
 assert photo["ok"] is True
