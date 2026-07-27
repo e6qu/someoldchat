@@ -4,6 +4,7 @@ package web
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -60,7 +61,7 @@ func TestOIDCProvisioningAcrossPostgreSQLAndGRPC(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := LoginHandler{service: remote, workspace: workspaceID, lookupUser: lookupUserID}
-	identity := externalIdentity{Subject: "sha-auth-subject-" + suffix, Email: "developer-" + suffix + "@example.test", Name: "Remote Developer", Role: "developer"}
+	identity := externalIdentity{Subject: "sha-auth-subject-" + suffix, Email: "developer-" + suffix + "@example.test", EmailVerified: true, Name: "Remote Developer", Role: "developer"}
 
 	const attempts = 2
 	users := make(chan domain.User, attempts)
@@ -73,9 +74,13 @@ func TestOIDCProvisioningAcrossPostgreSQLAndGRPC(t *testing.T) {
 		go func() {
 			defer workers.Done()
 			start.Wait()
-			user, resolveErr := handler.resolveIdentityUser(ctx, "oidc", identity)
+			user, role, resolveErr := handler.resolveIdentityUser(ctx, "oidc", identity)
 			if resolveErr != nil {
 				errorsFound <- resolveErr
+				return
+			}
+			if role != domain.WorkspaceRoleMember {
+				errorsFound <- fmt.Errorf("provisioned role=%q, want %q", role, domain.WorkspaceRoleMember)
 				return
 			}
 			users <- user

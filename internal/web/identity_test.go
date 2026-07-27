@@ -80,18 +80,22 @@ func TestOpenIDConnectBackchannelLogoutVerifiesTokenAndRevokesSessions(t *testin
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.com", Name: "admin"})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "person@example.com", Name: "person"})
 	service := service.Messages{Store: store}
-	if err := service.CreateSession(context.Background(), "browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "oidc-session"}); err != nil {
+	for _, token := range []string{"browser-session", "second-browser-session"} {
+		if err := service.CreateSession(context.Background(), token, domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: memberSessionScopes(t), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "oidc-session"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := service.CreateSession(context.Background(), "other-provider-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: memberSessionScopes(t), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "other-session"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.CreateSession(context.Background(), "second-browser-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "oidc-session"}); err != nil {
+	// The provider is assembled through discovery, exactly as cmd/server does, so
+	// the logout-token verifier is the RS256-pinned one built there. A hand-built
+	// ProviderConfig has no verifier and now fails closed by design.
+	discovered, err := DiscoverOpenIDConnectProvider(context.Background(), issuer.Client(), issuer.URL, "sameoldchat", "secret")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := service.CreateSession(context.Background(), "other-provider-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", Scopes: auth.AllScopes(), ExpiresAt: time.Now().Add(time.Hour), OIDCProvider: "oidc", OIDCSubject: "oidc-subject", OIDCSID: "other-session"}); err != nil {
-		t.Fatal(err)
-	}
-	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
-		Name: "oidc", Issuer: issuer.URL, ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: issuer.URL + "/oauth2/auth", TokenURL: issuer.URL + "/oauth2/token", UserInfoURL: issuer.URL + "/userinfo", Scopes: []string{"openid", "profile", "email"},
-	}})
+	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{discovered})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +295,7 @@ func TestOpenIDConnectCallbackBindsNonceAndProviderSessionLifetime(t *testing.T)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "access-token", "id_token": value})
 		case "/userinfo":
-			_ = json.NewEncoder(w).Encode(map[string]string{"sub": "sha-auth-subject", "email": "developer@example.test", "name": "Developer", "role": "developer"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"sub": "sha-auth-subject", "email": "developer@example.test", "email_verified": "true", "name": "Developer", "role": "developer"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -353,7 +357,7 @@ func TestOIDCLogoutRedirectUsesDurableSessionMetadata(t *testing.T) {
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
 	if err := store.CreateSession(context.Background(), "session", domain.SessionRecord{
-		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+		WorkspaceID: "T1", UserID: "U1", Scopes: memberSessionScopes(t), ExpiresAt: time.Now().UTC().Add(time.Hour),
 		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session",
 	}); err != nil {
 		t.Fatal(err)
@@ -452,7 +456,7 @@ func TestOIDCLogoutRedirectFailsClosedForIncompleteProviderMetadata(t *testing.T
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice"})
 	if err := store.CreateSession(context.Background(), "session", domain.SessionRecord{
-		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+		WorkspaceID: "T1", UserID: "U1", Scopes: memberSessionScopes(t), ExpiresAt: time.Now().UTC().Add(time.Hour),
 		OIDCProvider: "oidc", OIDCIDToken: "signed.id.token",
 	}); err != nil {
 		t.Fatal(err)
@@ -489,6 +493,19 @@ func TestOIDCLogoutRedirectFailsClosedForIncompleteProviderMetadata(t *testing.T
 	if err != nil || !record.Revoked {
 		t.Fatalf("session=%+v err=%v", record, err)
 	}
+}
+
+// memberSessionScopes is the scope set a signed-in member is entitled to. Tests
+// that only need an authenticated browser use it instead of auth.AllScopes(): a
+// browser session is never minted with the control plane, so a fixture that grants
+// it is testing a session the product cannot issue.
+func memberSessionScopes(t *testing.T) []string {
+	t.Helper()
+	scopes, err := auth.ScopesForWorkspaceRole(domain.WorkspaceRoleMember)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scopes.Values()
 }
 
 func newIPv4TLSServer(t *testing.T, handler http.Handler) *httptest.Server {
@@ -540,7 +557,7 @@ func TestGoogleAuthorizationLinksVerifiedMemberAndCreatesSession(t *testing.T) {
 			if r.Header.Get("Authorization") != "Bearer provider-token" {
 				return providerResponse(r, "missing token"), nil
 			}
-			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","name":"Alice"}`), nil
+			return providerResponse(r, `{"sub":"google-subject","email":"alice@example.com","email_verified":true,"name":"Alice"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -618,7 +635,7 @@ func TestOIDCAuthorizationProvisionsAuthorizedIdentityAndCreatesSession(t *testi
 		case "/oauth2/token":
 			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
 		case "/userinfo":
-			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","preferred_username":"alice","role":"admin"}`), nil
+			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","email_verified":true,"preferred_username":"alice","role":"admin"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -663,7 +680,7 @@ func TestOIDCAuthorizationRejectsIdentityWithoutSupportedRole(t *testing.T) {
 		case "/oauth2/token":
 			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
 		case "/userinfo":
-			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","preferred_username":"alice"}`), nil
+			return providerResponse(r, `{"sub":"oidc-subject","email":"alice@example.com","email_verified":true,"preferred_username":"alice"}`), nil
 		default:
 			return providerResponse(r, "not found"), nil
 		}
@@ -689,7 +706,12 @@ func TestOIDCAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	if err := service.CreateExternalIdentity(context.Background(), domain.ExternalIdentity{WorkspaceID: "T1", Provider: "oidc", Subject: "oidc-subject", UserID: "U2"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.SetUserRole(context.Background(), "T1", "U1", "U2", domain.WorkspaceRoleAdmin); err != nil {
+	// Establish the starting role through the system operation rather than
+	// through SetUserRole with U1 as actor: U1 is a plain member, and an
+	// administrative mutation must refuse a member even in a test fixture.
+	// Granting fake authority here would have hidden the very defect the
+	// authorization change closes.
+	if err := service.SynchronizeExternalUserRole(context.Background(), "T1", "U2", domain.WorkspaceRoleAdmin); err != nil {
 		t.Fatal(err)
 	}
 	handler, err := NewLoginHandler(service, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
@@ -698,9 +720,12 @@ func TestOIDCAuthorizationSynchronizesLinkedWorkspaceRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "oidc-subject", Email: "alice@example.com", Role: "developer"})
-	if err != nil || user.ID != "U2" {
-		t.Fatalf("user=%+v err=%v", user, err)
+	// EmailVerified is deliberately false: the provider subject is already bound to
+	// a local user, so this path never links by email and must not demand a
+	// verification claim it has no use for.
+	user, role, err := handler.resolveIdentityUser(context.Background(), "oidc", externalIdentity{Subject: "oidc-subject", Email: "alice@example.com", Role: "developer"})
+	if err != nil || user.ID != "U2" || role != domain.WorkspaceRoleMember {
+		t.Fatalf("user=%+v role=%q err=%v", user, role, err)
 	}
 	membership, err := store.GetWorkspaceMembership(context.Background(), "T1", "U2")
 	if err != nil || membership.Role != domain.WorkspaceRoleMember {
@@ -755,4 +780,279 @@ func providerResponse(request *http.Request, body string) *http.Response {
 		statusText = "401 Unauthorized"
 	}
 	return &http.Response{StatusCode: status, Status: statusText, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: request}
+}
+
+// newIdentityWorkspace assembles the login surface and the application surface over
+// one store, so a session minted by the callback can be replayed against the
+// administration endpoints exactly as a browser would.
+func newIdentityWorkspace(t *testing.T, userinfo string) (http.Handler, *memory.Store) {
+	t.Helper()
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.test", Name: "admin"})
+	messages := service.Messages{Store: store}
+	login, err := NewLoginHandler(messages, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid", "profile", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/oauth2/token":
+			return providerResponse(r, `{"access_token":"oidc-token"}`), nil
+		case "/userinfo":
+			return providerResponse(r, userinfo), nil
+		default:
+			return providerResponse(r, "not found"), nil
+		}
+	})}
+	browser, err := auth.NewBrowser(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(messages, browser, store, "C1", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Login = &login
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	return mux, store
+}
+
+// TestBrowserSessionScopesFollowTheWorkspaceRole is the mint-side half of the
+// privilege-escalation defect. Every browser session used to be created with
+// auth.AllScopes(), which includes admin, admin.users:read/write, admin.teams:write
+// and admin.apps:write, regardless of the workspace role that had just been
+// synchronized — so a `developer` identity could POST admin.auth.users.set and
+// promote itself. A session now carries only what its role justifies.
+func TestBrowserSessionScopesFollowTheWorkspaceRole(t *testing.T) {
+	mux, store := newIdentityWorkspace(t, `{"sub":"oidc-subject","email":"developer@example.test","email_verified":true,"name":"Developer","role":"developer"}`)
+	callback := completeAuthorization(t, mux, "oidc")
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+	}
+	sessionCookie := findSessionCookie(callback.Result().Cookies())
+	if sessionCookie == nil || sessionCookie.Value == "" {
+		t.Fatal("callback did not create a browser session cookie")
+	}
+	record, err := store.LookupSession(context.Background(), sessionCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range record.Scopes {
+		if auth.IsControlPlaneScope(auth.Scope(scope)) {
+			t.Fatalf("member session was minted with the control-plane scope %q", scope)
+		}
+	}
+	// The member must still hold ordinary chat authority; this is a narrowing, not
+	// a lockout.
+	principal := auth.Principal{Scopes: map[auth.Scope]struct{}{}}
+	for _, scope := range record.Scopes {
+		principal.Scopes[auth.Scope(scope)] = struct{}{}
+	}
+	for _, required := range []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeUsersRead, auth.ScopeSearchRead} {
+		if !principal.HasScope(required) {
+			t.Fatalf("member session lost the ordinary scope %q", required)
+		}
+	}
+
+	provisioned, err := store.FindUserByEmail(context.Background(), "T1", "developer@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrf := auth.CSRFToken(sessionCookie.Value)
+	for _, attempt := range []struct {
+		name   string
+		target string
+		body   string
+	}{
+		{name: "self promotion", target: "/api/admin.auth.users.set", body: "user_id=" + string(provisioned.ID) + "&action=role&role=admin"},
+		{name: "lock out the administrator", target: "/api/admin.auth.users.set", body: "user_id=U1&action=disable"},
+		{name: "disable the only login provider", target: "/api/admin.auth.methods.set", body: "provider=oidc&enabled=false"},
+	} {
+		t.Run(attempt.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, attempt.target, strings.NewReader(attempt.body+"&_csrf="+csrf))
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Accept", "application/json")
+			request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: sessionCookie.Value})
+			request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: csrf})
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	membership, err := store.GetWorkspaceMembership(context.Background(), "T1", provisioned.ID)
+	if err != nil || membership.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("membership=%+v err=%v, want an unchanged member", membership, err)
+	}
+	administrator, err := store.GetWorkspaceMembership(context.Background(), "T1", "U1")
+	if err != nil || !administrator.Active {
+		t.Fatalf("administrator membership=%+v err=%v", administrator, err)
+	}
+	method, err := store.GetAuthMethod(context.Background(), "T1", "oidc")
+	if err != nil || !method.Enabled {
+		t.Fatalf("authorization method=%+v err=%v", method, err)
+	}
+}
+
+// TestAdministratorSessionKeepsTheControlPlane is the positive counterpart: role
+// derivation must not lock a real administrator out.
+func TestAdministratorSessionKeepsTheControlPlane(t *testing.T) {
+	mux, store := newIdentityWorkspace(t, `{"sub":"oidc-subject","email":"boss@example.test","email_verified":true,"name":"Boss","role":"admin"}`)
+	callback := completeAuthorization(t, mux, "oidc")
+	sessionCookie := findSessionCookie(callback.Result().Cookies())
+	if callback.Code != http.StatusSeeOther || sessionCookie == nil {
+		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+	}
+	record, err := store.LookupSession(context.Background(), sessionCookie.Value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control := 0
+	for _, scope := range record.Scopes {
+		if auth.IsControlPlaneScope(auth.Scope(scope)) {
+			control++
+		}
+	}
+	if control == 0 {
+		t.Fatalf("administrator session carries no control-plane scope: %v", record.Scopes)
+	}
+	csrf := auth.CSRFToken(sessionCookie.Value)
+	request := httptest.NewRequest(http.MethodPost, "/api/admin.auth.users.set", strings.NewReader("user_id=U1&action=role&role=admin&_csrf="+csrf))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Accept", "application/json")
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: sessionCookie.Value})
+	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: csrf})
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("administrator mutation status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+// TestAuthorizationRefusesUnverifiedProviderEmailForAccountLinking covers the nOAuth
+// account-takeover defect. Account linking was performed on the email string alone,
+// with no email_verified check anywhere in internal/web, so an attacker holding their
+// own tenant of a multi-tenant issuer could set a directory attribute to a victim's
+// workspace address and be issued that victim's session.
+func TestAuthorizationRefusesUnverifiedProviderEmailForAccountLinking(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		userinfo string
+	}{
+		{name: "claim absent", userinfo: `{"sub":"attacker-subject","email":"victim@example.test","name":"Not The Victim","role":"admin"}`},
+		{name: "claim false", userinfo: `{"sub":"attacker-subject","email":"victim@example.test","email_verified":false,"name":"Not The Victim","role":"admin"}`},
+		{name: "claim not a boolean", userinfo: `{"sub":"attacker-subject","email":"victim@example.test","email_verified":"yes","role":"admin"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mux, store := newIdentityWorkspace(t, test.userinfo)
+			store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "victim@example.test", Name: "victim"})
+			callback := completeAuthorization(t, mux, "oidc")
+			if callback.Code != http.StatusForbidden {
+				t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+			}
+			if session := findSessionCookie(callback.Result().Cookies()); session != nil && session.Value != "" {
+				t.Fatalf("unverified provider email produced a session cookie: %+v", session)
+			}
+			if _, err := store.GetExternalIdentity(context.Background(), "T1", "oidc", "attacker-subject"); !errors.Is(err, storepkg.ErrNotFound) {
+				t.Fatalf("unverified provider email created a durable account link: %v", err)
+			}
+			membership, err := store.GetWorkspaceMembership(context.Background(), "T1", "U2")
+			if err != nil || membership.Role != domain.WorkspaceRoleMember {
+				t.Fatalf("victim membership=%+v err=%v, want it untouched", membership, err)
+			}
+		})
+	}
+}
+
+// TestAuthorizationRefusesUnverifiedProviderEmailForProvisioning closes the same hole
+// on the first-login path, where an unverified address would otherwise create a
+// workspace user the victim can never reclaim.
+func TestAuthorizationRefusesUnverifiedProviderEmailForProvisioning(t *testing.T) {
+	mux, store := newIdentityWorkspace(t, `{"sub":"attacker-subject","email":"newcomer@example.test","role":"admin"}`)
+	callback := completeAuthorization(t, mux, "oidc")
+	if callback.Code != http.StatusForbidden || !strings.Contains(callback.Body.String(), "did not verify") {
+		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+	}
+	if _, err := store.FindUserByEmail(context.Background(), "T1", "newcomer@example.test"); !errors.Is(err, storepkg.ErrNotFound) {
+		t.Fatalf("unverified provider email provisioned a workspace user: %v", err)
+	}
+}
+
+// TestEntraPreferredUsernameIsNeverTreatedAsVerified pins the Microsoft Entra ID
+// fallback: `preferred_username` is a directory attribute, not proof of address
+// ownership, and the deployment default authority is the multi-tenant `common`.
+func TestEntraPreferredUsernameIsNeverTreatedAsVerified(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "admin@example.test", Name: "admin"})
+	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "victim@example.test", Name: "victim"})
+	messages := service.Messages{Store: store}
+	login, err := NewLoginHandler(messages, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "entra", ClientID: "client", ClientSecret: "secret", AuthorizeURL: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize", TokenURL: "https://provider.test/token", UserInfoURL: "https://provider.test/userinfo", Scopes: []string{"openid", "email"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	login.client = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/token":
+			return providerResponse(r, `{"access_token":"provider-token"}`), nil
+		case "/userinfo":
+			// `mail` is empty and email_verified is asserted for an address the
+			// tenant does not own; the fallback must not inherit that assertion.
+			return providerResponse(r, `{"sub":"attacker-subject","email_verified":true,"preferred_username":"victim@example.test"}`), nil
+		default:
+			return providerResponse(r, "not found"), nil
+		}
+	})}
+	mux := http.NewServeMux()
+	login.Register(mux)
+	callback := completeAuthorization(t, mux, "entra")
+	if callback.Code != http.StatusForbidden {
+		t.Fatalf("callback status=%d body=%s", callback.Code, callback.Body.String())
+	}
+	if _, err := store.GetExternalIdentity(context.Background(), "T1", "entra", "attacker-subject"); !errors.Is(err, storepkg.ErrNotFound) {
+		t.Fatalf("preferred_username linked an account: %v", err)
+	}
+}
+
+// TestBackchannelLogoutFailsClosedWithoutAPinnedVerifier pins the fallback removal:
+// rebuilding the verifier from the issuer's advertised algorithm list would widen the
+// accepted signature set beyond the RS256 pin.
+func TestBackchannelLogoutFailsClosedWithoutAPinnedVerifier(t *testing.T) {
+	handler, err := NewLoginHandler(service.Messages{Store: memory.New()}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", Issuer: "https://auth.example.test", ClientID: "sameoldchat", ClientSecret: "secret", AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token", UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := handler.verifyBackchannelLogout(context.Background(), "any.logout.token"); err == nil || !strings.Contains(err.Error(), "verifier is unavailable") {
+		t.Fatalf("verification error=%v, want a closed failure", err)
+	}
+}
+
+func TestAssertedEmailVerifiedFailsClosed(t *testing.T) {
+	for _, test := range []struct {
+		raw  string
+		want bool
+	}{
+		{raw: ``, want: false},
+		{raw: `null`, want: false},
+		{raw: `true`, want: true},
+		{raw: `false`, want: false},
+		{raw: `"true"`, want: true},
+		{raw: `"TRUE"`, want: true},
+		{raw: `"yes"`, want: false},
+		{raw: `1`, want: false},
+		{raw: `{}`, want: false},
+	} {
+		if got := assertedEmailVerified([]byte(test.raw)); got != test.want {
+			t.Fatalf("assertedEmailVerified(%q)=%v, want %v", test.raw, got, test.want)
+		}
+	}
 }

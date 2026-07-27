@@ -294,12 +294,12 @@ func (h LoginHandler) verifyBackchannelLogout(ctx context.Context, raw string) (
 	providerConfig := h.providers["oidc"]
 	verifier := providerConfig.verifier
 	if verifier == nil {
-		ctx = oidc.ClientContext(ctx, h.client)
-		provider, err := oidc.NewProvider(ctx, providerConfig.Issuer)
-		if err != nil {
-			return backchannelLogoutClaims{}, fmt.Errorf("discover OpenID Connect provider: %w", err)
-		}
-		verifier = provider.Verifier(&oidc.Config{ClientID: providerConfig.ClientID})
+		// The verifier built by DiscoverOpenIDConnectProvider passes no
+		// SupportedSigningAlgs, which pins RS256. Rebuilding one here from the
+		// issuer's own advertised algorithm list would widen the accepted set to
+		// whatever the issuer claims to support, so an unconfigured verifier fails
+		// closed instead.
+		return backchannelLogoutClaims{}, errors.New("OpenID Connect logout token verifier is unavailable")
 	}
 	token, err := verifier.Verify(ctx, raw)
 	if err != nil {
@@ -455,7 +455,10 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		return
 	}
 	parts := strings.Split(string(decoded), "\x00")
-	if len(parts) != 5 || parts[0] != name || !hmac.Equal([]byte(parts[4]), []byte(signState(h.stateKey, strings.Join(parts[:4], "\x00")))) || parts[1] != strings.TrimSpace(r.URL.Query().Get("state")) {
+	// The state value is the per-request secret an authorization-code injection
+	// attacker has to guess, so it is compared with the same constant-time
+	// primitive as the signature beside it.
+	if len(parts) != 5 || parts[0] != name || !hmac.Equal([]byte(parts[4]), []byte(signState(h.stateKey, strings.Join(parts[:4], "\x00")))) || !hmac.Equal([]byte(parts[1]), []byte(strings.TrimSpace(r.URL.Query().Get("state")))) {
 		http.Error(w, "authorization state is invalid", http.StatusBadRequest)
 		return
 	}
@@ -487,9 +490,21 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "authorization identity is unavailable", http.StatusBadGateway)
 		return
 	}
-	user, err := h.resolveIdentityUser(r.Context(), name, identity)
+	user, role, err := h.resolveIdentityUser(r.Context(), name, identity)
+	if errors.Is(err, ErrUnverifiedProviderEmail) {
+		http.Error(w, "authorization provider did not verify this email address", http.StatusForbidden)
+		return
+	}
 	if err != nil || user.Deleted {
 		http.Error(w, "authorization identity is not provisioned", http.StatusForbidden)
+		return
+	}
+	// A browser session carries only the authority its user's durable workspace
+	// role justifies. An unrecognized role produces no scopes at all rather than
+	// a default set, so the failure direction is closed.
+	scopes, err := auth.ScopesForWorkspaceRole(role)
+	if err != nil {
+		http.Error(w, "authorization identity has no supported access role", http.StatusForbidden)
 		return
 	}
 	sessionToken, err := randomURLValue(32)
@@ -497,7 +512,7 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 		http.Error(w, "session unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	record := domain.SessionRecord{WorkspaceID: user.WorkspaceID, UserID: user.ID, Scopes: auth.AllScopes(), ExpiresAt: sessionExpiresAt}
+	record := domain.SessionRecord{WorkspaceID: user.WorkspaceID, UserID: user.ID, Scopes: scopes.Values(), ExpiresAt: sessionExpiresAt}
 	if provider.Issuer != "" {
 		record.OIDCProvider = name
 		record.OIDCIDToken = tokens.IDToken
@@ -518,24 +533,43 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
-func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, identity externalIdentity) (domain.User, error) {
+// ErrUnverifiedProviderEmail rejects an account link derived from an email
+// address the identity provider does not assert as verified.
+//
+// Linking a provider subject to a local user by email address is only sound if
+// the provider proved the user controls that address. A provider the operator
+// does not own — any tenant of a multi-tenant issuer, for example — can set a
+// directory attribute to a victim's workspace address without owning the domain,
+// which is the nOAuth account-takeover pattern. The check therefore fails closed
+// when the assertion is absent, not only when it is explicitly false.
+var ErrUnverifiedProviderEmail = errors.New("authorization provider did not assert a verified email address")
+
+func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, identity externalIdentity) (domain.User, domain.WorkspaceRole, error) {
 	link, err := h.service.GetExternalIdentity(ctx, h.workspace, provider, identity.Subject)
 	if err == nil {
+		// The subject is already bound to a local user, so no email is trusted
+		// here and no new link is created.
 		user, lookupErr := h.service.UserInfo(ctx, h.workspace, h.lookupUser, link.UserID)
 		if lookupErr != nil {
-			return domain.User{}, lookupErr
+			return domain.User{}, "", lookupErr
 		}
-		return h.synchronizeOIDCRole(ctx, provider, identity.Role, user)
+		return h.resolveWorkspaceRole(ctx, provider, identity.Role, user)
 	}
 	if !errors.Is(err, store.ErrNotFound) {
-		return domain.User{}, err
+		return domain.User{}, "", err
+	}
+
+	// Everything past this point establishes a new binding from the provider's
+	// email address, so the address must be verified by the provider.
+	if !identity.EmailVerified {
+		return domain.User{}, "", ErrUnverifiedProviderEmail
 	}
 
 	user, err := h.service.UserByEmail(ctx, h.workspace, h.lookupUser, identity.Email)
 	if errors.Is(err, store.ErrNotFound) && provider == "oidc" {
 		role, roleErr := oidcWorkspaceRole(identity.Role)
 		if roleErr != nil {
-			return domain.User{}, roleErr
+			return domain.User{}, "", roleErr
 		}
 		displayName := identity.Name
 		if displayName == "" {
@@ -544,13 +578,21 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 		if displayName == "" {
 			displayName = identity.Email
 		}
-		user, err = h.service.AdminCreateUser(ctx, h.workspace, h.lookupUser, identity.Email, displayName, role)
+		// First-login provisioning has no administrator behind it and no
+		// session for the user it creates, so it runs as the system operation
+		// whose authority is the provider assertion verified above — not as the
+		// configured lookup identity, whose own workspace role is deliberately
+		// that of a plain member.
+		user, err = h.service.ProvisionExternalUser(ctx, h.workspace, identity.Email, displayName, role)
 		if errors.Is(err, store.ErrAlreadyExists) {
 			user, err = h.service.UserByEmail(ctx, h.workspace, h.lookupUser, identity.Email)
 		}
 	}
-	if err != nil || user.Deleted {
-		return domain.User{}, err
+	if err != nil {
+		return domain.User{}, "", err
+	}
+	if user.Deleted {
+		return domain.User{}, "", store.ErrNotFound
 	}
 
 	err = h.service.CreateExternalIdentity(ctx, domain.ExternalIdentity{WorkspaceID: h.workspace, Provider: provider, Subject: identity.Subject, UserID: user.ID})
@@ -561,23 +603,50 @@ func (h LoginHandler) resolveIdentityUser(ctx context.Context, provider string, 
 		}
 	}
 	if err != nil {
-		return domain.User{}, err
+		return domain.User{}, "", err
 	}
-	return h.synchronizeOIDCRole(ctx, provider, identity.Role, user)
+	return h.resolveWorkspaceRole(ctx, provider, identity.Role, user)
 }
 
-func (h LoginHandler) synchronizeOIDCRole(ctx context.Context, provider, role string, user domain.User) (domain.User, error) {
+// resolveWorkspaceRole returns the durable workspace role that a session's
+// authority is derived from. For an OpenID Connect identity the provider's role
+// claim is authoritative and is written through first; every other provider
+// carries no role assertion, so the stored membership decides.
+func (h LoginHandler) resolveWorkspaceRole(ctx context.Context, provider, role string, user domain.User) (domain.User, domain.WorkspaceRole, error) {
 	if provider != "oidc" {
-		return user, nil
+		durable, err := h.workspaceRole(ctx, user.ID)
+		if err != nil {
+			return domain.User{}, "", err
+		}
+		return user, durable, nil
 	}
 	workspaceRole, err := oidcWorkspaceRole(role)
 	if err != nil {
-		return domain.User{}, err
+		return domain.User{}, "", err
 	}
-	if err := h.service.SetUserRole(ctx, h.workspace, h.lookupUser, user.ID, workspaceRole); err != nil {
-		return domain.User{}, err
+	// Writing the provider's role claim through is a role change, which no member
+	// may perform and which the signing-in user certainly may not perform on
+	// themselves. It runs as the system operation whose authority is the ID token
+	// verified earlier in the callback.
+	if err := h.service.SynchronizeExternalUserRole(ctx, h.workspace, user.ID, workspaceRole); err != nil {
+		return domain.User{}, "", err
 	}
-	return user, nil
+	return user, workspaceRole, nil
+}
+
+// workspaceRole reads a user's own durable workspace membership role.
+//
+// It reads exactly the one membership it needs, as the user it is about. The
+// previous implementation paged the whole workspace through AdminListUsers as the
+// configured lookup identity, which made an administrative read a dependency of
+// every sign-in — so gating that read on a real administrator would have locked
+// every member out — and cost O(workspace) work for an O(1) question.
+func (h LoginHandler) workspaceRole(ctx context.Context, userID domain.UserID) (domain.WorkspaceRole, error) {
+	membership, err := h.service.WorkspaceMembership(ctx, h.workspace, userID, userID)
+	if err != nil {
+		return "", err
+	}
+	return membership.Role, nil
 }
 
 func oidcWorkspaceRole(role string) (domain.WorkspaceRole, error) {
@@ -594,6 +663,7 @@ func oidcWorkspaceRole(role string) (domain.WorkspaceRole, error) {
 type externalIdentity struct {
 	Subject           string
 	Email             string
+	EmailVerified     bool
 	Name              string
 	PreferredUsername string
 	Role              string
@@ -702,13 +772,14 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 		return externalIdentity{}, fmt.Errorf("userinfo endpoint returned %s", response.Status)
 	}
 	var value struct {
-		Subject           string `json:"sub"`
-		ID                any    `json:"id"`
-		Email             string `json:"email"`
-		Login             string `json:"login"`
-		Name              string `json:"name"`
-		PreferredUsername string `json:"preferred_username"`
-		Role              string `json:"role"`
+		Subject           string          `json:"sub"`
+		ID                any             `json:"id"`
+		Email             string          `json:"email"`
+		EmailVerified     json.RawMessage `json:"email_verified"`
+		Login             string          `json:"login"`
+		Name              string          `json:"name"`
+		PreferredUsername string          `json:"preferred_username"`
+		Role              string          `json:"role"`
 	}
 	if err := decodeAuthorizationJSON(response.Body, maxAuthorizationUserInfoResponse, &value); err != nil {
 		return externalIdentity{}, err
@@ -716,6 +787,7 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 	identity := externalIdentity{
 		Subject:           value.Subject,
 		Email:             strings.ToLower(strings.TrimSpace(value.Email)),
+		EmailVerified:     assertedEmailVerified(value.EmailVerified),
 		Name:              strings.TrimSpace(value.Name),
 		PreferredUsername: strings.TrimSpace(value.PreferredUsername),
 		Role:              strings.ToLower(strings.TrimSpace(value.Role)),
@@ -724,7 +796,10 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 		identity.Subject = fmt.Sprint(value.ID)
 	}
 	if name == "entra" && identity.Email == "" {
+		// preferred_username is a directory attribute, not a proof of address
+		// ownership, so an address recovered from it is never treated as verified.
 		identity.Email = strings.ToLower(strings.TrimSpace(value.PreferredUsername))
+		identity.EmailVerified = false
 	}
 	if name == "github" && identity.Email == "" {
 		if provider.EmailURL == "" {
@@ -734,11 +809,31 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 		if err != nil {
 			return externalIdentity{}, err
 		}
+		// githubEmail accepts only a primary, verified address.
+		identity.EmailVerified = true
 	}
 	if identity.Subject == "" || identity.Email == "" {
 		return externalIdentity{}, errors.New("userinfo identity is incomplete")
 	}
 	return identity, nil
+}
+
+// assertedEmailVerified reads an `email_verified` claim. Providers emit it as a
+// JSON boolean or, less correctly, as the string "true"; anything else — including
+// an absent claim — counts as unverified so the decision fails closed.
+func assertedEmailVerified(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var boolean bool
+	if err := json.Unmarshal(raw, &boolean); err == nil {
+		return boolean
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return strings.EqualFold(strings.TrimSpace(text), "true")
+	}
+	return false
 }
 
 func (h LoginHandler) githubEmail(ctx context.Context, endpoint, token string) (string, error) {
