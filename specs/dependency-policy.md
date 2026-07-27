@@ -66,7 +66,11 @@ review.
 - Container bases MUST be pinned by digest.
 - CI actions MUST be pinned by full commit SHA.
 - Native libraries MUST use exact releases and verified source hashes.
-- Floating tags, branches, wildcard ranges, and `latest` are forbidden.
+- Floating tags, branches, wildcard ranges, and `latest` are forbidden. This
+  includes CI runner labels: `runs-on:` and matrix `runner:` values MUST name an
+  exact runner image such as `ubuntu-24.04`, never `ubuntu-latest`, because
+  GitHub moves that label between operating-system images and the toolchain a
+  green run was produced on is then not the toolchain the next run uses.
 - Generated dependency and SBOM files MUST be committed or produced as signed
   release artifacts.
 
@@ -75,7 +79,8 @@ review.
 Every dependency-changing pull request MUST run:
 
 1. Age verification against the 24-hour UTC cutoff.
-2. Integrity verification for modules, assets, actions, images, and archives.
+2. Integrity verification for modules, assets, actions, images, archives, and
+   CI runner labels.
 3. `govulncheck` for Go source and built binaries as applicable.
 4. OSV/advisory and container/native-library scanning.
 5. License and newly introduced transitive dependency review.
@@ -92,7 +97,7 @@ description of enforcement that does not exist:
 |---|---|
 | 1. Age verification | `make dependency-check` and `make workflow-check` |
 | 2. Integrity verification | `make dependency-check`, `go mod verify`, and the digest, commit-SHA, and lock-hash comparisons in `tests/dependency-admission` |
-| 3. `govulncheck` over Go source | `make vuln-check`, run by the pull-request workflow. Built-binary scanning is not wired up. |
+| 3. `govulncheck` over Go source | `make vuln-check` (default and `postgres` build configurations) and `make vuln-check-dqlite` in the dqlite job, which is the only job with the native headers. Both run in the pull-request workflow. Built-binary scanning is not wired up. |
 | 4. OSV/advisory and container/native-library scanning | **not implemented** |
 | 5. License review | inventory `license` fields are required and reviewed by hand; no automated gate |
 | 6. Provenance verification | produced on publication by `publish-container.yml`; not verified on a pull request |

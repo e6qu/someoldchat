@@ -416,6 +416,9 @@ func validateWorkflowPins(root string, paths []string, byID map[string]dependenc
 			if err := validateWorkflowImage(path, index+1, line, byID); err != nil {
 				return err
 			}
+			if err := validateWorkflowRunner(path, index+1, line); err != nil {
+				return err
+			}
 		}
 		if err := validateAptPins(path, lines); err != nil {
 			return err
@@ -427,6 +430,8 @@ func validateWorkflowPins(root string, paths []string, byID map[string]dependenc
 var (
 	workflowVersionKeyPattern = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?([A-Za-z0-9_.-]*[Vv]ersion)[\t ]*:[\t ]*(.+?)[\t ]*$`)
 	workflowImageKeyPattern   = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?image[\t ]*:[\t ]*(.+?)[\t ]*$`)
+	workflowRunnerKeyPattern  = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?(runs-on|runner)[\t ]*:[\t ]*(.+?)[\t ]*$`)
+	floatingRunnerPattern     = regexp.MustCompile(`(^|[^a-z0-9])latest([^a-z0-9]|$)`)
 	exactVersionPattern       = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	aptPackagePattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
 )
@@ -451,6 +456,33 @@ func validateWorkflowVersionKey(path string, lineNumber int, line string) error 
 	}
 	if !exactVersionPattern.MatchString(strings.TrimPrefix(value, "v")) {
 		return fmt.Errorf("workflow %s:%d selects %s %q, which is not an exact major.minor.patch version", path, lineNumber, key, value)
+	}
+	return nil
+}
+
+// validateWorkflowRunner rejects a floating runner label.
+//
+// specs/dependency-policy.md states plainly that "floating tags, branches,
+// wildcard ranges, and `latest` are forbidden", and `runs-on: ubuntu-latest` is
+// exactly that: GitHub moves the label between operating-system images, so the
+// toolchain a green run was produced on is not the toolchain the next run uses.
+// Six jobs across the two workflows used it while five others named an exact
+// image, and scripts/check-container-publication.sh asserted the *presence* of
+// `runner: ubuntu-latest`, so the gate enforced the policy violation. Nothing
+// inspected `runs-on` at all.
+func validateWorkflowRunner(path string, lineNumber int, line string) error {
+	match := workflowRunnerKeyPattern.FindStringSubmatch(line)
+	if match == nil {
+		return nil
+	}
+	value := unquoteYAMLScalar(match[2])
+	// A matrix reference resolves to another line in the same workflow, which is
+	// checked on its own.
+	if value == "" || strings.Contains(value, "${{") {
+		return nil
+	}
+	if floatingRunnerPattern.MatchString(strings.ToLower(value)) {
+		return fmt.Errorf("workflow %s:%d selects runner %q, which is a floating label; name an exact runner image such as ubuntu-24.04", path, lineNumber, value)
 	}
 	return nil
 }

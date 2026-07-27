@@ -106,7 +106,10 @@ database file or `directory` for a stopped dqlite state directory);
 `-request-spool-owner`, `-request-spool-max-bytes`, and
 `-request-spool-max-requests`; and every lifecycle command.
 `-wake-deadline`, `-wake-safety-margin`, and `-request-max-bytes` have defaults
-and are documented in [operations](operations.md#observability).
+and are documented in [operations](operations.md#disaster-recovery), where the
+table of the three sits. `-snapshot-root`, `-snapshot-s3-bucket`, and
+`-snapshot-s3-prefix` are conditionally required and mutually exclusive, as the
+list above states.
 Commands receive the fencing
 generation through `SAMEOLDCHAT_LIFECYCLE_GENERATION`; persistence startup also
 receives the selected backend, snapshot artifact, and schema version. Missing
@@ -134,8 +137,11 @@ activator stays running. For a three-VM dqlite deployment the two steps are
 separate and the order matters: `directory` snapshot mode archives a **stopped**
 state directory, so the database processes stop before the snapshot is taken,
 while the active storage is released only after the manifest is verified and
-published. Stopping is reversible — an interrupted hibernation restarts from the
-live volume and reads no snapshot — and releasing is not. See
+published. Stopping is reversible — an interrupted `QUIESCING` or `SNAPSHOTTING` restarts
+from the live volume and reads no snapshot — and releasing is not. An
+interrupted `STOPPING` is the one exception: its manifest is already published
+and verified for that fence, so it restores that generation, and only that
+generation. See
 [scale-to-zero](../specs/scale-to-zero.md#snapshot-boundary-by-profile). The
 activator host stays up throughout.
 

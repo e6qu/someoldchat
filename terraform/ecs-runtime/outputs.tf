@@ -18,7 +18,7 @@ output "environment" {
     SAMEOLDCHAT_BLOB_S3_BUCKET        = aws_s3_bucket.blobs.bucket
     SAMEOLDCHAT_BLOB_S3_PREFIX        = var.blob_prefix
     SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL = var.bootstrap_admin_email
-    SAMEOLDCHAT_CHAT_MODE             = var.chat_mode
+    SAMEOLDCHAT_CHAT_MODE             = "local"
     SAMEOLDCHAT_OIDC_CLIENT_ID        = var.oidc_client_id
     SAMEOLDCHAT_OIDC_ISSUER           = var.oidc_issuer
     SAMEOLDCHAT_RELEASE_REVISION      = var.release_revision
@@ -26,13 +26,16 @@ output "environment" {
   }
 }
 
+# SAMEOLDCHAT_SESSION_TOKEN is deliberately absent; see the comment above
+# aws_secretsmanager_secret.auth_state_key in main.tf. Exporting it made the
+# task exit 2 on every start because this module always configures an OpenID
+# Connect issuer.
 output "secrets" {
   description = "SameOldChat secret environment variables mapped to AWS Secrets Manager ARNs."
   value = {
     SAMEOLDCHAT_API_TOKEN          = aws_secretsmanager_secret.api_token.arn
     SAMEOLDCHAT_AUTH_STATE_KEY_HEX = aws_secretsmanager_secret.auth_state_key.arn
     SAMEOLDCHAT_OIDC_CLIENT_SECRET = var.oidc_client_secret_arn
-    SAMEOLDCHAT_SESSION_TOKEN      = aws_secretsmanager_secret.session_token.arn
   }
 }
 

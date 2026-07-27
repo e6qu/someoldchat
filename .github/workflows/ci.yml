@@ -24,7 +24,7 @@ concurrency:
 jobs:
   go:
     name: Go checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -43,7 +43,7 @@ jobs:
       # protoc plugins are built, so the local gate and this gate cannot select
       # different lint and breaking-change rule sets.
       - name: Check formatting and generated files
-        run: make fmt-check workflow-check container-check module-docs-check task-flags-check dependency-check generated-check proto-lint
+        run: make fmt-check workflow-check container-check module-docs-check module-startup-check task-flags-check dependency-check generated-check proto-lint
 
       - name: Check contracts and SDK inventory
         run: make contract-check sdk-inventory-check
@@ -105,7 +105,7 @@ jobs:
 
   terraform:
     name: Terraform validation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
       fail-fast: false
@@ -139,7 +139,7 @@ jobs:
   # and three defects in activator.py all survived every gate.
   scale-zero-artifacts:
     name: Scale-to-zero deployment artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out source
@@ -151,9 +151,7 @@ jobs:
           python-version: '3.12.11'
 
       - name: Test the activator Lambda
-        run: |
-          python3 -m compileall -q deploy/ecs-scale-zero/activator.py
-          python3 deploy/ecs-scale-zero/activator_test.py
+        run: make activator-check
 
       - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -302,6 +300,14 @@ jobs:
 
       - name: Build dqlite binaries
         run: make build-dqlite
+
+      # `make vet` and `make vuln-check` analyse the default build
+      # configuration, so internal/store/dqlite and every dqlite-tagged file were
+      # analysed and scanned by nothing at all, and github.com/canonical/go-dqlite
+      # was never reached by govulncheck. This is the only job with the native
+      # headers, so it is the only place they can run.
+      - name: Run static analysis and vulnerability scan over dqlite-tagged code
+        run: make vet-dqlite vuln-check-dqlite
 
       - name: Run dqlite tests
         run: make test-dqlite

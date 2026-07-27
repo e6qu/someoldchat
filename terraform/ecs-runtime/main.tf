@@ -8,10 +8,17 @@ locals {
   blob_bucket_prefix = "${replace(var.name, "/", "-")}-blobs-"
 }
 
+# prevent_destroy matches aws_dynamodb_table.state in deploy/ecs-scale-zero: this
+# bucket holds every uploaded file, versioning is suspended, and a rename of
+# var.name changes bucket_prefix, so without it a single `terraform apply` could
+# replace the bucket and lose every blob with no recovery path.
 resource "aws_s3_bucket" "blobs" {
   bucket_prefix = local.blob_bucket_prefix
   force_destroy = false
   tags          = local.tags
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "blobs" {
@@ -47,11 +54,6 @@ resource "random_password" "api_token" {
   special = false
 }
 
-resource "random_password" "session_token" {
-  length  = 48
-  special = false
-}
-
 resource "random_id" "auth_state_key" {
   byte_length = 48
 }
@@ -66,16 +68,14 @@ resource "aws_secretsmanager_secret_version" "api_token" {
   secret_string = random_password.api_token.result
 }
 
-resource "aws_secretsmanager_secret" "session_token" {
-  name = "${var.name}/session-token"
-  tags = local.tags
-}
-
-resource "aws_secretsmanager_secret_version" "session_token" {
-  secret_id     = aws_secretsmanager_secret.session_token.id
-  secret_string = random_password.session_token.result
-}
-
+# There is deliberately no session-token secret. -session-token seeds one static
+# browser session shared by every holder of the value, and cmd/server refuses it
+# outright once an identity provider is configured. This module makes oidc_issuer
+# a required variable, so a static session could never be legal here: exporting
+# it made every task built from this module's own outputs exit 2 at startup with
+# "-session-token ... cannot be combined with the configured identity provider".
+# scripts/check-terraform-module-startup.sh now starts the binary with exactly
+# the keys these outputs export, so the next such divergence fails a gate.
 resource "aws_secretsmanager_secret" "auth_state_key" {
   name = "${var.name}/auth-state-key"
   tags = local.tags

@@ -15,14 +15,25 @@
 #     # flag-contract: cmd/ecs-ws-activator
 #     command = [ "-listen", ":8080", ... ]
 #
+# A command whose value is not a literal list — `command = var.application_command`
+# — cannot be checked against any binary, so it must say so:
+#
+#     # flag-contract: caller-supplied
+#     command = var.application_command
+#
 # The Go side is the binary's own `flag` usage output, which is authoritative for
 # every binding style (`flag.String`, `flag.XxxVar`, a `FlagSet` bound by another
 # type) and cannot drift from the parsed flag set. A flag whose usage text ends in
 # "(required)" must appear in the command; any flag in the command must be
 # defined.
 #
-# A command list holding literal flag tokens with no `flag-contract` annotation is
-# an error, so a new task definition cannot opt out of the check by omission.
+# Every `command =` in every module must carry one of the two annotations, so a
+# new task definition cannot opt out of the check by omission. That claim used to
+# be false three ways, all proved: `-flag=value` matched no token at all, so
+# `"-bogus-flag=1"` passed and the task exited 2 at start; the same form was
+# reported as an *omission* when written legitimately as `"-listen=:8080"`; and a
+# command supplied through a variable produced neither tokens nor an annotation
+# error, so the application server's flags were never checked at all.
 set -euo pipefail
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -36,10 +47,16 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT INT TERM
 status=0
 
-# Emits one "<file>:<line> <package> <flag>" record per literal flag token found
-# in an annotated container command, and one "<file>:<line> - <flag>" record when
-# the annotation is missing. The annotation is scoped to the resource block it
-# appears in so it cannot leak into an unrelated task definition.
+# Emits one "<file>:<line> <owner> <flag>" record per literal flag token found in
+# a container command, and one "<file>:<line> <owner> !command" record per command
+# block, so a command that produces no tokens is still visible. The owner is "-"
+# when the block carries no `# flag-contract:` annotation. The annotation is
+# scoped to the resource block it appears in so it cannot leak into an unrelated
+# task definition.
+#
+# The token pattern accepts `-name` and `-name=value` and does not assume a
+# lowercase first character, because Go's flag package accepts all of them and
+# the deployed task is parsed by Go, not by this pattern.
 extract_command_flags() {
 	awk '
 		/^[[:space:]]*(resource|data|module)[[:space:]]+"/ { contract = "" }
@@ -50,26 +67,33 @@ extract_command_flags() {
 			contract = line
 		}
 		{
-			if (!collecting && $0 ~ /^[[:space:]]*command[[:space:]]*=/) {
+			# `command =` is matched anywhere on the line, not only at its start:
+			# aws_ecs_task_definition.application writes its whole container
+			# definition on one jsonencode line, so an anchored pattern never saw
+			# the application server command at all.
+			if (!collecting && $0 ~ /(^|[[:space:]{,])command[[:space:]]*=/) {
 				collecting = 1
 				depth = 0
 				start = FNR
-				found = 0
 				owner = contract
+				printf "%s:%d %s !command\n", FILENAME, start, (owner == "" ? "-" : owner)
 			}
 			if (!collecting) next
 			rest = $0
-			while (match(rest, /"-[a-z][a-z0-9-]*"/)) {
+			while (match(rest, /"-[A-Za-z0-9][A-Za-z0-9_-]*(=[^"]*)?"/)) {
 				token = substr(rest, RSTART + 1, RLENGTH - 2)
-				found = found + 1
+				sub(/=.*$/, "", token)
 				printf "%s:%d %s %s\n", FILENAME, start, (owner == "" ? "-" : owner), token
 				rest = substr(rest, RSTART + RLENGTH)
 			}
+			opened = 0
 			for (i = 1; i <= length($0); i++) {
 				character = substr($0, i, 1)
-				if (character == "[") depth++
+				if (character == "[") { depth++; opened++ }
 				else if (character == "]") depth--
 			}
+			# A single-line `command = var.x` opens no bracket at all and must not
+			# swallow the rest of the file.
 			if (depth <= 0) collecting = 0
 		}
 	' "$1"
@@ -87,15 +111,27 @@ touch "$scratch/used"
 while read -r position package flag; do
 	[[ -n "${position:-}" ]] || continue
 	if [[ "$package" == "-" ]]; then
-		echo "$position passes flag '$flag' from a command with no '# flag-contract: cmd/<binary>' annotation, so it cannot be verified against any binary" >&2
+		if [[ "$flag" == "!command" ]]; then
+			echo "$position declares a container command with no '# flag-contract: cmd/<binary>' or '# flag-contract: caller-supplied' annotation, so it cannot be verified against any binary" >&2
+		else
+			echo "$position passes flag '$flag' from a command with no '# flag-contract: cmd/<binary>' annotation, so it cannot be verified against any binary" >&2
+		fi
 		status=1
 		continue
 	fi
+	if [[ "$package" == "caller-supplied" ]]; then
+		if [[ "$flag" != "!command" ]]; then
+			echo "$position is annotated 'caller-supplied' but passes the literal flag '$flag', which is verifiable; name the binary instead" >&2
+			status=1
+		fi
+		continue
+	fi
+	[[ "$flag" != "!command" ]] || continue
 	printf '%s\n' "$package" >>"$scratch/packages"
 done <"$scratch/used"
 
 if [[ ! -s "$scratch/packages" ]]; then
-	echo 'no annotated Terraform container command was found; this check would silently cover nothing' >&2
+	echo 'no annotated Terraform container command named a binary; this check would silently cover nothing' >&2
 	exit 1
 fi
 
@@ -112,14 +148,14 @@ while IFS= read -r package; do
 	# usage block at all, which must not be read as "this binary defines no flags".
 	usage="$scratch/usage"
 	go run "./$package" -h >"$usage" 2>&1 || true
-	if ! grep -Eq '^[[:space:]]+-[a-z]' "$usage"; then
+	if ! grep -Eq '^[[:space:]]+-[A-Za-z0-9]' "$usage"; then
 		echo "could not enumerate the flags of $package; 'go run ./$package -h' produced no flag usage:" >&2
 		sed 's/^/    /' "$usage" >&2
 		status=1
 		continue
 	fi
 	awk '
-		match($0, /^[[:space:]]+-[a-z][a-z0-9-]*/) {
+		match($0, /^[[:space:]]+-[A-Za-z0-9][A-Za-z0-9_-]*/) {
 			name = substr($0, RSTART, RLENGTH)
 			sub(/^[[:space:]]+/, "", name)
 			current = name
@@ -129,7 +165,13 @@ while IFS= read -r package; do
 		# Only an unconditional "(required)" at the end of the usage text counts.
 		# "(required for -snapshot-store=filesystem)" is a conditional requirement
 		# this check cannot evaluate, so it must not be demanded of every caller.
-		current != "" && /\(required\)[[:space:]]*$/ { print "required " current; current = "" }
+		# Go appends its own " (default x)" after the usage text, which is not part
+		# of the requirement and is stripped before the test.
+		current != "" {
+			text = $0
+			sub(/[[:space:]]*\(default[[:space:]].*\)[[:space:]]*$/, "", text)
+			if (text ~ /\(required\)[[:space:]]*$/) { print "required " current; current = "" }
+		}
 	' "$usage" | sed "s|^|$package |" >>"$scratch/declared"
 done <"$scratch/packages.unique"
 touch "$scratch/declared"
@@ -138,7 +180,7 @@ while IFS= read -r package; do
 	[[ -n "$package" ]] || continue
 	awk -v package="$package" '$2 == "defined" && $1 == package { print $3 }' "$scratch/declared" | sort -u >"$scratch/defined.list"
 	awk -v package="$package" '$2 == "required" && $1 == package { print $3 }' "$scratch/declared" | sort -u >"$scratch/required.list"
-	awk -v package="$package" '$2 == package { print $3 }' "$scratch/used" | sort -u >"$scratch/used.list"
+	awk -v package="$package" '$2 == package && $3 != "!command" { print $3 }' "$scratch/used" | sort -u >"$scratch/used.list"
 	[[ -s "$scratch/defined.list" ]] || continue
 
 	while IFS= read -r flag; do

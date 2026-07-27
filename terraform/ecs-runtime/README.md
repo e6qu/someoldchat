@@ -4,12 +4,26 @@ This module owns the durable, application-specific resources for a SameOldChat
 Amazon Elastic Container Service deployment:
 
 - a private Amazon Simple Storage Service bucket for uploads, with versioning
-  explicitly suspended and incomplete multipart uploads removed after one day.
-  Hierarchical application names are normalized to an Amazon S3-safe bucket
-  prefix while remaining unchanged for secrets and tags;
-- distinct AWS Secrets Manager values for the API token, browser session token,
-  and OpenID Connect authorization-state key; and
+  explicitly suspended, `prevent_destroy` set, and incomplete multipart uploads
+  removed after one day. Hierarchical application names are normalized to an
+  Amazon S3-safe bucket prefix while remaining unchanged for secrets and tags;
+- distinct AWS Secrets Manager values for the API token and the OpenID Connect
+  authorization-state key; and
 - the least-privilege task-role policy needed to access the bucket.
+
+This module deliberately creates **no** browser session token. `-session-token`
+seeds one static browser session shared by every holder of the value, and
+`cmd/server` refuses it as soon as an identity provider is configured. Because
+`oidc_issuer` is required here, exporting a session token made every task built
+from these outputs exit 2 on startup. `make module-startup-check` starts the
+binary with exactly the keys `environment` and `secrets` export and fails if it
+refuses them.
+
+Known boundaries, recorded rather than guessed at: bucket versioning is
+`Suspended`, so a `sameoldchat-blobgc` deletion is not recoverable, and the two
+AWS Secrets Manager secrets use the AWS-managed key rather than a customer
+managed key. Both need a deliberate input (a retention/cost decision and a KMS
+key ARN respectively) and neither can be validated without applying.
 
 The caller owns the generic HTTP service, network, DNS, certificate, and EFS
 mount. This separation keeps SameOldChat portable while allowing an environment
@@ -21,7 +35,15 @@ replacement: this module owns the durable application resources, that one owns
 request-triggered activation. Both pin the same exact AWS provider version so a
 single root configuration can consume them together.
 
-Every variable below has no default and is therefore required.
+This module configures **local composition only**. It provisions no chat gRPC
+address, certificate authority, or client certificate, and the `environment`
+output always carries the storage and bootstrap settings that `cmd/server`
+refuses in `grpc` composition, where `sameoldchat-chatd` owns the store instead.
+The `chat_mode` variable used to accept `grpc` and produced exactly that
+refusal, so it is gone and `SAMEOLDCHAT_CHAT_MODE` is exported as `local`.
+
+Every variable shown in the example below is required. See
+[`variables.tf`](variables.tf) for the optional ones and their defaults.
 
 ```hcl
 module "chat_runtime" {
@@ -29,7 +51,6 @@ module "chat_runtime" {
 
   name                   = "sameoldchat"
   store                  = "postgresql"
-  chat_mode              = "local"
   auth_workspace         = "Tdev"
   auth_lookup_user       = "Udev"
   auth_public_url        = "https://chat.example.com"
@@ -49,10 +70,11 @@ values. All of these are required for the server to start, and the blob settings
 are exported so the task's `-blob-s3-prefix` cannot diverge from the prefix
 `task_policy_json` actually grants.
 
-`bootstrap_admin_email` reaches the store through the process that owns it:
-`sameoldchat` in local composition and `sameoldchat-chatd` in distributed
-composition. In distributed composition the server rejects the setting rather
-than accepting and dropping it.
+`bootstrap_admin_email` reaches the store through the process that owns it,
+which for this module is always `sameoldchat` itself. A distributed deployment
+puts it on `sameoldchat-chatd`; `cmd/server` rejects it, and every other
+store-owning setting, in `grpc` composition rather than accepting and dropping
+it, which is why this module is local-composition only.
 
 `bootstrap_admin_email` is deliberately required for the initial local
 administrator used by the authorization control plane. An authorized OpenID

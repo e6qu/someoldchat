@@ -185,3 +185,29 @@ func validInventory() inventory {
 		}},
 	}
 }
+
+// specs/dependency-policy.md forbids `latest`. Six workflow jobs used
+// `runs-on: ubuntu-latest` while five named an exact image, and nothing
+// inspected `runs-on` at all.
+func TestValidateWorkflowRunnerRejectsFloatingLabels(t *testing.T) {
+	for _, line := range []string{
+		"    runs-on: ubuntu-latest",
+		"    runs-on: macos-latest",
+		"            runner: ubuntu-latest",
+		"        - runner: windows-latest",
+	} {
+		if err := validateWorkflowRunner("workflow.yml", 1, line); err == nil {
+			t.Errorf("validateWorkflowRunner(%q) accepted a floating runner label", line)
+		}
+	}
+	for _, line := range []string{
+		"    runs-on: ubuntu-24.04",
+		"            runner: ubuntu-24.04-arm",
+		"    runs-on: ${{ matrix.arch.runner }}",
+		"    name: latest release",
+	} {
+		if err := validateWorkflowRunner("workflow.yml", 1, line); err != nil {
+			t.Errorf("validateWorkflowRunner(%q) = %v, want acceptance", line, err)
+		}
+	}
+}

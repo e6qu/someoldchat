@@ -61,7 +61,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	dqliteAddress := flags.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
 	dqliteCluster := flags.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
 	dqliteDatabase := flags.String("dqlite-database", "", "dqlite database name; required for local dqlite storage")
-	apiToken := flags.String("api-token", "", "durable API bearer token (required)")
+	// The environment default matches cmd/server. Without it the only way to
+	// supply the durable API token was the command line, so it was readable in
+	// `ps`, in /proc/<pid>/cmdline, and in every retained ECS task-definition
+	// revision, while terraform/ecs-runtime already publishes it as a secret
+	// environment variable.
+	apiToken := flags.String("api-token", os.Getenv("SAMEOLDCHAT_API_TOKEN"), "durable API bearer token (required); defaults to SAMEOLDCHAT_API_TOKEN")
 	appToken := flags.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
 	appID := flags.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
 	// -session-token is optional. It seeds one static browser session shared by
@@ -69,7 +74,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// process rejects it outright once a real identity provider is configured, so
 	// requiring it here forced a deployment with single sign-on to carry a shared
 	// bearer session it must not have.
-	sessionToken := flags.String("session-token", "", "static development browser session token; omit when the HTTP process uses an identity provider")
+	sessionToken := flags.String("session-token", os.Getenv("SAMEOLDCHAT_SESSION_TOKEN"), "static development browser session token; omit when the HTTP process uses an identity provider")
 	blobDirectory := flags.String("blob-dir", "", "external blob directory for file storage")
 	blobMaxBytes := flags.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
 	certFile := flags.String("tls-cert", "", "TLS certificate file (required)")
@@ -92,20 +97,23 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("chatd requires listen, store, TLS server/client-CA credentials, and an API token")
 		return exitConfiguration
 	}
+	// A mistyped path or a malformed PEM is operator-supplied configuration, not
+	// a runtime failure: reporting it as exitRuntime made an orchestrator with a
+	// restart-on-runtime-failure-only policy restart-loop forever on a typo.
 	tlsCertificate, err := tls.LoadX509KeyPair(*certFile, *keyFile)
 	if err != nil {
 		logger.Error("load TLS certificate", "error", err)
-		return exitRuntime
+		return exitConfiguration
 	}
 	clientCAPEM, err := os.ReadFile(*clientCAFile)
 	if err != nil {
 		logger.Error("read TLS client CA", "error", err)
-		return exitRuntime
+		return exitConfiguration
 	}
 	clientCAs := x509.NewCertPool()
 	if !clientCAs.AppendCertsFromPEM(clientCAPEM) {
-		logger.Error("TLS client CA contains no certificates")
-		return exitRuntime
+		logger.Error("TLS client CA contains no certificates", "path", *clientCAFile)
+		return exitConfiguration
 	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
 	if err != nil {

@@ -75,7 +75,12 @@ resource "aws_ecs_task_definition" "application" {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
   }
-  container_definitions = jsonencode([{ name = var.name, image = var.application_image, essential = true, command = var.application_command, environment = [for k, v in var.application_environment : { name = k, value = v }], portMappings = [{ containerPort = var.application_port, protocol = "tcp" }], logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.application.name, awslogs-region = var.region, awslogs-stream-prefix = "application" } } }])
+  # flag-contract: caller-supplied
+  # The application command is a module input, so no gate can resolve it to a
+  # binary. What the module *can* enforce is recorded on var.application_command
+  # itself: the HTTP tier is stopped with ecs:StopTask and has no drain, so a
+  # task-local store is refused at plan time.
+  container_definitions = jsonencode([{ name = var.name, image = var.application_image, essential = true, command = var.application_command, environment = [for k, v in var.application_environment : { name = k, value = v }], portMappings = [{ containerPort = var.application_port, protocol = "tcp" }], logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.application.name, awslogs-region = data.aws_region.current.region, awslogs-stream-prefix = "application" } } }])
 }
 
 resource "aws_iam_role" "activator" {
@@ -158,7 +163,7 @@ resource "aws_lambda_function" "activator" {
     subnet_ids         = var.lambda_subnet_ids
     security_group_ids = var.lambda_security_group_ids
   }
-  environment { variables = { CLUSTER = aws_ecs_cluster.this.name, TASK_DEFINITION = aws_ecs_task_definition.application.arn, SUBNETS = join(",", var.private_subnet_ids), SECURITY_GROUPS = join(",", concat([aws_security_group.application.id], var.application_security_group_ids)), PORT = tostring(var.application_port), REPLICAS = tostring(var.application_replicas), STARTUP_TIMEOUT = tostring(var.startup_timeout_seconds), REQUEST_TIMEOUT = tostring(var.request_timeout_seconds), STATE_TABLE = aws_dynamodb_table.state.name, IDLE_AFTER = tostring(var.idle_after_seconds), MAX_BODY_BYTES = tostring(var.request_max_body_bytes) } }
+  environment { variables = { CLUSTER = aws_ecs_cluster.this.name, TASK_DEFINITION = aws_ecs_task_definition.application.arn, SUBNETS = join(",", var.private_subnet_ids), SECURITY_GROUPS = join(",", concat([aws_security_group.application.id], var.application_security_group_ids)), PORT = tostring(var.application_port), REPLICAS = tostring(var.application_replicas), STARTUP_TIMEOUT = tostring(var.startup_timeout_seconds), REQUEST_TIMEOUT = tostring(var.request_timeout_seconds), STATE_TABLE = aws_dynamodb_table.state.name, IDLE_AFTER = tostring(var.idle_after_seconds), MAX_BODY_BYTES = tostring(var.request_max_body_bytes), SCALE_DOWN_LOCK_SECONDS = tostring(var.scale_down_lock_seconds) } }
 }
 
 # The request that restarts the idle window can never be the invocation that
@@ -292,7 +297,7 @@ resource "aws_cloudwatch_dashboard" "scale_zero" {
         height = 6
         properties = {
           title  = "HTTP activator"
-          region = var.region
+          region = data.aws_region.current.region
           stat   = "Sum"
           period = 60
           metrics = [
@@ -308,7 +313,7 @@ resource "aws_cloudwatch_dashboard" "scale_zero" {
         height = 6
         properties = {
           title  = "WebSocket edge and application tasks"
-          region = var.region
+          region = data.aws_region.current.region
           stat   = "Average"
           period = 60
           metrics = [
@@ -390,7 +395,8 @@ resource "aws_ecs_task_definition" "websocket_application" {
     name      = "${var.name}-websocket"
     image     = var.websocket_application_image
     essential = true
-    command   = var.websocket_application_command
+    # flag-contract: caller-supplied
+    command = var.websocket_application_command
     environment = [
       for k, v in var.websocket_application_environment : { name = k, value = v }
     ]
@@ -399,7 +405,7 @@ resource "aws_ecs_task_definition" "websocket_application" {
       logDriver = "awslogs"
       options = {
         awslogs-group         = aws_cloudwatch_log_group.websocket_application.name
-        awslogs-region        = var.region
+        awslogs-region        = data.aws_region.current.region
         awslogs-stream-prefix = "websocket-application"
       }
     }
@@ -470,7 +476,7 @@ resource "aws_ecs_task_definition" "websocket_edge" {
       logDriver = "awslogs"
       options = {
         awslogs-group         = aws_cloudwatch_log_group.websocket_edge.name
-        awslogs-region        = var.region
+        awslogs-region        = data.aws_region.current.region
         awslogs-stream-prefix = "websocket-edge"
       }
     }
@@ -515,6 +521,14 @@ resource "aws_lb" "websocket" {
   security_groups                  = [aws_security_group.websocket_nlb.id]
   enable_cross_zone_load_balancing = true
   enable_deletion_protection       = var.websocket_nlb_deletion_protection
+  dynamic "access_logs" {
+    for_each = trimspace(var.websocket_nlb_access_logs_bucket) == "" ? [] : [1]
+    content {
+      bucket  = var.websocket_nlb_access_logs_bucket
+      prefix  = var.websocket_nlb_access_logs_prefix
+      enabled = true
+    }
+  }
 }
 resource "aws_lb_target_group" "websocket_edge" {
   name        = substr("${var.name}-ws-edge", 0, 32)
@@ -524,11 +538,21 @@ resource "aws_lb_target_group" "websocket_edge" {
   vpc_id      = var.vpc_id
   # cmd/ecs-ws-activator serves GET /healthz. A TCP probe kept a wedged task
   # healthy, so ECS never replaced it and the unhealthy-target alarm never fired.
+  #
+  # The matcher is the whole 2xx range, not "200". cmd/ecs-ws-activator answers
+  # 204 while internal/activator answers 200 with a JSON body, and an exact "200"
+  # made every edge target permanently unhealthy: with
+  # deployment_minimum_healthy_percent = 100 and the deployment circuit breaker
+  # the service never converged, no WebSocket traffic was ever served, and
+  # aws_cloudwatch_metric_alarm.websocket_edge_unhealthy fired continuously. The
+  # probe's contract is "the process answers this route successfully"; binding it
+  # to one status code makes the module depend on an implementation detail the
+  # binary never promised.
   health_check {
     protocol = "HTTP"
     port     = "traffic-port"
     path     = "/healthz"
-    matcher  = "200"
+    matcher  = "200-299"
   }
 }
 resource "aws_lb_listener" "websocket" {
