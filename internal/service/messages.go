@@ -1750,22 +1750,24 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 		}
 		return domain.User{}, err
 	}
-	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, event)
+	// The profile change and the instruction to reclaim the replaced photo commit
+	// together. They used to be two transactions, so a crash between them left a
+	// blob nothing referenced and nothing would ever delete, and a failure of the
+	// second reported failure for a profile change that had already succeeded.
+	written := []events.Event{event}
+	if oldToken != "" {
+		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, string(workspaceID)+"/users/"+string(userID)+"/"+oldToken), time.Now().UTC())
+		if cleanupErr != nil {
+			return domain.User{}, cleanupErr
+		}
+		written = append(written, cleanup)
+	}
+	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, written...)
 	if err != nil {
 		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
 			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
 		}
 		return domain.User{}, err
-	}
-	if oldToken != "" {
-		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
-		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, oldKey), time.Now().UTC())
-		if cleanupErr != nil {
-			return domain.User{}, cleanupErr
-		}
-		if cleanupErr := m.Store.AppendEvent(ctx, cleanup); cleanupErr != nil {
-			return domain.User{}, cleanupErr
-		}
 	}
 	return updated, nil
 }
@@ -1804,18 +1806,18 @@ func (m Messages) DeleteUserPhoto(ctx context.Context, workspaceID domain.Worksp
 	if err != nil {
 		return err
 	}
-	if _, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, event); err != nil {
-		return err
-	}
+	// As in SetUserPhoto: the profile change and the reclamation of the removed
+	// photo are one unit, so a crash cannot leave an unreferenced blob behind.
+	written := []events.Event{event}
 	if oldToken != "" {
-		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
-		cleanup, err := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, oldKey), time.Now().UTC())
-		if err != nil {
-			return err
+		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, string(workspaceID)+"/users/"+string(userID)+"/"+oldToken), time.Now().UTC())
+		if cleanupErr != nil {
+			return cleanupErr
 		}
-		return m.Store.AppendEvent(ctx, cleanup)
+		written = append(written, cleanup)
 	}
-	return nil
+	_, err = m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, written...)
+	return err
 }
 
 func (m Messages) SetUserPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence) (domain.User, error) {

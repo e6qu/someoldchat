@@ -1093,7 +1093,7 @@ type failingProfileStore struct {
 	err error
 }
 
-func (s failingProfileStore) UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, events.Event) (domain.User, error) {
+func (s failingProfileStore) UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, ...events.Event) (domain.User, error) {
 	return domain.User{}, s.err
 }
 

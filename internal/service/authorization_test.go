@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
-
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
@@ -549,4 +550,74 @@ func TestProviderSynchronizationNeverDemotesAnOwner(t *testing.T) {
 	if membership, err := store.GetWorkspaceMembership(ctx, "T1", "U2"); err != nil || membership.Role != domain.WorkspaceRoleAdmin {
 		t.Fatalf("membership=%+v err=%v, want the claim applied to a non-owner", membership, err)
 	}
+}
+
+// Replacing or removing a profile photo changed the profile in one transaction
+// and recorded the instruction to reclaim the old blob in a second. A crash
+// between them left a blob nothing referenced and nothing would ever collect,
+// and a failure of the second reported failure for a change that had already
+// been committed. Both now commit together.
+func TestProfilePhotoChangesCommitTheirCleanupWithTheChange(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		change func(*testing.T, Messages)
+	}{
+		{"replacing", func(t *testing.T, messages Messages) {
+			if _, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", 4, strings.NewReader("two!")); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"removing", func(t *testing.T, messages Messages) {
+			if err := messages.DeleteUserPhoto(context.Background(), "T1", "U1"); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := context.Background()
+			repository := memory.New()
+			if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+				t.Fatal(err)
+			}
+			objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1<<20)
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages := Messages{Store: repository, Blob: objects}
+
+			first, err := messages.SetUserPhoto(ctx, "T1", "U1", "image/png", 4, strings.NewReader("one!"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if first.Profile.Image24 == "" {
+				t.Fatal("the first photo was not recorded on the profile")
+			}
+			if claimed := claimPhotoReclamations(t, repository, "before"); claimed != 0 {
+				t.Fatalf("a first photo produced %d reclamations, want none", claimed)
+			}
+
+			testCase.change(t, messages)
+
+			// Exactly one reclamation, and it names the blob that is no longer
+			// referenced by the profile.
+			if claimed := claimPhotoReclamations(t, repository, "after"); claimed != 1 {
+				t.Fatalf("%s a photo produced %d reclamations, want exactly one committed with the change", testCase.name, claimed)
+			}
+		})
+	}
+}
+
+// claimPhotoReclamations reads the outstanding photo reclamations the way the
+// blob collector does. They are an internal topic, deliberately withheld from
+// the client-facing enumeration so a storage key can never reach a subscriber.
+func claimPhotoReclamations(t *testing.T, repository *memory.Store, owner string) int {
+	t.Helper()
+	records, err := repository.ClaimEventsForTopic(context.Background(), "T1", events.UserPhotoBlobDeleteTopic, owner, 100, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(records)
 }
