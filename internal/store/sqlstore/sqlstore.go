@@ -624,13 +624,27 @@ const referentialProbeStatement = `INSERT INTO conversation_members(conversation
 // which is why this is a probe and not a setting check.
 func (s *Store) VerifyReferentialIntegrity(ctx context.Context) error {
 	return s.onEachPooledConnection(ctx, func(index int, connection *sql.Conn) error {
-		tx, err := connection.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin referential probe on connection %d: %w", index, err)
-		}
-		_, execErr := tx.ExecContext(ctx, referentialProbeStatement)
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			return fmt.Errorf("roll back referential probe on connection %d: %w", index, err)
+		// The probe holds every pooled connection at once and writes on each, so
+		// on a profile that reports contention rather than waiting through it the
+		// probe competes with itself. Losing that race says nothing about whether
+		// the schema is enforced, so it is waited out rather than read as an
+		// answer — a contended write is not a missing constraint.
+		var execErr error
+		if err := underContention(ctx, func() error {
+			tx, beginErr := connection.BeginTx(ctx, nil)
+			if beginErr != nil {
+				return fmt.Errorf("begin referential probe on connection %d: %w", index, beginErr)
+			}
+			_, execErr = tx.ExecContext(ctx, referentialProbeStatement)
+			if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+				return fmt.Errorf("roll back referential probe on connection %d: %w", index, rollbackErr)
+			}
+			if execErr != nil && contended(execErr) {
+				return execErr
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		if execErr == nil {
 			return fmt.Errorf("connection %d accepted a row referencing a missing conversation and a missing user: this storage profile does not enforce the schema's REFERENCES clauses, so every relationship in it is unguarded and store.ErrNotFound is unreachable for referential failures", index)
