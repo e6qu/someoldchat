@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
@@ -16,6 +17,11 @@ import (
 )
 
 type WakeFunc func(context.Context, uint64) error
+
+// defaultWakeAttempts bounds the recovery attempts a single wake generation gets
+// before the stack is durably recorded FAILED, as specs/scale-to-zero.md
+// requires. One transient cold-start error must not be terminal.
+const defaultWakeAttempts = 3
 
 type Handler struct {
 	context    context.Context
@@ -25,15 +31,22 @@ type Handler struct {
 	forward    http.Handler
 	spool      Spool
 	spoolOwner string
-	processMu  *sync.Mutex
-	queueMu    *sync.Mutex
-	waiters    map[uint64]chan spoolResult
-	maxBody    int64
-	wakeWait   time.Duration
-	metrics    *observability.Registry
+	// drainMu admits one spool drain at a time. It is never held while the
+	// stack is serving: once the stack is ACTIVE and the spool is empty,
+	// requests are proxied directly and never touch this lock.
+	drainMu *sync.Mutex
+	// queueMu guards the waiter map, and covers enqueue-then-register as one
+	// step so a drain cannot deliver a request before its waiter exists.
+	queueMu      *sync.Mutex
+	waiters      map[uint64]chan spoolResult
+	spoolDrained *atomic.Bool
+	maxBody      int64
+	wakeWait     time.Duration
+	wakeAttempts int
+	metrics      *observability.Registry
 }
 
-func NewHandler(ctx context.Context, controller *lifecycle.Controller, wake WakeFunc, metrics *observability.Registry) (Handler, error) {
+func newHandler(ctx context.Context, controller *lifecycle.Controller, wake WakeFunc, wakeDeadline time.Duration, metrics *observability.Registry) (Handler, error) {
 	if ctx == nil {
 		return Handler{}, errors.New("activator requires a context")
 	}
@@ -43,11 +56,18 @@ func NewHandler(ctx context.Context, controller *lifecycle.Controller, wake Wake
 	if wake == nil {
 		return Handler{}, errors.New("activator requires a wake driver")
 	}
+	if wakeDeadline <= 0 {
+		return Handler{}, errors.New("activator requires a positive wake deadline")
+	}
 	if metrics == nil {
 		return Handler{}, errors.New("activator requires metrics")
 	}
 	operationContext, cancel := context.WithCancel(ctx)
-	handler := Handler{context: operationContext, cancel: cancel, controller: controller, wake: wake, metrics: metrics, processMu: &sync.Mutex{}, queueMu: &sync.Mutex{}, waiters: make(map[uint64]chan spoolResult)}
+	handler := Handler{
+		context: operationContext, cancel: cancel, controller: controller, wake: wake, metrics: metrics,
+		drainMu: &sync.Mutex{}, queueMu: &sync.Mutex{}, waiters: make(map[uint64]chan spoolResult),
+		spoolDrained: &atomic.Bool{}, wakeWait: wakeDeadline, wakeAttempts: defaultWakeAttempts,
+	}
 	handler.recordLifecycleState()
 	return handler, nil
 }
@@ -56,14 +76,14 @@ func NewForwardingHandler(ctx context.Context, controller *lifecycle.Controller,
 	if forward == nil {
 		return Handler{}, errors.New("forwarding activator requires a forward handler")
 	}
-	if maxBodyBytes <= 0 || wakeDeadline <= 0 || metrics == nil {
-		return Handler{}, errors.New("forwarding activator requires positive body, wake, and metrics settings")
+	if maxBodyBytes <= 0 {
+		return Handler{}, errors.New("forwarding activator requires a positive body limit")
 	}
-	handler, err := NewHandler(ctx, controller, wake, metrics)
+	handler, err := newHandler(ctx, controller, wake, wakeDeadline, metrics)
 	if err != nil {
 		return Handler{}, err
 	}
-	handler.forward, handler.maxBody, handler.wakeWait, handler.metrics = forward, maxBodyBytes, wakeDeadline, metrics
+	handler.forward, handler.maxBody = forward, maxBodyBytes
 	return handler, nil
 }
 
@@ -79,6 +99,7 @@ func NewDurableForwardingHandler(ctx context.Context, controller *lifecycle.Cont
 		return Handler{}, err
 	}
 	handler.spool, handler.spoolOwner = spool, spoolOwner
+	go handler.drainLoop()
 	return handler, nil
 }
 
@@ -93,13 +114,9 @@ func (h Handler) Close() error {
 	return nil
 }
 
-func (h Handler) Register(mux *http.ServeMux) {
+func (h Handler) RegisterForwarding(mux *http.ServeMux) {
 	mux.HandleFunc("POST /activate", h.activate)
 	mux.HandleFunc("GET /healthz", h.health)
-}
-
-func (h Handler) RegisterForwarding(mux *http.ServeMux) {
-	h.Register(mux)
 	mux.Handle("/", h)
 }
 
@@ -109,7 +126,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forwarding unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	if h.spool != nil {
+	if h.spool != nil && !h.servingDirectly() {
 		h.serveDurable(w, r)
 		return
 	}
@@ -121,6 +138,23 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.forward.ServeHTTP(w, r)
+}
+
+// servingDirectly reports whether the stack is up and the spool has been fully
+// drained, in which case a request must be proxied straight through.
+//
+// Spooling a request that the stack can serve now would buffer the whole
+// response in memory, cap it at the body limit, serialize every request behind
+// one drain, and make streaming responses and protocol upgrades impossible. The
+// spool exists to hold requests that arrive while the stack is not up, and the
+// drained flag preserves the documented ordering guarantee: nothing overtakes a
+// request that is still queued.
+func (h Handler) servingDirectly() bool {
+	if !h.spoolDrained.Load() {
+		return false
+	}
+	state, _ := h.controller.Snapshot()
+	return state == lifecycle.StateActive
 }
 
 type spoolResult struct {
@@ -145,15 +179,27 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return
 	}
+	// Enqueue and waiter registration are one step: a drain that claimed the
+	// entry before the waiter existed would deliver it and drop the outcome,
+	// leaving the client to time out on a request the stack already applied.
 	h.queueMu.Lock()
 	id, err := h.spool.Enqueue(r.Context(), r, body)
 	if err != nil {
 		h.queueMu.Unlock()
 		h.recordRejected(int64(len(body)))
 		w.Header().Set("Retry-After", "1")
+		if errors.Is(err, ErrSpoolCapacity) {
+			// Overload is a bounded, expected condition. It must be
+			// distinguishable in logs and metrics from a broken control store.
+			h.metrics.AddCounter("sameoldchat_activator_spool_overflow_total", 1)
+			http.Error(w, "request spool is full", http.StatusServiceUnavailable)
+			return
+		}
+		h.metrics.AddCounter("sameoldchat_activator_spool_failures_total", 1)
 		http.Error(w, "request spool unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	h.spoolDrained.Store(false)
 	h.metrics.AddCounter("sameoldchat_activator_buffered_requests_total", 1)
 	h.metrics.AddCounter("sameoldchat_activator_buffered_bytes_total", uint64(len(body)))
 	result := make(chan spoolResult, 1)
@@ -161,21 +207,66 @@ func (h Handler) serveDurable(w http.ResponseWriter, r *http.Request) {
 	h.queueMu.Unlock()
 	defer h.removeSpoolWaiter(id, result)
 	go func() {
-		err := h.processSpool(h.context)
-		if err != nil {
+		if err := h.processSpool(h.context); err != nil {
 			h.completeSpoolRequest(id, spoolResult{err: err})
 		}
 	}()
+	// The wait is bounded like every other activator limit. Without it a
+	// durable request whose completion is owned by another replica waits
+	// forever, holding a server goroutine and connection.
+	waitContext, cancel := context.WithTimeout(r.Context(), h.wakeWait)
+	defer cancel()
 	select {
 	case value := <-result:
 		if value.err != nil && value.response.status == 0 {
 			h.recordRejected(int64(len(body)))
+			w.Header().Set("Retry-After", "1")
 			http.Error(w, "service waking", http.StatusServiceUnavailable)
 			return
 		}
 		writeCapturedResponse(w, value.response)
-	case <-r.Context().Done():
-		return
+	case <-waitContext.Done():
+		if r.Context().Err() != nil {
+			return
+		}
+		// The entry stays spooled for the drain worker; the client is told to
+		// retry rather than held open indefinitely.
+		h.recordRejected(int64(len(body)))
+		w.Header().Set("Retry-After", "1")
+		http.Error(w, "service waking", http.StatusServiceUnavailable)
+	}
+}
+
+// drainLoop is the single owned drain worker. Without it the only drain trigger
+// is an inbound request, so a request accepted just before an activator restart
+// sits in the control store until some unrelated client happens to arrive.
+func (h Handler) drainLoop() {
+	interval := h.wakeWait / 4
+	if interval < time.Millisecond {
+		interval = time.Millisecond
+	}
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	for {
+		select {
+		case <-h.context.Done():
+			return
+		case <-timer.C:
+		}
+		timer.Reset(interval)
+		pending, err := h.spool.Pending(h.context)
+		if err != nil {
+			h.metrics.AddCounter("sameoldchat_activator_spool_failures_total", 1)
+			continue
+		}
+		if pending == 0 {
+			// Nothing is queued, so there is no reason to wake the stack.
+			h.spoolDrained.Store(true)
+			continue
+		}
+		if err := h.processSpool(h.context); err != nil && h.context.Err() == nil {
+			h.metrics.AddCounter("sameoldchat_activator_drain_failures_total", 1)
+		}
 	}
 }
 
@@ -183,56 +274,70 @@ func (h Handler) processSpool(ctx context.Context) error {
 	if ctx == nil {
 		return errors.New("activator spool processor requires a context")
 	}
-	if h.processMu == nil {
+	if h.drainMu == nil {
 		return errors.New("activator spool processor is not initialized")
 	}
-	h.processMu.Lock()
-	defer h.processMu.Unlock()
+	h.drainMu.Lock()
+	defer h.drainMu.Unlock()
 	if err := h.ensureActive(ctx); err != nil {
 		return err
 	}
 	for {
-		h.queueMu.Lock()
 		requests, err := h.spool.Claim(ctx, h.spoolOwner, 1, h.wakeWait)
-		h.queueMu.Unlock()
 		if err != nil {
 			return err
 		}
 		if len(requests) == 0 {
+			h.spoolDrained.Store(true)
 			return nil
 		}
-		request := requests[0]
-		replay, err := http.NewRequestWithContext(ctx, request.Method, request.URL, bytes.NewReader(request.Body))
-		if err != nil {
+		if err := h.deliverSpooledRequest(ctx, requests[0]); err != nil {
 			return err
 		}
-		replay.Header = request.Header.Clone()
-		removeHopByHopHeaders(replay.Header)
-		replay.Host = request.Host
-		if replay.Header.Get("Idempotency-Key") == "" {
-			replay.Header.Set("Idempotency-Key", "sameoldchat-spool-"+strconv.FormatUint(request.ID, 10))
-		}
-		capture := newCapturedResponse(h.maxBody)
-		deliveryErr := h.forwardSpoolRequest(ctx, replay, request.ID, capture)
-		if deliveryErr != nil {
-			h.completeSpoolRequest(request.ID, spoolResult{err: deliveryErr})
-			return deliveryErr
-		}
-		if capture.err != nil {
-			h.completeSpoolRequest(request.ID, spoolResult{err: capture.err})
-			return capture.err
-		}
-		if capture.status < http.StatusInternalServerError {
-			if err := h.spool.Delete(ctx, h.spoolOwner, request.ID); err != nil {
-				h.completeSpoolRequest(request.ID, spoolResult{err: err})
-				return err
-			}
-			h.completeSpoolRequest(request.ID, spoolResult{response: capture.response()})
-			continue
-		}
-		h.completeSpoolRequest(request.ID, spoolResult{response: capture.response()})
-		return errors.New("spooled request delivery returned a server error")
 	}
+}
+
+// deliverSpooledRequest forwards one spooled request and always removes it.
+//
+// The application handler runs to completion before the outcome is known, so its
+// mutations are already applied by the time a capture failure or a 5xx status is
+// observed. Keeping the entry in that case does not retry anything safely: it
+// re-executes an applied, possibly non-idempotent request every time the lease
+// expires, and blocks every later entry behind it forever. The delivery is
+// therefore recorded once and the caller is told what happened.
+func (h Handler) deliverSpooledRequest(ctx context.Context, request SpooledRequest) error {
+	replay, err := http.NewRequestWithContext(ctx, request.Method, request.URL, bytes.NewReader(request.Body))
+	if err != nil {
+		return err
+	}
+	replay.Header = request.Header.Clone()
+	removeHopByHopHeaders(replay.Header)
+	replay.Host = request.Host
+	if replay.Header.Get("Idempotency-Key") == "" {
+		replay.Header.Set("Idempotency-Key", "sameoldchat-spool-"+strconv.FormatUint(request.ID, 10))
+	}
+	capture := newCapturedResponse(h.maxBody)
+	deliveryErr := h.forwardSpoolRequest(ctx, replay, request.ID, capture)
+	if deliveryErr != nil {
+		// The delivery never completed, so the entry stays claimable and is
+		// retried by the drain worker after the lease expires.
+		h.completeSpoolRequest(request.ID, spoolResult{err: deliveryErr})
+		return deliveryErr
+	}
+	response := capture.response()
+	if capture.err != nil {
+		h.metrics.AddCounter("sameoldchat_activator_capture_failures_total", 1)
+		response = capturedResponse{header: make(http.Header), status: http.StatusBadGateway}
+	}
+	deleteErr := h.spool.Delete(ctx, h.spoolOwner, request.ID)
+	if deleteErr != nil {
+		h.metrics.AddCounter("sameoldchat_activator_spool_delete_failures_total", 1)
+	}
+	h.completeSpoolRequest(request.ID, spoolResult{response: response, err: errors.Join(capture.err, deleteErr)})
+	if deleteErr != nil {
+		return deleteErr
+	}
+	return nil
 }
 
 func (h Handler) forwardSpoolRequest(ctx context.Context, request *http.Request, id uint64, capture *capturedWriter) error {
@@ -269,24 +374,27 @@ func (h Handler) forwardSpoolRequest(ctx context.Context, request *http.Request,
 	<-renewDone
 	select {
 	case err := <-renewErrors:
-		if !errors.Is(err, context.Canceled) && (capture.err == nil || errors.Is(capture.err, context.Canceled)) {
-			return err
+		// A lost lease means another owner is running the same work. That is
+		// the condition behind duplicate delivery, so it is always surfaced
+		// rather than dropped in favor of the operation's own error.
+		if !errors.Is(err, context.Canceled) {
+			h.metrics.AddCounter("sameoldchat_activator_lease_lost_total", 1)
+			return errors.Join(err, capture.err)
 		}
 	default:
 	}
-	return capture.err
+	// A capture failure is not a delivery failure: the application ran to
+	// completion, so the caller decides what to do with an applied request
+	// whose response could not be held.
+	return nil
 }
 
 func (h Handler) completeSpoolRequest(id uint64, result spoolResult) {
-	if h.processMu == nil {
+	if h.queueMu == nil {
 		return
 	}
 	h.queueMu.Lock()
 	defer h.queueMu.Unlock()
-	h.completeSpoolRequestLocked(id, result)
-}
-
-func (h Handler) completeSpoolRequestLocked(id uint64, result spoolResult) {
 	waiter, ok := h.waiters[id]
 	if !ok {
 		return
@@ -296,7 +404,7 @@ func (h Handler) completeSpoolRequestLocked(id uint64, result spoolResult) {
 }
 
 func (h Handler) removeSpoolWaiter(id uint64, waiter chan spoolResult) {
-	if h.processMu == nil {
+	if h.queueMu == nil {
 		return
 	}
 	h.queueMu.Lock()
@@ -385,21 +493,29 @@ func (h Handler) ensureActive(ctx context.Context) error {
 	waitContext, cancel := context.WithTimeout(ctx, h.wakeWait)
 	defer cancel()
 	for {
-		state, _ := h.controller.Snapshot()
-		if state == lifecycle.StateActive {
+		// Cheap cached fast path: a serving stack needs no control-store read.
+		if state, _ := h.controller.Snapshot(); state == lifecycle.StateActive {
 			return nil
 		}
 		fence, err := h.controller.BeginWake()
 		if err == nil {
-			result := h.startWake(fence)
 			select {
-			case err := <-result:
+			case err := <-h.startWake(fence):
 				return err
 			case <-waitContext.Done():
 				return waitContext.Err()
 			}
 		}
-		if !errors.Is(err, lifecycle.ErrWakeInProgress) {
+		// Only a nil error grants this caller the wake generation. An
+		// already-active stack is simply ready to serve.
+		if errors.Is(err, lifecycle.ErrAlreadyActive) {
+			return nil
+		}
+		// A lost compare-and-swap means another replica advanced the durable
+		// record. The controller has adopted it, so the next attempt sees
+		// reality; failing the request here would 503 the caller for a stack
+		// that is coming up.
+		if !errors.Is(err, lifecycle.ErrWakeInProgress) && !errors.Is(err, lifecycle.ErrStateConflict) {
 			return err
 		}
 		ticker := time.NewTicker(10 * time.Millisecond)
@@ -417,19 +533,18 @@ func (h Handler) health(w http.ResponseWriter, _ *http.Request) {
 	state, generation := h.controller.Snapshot()
 	h.recordLifecycleState()
 	w.Header().Set("Content-Type", "application/json")
-	_, _ = w.Write([]byte(`{"ok":true,"state":"` + string(state) + `","generation":` + itoa(generation) + `}`))
+	_, _ = w.Write([]byte(`{"ok":true,"state":"` + string(state) + `","generation":` + strconv.FormatUint(generation, 10) + `}`))
 }
 
 func (h Handler) activate(w http.ResponseWriter, r *http.Request) {
-	state, _ := h.controller.Snapshot()
 	h.recordLifecycleState()
-	if state == lifecycle.StateActive {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
 	fence, err := h.controller.BeginWake()
 	if err != nil {
-		if errors.Is(err, lifecycle.ErrWakeInProgress) {
+		if errors.Is(err, lifecycle.ErrAlreadyActive) {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if errors.Is(err, lifecycle.ErrWakeInProgress) || errors.Is(err, lifecycle.ErrStateConflict) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusAccepted)
 			return
@@ -446,8 +561,30 @@ func (h Handler) activate(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 		return
 	}
-	w.Header().Set("X-Lifecycle-Generation", itoa(fence))
+	w.Header().Set("X-Lifecycle-Generation", strconv.FormatUint(fence, 10))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Wake drives one fenced wake to completion through the same election and
+// bounded-retry path as an inbound request. It is the entry point for scheduled
+// activation, so a timer and a request cannot diverge in how they wake the stack.
+func (h Handler) Wake(ctx context.Context) error {
+	if ctx == nil {
+		return errors.New("scheduled wake requires a context")
+	}
+	fence, err := h.controller.BeginWake()
+	if err != nil {
+		if errors.Is(err, lifecycle.ErrAlreadyActive) {
+			return nil
+		}
+		return err
+	}
+	select {
+	case err := <-h.startWake(fence):
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (h Handler) startWake(fence uint64) <-chan error {
@@ -455,20 +592,74 @@ func (h Handler) startWake(fence uint64) <-chan error {
 	go func() {
 		started := time.Now()
 		defer func() { h.metrics.ObserveDuration("sameoldchat_wake_driver_duration", time.Since(started)) }()
-		wakeContext, cancel := context.WithTimeout(h.context, h.wakeWait)
-		defer cancel()
-		if err := h.wake(wakeContext, fence); err != nil {
-			result <- errors.Join(err, h.controller.Fail(fence))
-			return
-		}
-		if err := h.controller.Activate(fence); err != nil {
+		err := h.driveWake(fence)
+		switch {
+		case err == nil:
+			if activateErr := h.controller.Activate(fence); activateErr != nil {
+				result <- activateErr
+				return
+			}
+			h.recordLifecycleState()
+			result <- nil
+		case h.context.Err() != nil:
+			// The activator itself is shutting down. The wake is abandoned, not
+			// unrecoverable: the generation stays WAKING so the replacement
+			// process resumes it through lifecycle recovery. Recording FAILED
+			// here turns every rolling restart that lands during a cold start
+			// into an outage that only an operator can clear.
+			h.metrics.AddCounter("sameoldchat_activator_wake_abandoned_total", 1)
 			result <- err
-			return
+		default:
+			result <- errors.Join(err, h.controller.Fail(fence))
 		}
-		h.recordLifecycleState()
-		result <- nil
 	}()
 	return result
+}
+
+// driveWake spends the wake generation's bounded attempt budget before the
+// caller declares the generation failed.
+func (h Handler) driveWake(fence uint64) error {
+	var last error
+	for attempt := 0; attempt < h.wakeAttempts; attempt++ {
+		if attempt > 0 {
+			if err := h.backoff(attempt); err != nil {
+				return errors.Join(last, err)
+			}
+		}
+		wakeContext, cancel := context.WithTimeout(h.context, h.wakeWait)
+		err := h.wake(wakeContext, fence)
+		cancel()
+		if err == nil {
+			return nil
+		}
+		last = err
+		if h.context.Err() != nil {
+			return err
+		}
+		// A rejected transition or a stale fence is not transient: no number of
+		// retries makes this caller the owner of the generation.
+		if errors.Is(err, lifecycle.ErrInvalidTransition) || errors.Is(err, lifecycle.ErrStaleFence) {
+			return err
+		}
+		h.metrics.AddCounter("sameoldchat_activator_wake_attempt_failures_total", 1)
+	}
+	return last
+}
+
+func (h Handler) backoff(attempt int) error {
+	delay := h.wakeWait / 20
+	if delay <= 0 {
+		delay = time.Millisecond
+	}
+	delay <<= attempt - 1
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-h.context.Done():
+		return h.context.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func isBodyTooLargeError(err error) bool {
@@ -501,18 +692,4 @@ func (h Handler) recordLifecycleState() {
 		}
 		h.metrics.SetGauge("sameoldchat_lifecycle_state_"+string(candidate), value)
 	}
-}
-
-func itoa(value uint64) string {
-	if value == 0 {
-		return "0"
-	}
-	var b [20]byte
-	i := len(b)
-	for value > 0 {
-		i--
-		b[i] = byte('0' + value%10)
-		value /= 10
-	}
-	return string(b[i:])
 }

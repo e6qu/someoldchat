@@ -30,7 +30,6 @@ type S3 struct {
 
 var errExactSize = errors.New("blob source size does not match the declared size")
 
-var _ ListStore = S3{}
 var _ WalkStore = S3{}
 
 func NewS3(client *s3.Client, bucket, prefix string, maxSize int64) (S3, error) {
@@ -82,7 +81,7 @@ func (s S3) Open(ctx context.Context, key string) (Object, io.ReadCloser, error)
 		}
 		return Object{}, nil, errors.New("stored object has an invalid size")
 	}
-	return Object{Key: key, Size: *output.ContentLength}, output.Body, nil
+	return Object{Key: key, Size: *output.ContentLength, ModTime: aws.ToTime(output.LastModified)}, output.Body, nil
 }
 
 func (s S3) Delete(ctx context.Context, key string) error {
@@ -92,42 +91,6 @@ func (s S3) Delete(ctx context.Context, key string) error {
 	}
 	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(objectKey)})
 	return err
-}
-
-func (s S3) List(ctx context.Context, prefix string) ([]Object, error) {
-	objectPrefix := s.prefixWithSlash()
-	if prefix != "" {
-		var err error
-		objectPrefix, err = s.objectKey(prefix)
-		if err != nil {
-			return nil, err
-		}
-	}
-	objects := make([]Object, 0)
-	var token *string
-	for {
-		output, err := s.client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s.bucket), Prefix: aws.String(objectPrefix), ContinuationToken: token})
-		if err != nil {
-			return nil, err
-		}
-		if output == nil {
-			return nil, errors.New("object listing returned an empty response")
-		}
-		for _, item := range output.Contents {
-			if item.Key == nil || item.Size == nil || *item.Size < 0 || *item.Size > s.maxSize {
-				return nil, errors.New("object listing contains an invalid object")
-			}
-			key := strings.TrimPrefix(*item.Key, s.prefixWithSlash())
-			objects = append(objects, Object{Key: key, Size: *item.Size})
-		}
-		if !aws.ToBool(output.IsTruncated) {
-			return objects, nil
-		}
-		if output.NextContinuationToken == nil || *output.NextContinuationToken == "" {
-			return nil, errors.New("object listing is truncated without a continuation token")
-		}
-		token = output.NextContinuationToken
-	}
 }
 
 func (s S3) Walk(ctx context.Context, prefix string, visit func(Object) error) error {
@@ -155,7 +118,7 @@ func (s S3) Walk(ctx context.Context, prefix string, visit func(Object) error) e
 			if item.Key == nil || item.Size == nil || *item.Size < 0 || *item.Size > s.maxSize {
 				return errors.New("object listing contains an invalid object")
 			}
-			if err := visit(Object{Key: strings.TrimPrefix(*item.Key, s.prefixWithSlash()), Size: *item.Size}); err != nil {
+			if err := visit(Object{Key: strings.TrimPrefix(*item.Key, s.prefixWithSlash()), Size: *item.Size, ModTime: aws.ToTime(item.LastModified)}); err != nil {
 				return err
 			}
 		}

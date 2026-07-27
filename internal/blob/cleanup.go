@@ -106,8 +106,11 @@ func (w CleanupWorker) deleteWithLease(ctx context.Context, record events.Record
 	<-renewDone
 	select {
 	case err := <-renewErrors:
-		if !errors.Is(err, context.Canceled) && (deleteErr == nil || errors.Is(deleteErr, context.Canceled)) {
-			return err
+		// A lost lease means another worker is deleting the same object. That is
+		// the condition behind duplicate deletion, so it is always surfaced,
+		// joined with the delete's own error rather than dropped in favor of it.
+		if !errors.Is(err, context.Canceled) {
+			return errors.Join(err, deleteErr)
 		}
 	default:
 	}

@@ -93,7 +93,11 @@ func FuzzManifestVerificationRejectsForeignSignatures(f *testing.F) {
 
 		forger := manager
 		forger.SigningKey = []byte("attacker-signing-key")
-		manifest.Signature = forger.sign(manifest)
+		forged, err := forger.signManifest(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Signature = forged
 		if err := manager.verifyManifest(manifest); err == nil {
 			t.Fatalf("manifest signed with a foreign key verified: %+v", manifest)
 		}
@@ -149,7 +153,11 @@ func FuzzManifestVerificationRejectsForeignKeyIDs(f *testing.F) {
 			t.Skip()
 		}
 		manifest.KeyID = keyID
-		manifest.Signature = manager.sign(manifest)
+		resigned, err := manager.signManifest(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		manifest.Signature = resigned
 		if err := manager.verifyManifest(manifest); err == nil {
 			t.Fatalf("manifest with foreign key id %q verified", keyID)
 		}

@@ -5,12 +5,15 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 )
 
+const testWakeSafetyMargin = time.Minute
+
 func newTestCoordinator(controller *Controller, driver RuntimeDriver, snapshots Snapshotter) (Coordinator, error) {
-	return NewCoordinator(controller, driver, snapshots, observability.NewRegistry())
+	return NewCoordinator(controller, driver, snapshots, observability.NewRegistry(), testWakeSafetyMargin)
 }
 
 type coordinatorDriver struct {
@@ -66,7 +69,14 @@ func (d *coordinatorDriver) ReleaseActiveStorage(context.Context, uint64) error 
 
 type coordinatorSnapshots struct {
 	manifest Manifest
-	calls    []string
+	// live is the descriptor of the database already on the volume. A
+	// coordinator that recovers from live state must never touch manifest.
+	live         Manifest
+	calls        []string
+	restored     []uint64
+	restoreFails map[uint64]bool
+	verified     map[uint64]Manifest
+	lastVerified error
 }
 
 func (s *coordinatorSnapshots) Create(context.Context, uint64) (Manifest, error) {
@@ -77,12 +87,45 @@ func (s *coordinatorSnapshots) Current(context.Context, uint64) (Manifest, error
 	s.calls = append(s.calls, "current")
 	return s.manifest, nil
 }
-func (s *coordinatorSnapshots) LastVerified(context.Context, uint64) (Manifest, error) {
+func (s *coordinatorSnapshots) LastVerified(_ context.Context, maxGeneration uint64) (Manifest, error) {
 	s.calls = append(s.calls, "last-verified")
+	if s.lastVerified != nil {
+		return Manifest{}, s.lastVerified
+	}
+	if s.verified != nil {
+		var newest Manifest
+		for generation, manifest := range s.verified {
+			if generation <= maxGeneration && generation > newest.Generation {
+				newest = manifest
+			}
+		}
+		if newest.Generation == 0 {
+			return Manifest{}, ErrNoVerifiedSnapshot
+		}
+		return newest, nil
+	}
+	if s.manifest.Generation > maxGeneration {
+		return Manifest{}, ErrNoVerifiedSnapshot
+	}
 	return s.manifest, nil
 }
-func (s *coordinatorSnapshots) Restore(context.Context, Manifest) error {
+
+func (s *coordinatorSnapshots) LiveState(_ context.Context, generation uint64) (Manifest, error) {
+	s.calls = append(s.calls, "live-state")
+	live := s.live
+	if live.Backend == "" {
+		live = Manifest{Backend: "sqlite", SchemaVersion: 1}
+	}
+	live.Generation = generation
+	return live, nil
+}
+
+func (s *coordinatorSnapshots) Restore(_ context.Context, manifest Manifest) error {
 	s.calls = append(s.calls, "restore")
+	if s.restoreFails[manifest.Generation] {
+		return errors.New("restore failed")
+	}
+	s.restored = append(s.restored, manifest.Generation)
 	return nil
 }
 
@@ -91,7 +134,7 @@ func TestCoordinatorHibernateAndWake(t *testing.T) {
 	driver := &coordinatorDriver{}
 	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
 	metrics := observability.NewRegistry()
-	coordinator, err := NewCoordinator(controller, driver, snapshots, metrics)
+	coordinator, err := NewCoordinator(controller, driver, snapshots, metrics, testWakeSafetyMargin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +149,14 @@ func TestCoordinatorHibernateAndWake(t *testing.T) {
 	if state != StateHibernated || generation != 1 {
 		t.Fatalf("state=%s generation=%d", state, generation)
 	}
-	if err := coordinator.Wake(context.Background()); err != nil {
+	wakeFence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.WakeAt(context.Background(), wakeFence); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Activate(wakeFence); err != nil {
 		t.Fatal(err)
 	}
 	state, generation = controller.Snapshot()
@@ -253,14 +303,78 @@ func TestCoordinatorRecoversPersistedWakeAfterProcessRestart(t *testing.T) {
 	}
 }
 
-func TestCoordinatorRecoversInterruptedHibernateFromVerifiedSnapshot(t *testing.T) {
+// TestCoordinatorRecoversInterruptedQuiescenceWithoutRestoringOlderSnapshot
+// replaces an earlier test that asserted the interrupted-hibernation path
+// restores LastVerified. That assertion described data loss: quiescence
+// publishes no manifest, so LastVerified is the *previous* cycle's snapshot and
+// restoring it renames an older database over the intact live volume, destroying
+// every change since the last hibernation.
+func TestCoordinatorRecoversInterruptedQuiescenceWithoutRestoringOlderSnapshot(t *testing.T) {
+	for _, interrupted := range []struct {
+		name  string
+		state State
+	}{
+		{name: "quiescing", state: StateQuiescing},
+		{name: "snapshotting", state: StateSnapshot},
+	} {
+		t.Run(interrupted.name, func(t *testing.T) {
+			// A realistic history: several cycles have already published
+			// snapshots, so LastVerified has an older generation to offer.
+			controller, err := NewPersistent(&testStateStore{record: StateRecord{State: StateActive, Generation: 5}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			fence, err := controller.BeginHibernate(5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if interrupted.state == StateSnapshot {
+				if err := controller.BeginSnapshot(fence); err != nil {
+					t.Fatal(err)
+				}
+			}
+			driver := &coordinatorDriver{}
+			// The newest published manifest belongs to the PREVIOUS cycle.
+			snapshots := &coordinatorSnapshots{
+				manifest: Manifest{Generation: fence - 1, Backend: "sqlite", SchemaVersion: 1},
+				verified: map[uint64]Manifest{fence - 1: {Generation: fence - 1, Backend: "sqlite", SchemaVersion: 1}},
+			}
+			coordinator, err := newTestCoordinator(controller, driver, snapshots)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := coordinator.Recover(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			state, generation := controller.Snapshot()
+			if state != StateActive || generation != fence {
+				t.Fatalf("state=%s generation=%d, want active at the recovery fence", state, generation)
+			}
+			if len(snapshots.restored) != 0 {
+				t.Fatalf("restored generations=%v, want the live volume left untouched", snapshots.restored)
+			}
+			for _, call := range snapshots.calls {
+				if call == "restore" {
+					t.Fatalf("snapshot calls=%v, want no restore over live data", snapshots.calls)
+				}
+			}
+			if len(driver.calls) != 5 || driver.calls[1] != "start-persistence" {
+				t.Fatalf("driver=%v, want the stack restarted from the live volume", driver.calls)
+			}
+		})
+	}
+}
+
+// A crash during the very first hibernation leaves no snapshot at all. The
+// intact volume is the only copy of the data, so recovery must start from it
+// rather than declare the deployment unrecoverable.
+func TestCoordinatorRecoversFirstInterruptedHibernateWithoutAnySnapshot(t *testing.T) {
 	controller := New(StateActive)
-	fence, err := controller.BeginHibernate(0)
-	if err != nil {
+	if _, err := controller.BeginHibernate(0); err != nil {
 		t.Fatal(err)
 	}
 	driver := &coordinatorDriver{}
-	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: fence, Backend: "sqlite", SchemaVersion: 1}}
+	snapshots := &coordinatorSnapshots{lastVerified: ErrNoVerifiedSnapshot, verified: map[uint64]Manifest{}}
 	coordinator, err := newTestCoordinator(controller, driver, snapshots)
 	if err != nil {
 		t.Fatal(err)
@@ -268,11 +382,160 @@ func TestCoordinatorRecoversInterruptedHibernateFromVerifiedSnapshot(t *testing.
 	if err := coordinator.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	state, generation := controller.Snapshot()
-	if state != StateActive || generation != fence {
-		t.Fatalf("state=%s generation=%d", state, generation)
+	if state, _ := controller.Snapshot(); state != StateActive {
+		t.Fatalf("state=%s, want active without any snapshot", state)
 	}
-	if len(driver.calls) != 5 || len(snapshots.calls) != 2 || snapshots.calls[0] != "last-verified" || snapshots.calls[1] != "restore" {
-		t.Fatalf("driver=%v snapshots=%v", driver.calls, snapshots.calls)
+}
+
+// STOPPING is the one interrupted state whose own snapshot is already published
+// and verified, and the deployment profile may already have released the active
+// volume, so that exact generation is the correct restore source.
+func TestCoordinatorRecoversInterruptedStopFromThisCycleSnapshot(t *testing.T) {
+	controller, err := NewPersistent(&testStateStore{record: StateRecord{State: StateActive, Generation: 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := controller.BeginHibernate(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []func(uint64) error{controller.BeginSnapshot, controller.BeginStop} {
+		if err := step(fence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{verified: map[uint64]Manifest{
+		fence - 1: {Generation: fence - 1, Backend: "sqlite", SchemaVersion: 1},
+		fence:     {Generation: fence, Backend: "sqlite", SchemaVersion: 1},
+	}}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots.restored) != 1 || snapshots.restored[0] != fence {
+		t.Fatalf("restored=%v, want only this cycle's generation %d", snapshots.restored, fence)
+	}
+}
+
+// A crash in STOPPING whose manifest cannot be found must not silently fall back
+// to an older generation over the volume.
+func TestCoordinatorInterruptedStopWithoutItsOwnSnapshotUsesLiveVolume(t *testing.T) {
+	controller, err := NewPersistent(&testStateStore{record: StateRecord{State: StateActive, Generation: 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := controller.BeginHibernate(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []func(uint64) error{controller.BeginSnapshot, controller.BeginStop} {
+		if err := step(fence); err != nil {
+			t.Fatal(err)
+		}
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{verified: map[uint64]Manifest{fence - 1: {Generation: fence - 1, Backend: "sqlite", SchemaVersion: 1}}}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots.restored) != 0 {
+		t.Fatalf("restored=%v, want no older generation written over the volume", snapshots.restored)
+	}
+}
+
+// specs/scale-to-zero.md:139 requires restore failure to select older compatible
+// known-good generations in order. Only the interrupted-hibernation branch
+// consulted LastVerified before, so a corrupt newest artifact failed the wake.
+func TestWakeFallsBackToOlderKnownGoodGenerationOnRestoreFailure(t *testing.T) {
+	controller := New(StateHibernated)
+	for range 3 {
+		fence, err := controller.BeginWake()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := controller.Activate(fence); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := controller.BeginHibernate(fence); err != nil {
+			t.Fatal(err)
+		}
+		for _, step := range []func(uint64) error{controller.BeginSnapshot, controller.BeginStop, controller.CompleteHibernate} {
+			if err := step(fence + 1); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	fence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{
+		manifest:     Manifest{Generation: fence - 1, Backend: "sqlite", SchemaVersion: 1},
+		verified:     map[uint64]Manifest{2: {Generation: 2, Backend: "sqlite", SchemaVersion: 1}, fence - 1: {Generation: fence - 1, Backend: "sqlite", SchemaVersion: 1}},
+		restoreFails: map[uint64]bool{fence - 1: true},
+	}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.WakeAt(context.Background(), fence); err != nil {
+		t.Fatalf("wake=%v, want fallback to an older known-good generation", err)
+	}
+	if len(snapshots.restored) != 1 || snapshots.restored[0] != 2 {
+		t.Fatalf("restored=%v, want the older known-good generation 2", snapshots.restored)
+	}
+}
+
+// specs/scale-to-zero.md lists "no scheduled deadline falls within the wake
+// safety window" as an idle-eligibility precondition. Hibernate consulted the
+// deadline nowhere, so it would stop the stack seconds before a scheduled
+// message was due.
+func TestHibernateRefusesInsideTheWakeSafetyWindow(t *testing.T) {
+	controller := New(StateActive)
+	if err := controller.SetWakeDeadline(0, time.Now().Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Hibernate(context.Background(), 0); !errors.Is(err, ErrWakeDeadlineWithinSafetyWindow) {
+		t.Fatalf("hibernate error=%v, want the scheduled deadline to block hibernation", err)
+	}
+	if state, generation := controller.Snapshot(); state != StateActive || generation != 0 {
+		t.Fatalf("state=%s generation=%d, want the serving stack untouched", state, generation)
+	}
+	if len(driver.calls) != 0 || len(snapshots.calls) != 0 {
+		t.Fatalf("driver=%v snapshots=%v, want no hibernation work", driver.calls, snapshots.calls)
+	}
+}
+
+func TestHibernateProceedsWhenTheScheduledDeadlineIsOutsideTheSafetyWindow(t *testing.T) {
+	controller := New(StateActive)
+	if err := controller.SetWakeDeadline(0, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	driver := &coordinatorDriver{}
+	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
+	coordinator, err := newTestCoordinator(controller, driver, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Hibernate(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	if state, _ := controller.Snapshot(); state != StateHibernated {
+		t.Fatalf("state=%s, want hibernated", state)
 	}
 }

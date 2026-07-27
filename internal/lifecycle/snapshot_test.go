@@ -45,17 +45,19 @@ func (s *memorySnapshotStore) Delete(_ context.Context, key string) error {
 	return nil
 }
 
-func (s *memorySnapshotStore) List(_ context.Context, prefix string) ([]blob.Object, error) {
-	objects := make([]blob.Object, 0)
+func (s *memorySnapshotStore) Walk(_ context.Context, prefix string, visit func(blob.Object) error) error {
 	for key, body := range s.objects {
-		if strings.HasPrefix(key, prefix) {
-			objects = append(objects, blob.Object{Key: key, Size: int64(len(body))})
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if err := visit(blob.Object{Key: key, Size: int64(len(body))}); err != nil {
+			return err
 		}
 	}
-	return objects, nil
+	return nil
 }
 
-var _ blob.ListStore = (*memorySnapshotStore)(nil)
+var _ blob.WalkStore = (*memorySnapshotStore)(nil)
 
 func TestEncryptedSnapshotRoundTrip(t *testing.T) {
 	root := t.TempDir()
@@ -344,8 +346,170 @@ func TestSnapshotRejectsInconsistentManifestMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest.CiphertextBytes++
-	manifest.Signature = manager.sign(manifest)
+	if manifest.Signature, err = manager.signManifest(manifest); err != nil {
+		t.Fatal(err)
+	}
 	if err := manager.verifyManifest(manifest); err == nil {
 		t.Fatal("inconsistent snapshot size metadata was accepted")
 	}
+}
+
+// The object store is the only durable snapshot target for a scale-to-zero
+// deployment, because the filesystem root disappears with the volume. Both
+// snapshotter constructors required an absolute Manager.Root, which
+// NewObjectSnapshotManager never sets, so -snapshot-store=s3 could not start in
+// either snapshot mode.
+func TestObjectSnapshotManagerConfiguresBothSnapshotters(t *testing.T) {
+	store := &memorySnapshotStore{objects: make(map[string][]byte)}
+	manager, err := NewObjectSnapshotManager(store, bytes.Repeat([]byte{5}, 32), bytes.Repeat([]byte{6}, 32), "object-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := Manifest{Backend: "sqlite", SchemaVersion: 1, ApplicationVersion: "test"}
+	if _, err := NewFileSnapshotter(manager, "/srv/state/database.sqlite", "/srv/state/database.sqlite", metadata); err != nil {
+		t.Fatalf("file snapshotter over an object store: %v", err)
+	}
+	if _, err := NewDirectorySnapshotter(manager, "/srv/state/dqlite", "/srv/state/dqlite", metadata, DirectorySnapshotSourceStopped); err != nil {
+		t.Fatalf("directory snapshotter over an object store: %v", err)
+	}
+}
+
+// Exactly one durable target may be configured, so the two storage shapes cannot
+// silently drift apart again.
+func TestSnapshotManagerRequiresExactlyOneDurableTarget(t *testing.T) {
+	keys := func(m *SnapshotManager) {
+		m.EncryptionKey, m.SigningKey, m.KeyID, m.MaxBytes = bytes.Repeat([]byte{7}, 32), bytes.Repeat([]byte{8}, 32), "key", 1<<20
+	}
+	both := SnapshotManager{Root: "/srv/snapshots", ObjectStore: &memorySnapshotStore{objects: map[string][]byte{}}}
+	keys(&both)
+	if err := both.Validate(); err == nil {
+		t.Fatal("a manager with both a root and an object store was accepted")
+	}
+	neither := SnapshotManager{}
+	keys(&neither)
+	if err := neither.Validate(); err == nil {
+		t.Fatal("a manager with no durable target was accepted")
+	}
+	relative := SnapshotManager{Root: "snapshots"}
+	keys(&relative)
+	if err := relative.Validate(); err == nil {
+		t.Fatal("a relative snapshot root was accepted")
+	}
+}
+
+// A directory snapshot over the object store has no local snapshot root to stage
+// its archive in; it must still be able to create and restore one.
+func TestDirectorySnapshotRoundTripOverObjectStore(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "dqlite")
+	if err := os.MkdirAll(filepath.Join(source, "nested"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("dqlite segment bytes\n")
+	if err := os.WriteFile(filepath.Join(source, "nested", "0000000001"), want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := &memorySnapshotStore{objects: make(map[string][]byte)}
+	manager, err := NewObjectSnapshotManager(store, bytes.Repeat([]byte{9}, 32), bytes.Repeat([]byte{10}, 32), "object-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(root, "restored")
+	snapshotter, err := NewDirectorySnapshotter(manager, source, output, Manifest{Backend: "dqlite", SchemaVersion: 3, ApplicationVersion: "test"}, DirectorySnapshotSourceStopped)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := snapshotter.Create(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshotter.Restore(context.Background(), manifest); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(output, "nested", "0000000001"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Fatalf("restored=%q want %q", got, want)
+	}
+}
+
+// specs/scale-to-zero.md requires restore to defend against unsupported schema
+// versions. A rollback to an older activator must refuse a newer snapshot before
+// any bytes reach the live volume, not after.
+func TestRestoreRefusesSnapshotFromANewerSchema(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "database.sqlite")
+	if err := os.WriteFile(sourcePath, []byte("rows"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := NewSnapshotManager(filepath.Join(root, "snapshots"), bytes.Repeat([]byte{11}, 32), bytes.Repeat([]byte{12}, 32), "test-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputPath := filepath.Join(root, "live.sqlite")
+	if err := os.WriteFile(outputPath, []byte("newer live rows"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	newer, err := NewFileSnapshotter(manager, sourcePath, outputPath, Manifest{Backend: "sqlite", SchemaVersion: 9, ApplicationVersion: "new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := newer.Create(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rolledBack, err := NewFileSnapshotter(manager, sourcePath, outputPath, Manifest{Backend: "sqlite", SchemaVersion: 4, ApplicationVersion: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rolledBack.Restore(context.Background(), manifest); err == nil {
+		t.Fatal("a snapshot from a newer schema version was restored over the live volume")
+	}
+	live, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(live) != "newer live rows" {
+		t.Fatalf("live volume=%q, want it untouched by the refused restore", live)
+	}
+}
+
+// docs/blob-lifecycle.md forbids treating an unavailable provider as empty, and
+// the same rule belongs here: a transient read failure on the newest manifest
+// must not be indistinguishable from corruption, because that silently selects
+// older data.
+func TestLastVerifiedSurfacesProviderFailuresInsteadOfSelectingOlderData(t *testing.T) {
+	store := &failingSnapshotStore{memorySnapshotStore: memorySnapshotStore{objects: make(map[string][]byte)}}
+	manager, err := NewObjectSnapshotManager(store, bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32), "object-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "database.sqlite")
+	for generation := uint64(1); generation <= 2; generation++ {
+		if err := os.WriteFile(sourcePath, []byte("generation "+string(rune('0'+generation))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := manager.Create(sourcePath, Manifest{Generation: generation, Backend: "sqlite", SchemaVersion: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.failKey = "manifests/00000000000000000002.json"
+	if _, err := manager.LastVerified(2); err == nil {
+		t.Fatal("an unreadable newest manifest silently selected an older generation")
+	}
+}
+
+type failingSnapshotStore struct {
+	memorySnapshotStore
+	failKey string
+}
+
+func (s *failingSnapshotStore) Open(ctx context.Context, key string) (blob.Object, io.ReadCloser, error) {
+	if s.failKey != "" && key == s.failKey {
+		return blob.Object{}, nil, errors.New("snapshot provider is throttling")
+	}
+	return s.memorySnapshotStore.Open(ctx, key)
 }
