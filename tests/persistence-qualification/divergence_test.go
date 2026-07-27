@@ -501,14 +501,22 @@ func expiredSocketModeConnectionIsNotRevived(t *testing.T, open opener) {
 	defer closeRepository()
 
 	appID := domain.AppID("A-revive-" + f.suffix)
-	connection := domain.SocketModeConnection{ID: "socket-revive-" + f.suffix, AppID: appID, ExpiresAt: time.Now().UTC().Add(80 * time.Millisecond)}
+	connection := domain.SocketModeConnection{ID: "socket-revive-" + f.suffix, AppID: appID, ExpiresAt: time.Now().UTC().Add(time.Minute)}
 	if err := f.repository.CreateSocketModeConnection(ctx, connection); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.repository.ConsumeSocketModeConnection(ctx, connection.ID); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(160 * time.Millisecond)
+	// Start the expiry window only after consumption. Under the race detector a
+	// contended SQLite operation can take longer than the former 80 ms ticket
+	// lifetime, which made the prerequisite consume correctly return NotFound
+	// before this contract reached the renewal behavior it exists to exercise.
+	expiresAt := time.Now().UTC().Add(2 * time.Second)
+	if err := f.repository.RenewSocketModeConnection(ctx, connection.ID, expiresAt); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(time.Until(expiresAt) + 100*time.Millisecond)
 	active, err := f.repository.CountSocketModeConnections(ctx, appID)
 	if err != nil || active != 0 {
 		t.Fatalf("active connections after expiry=%d err=%v, want 0", active, err)
