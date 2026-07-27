@@ -31,7 +31,10 @@ provider_project=someoldchat-shauth-provider
 primary_pid=
 witness_pid=
 
-GOWORK=off GOCACHE="$root/.cache/go-build" go build -trimpath -o "$work_dir/sameoldchat" ./cmd/server
+# `./cmd/server` resolved against the caller's working directory, so the script
+# only worked from the repository root even though $root exists precisely to make
+# it location-independent.
+GOWORK=off GOCACHE="$root/.cache/go-build" go build -C "$root" -trimpath -o "$work_dir/sameoldchat" ./cmd/server
 release_revision="sha256:$(openssl dgst -sha256 -r "$work_dir/sameoldchat" | awk '{print $1}')"
 
 ports=$(node - <<'NODE'
@@ -152,8 +155,15 @@ cleanup() {
 		fi
 	done
 	if test "$status" -ne 0; then
+		# Written as an explicit `if` rather than `test -f X && tail X`. The
+		# latter is safe only because POSIX suppresses `set -e` for a non-final
+		# member of an AND-OR list, which is exactly the kind of rule a reader
+		# has to look up before trusting that the teardown below still runs.
+		# Verified in sh, dash, and bash: both forms reach the teardown.
 		for log_file in "$work_dir/primary.log" "$work_dir/witness.log"; do
-			test -f "$log_file" && tail -n 120 "$log_file" >&2
+			if test -f "$log_file"; then
+				tail -n 120 "$log_file" >&2
+			fi
 		done
 		provider_compose logs --no-color --tail=120 shauth hydra postgres >&2 || true
 	fi

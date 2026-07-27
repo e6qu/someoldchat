@@ -2,13 +2,24 @@ name: CI
 
 on:
   pull_request:
+  # A commit can reach the default branch without a pull request (direct push,
+  # administrative merge, `gh pr merge --admin`). Gating pushes as well means no
+  # commit on `main` is unverified, and `publish-container.yml` calls this
+  # workflow so a container can never be built from an unverified commit.
+  push:
+    branches: [main]
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded pull-request runs are cancelled. Runs keyed to a commit are not:
+  # a publication depends on this workflow's result, and cancelling it would
+  # either block the release or, worse, let a later push retire the verification
+  # a half-finished publication relies on.
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pull-request' || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   go:
@@ -27,27 +38,42 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Set up Buf
-        uses: bufbuild/buf-setup-action@a47c93e0b1648d5651a065437926377d060baa99 # v1.50.0
-        with:
-          version: 1.71.0
-          github_token: ${{ github.token }}
-
+      # buf is no longer installed by a third-party action: `make proto-tools`
+      # builds the version pinned by BUF_VERSION in the Makefile, the same way the
+      # protoc plugins are built, so the local gate and this gate cannot select
+      # different lint and breaking-change rule sets.
       - name: Check formatting and generated files
-        run: make fmt-check workflow-check container-check dependency-check generated-check proto-lint
+        run: make fmt-check workflow-check container-check module-docs-check task-flags-check dependency-check generated-check proto-lint
 
       - name: Check contracts and SDK inventory
         run: make contract-check sdk-inventory-check
 
       - name: Ratchet compatibility ledger
         env:
-          BASE_REF: origin/${{ github.base_ref }}
+          # `github.base_ref` is empty for `push` and `workflow_call`; the first
+          # parent of the pushed commit is the ledger the ratchet must compare
+          # against there.
+          BASE_REF: ${{ github.base_ref != '' && format('origin/{0}', github.base_ref) || format('{0}^', github.sha) }}
         run: |
           if git cat-file -e "$BASE_REF:specs/compatibility.yaml" 2>/dev/null; then
             make contract-ratchet BASE_REF="$BASE_REF"
           else
             echo "Compatibility ratchet bootstrap: $BASE_REF has no compatibility ledger."
             make contract-check
+          fi
+
+      # The gRPC wire contract needs the same ratchet as the Slack HTTP ledger:
+      # the distributed profile runs http and chat at independent replica counts,
+      # so a rollout always serves mixed versions of this contract.
+      - name: Ratchet protobuf wire compatibility
+        env:
+          BASE_REF: ${{ github.base_ref != '' && format('origin/{0}', github.base_ref) || format('{0}^', github.sha) }}
+        run: |
+          if git cat-file -e "$BASE_REF:buf.yaml" 2>/dev/null; then
+            make proto-breaking BASE_REF="$BASE_REF"
+          else
+            echo "Protobuf breaking-change bootstrap: $BASE_REF has no buf configuration."
+            make proto-lint
           fi
 
       - name: Report compatibility progress
@@ -69,7 +95,10 @@ jobs:
         run: make test-race
 
       - name: Run static analysis
-        run: go vet ./...
+        run: make vet
+
+      - name: Scan for known vulnerabilities
+        run: make vuln-check
 
       - name: Build static binaries
         run: make build-static
@@ -104,6 +133,50 @@ jobs:
 
       - name: Validate Terraform
         run: terraform validate
+
+  # The WebSocket edge image and the activator Lambda were the only shipped
+  # deployment artifacts no workflow exercised, which is why an arm64-only build
+  # and three defects in activator.py all survived every gate.
+  scale-zero-artifacts:
+    name: Scale-to-zero deployment artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12.11'
+
+      - name: Test the activator Lambda
+        run: |
+          python3 -m compileall -q deploy/ecs-scale-zero/activator.py
+          python3 deploy/ecs-scale-zero/activator_test.py
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      - name: Build the WebSocket edge image for both published architectures
+        run: |
+          set -euo pipefail
+          for platform in linux/amd64 linux/arm64; do
+            arch="${platform#linux/}"
+            docker buildx build \
+              --platform "$platform" \
+              --file deploy/ecs-scale-zero/Dockerfile.websocket-edge \
+              --output "type=local,dest=${RUNNER_TEMP}/edge-${arch}" .
+          done
+
+      - name: Assert the edge binary matches the requested architecture
+        run: |
+          set -euo pipefail
+          expect_amd64="$(file -b "${RUNNER_TEMP}/edge-amd64/ecs-ws-activator")"
+          expect_arm64="$(file -b "${RUNNER_TEMP}/edge-arm64/ecs-ws-activator")"
+          echo "amd64: $expect_amd64"
+          echo "arm64: $expect_arm64"
+          case "$expect_amd64" in *x86-64*) ;; *) echo 'linux/amd64 build did not produce an x86-64 binary' >&2; exit 1 ;; esac
+          case "$expect_arm64" in *aarch64*) ;; *) echo 'linux/arm64 build did not produce an aarch64 binary' >&2; exit 1 ;; esac
 
   sdk:
     name: Official SDK qualification

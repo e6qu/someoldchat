@@ -5,7 +5,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -213,6 +215,13 @@ func validateRepository(root string, value inventory) error {
 			if !ok {
 				continue
 			}
+			// specs/dependency-policy.md requires a full commit SHA. It was
+			// enforced only as a side effect of the inventory comparison below,
+			// while parseActionUse contained a conditional whose two branches
+			// were identical, so the rule looked enforced and was not.
+			if !gitRevisionPattern.MatchString(revision) {
+				return fmt.Errorf("workflow %s:%d action %q is pinned to %q, not a full 40-character commit SHA", path, lineNumber+1, repository, revision)
+			}
 			item, exists := byID["action/"+repository]
 			if !exists {
 				return fmt.Errorf("workflow %s:%d action %q is absent from dependency inventory", path, lineNumber+1, repository)
@@ -222,10 +231,19 @@ func validateRepository(root string, value inventory) error {
 			}
 		}
 	}
-	if err := validateWorkflowPins(root, workflowFiles); err != nil {
+	if err := validateWorkflowPins(root, workflowFiles, byID); err != nil {
 		return err
 	}
-	if err := validateDockerfiles(root); err != nil {
+	if err := validateDockerfiles(root, byID); err != nil {
+		return err
+	}
+	if err := validateTerraformPins(root, byID); err != nil {
+		return err
+	}
+	if err := validateToolPins(root, byID); err != nil {
+		return err
+	}
+	if err := validateSourceCheckoutPins(root, byID); err != nil {
 		return err
 	}
 	return nil
@@ -372,44 +390,174 @@ func parseActionUse(line string) (repository, revision string, ok bool) {
 	}
 	repository = value[:separator]
 	revision = value[separator+1:]
-	if !gitRevisionPattern.MatchString(revision) {
-		return repository, revision, true
-	}
 	return repository, revision, true
 }
 
-func validateWorkflowPins(root string, paths []string) error {
-	contents := make([]string, 0, len(paths))
+// validateWorkflowPins rejects any version selection in a workflow that is not a
+// full exact version, and requires every workflow container image to carry a
+// digest that the inventory records.
+//
+// This used to assert that eleven exact strings appeared somewhere in the
+// concatenated workflow text, which enforced nothing that
+// specs/dependency-policy.md claims: adding `node-version: 24` in a new job
+// passed unchanged as long as `node-version: 24.7.0` still appeared elsewhere,
+// and a removed setup step was invisible because only the literal was checked.
+func validateWorkflowPins(root string, paths []string, byID map[string]dependency) error {
 	for _, path := range paths {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read workflow %q: %w", path, err)
 		}
-		contents = append(contents, string(body))
-	}
-	all := strings.Join(contents, "\n")
-	for _, pin := range []string{
-		"terraform_version: 1.13.5",
-		"node-version: 24.7.0",
-		"python-version: '3.12.11'",
-		"java-version: '17.0.15'",
-		"deno-version: 2.8.1",
-		"version: 1.71.0",
-		"dqlite-tools-v3=3.0.4~noble1",
-		"libdqlite-dev=1.18.3~noble1",
-		"libdqlite1.18=1.18.7~noble1",
-		"libdqlite1.18-dev=1.18.7~noble1",
-		"libuv1-dev=1.48.0-1.1build1",
-	} {
-		if !strings.Contains(all, pin) {
-			return fmt.Errorf("workflow pin %q is absent", pin)
+		lines := strings.Split(string(body), "\n")
+		for index, line := range lines {
+			if err := validateWorkflowVersionKey(path, index+1, line); err != nil {
+				return err
+			}
+			if err := validateWorkflowImage(path, index+1, line, byID); err != nil {
+				return err
+			}
+		}
+		if err := validateAptPins(path, lines); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func validateDockerfiles(root string) error {
-	for _, path := range []string{root + "/Dockerfile", root + "/deploy/ecs-scale-zero/Dockerfile.websocket-edge"} {
+var (
+	workflowVersionKeyPattern = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?([A-Za-z0-9_.-]*[Vv]ersion)[\t ]*:[\t ]*(.+?)[\t ]*$`)
+	workflowImageKeyPattern   = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?image[\t ]*:[\t ]*(.+?)[\t ]*$`)
+	exactVersionPattern       = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
+	aptPackagePattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
+)
+
+// versionKeysNamingAFile lists keys whose value is a path, not a version.
+var versionKeysNamingAFile = map[string]struct{}{"go-version-file": {}}
+
+func validateWorkflowVersionKey(path string, lineNumber int, line string) error {
+	match := workflowVersionKeyPattern.FindStringSubmatch(line)
+	if match == nil {
+		return nil
+	}
+	key := match[1]
+	if _, ok := versionKeysNamingAFile[key]; ok {
+		return nil
+	}
+	value := unquoteYAMLScalar(match[2])
+	// A templated value is resolved at run time and cannot be checked here; a
+	// bare "1" style selection is exactly what the policy forbids.
+	if value == "" || strings.Contains(value, "${{") {
+		return nil
+	}
+	if !exactVersionPattern.MatchString(strings.TrimPrefix(value, "v")) {
+		return fmt.Errorf("workflow %s:%d selects %s %q, which is not an exact major.minor.patch version", path, lineNumber, key, value)
+	}
+	return nil
+}
+
+func validateWorkflowImage(path string, lineNumber int, line string, byID map[string]dependency) error {
+	match := workflowImageKeyPattern.FindStringSubmatch(line)
+	if match == nil {
+		return nil
+	}
+	reference := unquoteYAMLScalar(match[1])
+	if reference == "" || strings.Contains(reference, "${{") {
+		return nil
+	}
+	if !hasImageDigest(reference) {
+		return fmt.Errorf("workflow %s:%d container image %q is not pinned by digest", path, lineNumber, reference)
+	}
+	return requireInventoriedImage(fmt.Sprintf("workflow %s:%d", path, lineNumber), reference, byID)
+}
+
+// validateAptPins requires every package in an apt-get install invocation to
+// carry an explicit "=version". The literal allow-list it replaces could only
+// notice a removed pin, never an added unpinned package.
+func validateAptPins(path string, lines []string) error {
+	for index := 0; index < len(lines); index++ {
+		if !strings.Contains(lines[index], "apt-get install") {
+			continue
+		}
+		command := lines[index]
+		for strings.HasSuffix(strings.TrimRight(command, " \t"), "\\") && index+1 < len(lines) {
+			command = strings.TrimSuffix(strings.TrimRight(command, " \t"), "\\") + " " + lines[index+1]
+			index++
+		}
+		fields := strings.Fields(command)
+		for position, field := range fields {
+			if !aptPackagePattern.MatchString(field) {
+				continue
+			}
+			// Skip the command words themselves and anything before "install".
+			if position == 0 || field == "install" || field == "apt-get" || field == "sudo" {
+				continue
+			}
+			installed := false
+			for _, earlier := range fields[:position] {
+				if earlier == "install" {
+					installed = true
+				}
+			}
+			if installed {
+				return fmt.Errorf("workflow %s installs package %q without an explicit =version", path, field)
+			}
+		}
+	}
+	return nil
+}
+
+func unquoteYAMLScalar(value string) string {
+	value = strings.TrimSpace(value)
+	if comment := strings.Index(value, " #"); comment >= 0 {
+		value = strings.TrimSpace(value[:comment])
+	}
+	if len(value) >= 2 {
+		first, last := value[0], value[len(value)-1]
+		if (first == '\'' && last == '\'') || (first == '"' && last == '"') {
+			value = value[1 : len(value)-1]
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+// dockerfilePaths walks the repository instead of naming two files, so a new
+// Dockerfile cannot escape digest pinning by simply not being on a hardcoded
+// list.
+func dockerfilePaths(root string) ([]string, error) {
+	skipped := map[string]struct{}{".git": {}, ".cache": {}, ".terraform": {}, ".qualification": {}, "node_modules": {}, "bin": {}, "dist": {}}
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if _, ok := skipped[entry.Name()]; ok {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		name := entry.Name()
+		if name == "Dockerfile" || strings.HasPrefix(name, "Dockerfile.") || strings.HasSuffix(name, ".Dockerfile") {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("walk for Dockerfiles: %w", err)
+	}
+	slices.Sort(paths)
+	if len(paths) == 0 {
+		return nil, errors.New("no Dockerfile found; the digest-pinning check would silently cover nothing")
+	}
+	return paths, nil
+}
+
+func validateDockerfiles(root string, byID map[string]dependency) error {
+	paths, err := dockerfilePaths(root)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
 		body, err := os.ReadFile(path)
 		if err != nil {
 			return fmt.Errorf("read Dockerfile %q: %w", path, err)
@@ -417,8 +565,12 @@ func validateDockerfiles(root string) error {
 		for lineNumber, line := range strings.Split(string(body), "\n") {
 			trimmed := strings.TrimSpace(line)
 			if strings.HasPrefix(trimmed, "# syntax=") {
-				if !hasImageDigest(strings.TrimPrefix(trimmed, "# syntax=")) {
+				reference := strings.TrimPrefix(trimmed, "# syntax=")
+				if !hasImageDigest(reference) {
 					return fmt.Errorf("Dockerfile %s:%d syntax image is not pinned by digest", path, lineNumber+1)
+				}
+				if err := requireInventoriedImage(fmt.Sprintf("Dockerfile %s:%d", path, lineNumber+1), reference, byID); err != nil {
+					return err
 				}
 				continue
 			}
@@ -436,7 +588,202 @@ func validateDockerfiles(root string) error {
 			if imageIndex == len(fields) || !hasImageDigest(fields[imageIndex]) {
 				return fmt.Errorf("Dockerfile %s:%d base image is not pinned by digest", path, lineNumber+1)
 			}
+			if err := requireInventoriedImage(fmt.Sprintf("Dockerfile %s:%d", path, lineNumber+1), fields[imageIndex], byID); err != nil {
+				return err
+			}
 		}
+	}
+	return nil
+}
+
+// requireInventoriedImage ties a digest-pinned reference to an inventory entry,
+// so the 24-hour publication quarantine finally applies to the images the
+// product actually ships and builds with. Asserting only that "a digest is
+// present" let a base-image bump published minutes ago pass untouched.
+func requireInventoriedImage(position, reference string, byID map[string]dependency) error {
+	name, tag, digest := splitImageReference(reference)
+	name = normalizeImageName(name)
+	item, ok := byID["container/"+name]
+	if !ok {
+		return fmt.Errorf("%s container image %q is absent from the dependency inventory", position, name)
+	}
+	if item.Kind != "container-image" {
+		return fmt.Errorf("%s inventory entry for %q has kind %q, want container-image", position, name, item.Kind)
+	}
+	if item.Revision != digest || item.Checksum != digest {
+		return fmt.Errorf("%s container image %q uses digest %q, which the inventory does not record", position, name, digest)
+	}
+	if tag == "" {
+		return fmt.Errorf("%s container image %q carries no tag, so a digest bump cannot be reviewed against a version", position, name)
+	}
+	if tag != item.Version {
+		return fmt.Errorf("%s container image %q is tagged %q while the inventory records version %q", position, name, tag, item.Version)
+	}
+	return nil
+}
+
+// normalizeImageName expands a short Docker Hub reference to its canonical form,
+// so `postgres` and `docker.io/library/postgres` resolve to one inventory entry.
+func normalizeImageName(name string) string {
+	first, _, hasSlash := strings.Cut(name, "/")
+	if hasSlash && (strings.ContainsAny(first, ".:") || first == "localhost") {
+		return name
+	}
+	if !hasSlash {
+		return "docker.io/library/" + name
+	}
+	return "docker.io/" + name
+}
+
+// splitImageReference separates name, tag, and digest. A digest may be present
+// with or without a tag; a registry host may carry a port, so the tag separator
+// is searched after the last path element begins.
+func splitImageReference(reference string) (name, tag, digest string) {
+	if at := strings.LastIndex(reference, "@"); at >= 0 {
+		digest = reference[at+1:]
+		reference = reference[:at]
+	}
+	lastSlash := strings.LastIndex(reference, "/")
+	if colon := strings.LastIndex(reference, ":"); colon > lastSlash {
+		tag = reference[colon+1:]
+		reference = reference[:colon]
+	}
+	return reference, tag, digest
+}
+
+var (
+	terraformRequiredVersionPattern = regexp.MustCompile(`required_version[\t ]*=[\t ]*"([^"]*)"`)
+	terraformProviderPattern        = regexp.MustCompile(`source[\t ]*=[\t ]*"([^"]*)"[,\s]*version[\t ]*=[\t ]*"([^"]*)"`)
+	terraformProviderBlockPattern   = regexp.MustCompile(`(?s)source[\t ]*=[\t ]*"([^"]*)"\s*\n\s*version[\t ]*=[\t ]*"([^"]*)"`)
+)
+
+// validateTerraformPins enforces specs/dependency-policy.md on *.tf: an exact
+// Terraform version and an exact provider version, each recorded in the
+// inventory. Nothing checked these before, so every constraint was a floating
+// range and `terraform init` in CI could silently take any newer provider — with
+// no quarantine and no inventory entry.
+func validateTerraformPins(root string, byID map[string]dependency) error {
+	var paths []string
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", ".cache", ".terraform", ".qualification", "node_modules":
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if strings.HasSuffix(entry.Name(), ".tf") {
+			paths = append(paths, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("walk for Terraform configuration: %w", err)
+	}
+	slices.Sort(paths)
+	terraform, ok := byID["tool/terraform"]
+	if !ok {
+		return errors.New("inventory has no tool/terraform entry, so the Terraform version pin cannot be verified")
+	}
+	for _, path := range paths {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("read Terraform configuration %q: %w", path, err)
+		}
+		text := string(body)
+		for _, match := range terraformRequiredVersionPattern.FindAllStringSubmatch(text, -1) {
+			if match[1] != terraform.Version {
+				return fmt.Errorf("%s pins required_version = %q; the inventory records Terraform %s and specs/dependency-policy.md requires an exact version", path, match[1], terraform.Version)
+			}
+		}
+		matches := terraformProviderPattern.FindAllStringSubmatch(text, -1)
+		matches = append(matches, terraformProviderBlockPattern.FindAllStringSubmatch(text, -1)...)
+		for _, match := range matches {
+			source, version := match[1], match[2]
+			if !exactVersionPattern.MatchString(version) {
+				return fmt.Errorf("%s pins provider %q to %q, which is not an exact major.minor.patch version", path, source, version)
+			}
+			item, exists := byID["terraform-provider/"+source]
+			if !exists {
+				return fmt.Errorf("%s provider %q is absent from the dependency inventory", path, source)
+			}
+			if item.Kind != "terraform-provider" || item.Version != version {
+				return fmt.Errorf("inventory entry for provider %q does not match the %q version %q", source, path, version)
+			}
+		}
+	}
+	return nil
+}
+
+var makefileToolVersionPattern = regexp.MustCompile(`(?m)^([A-Z0-9_]+)_VERSION[\t ]*:?=[\t ]*([0-9][0-9A-Za-z.+-]*)[\t ]*$`)
+
+// makefileToolInventoryIDs maps a Makefile version variable to the inventory
+// entry that must agree with it, so a pinned generator cannot drift from its
+// recorded integrity evidence.
+var makefileToolInventoryIDs = map[string]string{
+	"PROTOC_GEN_GO_GRPC": "tool/google.golang.org/grpc/cmd/protoc-gen-go-grpc",
+	"GOVULNCHECK":        "tool/golang.org/x/vuln",
+}
+
+func validateToolPins(root string, byID map[string]dependency) error {
+	body, err := os.ReadFile(root + "/Makefile")
+	if err != nil {
+		return fmt.Errorf("read Makefile: %w", err)
+	}
+	found := make(map[string]struct{}, len(makefileToolInventoryIDs))
+	for _, match := range makefileToolVersionPattern.FindAllStringSubmatch(string(body), -1) {
+		identifier, ok := makefileToolInventoryIDs[match[1]]
+		if !ok {
+			continue
+		}
+		found[match[1]] = struct{}{}
+		item, exists := byID[identifier]
+		if !exists {
+			return fmt.Errorf("Makefile pins %s_VERSION but %s is absent from the dependency inventory", match[1], identifier)
+		}
+		if item.Version != strings.TrimPrefix(match[2], "v") {
+			return fmt.Errorf("Makefile pins %s_VERSION = %s while the inventory records %s", match[1], match[2], item.Version)
+		}
+	}
+	for variable, identifier := range makefileToolInventoryIDs {
+		if _, ok := found[variable]; !ok {
+			return fmt.Errorf("Makefile no longer defines %s_VERSION, so the pin for %s is unenforced", variable, identifier)
+		}
+	}
+	return nil
+}
+
+var (
+	shauthWorkflowRefPattern = regexp.MustCompile(`(?m)^[\t ]*ref:[\t ]*([0-9a-f]{40})[\t ]*$`)
+	shauthScriptPinPattern   = regexp.MustCompile(`(?m)^expected_shauth_commit=([0-9a-f]{40})[\t ]*$`)
+)
+
+// validateSourceCheckoutPins covers the third-party repository CI checks out and
+// then executes. parseActionUse inspects only `uses:` values, so the
+// repository/ref inputs of a checkout step were never compared with anything.
+func validateSourceCheckoutPins(root string, byID map[string]dependency) error {
+	item, ok := byID["source/e6qu/shauth"]
+	if !ok {
+		return errors.New("inventory has no source/e6qu/shauth entry, yet CI checks out and executes that repository")
+	}
+	workflow, err := os.ReadFile(root + "/.github/workflows/ci.yml")
+	if err != nil {
+		return fmt.Errorf("read integration workflow: %w", err)
+	}
+	refs := shauthWorkflowRefPattern.FindAllStringSubmatch(string(workflow), -1)
+	if len(refs) != 1 || refs[0][1] != item.Revision {
+		return fmt.Errorf("ci.yml must check out exactly the inventoried Shauth revision %s", item.Revision)
+	}
+	script, err := os.ReadFile(root + "/scripts/test-shauth-sso.sh")
+	if err != nil {
+		return fmt.Errorf("read Shauth qualification script: %w", err)
+	}
+	pins := shauthScriptPinPattern.FindAllStringSubmatch(string(script), -1)
+	if len(pins) != 1 || pins[0][1] != item.Revision {
+		return fmt.Errorf("scripts/test-shauth-sso.sh must assert the inventoried Shauth revision %s", item.Revision)
 	}
 	return nil
 }

@@ -85,22 +85,69 @@ Every dependency-changing pull request MUST run:
 
 CI MUST fail closed when age or integrity evidence is unavailable.
 
+Implementation status of these controls, so the policy is not read as a
+description of enforcement that does not exist:
+
+| Control | Where it runs |
+|---|---|
+| 1. Age verification | `make dependency-check` and `make workflow-check` |
+| 2. Integrity verification | `make dependency-check`, `go mod verify`, and the digest, commit-SHA, and lock-hash comparisons in `tests/dependency-admission` |
+| 3. `govulncheck` over Go source | `make vuln-check`, run by the pull-request workflow. Built-binary scanning is not wired up. |
+| 4. OSV/advisory and container/native-library scanning | **not implemented** |
+| 5. License review | inventory `license` fields are required and reviewed by hand; no automated gate |
+| 6. Provenance verification | produced on publication by `publish-container.yml`; not verified on a pull request |
+| 7. SBOM generation | produced on publication by `publish-container.yml`; not produced on a pull request |
+| 8. Full test suite | `.github/workflows/ci.yml` |
+
 ## Automation
 
 The committed dependency admission inventory is the machine-readable record of
 the selected direct inputs and their evidence. Every module declared in
 `go.mod`, including indirect requirements, must also have archive and `go.mod`
 checksums in `go.sum`; this is an integrity check, not a substitute for
-provenance evidence. `make dependency-check` MUST run `go list -mod=readonly`
+provenance evidence.
+
+The inventory covers Go modules, npm packages, CI actions, container images,
+Terraform providers, pinned tools (`terraform`, `buf`, `protoc-gen-go-grpc`,
+`govulncheck`), and the third-party source checkout the Shauth qualification
+executes. Indirect Go modules are covered by `go.sum` checksums and `go mod
+verify` only; the inventory records the direct inputs, so a bump of an indirect
+module — for example the `golang.org/x/text` bump that cleared GO-2026-5970 — is
+integrity-checked but not quarantine-checked.
+
+Three gaps in that coverage, stated so the policy is not read as enforcement
+that does not exist:
+
+- Operating-system packages installed by CI (`dqlite-tools-v3`, `libdqlite*`,
+  `libuv1-dev`) and the CI language runtimes (Node.js, CPython, Temurin, Deno)
+  are enforced structurally — every package must carry an explicit `=version`
+  and every runtime version key must be an exact major.minor.patch value — but
+  have no inventory entry, so the 24-hour quarantine does not apply to them and
+  no publication timestamp or checksum is recorded for them.
+- `buf` has an inventory entry and an exact `BUF_VERSION` pin in the `Makefile`,
+  but the two are not compared: the Makefile-to-inventory comparison covers only
+  `PROTOC_GEN_GO_GRPC_VERSION` and `GOVULNCHECK_VERSION`. `terraform` is
+  compared through its `*.tf` `required_version`, not through the `Makefile`.
+- Indirect Go modules, as above.
+
+`make dependency-check` MUST run `go list -mod=readonly`
 and `go mod verify` before its repository checks. It MUST run in local checks
 and pull-request continuous integration. It fails when an entry
 is incomplete, uses a mutable revision or checksum, lacks HTTPS evidence, uses
 a prerelease version, has a future publication time, or has not passed the
-publication quarantine. Pin syntax for workflow actions and container images
-is checked separately by `make workflow-check` and `make container-check`.
-CI language runtimes and Terraform MUST use exact versions; `workflow-check`
-rejects bare major or minor selections and requires an explicit Terraform
-version.
+publication quarantine.
+
+`make workflow-check` runs the same verifier for its pin-syntax rules. It rejects
+a CI action that is not pinned to a full 40-character commit SHA, a workflow
+version key whose value is not an exact major.minor.patch version, an
+`apt-get install` package without an explicit `=version`, a workflow container
+image without a digest, a `*.tf` `required_version` or provider `version` that is
+not exact, and a pinned generator in the `Makefile` whose version disagrees with
+the inventory. Every digest-pinned container image and every provider version
+must additionally match an inventory entry, so a base-image or provider bump is
+subject to the publication quarantine rather than merely being "a digest".
+`make container-check` additionally validates the publication workflow's own
+shape and its retention behaviour.
 
 A daily job SHOULD propose the newest eligible version after its quarantine has
 elapsed. Updates MUST be narrow, reviewable, and never automatically merged.
