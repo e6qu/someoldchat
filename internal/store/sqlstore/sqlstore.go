@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, c
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS socket_mode_admission (app_id TEXT PRIMARY KEY, ticket INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_responses (app_id TEXT NOT NULL, envelope_id TEXT NOT NULL, payload TEXT NOT NULL, received_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (app_id, envelope_id));
 CREATE TABLE IF NOT EXISTS conversation_prefs (
@@ -242,7 +243,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 81
+const schemaVersion = 82
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -657,6 +658,38 @@ func sqliteBusy(err error) bool {
 	// so the message check stays as a fallback rather than the only signal.
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
+}
+
+// underContention runs a write that may lose a race for the engine's write lock.
+//
+// SQLite absorbs contention inside the driver through busy_timeout, so a
+// concurrent writer waits. The replicated profile has no equivalent: it reports
+// the contention to the caller, so a write that would simply have waited on one
+// profile fails on another — the same operation, a different answer per
+// deployment. Retrying with a short backoff gives every profile the behaviour
+// SQLite already had.
+//
+// The bound is deliberate. Contention is transient by definition, so an
+// operation that keeps losing is reporting something other than contention and
+// must surface rather than spin.
+func underContention(ctx context.Context, attempt func() error) error {
+	const attempts = 8
+	delay := time.Millisecond
+	var err error
+	for try := 0; try < attempts; try++ {
+		if err = attempt(); err == nil || !sqliteBusy(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		if delay < 64*time.Millisecond {
+			delay *= 2
+		}
+	}
+	return err
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -1594,6 +1627,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		// from 77 rewrites the messages table once, not twice.
 		if err := registerTimestampBackfills(ctx, db, []string{messagesCreatedAtBackfill}); err != nil {
 			return err
+		}
+	}
+	if version < 82 {
+		// One row per app to serialize Socket Mode admission. The previous
+		// serializing statement wrote every live ticket of the app, which takes
+		// the single write lock on the SQLite family but takes a row lock per
+		// ticket on PostgreSQL — and concurrent admissions visited those rows in
+		// different orders, so they deadlocked. A single row per app is ordered
+		// by construction.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_admission (app_id TEXT PRIMARY KEY, ticket INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			if !errors.Is(classify(err), store.ErrAlreadyExists) {
+				return fmt.Errorf("create socket mode admission: %w", err)
+			}
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -4054,8 +4100,15 @@ func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTM
 }
 
 func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.SocketModeConnection) error {
+	return underContention(ctx, func() error { return s.createSocketModeConnectionOnce(ctx, value) })
+}
+
+func (s *Store) createSocketModeConnectionOnce(ctx context.Context, value domain.SocketModeConnection) error {
 	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
 		return errors.New("invalid Socket Mode connection")
+	}
+	if err := s.ensureSocketModeAdmissionRow(ctx, value.AppID); err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -4065,7 +4118,7 @@ func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.Soc
 	// Same shape as ConsumeSocketModeConnection: take the admission lock before
 	// reading the count, so the count cannot be stale by the time it is acted on.
 	now := s.now().UTC()
-	if _, err := tx.ExecContext(ctx, socketModeAdmissionLockStatement, value.AppID, now.UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, socketModeAdmissionLockStatement, value.AppID); err != nil {
 		return err
 	}
 	var active int
@@ -4086,28 +4139,48 @@ func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.Soc
 // active-connection count is read.
 //
 // Counting and then updating in a transaction whose first statement is a READ is
-// check-then-act: on SQLite and dqlite the transaction begins deferred, so every
-// concurrent dialler takes its read snapshot before any of them writes, every one
-// of them sees the same count, and every one of them is admitted. Measured, 64
-// concurrent diallers against a limit of 10 admitted 11-15. Issuing a write
-// first takes the engine's write lock before anything is read — the RESERVED
-// lock on the SQLite family, row locks on every live ticket of that app on
-// PostgreSQL — so the count each caller reads already includes every admission
-// that committed before it.
+// check-then-act: the transaction begins deferred, so every concurrent dialler
+// takes its read snapshot before any of them writes, every one of them sees the
+// same count, and every one of them is admitted. Measured, 64 concurrent
+// diallers against a limit of 10 admitted 11-15. Writing first takes the
+// engine's write lock before anything is read, so the count each caller reads
+// already includes every admission that committed before it.
 //
-// SET app_id = app_id is a deliberate no-op write: the row's value is unchanged,
-// and the statement exists only for the lock it takes. The predicate is scoped to
-// the app's unexpired tickets so the write is bounded, and every competing
-// admission for that app necessarily matches at least the ticket it is trying to
-// consume, so no two admissions for one app can miss each other.
-const socketModeAdmissionLockStatement = `UPDATE socket_mode_connections SET app_id = app_id WHERE app_id = ? AND expires_at > ?`
+// The write must touch exactly ONE row. An earlier version wrote every live
+// ticket of the app, which is a single lock on the SQLite family but a row lock
+// per ticket on PostgreSQL — concurrent admissions acquired those rows in
+// different orders and deadlocked, and on the replicated profile the breadth of
+// the write showed up as lock contention. One row per app is ordered by
+// construction, so admissions queue instead of colliding.
+const socketModeAdmissionLockStatement = `UPDATE socket_mode_admission SET ticket = ticket + 1 WHERE app_id = ?`
+
+// ensureSocketModeAdmissionRow creates the app's admission row if it is absent.
+// It runs outside the admission transaction: the lock statement takes no lock at
+// all when it matches no row, so the row has to exist before it runs.
+func (s *Store) ensureSocketModeAdmissionRow(ctx context.Context, appID domain.AppID) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_admission(app_id, ticket) VALUES (?, 0) ON CONFLICT(app_id) DO NOTHING`, appID)
+	return err
+}
 
 func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (domain.SocketModeConnection, error) {
+	var value domain.SocketModeConnection
+	err := underContention(ctx, func() error {
+		result, err := s.consumeSocketModeConnectionOnce(ctx, id)
+		value = result
+		return err
+	})
+	return value, err
+}
+
+func (s *Store) consumeSocketModeConnectionOnce(ctx context.Context, id string) (domain.SocketModeConnection, error) {
 	// Resolve the ticket's app before the transaction opens, so the transaction's
 	// first statement is the admission lock rather than a read.
 	var appID domain.AppID
 	if err := s.db.QueryRowContext(ctx, `SELECT app_id FROM socket_mode_connections WHERE id = ?`, id).Scan(&appID); err != nil {
 		return domain.SocketModeConnection{}, translateNotFound(err)
+	}
+	if err := s.ensureSocketModeAdmissionRow(ctx, appID); err != nil {
+		return domain.SocketModeConnection{}, err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -4115,7 +4188,7 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	}
 	defer tx.Rollback()
 	now := s.now().UTC()
-	if _, err := tx.ExecContext(ctx, socketModeAdmissionLockStatement, appID, now.UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, socketModeAdmissionLockStatement, appID); err != nil {
 		return domain.SocketModeConnection{}, err
 	}
 	var value domain.SocketModeConnection
@@ -5505,6 +5578,16 @@ func (s *Store) ListBookmarks(ctx context.Context, workspace domain.WorkspaceID,
 }
 
 func (s *Store) UpdateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
+	var updated domain.Bookmark
+	err := underContention(ctx, func() error {
+		value, err := s.updateBookmarkOnce(ctx, bookmark, event)
+		updated = value
+		return err
+	})
+	return updated, err
+}
+
+func (s *Store) updateBookmarkOnce(ctx context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Bookmark{}, err
