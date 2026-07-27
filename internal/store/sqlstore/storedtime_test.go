@@ -8,6 +8,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -439,29 +440,73 @@ func TestSQLiteStoredTimestampMigrationIsSafeUnderConcurrentStartup(t *testing.T
 	}
 }
 
-// TestSQLiteRepositoryWritesNoVariableWidthTimestamp is the invariant behind the
-// encoding: no repository path may reach a timestamp column through anything but
-// domain.NewStoredTime. A reintroduced time.RFC3339Nano write would restore the
-// whole defect class silently, so the guard is on the source, not on one column.
-func TestSQLiteRepositoryWritesNoVariableWidthTimestamp(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "sqlstore.go", nil, parser.SkipObjectResolution)
+// TestRepositoriesWriteNoVariableWidthTimestamp is the invariant behind the
+// encoding: no repository path may reach a timestamp column, an ordering key or
+// a keyset cursor through anything but domain.NewStoredTime.
+//
+// The previous version of this guard read one file — sqlstore.go — and matched
+// one spelling, the time.RFC3339* selector. Both narrowings were load bearing:
+// the in-memory repository kept building its star and user-reaction cursor keys
+// with time.RFC3339Nano the whole time the guard was green, in a different file,
+// and an inlined layout string would have passed it in any file. So it now walks
+// every non-test source file under internal/store and rejects a bare layout
+// literal as well as the named constants.
+func TestRepositoriesWriteNoVariableWidthTimestamp(t *testing.T) {
+	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ast.Inspect(file, func(node ast.Node) bool {
-		selector, ok := node.(*ast.SelectorExpr)
-		if !ok {
+	scanned := 0
+	walkErr := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			return parseErr
+		}
+		scanned++
+		relative, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			relative = path
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			switch typed := node.(type) {
+			case *ast.SelectorExpr:
+				pkg, ok := typed.X.(*ast.Ident)
+				if !ok || pkg.Name != "time" {
+					return true
+				}
+				// Every named layout in the time package is variable width in
+				// one field or another; none of them may encode a stored value.
+				for _, layout := range []string{"RFC3339", "RFC1123", "RFC822", "RFC850", "ANSIC", "UnixDate", "RubyDate", "Kitchen", "Stamp", "Layout", "DateTime", "DateOnly", "TimeOnly"} {
+					if typed.Sel.Name == layout || strings.HasPrefix(typed.Sel.Name, layout) {
+						t.Errorf("%s references time.%s; stored timestamps must go through domain.NewStoredTime, whose encoding is fixed width", relative, typed.Sel.Name)
+					}
+				}
+			case *ast.BasicLit:
+				if typed.Kind != token.STRING {
+					return true
+				}
+				// Go's reference time. Any literal carrying it is a hand-written
+				// layout, which is the same defect wearing different clothes.
+				if strings.Contains(typed.Value, "15:04:05") || strings.Contains(typed.Value, "2006-01-02") {
+					t.Errorf("%s inlines the time layout %s; stored timestamps must go through domain.NewStoredTime", relative, typed.Value)
+				}
+			}
 			return true
-		}
-		pkg, ok := selector.X.(*ast.Ident)
-		if !ok || pkg.Name != "time" {
-			return true
-		}
-		if strings.HasPrefix(selector.Sel.Name, "RFC3339") {
-			t.Fatalf("sqlstore.go references time.%s; stored timestamps must go through domain.NewStoredTime, whose encoding is fixed width", selector.Sel.Name)
-		}
-		return true
+		})
+		return nil
 	})
+	if walkErr != nil {
+		t.Fatal(walkErr)
+	}
+	if scanned < 4 {
+		t.Fatalf("the guard scanned only %d files; it is not covering internal/store", scanned)
+	}
 }
 
 // TestSQLiteSearchConversationsTreatsLikeMetacharactersLiterally pins the
@@ -562,11 +607,17 @@ func TestConnectionSettingsAreVerifiedAcrossThePool(t *testing.T) {
 	assertForeignKeysEnforced(t, s)
 }
 
-// TestSQLiteUserEmailMigrationNormalizesAndRefusesCollisions covers the second
+// TestSQLiteUserEmailMigrationNormalizesAndResolvesCollisions covers the second
 // data migration against an already-populated database: addresses are rewritten
-// into the canonical form, and two rows that would collide once normalized abort
-// the upgrade with both identities named instead of failing on a unique index.
-func TestSQLiteUserEmailMigrationNormalizesAndRefusesCollisions(t *testing.T) {
+// into the canonical form, and two rows that collide once normalized are
+// resolved deterministically and recorded, rather than stopping the upgrade for
+// ever.
+//
+// The collision is one the pre-upgrade schema deliberately admitted — its
+// uniqueness guard was an index on lower(email), and SQLite folds ASCII only —
+// so aborting punished the operator for the product's own per-engine rule and
+// left no supported way forward.
+func TestSQLiteUserEmailMigrationNormalizesAndResolvesCollisions(t *testing.T) {
 	ctx := context.Background()
 	populate := func(t *testing.T, rows [][3]string) string {
 		t.Helper()
@@ -622,12 +673,49 @@ func TestSQLiteUserEmailMigrationNormalizesAndRefusesCollisions(t *testing.T) {
 	}
 
 	// SQLite's ASCII-only lower() let these two rows coexist; normalizing makes
-	// them one identity, so the upgrade must stop and name both users.
+	// them one identity. The upgrade must complete: the lowest identifier keeps
+	// the address, the other is cleared, and the clearing is recorded so an
+	// administrator can act on it.
 	collision := populate(t, [][3]string{{"U1", "Ä@x.test", "upper"}, {"U2", "ä@x.test", "lower"}})
-	if _, err := Open(ctx, collision); err == nil {
-		t.Fatal("a database with two users that normalize to one address was upgraded")
-	} else if !strings.Contains(err.Error(), "U1") || !strings.Contains(err.Error(), "U2") {
-		t.Fatalf("collision error=%v, want both user identities named", err)
+	resolved, err := Open(ctx, collision)
+	if err != nil {
+		t.Fatalf("a database an older release admitted must still be upgradable: %v", err)
+	}
+	defer resolved.Close()
+	kept, err := resolved.GetUser(ctx, "U1")
+	if err != nil || kept.Email != "ä@x.test" {
+		t.Fatalf("lowest identifier kept %+v err=%v, want the normalized address", kept, err)
+	}
+	cleared, err := resolved.GetUser(ctx, "U2")
+	if err != nil || cleared.Email != "" {
+		t.Fatalf("colliding identity %+v err=%v, want its address cleared", cleared, err)
+	}
+	survivor, err := resolved.FindUserByEmail(ctx, "T1", "Ä@X.TEST")
+	if err != nil || survivor.ID != "U1" {
+		t.Fatalf("the surviving address resolves to %+v err=%v, want U1", survivor, err)
+	}
+	notices, err := resolved.MigrationNotices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded bool
+	for _, notice := range notices {
+		if notice.Kind == MigrationNoticeEmailCleared && notice.Subject == "U2" {
+			recorded = true
+			if !strings.Contains(notice.Detail, "ä@x.test") || !strings.Contains(notice.Detail, "U1") {
+				t.Fatalf("notice detail=%q, want the address and the identity that kept it", notice.Detail)
+			}
+			if notice.ObservedAt.IsZero() {
+				t.Fatal("notice has no observation instant")
+			}
+		}
+	}
+	if !recorded {
+		t.Fatalf("notices=%+v, want the cleared address recorded for U2", notices)
+	}
+	// Reopening must not clear anything else, and must not re-resolve.
+	if err := resolved.Migrate(ctx); err != nil {
+		t.Fatalf("re-running the migration after a resolved collision failed: %v", err)
 	}
 }
 

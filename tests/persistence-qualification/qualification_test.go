@@ -43,6 +43,17 @@ func runQualification(t *testing.T, open opener) {
 		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
 		{"Socket Mode batches are all or nothing", socketModeBatchesAreAllOrNothing},
 		{"seed helpers reject invalid input", seedHelpersRejectInvalidInput},
+		{"Socket Mode admission is atomic under concurrency", socketModeAdmissionIsAtomicUnderConcurrency},
+		{"blob references tolerate an arbitrary profile photo URL", blobReferencesTolerateAnArbitraryProfilePhotoURL},
+		{"email identity is not Unicode case folded", emailIdentityIsNotUnicodeCaseFolded},
+		{"stars page in chronological order", starsPageInChronologicalOrder},
+		{"messages resolve by their own creation instant", messagesResolveByTheirOwnCreationInstant},
+		{"lists are created with their items or not at all", listsAreCreatedWithTheirItemsOrNotAtAll},
+		{"profile changes commit with every event they carry", profileChangesCommitWithEveryEventTheyCarry},
+		{"resolved access names one grant deterministically", resolvedAccessNamesOneGrantDeterministically},
+		{"mutations return the value they wrote", mutationsReturnTheValueTheyWrote},
+		{"ending an already ended call is a conflict", endingAnAlreadyEndedCallIsAConflict},
+		{"connected channel pages are filtered and bounded", connectedChannelPagesAreFilteredAndBounded},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}

@@ -64,8 +64,20 @@ func TestSQLiteCreateUserIsTransactionalAndWorkspaceScoped(t *testing.T) {
 	if err := s.CreateUser(ctx, domain.User{ID: "U3", WorkspaceID: "T1", Email: "ALICE@EXAMPLE.COM", Name: "Other"}, domain.WorkspaceMembership{WorkspaceID: "T1", UserID: "U3", Role: domain.WorkspaceRoleMember, Active: true}, events.Event{ID: "E-duplicate", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != store.ErrAlreadyExists {
 		t.Fatalf("duplicate error=%v", err)
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name) VALUES (?, ?, ?, ?)`, "U4", "T1", "Alice@Example.com", "Other"); err == nil {
-		t.Fatal("database accepted a case-insensitive duplicate user email")
+	// The database's own guard is the plain-column unique index over the
+	// canonical form, which every writer produces. It replaced a unique index on
+	// lower(email) — the last per-engine identity rule in the schema, and one
+	// that made PostgreSQL reject writes SQLite accepted, because SQLite folds
+	// ASCII only and PostgreSQL folds by the cluster's locale.
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name) VALUES (?, ?, ?, ?)`, "U4", "T1", "alice@example.com", "Other"); err == nil {
+		t.Fatal("database accepted a duplicate canonical user email")
+	}
+	var perEngineIndexes int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'users_workspace_email'`).Scan(&perEngineIndexes); err != nil {
+		t.Fatal(err)
+	}
+	if perEngineIndexes != 0 {
+		t.Fatal("the lower(email) expression index survives; e-mail identity is still decided by the engine's collation")
 	}
 }
 

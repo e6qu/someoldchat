@@ -56,6 +56,51 @@ func AccessRank(level string) int {
 	}
 }
 
+// ListItemCreation pairs a list item with the event that announces it. The two
+// are carried together so a caller cannot hand CreateListWithItems a set of
+// items and a set of events that do not correspond.
+type ListItemCreation struct {
+	Item  domain.ListItem
+	Event events.Event
+}
+
+// BetterAccessGrant reports whether one grant should replace another as the
+// grant that decided a resolved access level.
+//
+// The port promises that the returned grant "names the grant that decided the
+// outcome, so a caller can report why access was allowed". Both repositories
+// broke that promise the same way: they kept the first grant of the highest rank
+// they happened to see, over a randomised Go map in one and over a query with no
+// ORDER BY in the other. A user holding write through two channels got a
+// different answer on successive identical calls. The level was stable, so this
+// was never an authorization defect — it made the documented "why" unusable and
+// any test asserting it flaky.
+//
+// The order is: higher access rank first, then a direct user grant ahead of a
+// channel grant, then the lower entity identifier. A level this build does not
+// recognise ranks zero and can never win, so an unknown string cannot become the
+// reported reason.
+func BetterAccessGrant(entityType, entityID, level, bestType, bestID, bestLevel string) bool {
+	rank, bestRank := AccessRank(level), AccessRank(bestLevel)
+	if rank == 0 {
+		return false
+	}
+	if rank != bestRank {
+		return rank > bestRank
+	}
+	if accessEntityRank(entityType) != accessEntityRank(bestType) {
+		return accessEntityRank(entityType) < accessEntityRank(bestType)
+	}
+	return entityID < bestID
+}
+
+func accessEntityRank(entityType string) int {
+	if entityType == "user" {
+		return 0
+	}
+	return 1
+}
+
 var (
 	ErrNotFound                  = errors.New("not found")
 	ErrLeaseConflict             = errors.New("outbox lease conflict")
@@ -78,15 +123,24 @@ type Store interface {
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
-	// GetAuthMethod reports the persisted enablement of one authorization
-	// provider. A provider with no stored decision returns ErrNotFound — the
-	// repository does not invent one. It used to report Enabled: true for a
-	// missing row, which made "no administrator has ever configured this
-	// provider" indistinguishable from "an administrator enabled it" and made
-	// the absence of a decision read as permission granted. The returned value
-	// is disabled in that case as well, so a caller that ignores the error
-	// still fails closed. The default for a provider the deployment itself
-	// configured belongs to the caller that knows the provider configuration.
+	// GetAuthMethod reports the persisted ADMINISTRATIVE OVERRIDE for one
+	// authorization provider. A provider with no stored row reports
+	// Enabled: true and a nil error, and that is the specified behaviour, not an
+	// accident: this table records an administrator's decision to turn a
+	// provider OFF. Whether a provider exists at all is decided by the
+	// operator's startup configuration — issuer, client identifier, secret — so
+	// a provider that reaches this call is one the operator configured.
+	//
+	// Do not "fix" this to report ErrNotFound or to fail closed. A new
+	// deployment has no rows in this table, so absence-means-disabled disables
+	// every provider at once, and the administrator who would re-enable one
+	// cannot sign in either: there is no bootstrap path out of that state. The
+	// port, the SQL repository and the in-memory repository all documented the
+	// opposite of what all three of them did, which is how a security-relevant
+	// contract came to be stated three times and wrong three times.
+	//
+	// An implementation of this port that returns ErrNotFound for a missing row
+	// is a locked-out deployment.
 	GetAuthMethod(context.Context, domain.WorkspaceID, string) (domain.AuthMethod, error)
 	SetAuthMethod(context.Context, domain.AuthMethod) error
 	GetExternalIdentity(context.Context, domain.WorkspaceID, string, string) (domain.ExternalIdentity, error)
@@ -107,7 +161,18 @@ type Store interface {
 	GetUser(context.Context, domain.UserID) (domain.User, error)
 	CreateUser(context.Context, domain.User, domain.WorkspaceMembership, events.Event) error
 	FindUserByEmail(context.Context, domain.WorkspaceID, string) (domain.User, error)
-	UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, events.Event) (domain.User, error)
+	// UpdateUserProfile commits the profile change and EVERY event given with it
+	// in one transaction.
+	//
+	// It is variadic because the photo journeys need two: the
+	// user.profile_changed announcement and the internal
+	// user.photo_blob_delete instruction that retires the bytes the old profile
+	// referenced. Appending the second through a separate AppendEvent left a
+	// window in which the profile no longer names the old blob and nothing has
+	// been told to delete it, so a crash there orphaned the blob permanently —
+	// a leak with no reconciler behind it. A domain change and the events that
+	// describe it are one unit of work.
+	UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, ...events.Event) (domain.User, error)
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence, events.Event) (domain.User, error)
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error
@@ -280,6 +345,19 @@ type Store interface {
 	GetCanvasAccess(context.Context, domain.CanvasID, domain.UserID) (domain.CanvasAccess, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	CreateList(context.Context, domain.List, events.Event) error
+	// CreateListWithItems creates a list and its initial items as one unit.
+	//
+	// lists.create with copy_from used to create the list, publish list.created,
+	// and then copy the source items one store call at a time. A failure partway
+	// through left a half-copied list that clients had already been told about,
+	// with no cleanup path: the caller could neither finish nor undo. Pairing
+	// each item with its own event in ListItemCreation is what keeps the two
+	// from getting out of step, and committing all of them together is what
+	// makes the outcome all or nothing.
+	//
+	// The whole copy is one transaction, so the caller is responsible for
+	// bounding it; it is a list's item count, which the product already bounds.
+	CreateListWithItems(context.Context, domain.List, events.Event, []ListItemCreation) error
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
 	UpdateList(context.Context, domain.List, events.Event) error
 	CreateListItem(context.Context, domain.ListItem, events.Event) error
