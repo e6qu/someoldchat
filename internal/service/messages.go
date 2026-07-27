@@ -2984,7 +2984,7 @@ func (m Messages) AddReaction(ctx context.Context, workspaceID domain.WorkspaceI
 	}
 	now := time.Now().UTC()
 	reaction.CreatedAt = now
-	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.added", reaction, userID, conversationID), now)
+	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.added", reaction, userID, conversationID, timestamp), now)
 	if err != nil {
 		return err
 	}
@@ -2997,7 +2997,7 @@ func (m Messages) RemoveReaction(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.removed", reaction, userID, conversationID), now)
+	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.removed", reaction, userID, conversationID, timestamp), now)
 	if err != nil {
 		return err
 	}
@@ -3019,10 +3019,11 @@ func (m Messages) UserReactions(ctx context.Context, workspaceID domain.Workspac
 	return m.Store.ListUserReactions(ctx, workspaceID, userID, request)
 }
 
-func reactionPayload(topic string, reaction domain.Reaction, userID domain.UserID, conversationID domain.ConversationID) events.Payload {
+func reactionPayload(topic string, reaction domain.Reaction, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) events.Payload {
 	return events.NewPayload(topic,
 		events.String("message_id", string(reaction.Message)),
 		events.String("channel_id", string(conversationID)),
+		events.String("ts", string(timestamp)),
 		events.String("reaction", reaction.Name),
 		events.String("user_id", string(userID)),
 	)
@@ -3046,7 +3047,7 @@ func (m Messages) AddPin(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("pin.added", message.ID, conversationID, userID), now)
+	event, err := newEvent(workspaceID, userID, messageItemPayload("pin.added", message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
@@ -3059,17 +3060,18 @@ func (m Messages) RemovePin(ctx context.Context, workspaceID domain.WorkspaceID,
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("pin.removed", message.ID, conversationID, userID), now)
+	event, err := newEvent(workspaceID, userID, messageItemPayload("pin.removed", message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
 	return m.Store.RemovePin(ctx, domain.Pin{Message: message.ID, UserID: userID}, event)
 }
 
-func messageItemPayload(topic string, messageID domain.MessageID, conversationID domain.ConversationID, userID domain.UserID) events.Payload {
+func messageItemPayload(topic string, messageID domain.MessageID, conversationID domain.ConversationID, userID domain.UserID, timestamp domain.MessageTimestamp) events.Payload {
 	return events.NewPayload(topic,
 		events.String("message_id", string(messageID)),
 		events.String("channel_id", string(conversationID)),
+		events.String("ts", string(timestamp)),
 		events.String("user_id", string(userID)),
 	)
 }
@@ -3087,7 +3089,7 @@ func (m Messages) AddStar(ctx context.Context, workspaceID domain.WorkspaceID, u
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", message.ID, conversationID, userID), now)
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}
@@ -3100,7 +3102,7 @@ func (m Messages) RemoveStar(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	now := time.Now().UTC()
-	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", message.ID, conversationID, userID), now)
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", message.ID, conversationID, userID, timestamp), now)
 	if err != nil {
 		return err
 	}

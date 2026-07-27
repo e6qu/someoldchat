@@ -193,11 +193,15 @@ acknowledgement failure so the deployment platform can restart it.
 The outbox worker requires `-delivery-format`. Use `record` only for an
 integration that explicitly accepts the internal `events.Record` JSON shape.
 Use `slack-events` with `-app-id` and `-signing-secret` for a Slack Events
-API request URL. That mode requires each delivered payload to be a JSON Slack
-inner event or a validated complete `event_callback` envelope. It does not
-turn an identifier-only domain event into a guessed Slack event. The request
-includes `X-Slack-Request-Timestamp`, `X-Slack-Signature`, and the durable event
-ID as `Idempotency-Key`.
+API request URL. That mode translates the durable topic through the shared
+Slack event table, sends only events whose inner shape is complete and allowed
+on the Events API surface, and signs each resulting `event_callback` body.
+Topics with no safe Slack representation are acknowledged without being sent;
+malformed or incomplete typed payloads are permanent producer failures rather
+than retry loops. A record may fan out into several deliveries (for example,
+one `member_joined_channel` event per invited user), each with a distinct
+idempotency key. The request includes `X-Slack-Request-Timestamp`,
+`X-Slack-Signature`, and that key as `Idempotency-Key`.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
 [Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),
@@ -219,11 +223,11 @@ or type-less JSON event payloads.
 - A snapshot is not considered valid merely because upload succeeded.
 
 Snapshot retention is a stated target, not current behaviour. `internal/lifecycle`
-exposes snapshot creation, restore, current-generation selection, and
-last-verified lookup, and no delete, prune, or retain operation at all; every
-published generation is retained forever, `retained_snapshots` in the deployment
-guide's configuration schema is read by no code, and no automated restore drill
-exists in `.github/workflows` or `scripts`. The target is:
+exposes snapshot creation, exact-generation selection, restore, and quarantine
+records, and no delete, prune, or retain operation at all; every published
+generation is retained forever, `retained_snapshots` in the deployment guide's
+configuration schema is read by no code, and no automated restore drill exists
+in `.github/workflows` or `scripts`. The target is:
 
 - retain the newest verified generation and at least two older verified
   generations by default;
@@ -237,10 +241,13 @@ drills are a manual operator step in the release procedure below.
 ## Disaster recovery
 
 If the current snapshot fails verification or restoration, the activator marks
-that generation unusable and the stack enters `FAILED`, preserving evidence and
-exposing an operator-safe status endpoint without leaking internal details
-publicly. Restoring an older retained generation is an explicit, authenticated
-operator action with its own generation and compatibility checks
+that generation unusable, writes a durable
+`quarantine/<generation>.json` record for deterministic integrity failures,
+and the stack enters `FAILED`, preserving evidence and exposing an
+operator-safe status endpoint without leaking internal details publicly.
+Provider availability failures are not quarantined. Restoring an older retained
+generation is an explicit, authenticated operator action with its own
+generation and compatibility checks
 (`POST /restore` with the selected generation, guarded by `-control-token`). It
 is a recovery selection, not an implicit implementation fallback:
 `specs/scale-to-zero.md` states that restore failure MUST NOT be converted into

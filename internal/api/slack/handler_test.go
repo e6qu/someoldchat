@@ -2698,7 +2698,7 @@ func TestHistoryCursorAdvancesBoundedPage(t *testing.T) {
 	second.Header.Set("Authorization", "Bearer token")
 	secondResult := httptest.NewRecorder()
 	handler.ServeHTTP(secondResult, second)
-	if secondResult.Code != http.StatusOK || !strings.Contains(secondResult.Body.String(), "two") {
+	if secondResult.Code != http.StatusOK || !strings.Contains(secondResult.Body.String(), "one") {
 		t.Fatalf("second status=%d body=%s", secondResult.Code, secondResult.Body)
 	}
 }

@@ -509,7 +509,7 @@ func (r Remote) Permalink(ctx context.Context, workspaceID domain.WorkspaceID, u
 }
 
 func (r Remote) History(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
-	in := &chatv1.HistoryRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor)}
+	in := &chatv1.HistoryRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending}
 	out, err := r.messages.History(ctx, in)
 	if err != nil {
 		return domain.MessagePage{}, err
@@ -4010,7 +4010,7 @@ func (s *Server) permalinkProto(ctx context.Context, input *chatv1.PermalinkRequ
 }
 
 func (s *Server) historyProto(ctx context.Context, input *chatv1.HistoryRequest) (*chatv1.MessagePage, error) {
-	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request := protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending())
 	page, err := s.implementation.History(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
 		return nil, mapError(err)
@@ -4886,7 +4886,15 @@ func seamPage(limit int) int {
 // both compositions read it. What survives here is maxSeamPage, which refuses
 // nothing and only stops one request from reserving gigabytes.
 func protoPageRequest(limit int32, cursor string) domain.PageRequest {
-	return domain.PageRequest{Limit: seamPage(int(limit)), Cursor: domain.Cursor(cursor)}
+	return protoDirectionalPageRequest(limit, cursor, false)
+}
+
+func protoDirectionalPageRequest(limit int32, cursor string, descending bool) domain.PageRequest {
+	return domain.PageRequest{
+		Limit:      seamPage(int(limit)),
+		Cursor:     domain.Cursor(cursor),
+		Descending: descending,
+	}
 }
 
 func stringIDs(values []domain.UserID) []string {

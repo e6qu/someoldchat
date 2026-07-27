@@ -343,6 +343,106 @@ func conversationSearchTreatsMetacharactersLiterally(t *testing.T, open opener) 
 	}
 }
 
+func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	conversation := domain.Conversation{
+		ID:          domain.ConversationID("C-unicode-" + f.suffix),
+		WorkspaceID: f.workspaceID,
+		Name:        "ÄPFEL",
+	}
+	if err := f.repository.CreateConversation(ctx, conversation, f.userID, f.event("unicode-conversation", "conversation.created", string(conversation.ID))); err != nil {
+		t.Fatal(err)
+	}
+	assertConversation := func(query string) {
+		t.Helper()
+		page, err := f.repository.SearchConversations(ctx, f.workspaceID, query, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatalf("conversation search %q: %v", query, err)
+		}
+		if len(page.Conversations) != 1 || page.Conversations[0].ID != conversation.ID {
+			t.Fatalf("conversation search %q returned %+v, want %s", query, page.Conversations, conversation.ID)
+		}
+	}
+	assertConversation("äpfel")
+	if _, err := f.repository.RenameConversation(ctx, conversation.ID, "ÜBER", f.event("unicode-rename", "conversation.renamed", string(conversation.ID))); err != nil {
+		t.Fatal(err)
+	}
+	assertConversation("über")
+	if _, err := f.repository.SetConversationTopic(ctx, conversation.ID, "ÉCOLE", f.event("unicode-topic", "conversation.topic_changed", string(conversation.ID))); err != nil {
+		t.Fatal(err)
+	}
+	assertConversation("école")
+	if _, err := f.repository.SetConversationPurpose(ctx, conversation.ID, "ÅNGSTRÖM", f.event("unicode-purpose", "conversation.purpose_changed", string(conversation.ID))); err != nil {
+		t.Fatal(err)
+	}
+	assertConversation("ångström")
+
+	createdAt := time.Unix(1700000100, 0).UTC()
+	message := domain.Message{ID: domain.MessageID("M-unicode-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: conversation.ID, AuthorID: f.userID, Text: "ÄPFEL", CreatedAt: createdAt}
+	if err := f.repository.CreateMessage(ctx, message, f.event("unicode-message", "message.created", string(message.ID)), ""); err != nil {
+		t.Fatal(err)
+	}
+	assertMessage := func(query string) {
+		t.Helper()
+		page, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, query, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatalf("message search %q: %v", query, err)
+		}
+		if len(page.Messages) != 1 || page.Messages[0].ID != message.ID {
+			t.Fatalf("message search %q returned %+v, want %s", query, page.Messages, message.ID)
+		}
+	}
+	assertMessage("äpfel")
+	message.Text = "ÖL"
+	if err := f.repository.UpdateMessage(ctx, message, f.event("unicode-message-update", "message.changed", string(message.ID))); err != nil {
+		t.Fatal(err)
+	}
+	assertMessage("öl")
+}
+
+func messagesPageInBothDirections(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	base := time.Unix(1700000200, 0).UTC()
+	var deleted domain.Message
+	for index := 1; index <= 5; index++ {
+		message := f.message(t, ctx, fmt.Sprintf("direction-%d", index), base.Add(time.Duration(index)*time.Second))
+		if index == 4 {
+			deleted = message
+		}
+	}
+	deleted.Deleted = true
+	if err := f.repository.UpdateMessage(ctx, deleted, f.event("delete-direction-4", "message.deleted", string(deleted.ID))); err != nil {
+		t.Fatal(err)
+	}
+	first, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Descending: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := []domain.MessageID{first.Messages[0].ID, first.Messages[1].ID}; !strings.Contains(string(got[0]), "direction-5") || !strings.Contains(string(got[1]), "direction-3") || !first.HasMore || first.NextCursor == "" {
+		t.Fatalf("first descending page=%+v", first)
+	}
+	second, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Cursor: first.NextCursor, Descending: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Messages) != 2 || !strings.Contains(string(second.Messages[0].ID), "direction-2") || !strings.Contains(string(second.Messages[1].ID), "direction-1") || second.HasMore {
+		t.Fatalf("second descending page=%+v", second)
+	}
+	forward, err := f.repository.ListMessages(ctx, f.channelID, domain.PageRequest{Limit: 2, Cursor: first.NextCursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forward.Messages) != 1 || !strings.Contains(string(forward.Messages[0].ID), "direction-5") {
+		t.Fatalf("descending cursor did not resume forward from the same row: %+v", forward)
+	}
+}
+
 func referentialFailuresAreSentinels(t *testing.T, open opener) {
 	ctx := context.Background()
 	f, closeRepository := newFixture(t, ctx, open)

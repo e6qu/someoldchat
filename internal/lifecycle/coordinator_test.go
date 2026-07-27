@@ -131,7 +131,7 @@ func (s *coordinatorSnapshots) Current(context.Context, uint64) (Manifest, error
 	}
 	return s.manifest, nil
 }
-func (s *coordinatorSnapshots) LastVerified(_ context.Context, maxGeneration uint64) (Manifest, error) {
+func (s *coordinatorSnapshots) Select(_ context.Context, maxGeneration uint64) (Manifest, error) {
 	s.record("last-verified")
 	if s.lastVerified != nil {
 		return Manifest{}, s.lastVerified
@@ -646,8 +646,9 @@ func TestCoordinatorRecoversPersistedWakeAfterProcessRestart(t *testing.T) {
 
 // TestCoordinatorRecoversInterruptedQuiescenceWithoutRestoringOlderSnapshot
 // replaces an earlier test that asserted the interrupted-hibernation path
-// restores LastVerified. That assertion described data loss: quiescence
-// publishes no manifest, so LastVerified is the *previous* cycle's snapshot and
+// restores the newest previously verified snapshot. That assertion described
+// data loss: quiescence publishes no manifest, so that snapshot is from the
+// *previous* cycle and
 // restoring it renames an older database over the intact live volume, destroying
 // every change since the last hibernation.
 func TestCoordinatorRecoversInterruptedQuiescenceWithoutRestoringOlderSnapshot(t *testing.T) {
@@ -660,7 +661,7 @@ func TestCoordinatorRecoversInterruptedQuiescenceWithoutRestoringOlderSnapshot(t
 	} {
 		t.Run(interrupted.name, func(t *testing.T) {
 			// A realistic history: several cycles have already published
-			// snapshots, so LastVerified has an older generation to offer.
+			// snapshots, so an older generation exists to tempt recovery.
 			controller, err := NewPersistent(&testStateStore{record: servingRecord(5)})
 			if err != nil {
 				t.Fatal(err)

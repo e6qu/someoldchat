@@ -115,6 +115,7 @@ message HistoryRequest {
   string conversation_id = 3;
   int32 limit = 4;
   string cursor = 5;
+  bool descending = 6;
 }
 
 message RepliesRequest {

@@ -854,9 +854,9 @@ func (c countingChat) History(ctx context.Context, workspace domain.WorkspaceID,
 	return c.Service.History(ctx, workspace, user, conversation, request)
 }
 
-// truncatedWorkspace seeds a conversation one page longer than the whole scan
-// budget, which is the only state in which historyView.Truncated is set.
-func truncatedWorkspace(t *testing.T, calls *int) *http.ServeMux {
+// longTimelineWorkspace seeds enough messages to prove that timeline cost and
+// correctness do not depend on walking from the first row.
+func longTimelineWorkspace(t *testing.T, calls *int) *http.ServeMux {
 	t.Helper()
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
@@ -867,7 +867,7 @@ func truncatedWorkspace(t *testing.T, calls *int) *http.ServeMux {
 		t.Fatal(err)
 	}
 	base := time.Unix(1700000000, 0).UTC()
-	for index := 0; index < timelineScan*timelineScanPages+timelineScan; index++ {
+	for index := 0; index < timelineWindow*4; index++ {
 		message := domain.Message{ID: domain.MessageID(fmt.Sprintf("M%06d", index)), WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: fmt.Sprintf("note-%06d", index), CreatedAt: base.Add(time.Duration(index) * time.Second)}
 		if err := s.CreateMessage(context.Background(), message, events.Event{ID: domain.EventID(fmt.Sprintf("E%06d", index)), WorkspaceID: "T1", Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}, ""); err != nil {
 			t.Fatal(err)
@@ -890,76 +890,51 @@ func truncatedWorkspace(t *testing.T, calls *int) *http.ServeMux {
 	return mux
 }
 
-// TestATruncatedTimelineIsNeverPresentedAsCurrent covers the defect the scan
-// bound introduced. Past timelineScan*timelineScanPages messages the walk gives
-// up in the same place whatever cursor it is given, so there is no reachable
-// newest window at all — and the page presented the window it did reach as if
-// it were current: it offered NewestURL (which is the URL that produced this
-// very window), the client navigated there after every post, and the message
-// the reader had just sent disappeared with no error. The truncation warning
-// also lived on the page rather than in the region, so the first /app/timeline
-// refresh replaced the messages and left a stale window with nothing to say so.
-//
-// Observed before the fix, against this exact seed:
-//
-//	/app          data-newest="/app?channel=Cdev"  (the same window)
-//	/app          notice "Search for a message to reach recent history" — which lands here
-//	/app/timeline no truncation warning at all
-//
-// The scan bound itself is asserted by TestTheTimelineScanIsBounded below.
-func TestATruncatedTimelineIsNeverPresentedAsCurrent(t *testing.T) {
-	mux := truncatedWorkspace(t, nil)
+// The old bounded forward scan made the newest rows unreachable once a channel
+// crossed its budget. A descending keyset page must make the same long channel
+// an ordinary current view.
+func TestALongTimelineReachesTheNewestMessages(t *testing.T) {
+	mux := longTimelineWorkspace(t, nil)
 
 	page := get(t, mux, "/app?channel=Cdev")
 	if page.Code != http.StatusOK {
 		t.Fatalf("status=%d", page.Code)
 	}
 	body := page.Body.String()
-	requireContains(t, "truncated page", body,
-		truncationNotice,
-		`data-live="false"`,
-		`data-truncated="true"`,
-		`data-newest=""`,
+	requireContains(t, "long page", body,
+		"note-000199",
+		"note-000150",
+		`data-live="true"`,
+		"Show older messages",
 	)
-	// Every one of these leads back to this same window, so none is offered.
-	requireMissing(t, "truncated page", body,
+	requireMissing(t, "long page", body,
+		"note-000149",
 		"Jump to the latest messages",
-		">Mark as read<",
-		"Search for a message to reach recent history",
-		`data-newest="/app?channel=Cdev"`,
 	)
 
-	// The region owns the warning, so a forced refresh cannot drop it.
 	fragment := get(t, mux, "/app/timeline?channel=Cdev")
 	if fragment.Code != http.StatusOK {
 		t.Fatalf("fragment status=%d", fragment.Code)
 	}
-	requireContains(t, "truncated fragment", fragment.Body.String(), truncationNotice)
-
-	// A thread pane in the same conversation is a complete window of its own
-	// and must not inherit the warning.
-	thread := get(t, mux, "/app/timeline?channel=Cdev&thread=1700000000.000000")
-	requireMissing(t, "thread fragment", thread.Body.String(), truncationNotice)
+	requireContains(t, "long fragment", fragment.Body.String(), "note-000199")
 }
 
-// TestTheTimelineScanIsBounded covers the unbounded read: rendering 50 messages
-// walked the whole conversation, which measured 250 service calls and 50,000
-// rows on a 50,000-message channel — once per open tab per event, and once per
-// network round trip in the distributed profile.
-func TestTheTimelineScanIsBounded(t *testing.T) {
+// One timeline render is one service call in both local and distributed
+// composition; conversation length cannot multiply network round trips.
+func TestTheTimelineUsesOneDescendingRead(t *testing.T) {
 	calls := 0
-	mux := truncatedWorkspace(t, &calls)
+	mux := longTimelineWorkspace(t, &calls)
 
 	response := get(t, mux, "/app?channel=Cdev")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d", response.Code)
 	}
-	if calls > timelineScanPages {
-		t.Fatalf("one render issued %d history calls, the budget is %d", calls, timelineScanPages)
+	if calls != 1 {
+		t.Fatalf("one render issued %d history calls, want 1", calls)
 	}
 
 	calls = 0
-	if fragment := get(t, mux, "/app/timeline?channel=Cdev"); fragment.Code != http.StatusOK || calls > timelineScanPages {
+	if fragment := get(t, mux, "/app/timeline?channel=Cdev"); fragment.Code != http.StatusOK || calls != 1 {
 		t.Fatalf("fragment status=%d calls=%d", fragment.Code, calls)
 	}
 }

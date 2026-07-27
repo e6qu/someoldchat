@@ -39,6 +39,8 @@ func runQualification(t *testing.T, open opener) {
 		{"events retain their actor", eventsRetainTheirActor},
 		{"email identity is case folded", emailIdentityIsCaseFolded},
 		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
+		{"search folds Unicode identically", searchFoldsUnicodeIdentically},
+		{"messages page in both directions", messagesPageInBothDirections},
 		{"referential failures are sentinels", referentialFailuresAreSentinels},
 		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
 		{"Socket Mode batches are all or nothing", socketModeBatchesAreAllOrNothing},

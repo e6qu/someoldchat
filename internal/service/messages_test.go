@@ -110,11 +110,11 @@ func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *test
 	}
 }
 
-// Every event this package emits has to be deliverable by every consumer of
-// the durable journal. The producers used to store bare identifiers, which no
-// consumer can decode, so this asserts the contract at the boundary the
-// consumers actually use rather than on a hand-written payload.
-func TestEmittedEventsAreDeliverableToEveryConsumer(t *testing.T) {
+// Every event this package emits needs a typed payload that journal consumers
+// can inspect safely. Audience consumers must reject recipient-scoped records;
+// Slack delivery may also deliberately withhold a typed record when no safe,
+// complete Slack shape exists for its topic.
+func TestEmittedEventsAreTypedAndRespectAudienceBoundaries(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
@@ -158,7 +158,7 @@ func TestEmittedEventsAreDeliverableToEveryConsumer(t *testing.T) {
 		if events.RecipientScoped(record.Event.Topic) {
 			// The record is addressed to one user, so no audience consumer may
 			// receive it: its payload carries that user's message text.
-			if _, err := events.SlackEventBody(record, "A1"); !errors.Is(err, events.ErrPayloadRecipientScoped) {
+			if _, err := events.SlackEventBodies(record, "A1"); !errors.Is(err, events.ErrPayloadRecipientScoped) {
 				t.Fatalf("topic %q was offered to an audience consumer: %v", record.Event.Topic, err)
 			}
 			if recipient, ok := delivered.Field("user_id"); !ok || recipient != "U1" {
@@ -166,8 +166,8 @@ func TestEmittedEventsAreDeliverableToEveryConsumer(t *testing.T) {
 			}
 			continue
 		}
-		if _, err := events.SlackEventBody(record, "A1"); err != nil {
-			t.Fatalf("topic %q cannot be delivered as a Slack event: %v", record.Event.Topic, err)
+		if _, err := events.SlackEventBodies(record, "A1"); err != nil {
+			t.Fatalf("topic %q cannot be evaluated for Slack delivery: %v", record.Event.Topic, err)
 		}
 		if strings.Contains(record.Event.Payload, "just for you") {
 			t.Fatalf("topic %q carries ephemeral message text: %s", record.Event.Topic, record.Event.Payload)
@@ -819,7 +819,7 @@ func TestAdminAppApprovalIsDurableAndBounded(t *testing.T) {
 	if err != nil || len(page.Apps) != 1 || page.Apps[0].Status != domain.AppApprovalApproved {
 		t.Fatalf("approved page=%+v err=%v", page, err)
 	}
-	if _, err := messages.AdminListApps(ctx, "T1", "U1", domain.AppApprovalApproved, domain.PageRequest{Limit: 0}); !errors.Is(err, store.ErrInvalidAppApproval) {
+	if _, err := messages.AdminListApps(ctx, "T1", "U1", domain.AppApprovalApproved, domain.PageRequest{Limit: 0}); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("invalid page error=%v", err)
 	}
 }

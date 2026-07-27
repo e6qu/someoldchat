@@ -748,11 +748,11 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 		t.Fatalf("search=%+v err=%v", search, err)
 	}
 	page, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Messages) != 3 || page.Messages[0].Text != "updated" || !page.Messages[0].Deleted {
+	if err != nil || len(page.Messages) != 2 || page.Messages[0].ID != retried.ID || page.Messages[1].ID != keyed.ID {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
 	replies, err := remote.Replies(ctx, "T1", "U1", "C1", timestamp, domain.PageRequest{Limit: 10})
-	if err != nil || len(replies.Messages) != 1 || replies.Messages[0].ID != message.ID {
+	if err != nil || len(replies.Messages) != 0 {
 		t.Fatalf("replies=%+v err=%v", replies, err)
 	}
 	if err := remote.LeaveConversation(ctx, "T1", "U1", "C1"); err != nil {

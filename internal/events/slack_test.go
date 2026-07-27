@@ -3,79 +3,9 @@ package events
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 )
-
-func TestSlackEventBodyWrapsInnerEvent(t *testing.T) {
-	// Topic and the payload's "type" name the same event. New guarantees that at
-	// the write boundary and Deliverable now requires it on read, because Topic
-	// alone decides internal-topic exclusion, recipient scoping and the browser
-	// event name while the consumer acts on the payload.
-	body, err := SlackEventBody(Record{Sequence: 9, Event: Event{
-		ID: "Ev1", WorkspaceID: "T1", Topic: "message", CreatedAt: time.Unix(1700000000, 0).UTC(),
-		Payload: `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`,
-	}}, "A1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var envelope map[string]json.RawMessage
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	var event map[string]any
-	if err := json.Unmarshal(envelope["event"], &event); err != nil {
-		t.Fatal(err)
-	}
-	if event["type"] != "message" || string(envelope["api_app_id"]) != `"A1"` || string(envelope["event_id"]) != `"Ev1"` {
-		t.Fatalf("envelope=%s", body)
-	}
-}
-
-// The contract is that a durable payload is the Slack *inner* event and
-// SlackEventBody builds the envelope around it. A stored payload that is itself
-// an envelope is a foreign record no producer in this system writes, and the
-// branch that used to accept one returned unsentinelled errors that the worker
-// classified as retryable — so such a record was re-claimed every lease period
-// forever. Every rejection here must therefore carry a sentinel the worker
-// classifies as permanent.
-func TestSlackEventBodyRejectsAForeignEnvelopePayloadPermanently(t *testing.T) {
-	payload := `{"type":"event_callback","team_id":"T1","api_app_id":"A1","event_id":"Ev1","event_time":1700000000,"event":{"type":"message","event_ts":"1700000000.000000"}}`
-	_, err := SlackEventBody(Record{Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "event_callback", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: payload}}, "A1")
-	if !errors.Is(err, ErrPayloadMalformed) {
-		t.Fatalf("foreign envelope error=%v, want %v so the worker drops it instead of retrying forever", err, ErrPayloadMalformed)
-	}
-}
-
-// Every error SlackEventBody can return about a record must be classifiable, or
-// the caller has no way to tell "this record will never encode" from "the
-// destination is down" and retries a poisoned record forever.
-func TestSlackEventBodyErrorsAboutARecordAllCarrySentinels(t *testing.T) {
-	for name, record := range map[string]Record{
-		"identifier payload":     {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "M1"}},
-		"payload without a type": {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"text":"hello"}`}},
-		"missing event_ts":       {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.created"}`}},
-		"internal record":        {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: UserPhotoBlobDeleteTopic, CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "T1/users/U1/photo"}},
-		"recipient scoped":       {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: EphemeralMessageTopic, CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"secret"}`}},
-		"incomplete record":      {Event: Event{ID: "", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.created","event_ts":"1.0"}`}},
-	} {
-		_, err := SlackEventBody(record, "A1")
-		if err == nil {
-			t.Fatalf("%s: an undeliverable record was encoded", name)
-		}
-		if !errors.Is(err, ErrPayloadMalformed) && !errors.Is(err, ErrPayloadInternal) && !errors.Is(err, ErrPayloadRecipientScoped) && !errors.Is(err, ErrEventIncomplete) {
-			t.Fatalf("%s: error=%v carries no sentinel, so it is retried forever", name, err)
-		}
-	}
-}
-
-func TestSlackEventBodyRejectsIdentifierOnlyPayload(t *testing.T) {
-	_, err := SlackEventBody(Record{Event: Event{ID: "Ev1", WorkspaceID: "T1", CreatedAt: time.Now().UTC(), Payload: "M1"}}, "A1")
-	if err == nil || !strings.Contains(err.Error(), "JSON object") {
-		t.Fatalf("identifier-only payload error=%v", err)
-	}
-}
 
 func TestSlackSignatureUsesPublishedV0Format(t *testing.T) {
 	timestamp := time.Unix(1531420618, 0).UTC()
@@ -89,5 +19,76 @@ func TestSlackSignatureUsesPublishedV0Format(t *testing.T) {
 	}
 	if _, err := SlackSignature("", timestamp, body); err == nil {
 		t.Fatal("empty signing secret accepted")
+	}
+}
+
+func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
+	event, err := New("Ev1", "T1", "U1", NewPayload("conversation.members_invited",
+		String("channel_id", "C1"),
+		Strings("user_ids", []string{"U2", "U3"}),
+	), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodies, err := SlackEventBodies(Record{Sequence: 1, Event: event}, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("bodies=%d, want one member_joined_channel per invited user", len(bodies))
+	}
+	for index, wantUser := range []string{"U2", "U3"} {
+		var envelope struct {
+			Event struct {
+				Type    string `json:"type"`
+				User    string `json:"user"`
+				Channel string `json:"channel"`
+				EventTS string `json:"event_ts"`
+			} `json:"event"`
+		}
+		if err := json.Unmarshal(bodies[index], &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Event.Type != "member_joined_channel" || envelope.Event.User != wantUser || envelope.Event.Channel != "C1" || envelope.Event.EventTS == "" {
+			t.Fatalf("body[%d]=%s", index, bodies[index])
+		}
+	}
+}
+
+func TestPretranslatedEventCannotBypassKnownTopicSurface(t *testing.T) {
+	event := Event{
+		ID:          "Ev1",
+		WorkspaceID: "T1",
+		Topic:       "user.presence_changed",
+		Payload:     `{"type":"presence_change","event_ts":"1700000000.000000","user":"U1","presence":"away"}`,
+		CreatedAt:   time.Unix(1700000000, 0).UTC(),
+	}
+	delivered, err := Deliverable(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inners, err := SlackInner(event.Topic, delivered, SurfaceEventsAPI); err != nil || len(inners) != 0 {
+		t.Fatalf("Events API inners=%v err=%v, want RTM-only event withheld", inners, err)
+	}
+	inners, err := SlackInner(event.Topic, delivered, SurfaceRTM)
+	if err != nil || len(inners) != 1 || inners[0].Type() != "presence_change" {
+		t.Fatalf("RTM inners=%v err=%v", inners, err)
+	}
+}
+
+func TestPretranslatedEventMustMatchKnownTopicMapping(t *testing.T) {
+	event := Event{
+		ID:          "Ev1",
+		WorkspaceID: "T1",
+		Topic:       "message.created",
+		Payload:     `{"type":"reaction_added","event_ts":"1700000000.000000"}`,
+		CreatedAt:   time.Unix(1700000000, 0).UTC(),
+	}
+	delivered, err := Deliverable(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SlackInner(event.Topic, delivered, SurfaceSocketMode); !errors.Is(err, ErrPayloadFieldInvalid) {
+		t.Fatalf("mismatched translated event error=%v, want %v", err, ErrPayloadFieldInvalid)
 	}
 }

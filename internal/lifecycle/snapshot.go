@@ -43,18 +43,38 @@ type Manifest struct {
 	Signature          string `json:"signature"`
 }
 
-// ErrNoVerifiedSnapshot reports that no manifest at or before the requested
-// generation passed verification. It is a distinct sentinel because "nothing
-// has been snapshotted yet" is an ordinary state during a first hibernation,
-// while an unreadable snapshot provider is not.
-var ErrNoVerifiedSnapshot = errors.New("no verified snapshot is available at or before recovery generation")
+// ErrNoVerifiedSnapshot reports that the requested generation has no published
+// manifest at all. It is a distinct sentinel because "nothing has been
+// snapshotted yet" is an ordinary state during a first hibernation, while an
+// unreadable snapshot provider is not.
+var ErrNoVerifiedSnapshot = errors.New("no snapshot manifest is published for the selected generation")
+
+// integrityError marks a deterministic defect in stored snapshot bytes. It is
+// deliberately distinct from provider availability errors: only the former
+// proves a generation bad and may be quarantined. A timeout or denied request
+// must fail recovery without rewriting the durable verdict.
+type integrityError struct {
+	reason string
+}
+
+func (e integrityError) Error() string { return e.reason }
+
+func integrityFailure(reason string) error {
+	return integrityError{reason: reason}
+}
 
 // SnapshotManager stores encrypted, signed snapshot artifacts and manifests in
 // exactly one durable target: either a filesystem Root or an ObjectStore.
 // Validate enforces that invariant so the two shapes cannot drift apart again.
+//
+// The object target is a plain blob.Store rather than a blob.WalkStore: every
+// record this manager reads is addressed by the generation that names it, so it
+// never enumerates the bucket. Enumeration was only ever needed by the
+// "newest verified generation at or before N" scan, which was the implicit
+// fallback specs/scale-to-zero.md forbids; Select replaced it.
 type SnapshotManager struct {
 	Root          string
-	ObjectStore   blob.WalkStore
+	ObjectStore   blob.Store
 	EncryptionKey []byte
 	SigningKey    []byte
 	KeyID         string
@@ -69,7 +89,7 @@ func NewSnapshotManager(root string, encryptionKey, signingKey []byte, keyID str
 	return manager, nil
 }
 
-func NewObjectSnapshotManager(store blob.WalkStore, encryptionKey, signingKey []byte, keyID string, maxBytes int64) (SnapshotManager, error) {
+func NewObjectSnapshotManager(store blob.Store, encryptionKey, signingKey []byte, keyID string, maxBytes int64) (SnapshotManager, error) {
 	if store == nil {
 		return SnapshotManager{}, errors.New("object snapshot manager requires an object store")
 	}
@@ -116,14 +136,24 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 	if metadata.Generation == 0 || metadata.Backend == "" || metadata.SchemaVersion < 1 {
 		return Manifest{}, errors.New("snapshot metadata is incomplete")
 	}
-	if err := m.ensureMonotonicGeneration(metadata.Generation); err != nil {
-		return Manifest{}, err
-	}
-	previous, previousErr := m.Current(metadata.Generation)
-	if previousErr == nil {
+	// The current manifest is read once, and it is its *record* — format,
+	// metadata, and signature — that must verify here. Verifying its artifact as
+	// well made one rotted artifact permanently fatal: every later hibernation
+	// failed at "verify current snapshot manifest", so a deployment whose newest
+	// snapshot had lost a byte could never publish a good one again and had no
+	// way back except deleting the durable record by hand. Whether those bytes
+	// are still readable is a question for the restore that selects them, and
+	// Select answers it by quarantining the generation.
+	previous, err := m.currentRecord()
+	switch {
+	case err == nil:
+		if previous.Generation >= metadata.Generation {
+			return Manifest{}, fmt.Errorf("snapshot generation %d is not newer than current generation %d", metadata.Generation, previous.Generation)
+		}
 		metadata.PreviousGeneration = previous.Generation
-	} else if !errors.Is(previousErr, os.ErrNotExist) && !errors.Is(previousErr, blob.ErrNotFound) {
-		return Manifest{}, fmt.Errorf("read previous verified snapshot: %w", previousErr)
+	case errors.Is(err, os.ErrNotExist):
+	default:
+		return Manifest{}, fmt.Errorf("read current snapshot manifest: %w", err)
 	}
 	source, err := os.Open(sourcePath)
 	if err != nil {
@@ -134,10 +164,9 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 	temporaryDirectory := os.TempDir()
 	artifactPath := ""
 	if m.ObjectStore == nil {
+		// Only the artifact directory is created here; writeRecord creates the
+		// directory of every control record it publishes.
 		if err := os.MkdirAll(filepath.Join(m.Root, "artifacts"), 0o700); err != nil {
-			return Manifest{}, err
-		}
-		if err := os.MkdirAll(filepath.Join(m.Root, "manifests"), 0o700); err != nil {
 			return Manifest{}, err
 		}
 		artifactPath, err = safePath(m.Root, artifactName)
@@ -254,49 +283,59 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 	return metadata, nil
 }
 
-func (m SnapshotManager) ensureMonotonicGeneration(next uint64) error {
-	if m.ObjectStore != nil {
-		body, err := m.readObject("current.json")
-		if errors.Is(err, blob.ErrNotFound) {
-			return nil
-		}
-		if err != nil {
-			return fmt.Errorf("read current snapshot manifest: %w", err)
-		}
-		var current Manifest
-		if err := json.Unmarshal(body, &current); err != nil {
-			return fmt.Errorf("decode current snapshot manifest: %w", err)
-		}
-		if err := m.verifyManifest(current); err != nil {
-			return fmt.Errorf("verify current snapshot manifest: %w", err)
-		}
-		if current.Generation >= next {
-			return fmt.Errorf("snapshot generation %d is not newer than current generation %d", next, current.Generation)
-		}
-		return nil
-	}
-	path, err := safePath(m.Root, "current.json")
+// currentRecord reads and record-verifies the published current manifest. It
+// does not read the artifact; see Create for why publication must not depend on
+// bytes an older generation is responsible for.
+func (m SnapshotManager) currentRecord() (Manifest, error) {
+	body, err := m.readRecord("current.json")
 	if err != nil {
-		return err
-	}
-	body, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("read current snapshot manifest: %w", err)
+		return Manifest{}, err
 	}
 	var current Manifest
 	if err := json.Unmarshal(body, &current); err != nil {
-		return fmt.Errorf("decode current snapshot manifest: %w", err)
+		return Manifest{}, fmt.Errorf("decode current snapshot manifest: %w", err)
 	}
-	if err := m.verifyManifest(current); err != nil {
-		return fmt.Errorf("verify current snapshot manifest: %w", err)
+	if err := m.verifyManifestRecord(current); err != nil {
+		return Manifest{}, fmt.Errorf("verify current snapshot manifest: %w", err)
 	}
-	if current.Generation >= next {
-		return fmt.Errorf("snapshot generation %d is not newer than current generation %d", next, current.Generation)
+	return current, nil
+}
+
+// readRecord reads one small control record from whichever durable target is
+// configured, and reports a missing record as os.ErrNotExist for both backends.
+// One absence sentinel is what lets every caller distinguish "nothing has been
+// published" from "the store cannot be read", which is the distinction the whole
+// recovery policy turns on.
+func (m SnapshotManager) readRecord(key string) ([]byte, error) {
+	if m.ObjectStore != nil {
+		body, err := m.readObject(key)
+		if errors.Is(err, blob.ErrNotFound) {
+			return nil, fmt.Errorf("snapshot record %q: %w", key, os.ErrNotExist)
+		}
+		return body, err
 	}
-	return nil
+	path, err := safePath(m.Root, key)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// writeRecord publishes one small control record durably: atomically and
+// fsynced on a filesystem, as a single object put against an object store.
+func (m SnapshotManager) writeRecord(key string, body []byte) error {
+	if m.ObjectStore != nil {
+		_, err := m.ObjectStore.Put(context.Background(), key, int64(len(body)), bytes.NewReader(body))
+		return err
+	}
+	path, err := safePath(m.Root, key)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return atomicWrite(path, body)
 }
 
 func (m SnapshotManager) readObject(key string) ([]byte, error) {
@@ -319,7 +358,7 @@ func (m SnapshotManager) readObject(key string) ([]byte, error) {
 }
 
 func (m SnapshotManager) Restore(manifest Manifest, outputPath string) error {
-	if err := m.verifyManifest(manifest); err != nil {
+	if err := m.verifyAndRecord(manifest); err != nil {
 		return err
 	}
 	input, err := m.openArtifact(manifest.Artifact)
@@ -377,7 +416,7 @@ func (m SnapshotManager) Restore(manifest Manifest, outputPath string) error {
 		return err
 	}
 	if hex.EncodeToString(hash.Sum(nil)) != manifest.PlaintextSHA256 || total != manifest.PlaintextBytes {
-		return errors.New("restored snapshot digest mismatch")
+		return m.quarantineFailure(manifest.Generation, integrityFailure("restored snapshot digest mismatch"))
 	}
 	return os.Rename(temporaryPath, outputPath)
 }
@@ -394,29 +433,15 @@ func (m SnapshotManager) openArtifact(artifact string) (io.ReadCloser, error) {
 	return os.Open(path)
 }
 
+// Current returns the published current manifest, fully verified, provided it is
+// not newer than the recovery fence.
+//
+// A verification failure here is recorded against the generation exactly as one
+// discovered by Select is: the wake path is the other place a generation is
+// proved bad, and a failure it found must not be forgotten just because the
+// operator was not the one who found it.
 func (m SnapshotManager) Current(generation uint64) (Manifest, error) {
-	if m.ObjectStore != nil {
-		body, err := m.readObject("current.json")
-		if err != nil {
-			return Manifest{}, err
-		}
-		var manifest Manifest
-		if err := json.Unmarshal(body, &manifest); err != nil {
-			return Manifest{}, err
-		}
-		if manifest.Generation == 0 || manifest.Generation > generation {
-			return Manifest{}, errors.New("snapshot generation is newer than the recovery fence")
-		}
-		if err := m.verifyManifest(manifest); err != nil {
-			return Manifest{}, err
-		}
-		return manifest, nil
-	}
-	path, err := safePath(m.Root, "current.json")
-	if err != nil {
-		return Manifest{}, err
-	}
-	body, err := os.ReadFile(path)
+	body, err := m.readRecord("current.json")
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -427,166 +452,171 @@ func (m SnapshotManager) Current(generation uint64) (Manifest, error) {
 	if manifest.Generation == 0 || manifest.Generation > generation {
 		return Manifest{}, errors.New("snapshot generation is newer than the recovery fence")
 	}
-	if err := m.verifyManifest(manifest); err != nil {
+	if err := m.verifyAndRecord(manifest); err != nil {
 		return Manifest{}, err
 	}
 	return manifest, nil
 }
 
-// LastVerified selects the newest manifest at or before maxGeneration whose
-// signature and artifact both verify.
+// Select loads exactly the requested generation and verifies it.
 //
-// A manifest that fails verification is skipped, because skipping corruption is
-// the point of the recovery policy. A provider that cannot be read is not
-// skipped: an unavailable snapshot store is indistinguishable from corruption
-// to this loop, and treating it as corruption silently selects older data.
-func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
-	if m.ObjectStore != nil {
-		var newest Manifest
-		if err := m.ObjectStore.Walk(context.Background(), "manifests/", func(object blob.Object) error {
-			if !strings.HasSuffix(object.Key, ".json") {
-				return nil
-			}
-			body, err := m.readObject(object.Key)
-			if errors.Is(err, blob.ErrNotFound) {
-				return nil
-			}
-			if err != nil {
-				return fmt.Errorf("read snapshot manifest %q: %w", object.Key, err)
-			}
-			var manifest Manifest
-			if json.Unmarshal(body, &manifest) != nil || manifest.Generation == 0 || manifest.Generation > maxGeneration || manifest.Generation <= newest.Generation {
-				return nil
-			}
-			if err := m.verifyManifest(manifest); err == nil {
-				newest = manifest
-			}
-			return nil
-		}); err != nil {
-			return Manifest{}, err
-		}
-		if newest.Generation > 0 {
-			return newest, nil
-		}
+// The former implementation searched backward for the newest usable generation.
+// Even though the coordinator later rejected a different generation, that scan
+// made fallback part of the storage contract, required object-store
+// enumeration, and never durably recorded the corrupt generation it skipped.
+// Explicit operator recovery names one generation, so direct addressing is
+// both the smaller interface and the only answer consistent with the recovery
+// policy.
+func (m SnapshotManager) Select(generation uint64) (Manifest, error) {
+	if generation == 0 {
 		return Manifest{}, ErrNoVerifiedSnapshot
 	}
-	manifestDirectory, err := safePath(m.Root, "manifests")
+	body, err := m.readRecord(manifestKey(generation))
+	if errors.Is(err, os.ErrNotExist) {
+		return Manifest{}, fmt.Errorf("%w: generation %d", ErrNoVerifiedSnapshot, generation)
+	}
 	if err != nil {
 		return Manifest{}, err
 	}
-	var newest Manifest
-	directory, err := os.Open(manifestDirectory)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	var manifest Manifest
+	if err := json.Unmarshal(body, &manifest); err != nil {
+		integrityErr := integrityFailure("decode selected snapshot manifest: " + err.Error())
+		return Manifest{}, m.quarantineFailure(generation, integrityErr)
+	}
+	if manifest.Generation != generation {
+		integrityErr := integrityFailure(fmt.Sprintf("selected snapshot manifest names generation %d, want %d", manifest.Generation, generation))
+		return Manifest{}, m.quarantineFailure(generation, integrityErr)
+	}
+	if err := m.verifyAndRecord(manifest); err != nil {
 		return Manifest{}, err
 	}
-	if err == nil {
-		defer directory.Close()
-		for {
-			entries, readErr := directory.ReadDir(128)
-			for _, entry := range entries {
-				if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
-					continue
-				}
-				body, readErr := os.ReadFile(filepath.Join(manifestDirectory, entry.Name()))
-				if errors.Is(readErr, os.ErrNotExist) {
-					continue
-				}
-				if readErr != nil {
-					return Manifest{}, fmt.Errorf("read snapshot manifest %q: %w", entry.Name(), readErr)
-				}
-				var manifest Manifest
-				if json.Unmarshal(body, &manifest) != nil || manifest.Generation == 0 || manifest.Generation > maxGeneration || manifest.Generation <= newest.Generation {
-					continue
-				}
-				if err := m.verifyManifest(manifest); err == nil {
-					newest = manifest
-				}
-			}
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			if readErr != nil {
-				return Manifest{}, readErr
-			}
-		}
-	}
-	if newest.Generation > 0 {
-		return newest, nil
-	}
-	// No current.json fallback. Both backends publish every manifest under
-	// manifests/ before selecting it as current, so a generation reachable only
-	// through current.json is not a generation this method was asked for — it is
-	// a *different* one, and returning it is the implicit fallback
-	// specs/scale-to-zero.md:180-183 forbids. The object-store path already
-	// answered ErrNoVerifiedSnapshot here; the two backends now answer the same
-	// question the same way, so a future caller that forgets the coordinator's
-	// exact-generation check cannot silently restore something else.
-	return Manifest{}, ErrNoVerifiedSnapshot
+	return manifest, nil
 }
 
+// verifyAndRecord verifies a published generation and quarantines only a
+// deterministic integrity failure. Provider failures remain retryable and do
+// not become evidence that the generation's bytes are bad.
+func (m SnapshotManager) verifyAndRecord(manifest Manifest) error {
+	err := m.verifyManifest(manifest)
+	if err == nil {
+		return nil
+	}
+	var integrity integrityError
+	if !errors.As(err, &integrity) {
+		return err
+	}
+	return m.quarantineFailure(manifest.Generation, err)
+}
+
+type quarantineRecord struct {
+	Generation uint64 `json:"generation"`
+	DetectedAt string `json:"detected_at"`
+	Reason     string `json:"reason"`
+}
+
+func (m SnapshotManager) quarantineFailure(generation uint64, failure error) error {
+	if generation == 0 {
+		return failure
+	}
+	record := quarantineRecord{
+		Generation: generation,
+		DetectedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Reason:     failure.Error(),
+	}
+	body, err := json.Marshal(record)
+	if err != nil {
+		return errors.Join(failure, fmt.Errorf("encode snapshot quarantine record: %w", err))
+	}
+	key := fmt.Sprintf("quarantine/%020d.json", generation)
+	if err := m.writeRecord(key, body); err != nil {
+		return errors.Join(failure, fmt.Errorf("publish snapshot quarantine record: %w", err))
+	}
+	return failure
+}
+
+// verifyManifest proves a generation is restorable: its record is authentic and
+// its artifact still holds exactly the bytes the record names.
 func (m SnapshotManager) verifyManifest(manifest Manifest) error {
+	if err := m.verifyManifestRecord(manifest); err != nil {
+		return err
+	}
+	return m.verifyArtifact(manifest)
+}
+
+// verifyManifestRecord proves the manifest itself is authentic and internally
+// consistent, without reading the artifact. Every failure it can report is a
+// property of the stored record rather than of the store, so each is an
+// integrityError: re-reading the same bytes produces the same verdict, which is
+// what makes a generation quarantinable rather than merely unavailable.
+func (m SnapshotManager) verifyManifestRecord(manifest Manifest) error {
 	if manifest.FormatVersion != 1 || manifest.ManifestVersion != 1 || manifest.Generation == 0 || manifest.Backend == "" || manifest.SchemaVersion < 1 {
-		return errors.New("snapshot manifest format or metadata is invalid")
+		return integrityFailure("snapshot manifest format or metadata is invalid")
 	}
 	if manifest.PlaintextBytes < 0 || manifest.CiphertextBytes != manifest.PlaintextBytes || len(manifest.PlaintextSHA256) != sha256.Size*2 || len(manifest.CiphertextSHA256) != sha256.Size*2 {
-		return errors.New("snapshot manifest size or digest metadata is invalid")
+		return integrityFailure("snapshot manifest size or digest metadata is invalid")
 	}
 	if _, err := hex.DecodeString(manifest.PlaintextSHA256); err != nil {
-		return errors.New("snapshot manifest plaintext digest is invalid")
+		return integrityFailure("snapshot manifest plaintext digest is invalid")
 	}
 	if _, err := hex.DecodeString(manifest.CiphertextSHA256); err != nil {
-		return errors.New("snapshot manifest ciphertext digest is invalid")
+		return integrityFailure("snapshot manifest ciphertext digest is invalid")
 	}
 	if strings.TrimSpace(manifest.CreatedAt) == "" || strings.TrimSpace(manifest.VerifiedAt) == "" || strings.TrimSpace(manifest.Artifact) == "" {
-		return errors.New("snapshot manifest provenance is incomplete")
+		return integrityFailure("snapshot manifest provenance is incomplete")
 	}
 	if manifest.KeyID != m.KeyID || manifest.Signature == "" {
-		return errors.New("snapshot manifest authentication failed")
+		return integrityFailure("snapshot manifest authentication failed")
 	}
 	signature, err := m.signManifest(manifest)
 	if err != nil {
 		return err
 	}
 	if !hmac.Equal([]byte(manifest.Signature), []byte(signature)) {
-		return errors.New("snapshot manifest signature mismatch")
+		return integrityFailure("snapshot manifest signature mismatch")
 	}
-	return m.verifyArtifact(manifest)
+	return nil
 }
 
 func (m SnapshotManager) verifyArtifact(manifest Manifest) error {
-	input, err := m.openArtifact(manifest.Artifact)
-	if err != nil {
-		return err
-	}
-	defer input.Close()
-	objectSize := int64(-1)
+	var input io.ReadCloser
+	var objectSize int64
 	if m.ObjectStore != nil {
-		object, sizeReader, err := m.ObjectStore.Open(context.Background(), manifest.Artifact)
+		object, reader, err := m.ObjectStore.Open(context.Background(), manifest.Artifact)
 		if err != nil {
+			if errors.Is(err, blob.ErrNotFound) {
+				return integrityFailure("snapshot artifact is missing")
+			}
 			return err
 		}
-		closeErr := sizeReader.Close()
-		if closeErr != nil {
-			return closeErr
-		}
+		input = reader
 		objectSize = object.Size
 	} else {
-		statInput, ok := input.(interface{ Stat() (os.FileInfo, error) })
-		if !ok {
-			return errors.New("filesystem snapshot artifact does not expose file metadata")
-		}
-		stat, err := statInput.Stat()
+		path, err := safePath(m.Root, manifest.Artifact)
 		if err != nil {
+			return integrityFailure(err.Error())
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return integrityFailure("snapshot artifact is missing")
+			}
+			return err
+		}
+		input = file
+		stat, err := file.Stat()
+		if err != nil {
+			_ = file.Close()
 			return err
 		}
 		objectSize = stat.Size()
 	}
+	defer input.Close()
 	if objectSize != manifest.CiphertextBytes+aes.BlockSize+sha256.Size {
-		return errors.New("snapshot artifact size mismatch")
+		return integrityFailure("snapshot artifact size mismatch")
 	}
 	var nonce [aes.BlockSize]byte
 	if _, err := io.ReadFull(input, nonce[:]); err != nil {
-		return err
+		return integrityFailure("snapshot artifact nonce is truncated")
 	}
 	mac := hmac.New(sha256.New, m.artifactMACKey())
 	mac.Write(nonce[:])
@@ -600,16 +630,16 @@ func (m SnapshotManager) verifyArtifact(manifest Manifest) error {
 		}
 		count, err := io.CopyN(io.MultiWriter(mac, hash), input, want)
 		if err != nil {
-			return err
+			return integrityFailure("snapshot artifact ciphertext is truncated")
 		}
 		remaining -= count
 	}
 	provided := make([]byte, sha256.Size)
 	if _, err := io.ReadFull(input, provided); err != nil {
-		return err
+		return integrityFailure("snapshot artifact authentication tag is truncated")
 	}
 	if !hmac.Equal(provided, mac.Sum(nil)) || hex.EncodeToString(hash.Sum(nil)) != manifest.CiphertextSHA256 {
-		return errors.New("snapshot artifact authentication failed")
+		return integrityFailure("snapshot artifact authentication failed")
 	}
 	return nil
 }
@@ -619,26 +649,19 @@ func (m SnapshotManager) publishManifest(manifest Manifest) error {
 	if err != nil {
 		return err
 	}
-	if m.ObjectStore != nil {
-		manifestKey := fmt.Sprintf("manifests/%020d.json", manifest.Generation)
-		if _, err := m.ObjectStore.Put(context.Background(), manifestKey, int64(len(body)), bytes.NewReader(body)); err != nil {
-			return err
-		}
-		_, err := m.ObjectStore.Put(context.Background(), "current.json", int64(len(body)), bytes.NewReader(body))
+	// The generation's own manifest is published before it is selected as
+	// current, so a current.json is never the only record of a generation.
+	if err := m.writeRecord(manifestKey(manifest.Generation), body); err != nil {
 		return err
 	}
-	path, err := safePath(m.Root, fmt.Sprintf("manifests/%020d.json", manifest.Generation))
-	if err != nil {
-		return err
-	}
-	if err := atomicWrite(path, body); err != nil {
-		return err
-	}
-	current, err := safePath(m.Root, "current.json")
-	if err != nil {
-		return err
-	}
-	return atomicWrite(current, body)
+	return m.writeRecord("current.json", body)
+}
+
+// manifestKey addresses a generation's published manifest. Both backends use one
+// key space, which is what lets Select read a generation directly instead of
+// enumerating and choosing.
+func manifestKey(generation uint64) string {
+	return fmt.Sprintf("manifests/%020d.json", generation)
 }
 
 // signManifest authenticates the manifest. The marshal error is surfaced rather

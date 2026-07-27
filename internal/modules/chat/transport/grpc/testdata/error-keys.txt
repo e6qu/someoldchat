@@ -9,6 +9,7 @@ events.event_incomplete
 events.payload_field_invalid
 events.payload_malformed
 events.payload_required
+events.slack_event_incomplete
 service.blob_unavailable
 service.emoji_already_exists
 service.invalid_access_log

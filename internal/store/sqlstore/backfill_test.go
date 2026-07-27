@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -539,16 +540,16 @@ func TestSQLiteBackfillChunkQueryIsIndexed(t *testing.T) {
 	s := openDrained(t, ctx, filepath.Join(t.TempDir(), "plan.db"))
 	defer s.Close()
 
-	task := timestampBackfills["outbox.created_at"]
+	task := columnBackfills["outbox.created_at"]
 	if task.name == "" {
 		t.Fatal("the re-encoding registry no longer holds outbox.created_at")
 	}
 	if err := s.createBackfillIndex(ctx, task); err != nil {
 		t.Fatal(err)
 	}
-	query := `SELECT DISTINCT ` + task.column + ` FROM ` + task.table +
-		` WHERE ` + task.column + ` > ? AND ` + task.pending +
-		` ORDER BY ` + task.column + ` LIMIT ?`
+	query := `SELECT DISTINCT ` + task.key + ` FROM ` + task.table +
+		` WHERE ` + task.key + ` > ? AND ` + task.pending +
+		` ORDER BY ` + task.key + ` LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, `EXPLAIN QUERY PLAN `+query, "", backfillChunkSize)
 	if err != nil {
 		t.Fatal(err)
@@ -734,8 +735,15 @@ func TestSQLiteBackfillIsANoOpOnAFreshDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(statuses) != 1 || statuses[0].Name != messagesIdentityBackfill {
-		t.Fatalf("a fresh database registered %+v, want only the uniqueness pass", statuses)
+	wantStatuses := append(foldBackfillNames(), messagesIdentityBackfill)
+	sort.Strings(wantStatuses)
+	if len(statuses) != len(wantStatuses) {
+		t.Fatalf("a fresh database registered %+v, want completed release passes %v", statuses, wantStatuses)
+	}
+	for index, status := range statuses {
+		if status.Name != wantStatuses[index] || !status.Done || status.Rejected != 0 {
+			t.Fatalf("fresh status[%d]=%+v, want completed clean %q", index, status, wantStatuses[index])
+		}
 	}
 	notices, err := fresh.MigrationNotices(ctx)
 	if err != nil {

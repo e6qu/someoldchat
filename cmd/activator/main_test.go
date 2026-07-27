@@ -316,7 +316,7 @@ func (s *stubSnapshotter) Current(context.Context, uint64) (lifecycle.Manifest, 
 	return lifecycle.Manifest{}, lifecycle.ErrNoVerifiedSnapshot
 }
 
-func (s *stubSnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (lifecycle.Manifest, error) {
+func (s *stubSnapshotter) Select(_ context.Context, maxGeneration uint64) (lifecycle.Manifest, error) {
 	var newest lifecycle.Manifest
 	for generation, manifest := range s.verified {
 		if generation <= maxGeneration && generation > newest.Generation {

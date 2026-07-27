@@ -446,6 +446,10 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// Slack history is newest-first. Reading the store in that direction also
+	// makes the requested window one index seek instead of filtering the oldest
+	// page of a long conversation and calling it history.
+	request.Page.Descending = true
 	page, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, request.Page)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))

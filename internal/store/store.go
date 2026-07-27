@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -131,6 +132,48 @@ var (
 	// instead of as raw driver text.
 	ErrTransient = errors.New("transient storage failure")
 )
+
+// InvalidArgument classifies a malformed request as a caller mistake.
+//
+// Every guard on a request path returns through here. They used to return bare
+// errors.New values, which no transport had classified, so a missing identifier
+// or a non-positive page limit reached the caller as HTTP 500 and as
+// codes.Unavailable across the chat seam — an answer that asks a caller to retry
+// a request that can never succeed. AGENTS.md: handled errors must not become
+// HTTP 500 responses. The guard belongs here rather than at the transport,
+// because a transport-side guard is a second copy of the rule that can diverge
+// from this one, and one such divergence was deliberately deleted already.
+func InvalidArgument(reason string) error {
+	return fmt.Errorf("%w: %s", ErrInvalidArgument, reason)
+}
+
+// CheckPage validates the bounds every paged read shares. It permits either
+// direction, so only a read that implements domain.PageRequest.Descending may
+// use it; every other paged read uses CheckAscendingPage.
+func CheckPage(request domain.PageRequest) error {
+	if request.Limit <= 0 {
+		return InvalidArgument("page limit must be positive")
+	}
+	return nil
+}
+
+// CheckAscendingPage is CheckPage plus the refusal that keeps
+// domain.PageRequest.Descending honest.
+//
+// Descending is one field on the one page request every read shares, and only
+// the message reads implement it. A read that ignored it would answer the oldest
+// page to a caller that asked for the newest and report success, which is a
+// worse outcome than the walk the field exists to remove. Refusing names the
+// limitation at the boundary that has it.
+func CheckAscendingPage(request domain.PageRequest) error {
+	if err := CheckPage(request); err != nil {
+		return err
+	}
+	if request.Descending {
+		return InvalidArgument("this read does not page in descending order")
+	}
+	return nil
+}
 
 type Store interface {
 	AppendEvent(context.Context, events.Event) error
@@ -310,7 +353,30 @@ type Store interface {
 	// in the same position as one that hands it two identical identifiers.
 	CreateMessage(context.Context, domain.Message, events.Event, string) error
 	GetMessage(context.Context, domain.MessageID) (domain.Message, error)
+	// ListMessages pages the non-deleted messages in one conversation in either
+	// direction. Deleted rows remain individually addressable through GetMessage
+	// for mutation and audit paths, but history must not expose their retained
+	// text or let tombstones consume a whole visible page.
+	//
+	// domain.PageRequest.Descending selects `ORDER BY created_at DESC, id DESC`
+	// with a backward-walking cursor, and it is the only read that implements it.
+	// Without it the newest window of a conversation was reachable only by walking
+	// the whole conversation forward: internal/web bounded that walk, so a
+	// conversation past the bound had NO reachable newest window — paging forward,
+	// "jump to the latest" and a search permalink all landed on the same stale
+	// window — and internal/api/slack scanned and filtered for the same reason.
+	// One descending page of Limit+1 rows answers both.
+	//
+	// The two directions are the same read: a full forward walk and a full
+	// backward walk of one conversation visit exactly the same rows in opposite
+	// order, across page boundaries and while messages are being written, because
+	// both compare the same (created_at, id) key through
+	// domain.PageRequest.PageAfter and both take NextCursor from the last row of
+	// the page. A cursor carries no direction, so one minted walking backwards
+	// resumes a forward walk from the same row.
 	ListMessages(context.Context, domain.ConversationID, domain.PageRequest) (domain.MessagePage, error)
+	// ListThreadMessages has the same non-deleted history boundary as
+	// ListMessages, in chronological order.
 	ListThreadMessages(context.Context, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) (domain.MessagePage, error)
 	AddReaction(context.Context, domain.Reaction, events.Event) error
 	RemoveReaction(context.Context, domain.Reaction, events.Event) error

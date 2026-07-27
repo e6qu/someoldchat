@@ -41,8 +41,16 @@ import (
 //     is an index range seek over its own 500 values instead of a scan of the
 //     table; the index is dropped when the pass finishes. messages.created_at is
 //     walked through the covering index messages(conversation, created_at, id)
-//     that already exists, one conversation at a time. Measured rates are in
-//     TestSQLiteBackfillRateIsLinear.
+//     that already exists, one conversation at a time. The four folded-search
+//     copies are walked through their table's primary key, which needs no
+//     transient index at all — an index on free text would be as large as the
+//     table it is meant to make cheap. Measured rates are in
+//     TestSQLiteBackfillRateIsLinear and TestSQLiteFoldBackfillRateIsLinear.
+//
+// The machinery is no longer timestamp-shaped. columnBackfill states which
+// column a pass chunks by, which it reads, which it writes and how it derives
+// one from the other, so a new column-wide rewrite is a registry entry rather
+// than a second copy of the driver loop.
 //   - Each chunk commits with its own durable cursor, so a crash resumes where
 //     it stopped instead of starting over, and two replicas cooperate on one
 //     scan rather than duplicating it.
@@ -77,16 +85,50 @@ const backfillChunkSize = 500
 // order of the tuple.
 const backfillCursorSeparator = "\n"
 
-// timestampBackfill is one column-wide re-encoding.
-type timestampBackfill struct {
-	// name is the durable progress key. It is the table and column, so a
-	// deployment that already ran one step and not another resumes correctly and
-	// two steps that owe the same column collapse to one pass.
+// columnBackfill is one column-wide rewrite.
+//
+// It used to be one column-wide RE-ENCODING — the struct was named
+// timestampBackfill, its rewrite was hard-coded to domain.ParseStoredTime, and
+// the column it read was the column it wrote. The folded-search columns need the
+// same guarantees (chunked, off the startup path, resumable, linear, a value it
+// cannot handle counted rather than fatal) and a different rewrite that reads one
+// column and writes another, so the shape is now stated in fields:
+//
+//   - key is the column the pass orders and chunks by, and the value it stores in
+//     schema_backfills.cursor. It must be unique per row or hold few enough
+//     distinct values that a chunk of them is bounded work.
+//   - source is the column the rewrite reads and target the column it writes. A
+//     re-encoding sets all three to one column, which is the original behaviour.
+//   - rewrite derives target's value from source's. An error counts the row in
+//     schema_backfills.rejected and records a notice; only a fatalRewrite stops
+//     the pass.
+type columnBackfill struct {
+	// name is the durable progress key. It is the table and the column written,
+	// so a deployment that already ran one step and not another resumes correctly
+	// and two steps that owe the same column collapse to one pass.
 	name    string
 	table   string
-	column  string
+	key     string
+	source  string
+	target  string
 	pending string
+	rewrite func(string) (string, error)
+	// index requests a transient index on key for the duration of the pass. A
+	// pass that chunks by a column with no index of its own needs one or every
+	// chunk is a full table scan; a pass that chunks by the primary key does not.
+	index bool
 }
+
+// keyed reports whether the pass chunks by the same column it reads, which is
+// the shape a re-encoding has and which lets the chunk query be a DISTINCT over
+// one column.
+func (b columnBackfill) keyed() bool { return b.key == b.source }
+
+// fatalRewrite marks a rewrite failure that must stop the pass instead of being
+// counted as one unrepairable row. It is for a broken invariant of this
+// repository — a re-encoding that produced a non-order-preserving value — not for
+// data a deployment might legitimately hold.
+type fatalRewrite struct{ error }
 
 // canonicalStoredTimeShape is a SQL predicate that is true for a value in the
 // fixed-width, single-zone form domain.StoredTime writes.
@@ -128,13 +170,91 @@ const messagesIdentityBackfill = "messages.created_at.identity"
 // runMessageIdentityBackfill.
 const messagesConversationCreatedUniqueIndex = "messages_conversation_created_unique"
 
-// timestampBackfills is the registry of the pure re-encoding passes, keyed by
-// name.
-var timestampBackfills = func() map[string]timestampBackfill {
-	registry := make(map[string]timestampBackfill, len(storedTimestampColumns))
+// rewriteStoredTime is the re-encoding passes' rewrite: a stored instant in any
+// encoding this repository has ever written, in the fixed-width order-preserving
+// form.
+func rewriteStoredTime(value string) (string, error) {
+	parsed, err := domain.ParseStoredTime(value)
+	if err != nil {
+		// An undecodable value must not brick the process. Aborting here left the
+		// schema at its old version and failed identically on every restart of
+		// every binary, with no skip, no repair mode and no way to reach the
+		// database through the product — and the authors already knew free-form
+		// text lives in timestamp columns in the field, which is why
+		// schema_migrations.applied_at is exempt from this rewrite.
+		return "", err
+	}
+	normalized := domain.NewStoredTime(parsed)
+	if !normalized.Ordered() {
+		return "", fatalRewrite{fmt.Errorf("rewrite of %q produced the non-ordered value %q", value, string(normalized))}
+	}
+	return string(normalized), nil
+}
+
+// foldedColumns are the searchable values that carry a stored, Go-folded copy.
+//
+// Case-insensitive matching cannot be delegated to the engine: SQLite and dqlite
+// fold ASCII only, PostgreSQL folds by the database's locale, and both search
+// paths folded the query TERM in Go. The two disagreed for every non-ASCII
+// character, so a message containing "ÄPFEL" was found by neither
+// SearchMessages("äpfel") nor SearchMessages("ÄPFEL") on SQLite and dqlite while
+// the in-memory and PostgreSQL profiles found it by both. See
+// domain.FoldSearchText.
+var foldedColumns = []struct{ table, source, folded string }{
+	{"messages", "text", "text_folded"},
+	{"conversations", "name", "name_folded"},
+	{"conversations", "topic", "topic_folded"},
+	{"conversations", "purpose", "purpose_folded"},
+}
+
+// foldPending selects the rows whose folded copy has not been computed yet.
+//
+// It is a SHAPE test, like canonicalStoredTimeShape, and for the same reason: a
+// predicate that could compare the stored fold with the correct fold would need
+// the engine to compute the correct fold, which is exactly the thing no engine
+// agrees on. domain.FoldSearchText never maps a non-empty value to an empty one,
+// so "source is not empty and the copy is" is true of precisely the rows written
+// before the column existed and false of every row a writer of this release
+// produced.
+func foldPending(source, folded string) string {
+	return fmt.Sprintf("(%s <> '' AND %s = '')", source, folded)
+}
+
+func foldBackfillNames() []string {
+	names := make([]string, 0, len(foldedColumns))
+	for _, target := range foldedColumns {
+		names = append(names, target.table+"."+target.folded)
+	}
+	return names
+}
+
+// columnBackfills is the registry of every column-wide rewrite, keyed by name.
+var columnBackfills = func() map[string]columnBackfill {
+	registry := make(map[string]columnBackfill, len(storedTimestampColumns)+len(foldedColumns))
 	for _, target := range storedTimestampColumns {
 		name := target.table + "." + target.column
-		registry[name] = timestampBackfill{name: name, table: target.table, column: target.column, pending: normalizePending(target.column)}
+		registry[name] = columnBackfill{
+			name: name, table: target.table,
+			key: target.column, source: target.column, target: target.column,
+			pending: normalizePending(target.column),
+			rewrite: rewriteStoredTime,
+			index:   true,
+		}
+	}
+	for _, target := range foldedColumns {
+		name := target.table + "." + target.folded
+		registry[name] = columnBackfill{
+			name: name, table: target.table,
+			// Chunked by the primary key rather than by the value: the source is
+			// free text, so an index on it would be as large as the table it is
+			// meant to make cheap, and messages(id) and conversations(id) are
+			// already indexed. Ordering by the primary key also makes each chunk
+			// exactly the rows it rewrites, with no DISTINCT to collapse.
+			key: "id", source: target.source, target: target.folded,
+			pending: foldPending(target.source, target.folded),
+			rewrite: func(value string) (string, error) { return domain.FoldSearchText(value), nil },
+			index:   false,
+		}
 	}
 	return registry
 }()
@@ -210,7 +330,7 @@ func truncateNoticeSubject(subject string) string {
 	return subject[:migrationNoticeSubjectLimit] + "…"
 }
 
-// registerTimestampBackfills records the columns a migration step owes, inside
+// registerBackfills records the columns a migration step owes, inside
 // the schema transaction, so the record and the version bump commit together.
 //
 // Registration RESETS the progress of a named backfill rather than skipping an
@@ -220,10 +340,10 @@ func truncateNoticeSubject(subject string) string {
 // reaches this code, and a process that crashed mid-rewrite also sees the new
 // version on restart and resumes from its stored cursor instead of restarting
 // the scan.
-func registerTimestampBackfills(ctx context.Context, db queryExecutor, names []string) error {
+func registerBackfills(ctx context.Context, db queryExecutor, names []string) error {
 	for _, name := range names {
-		if _, ok := timestampBackfills[name]; !ok && name != messagesIdentityBackfill {
-			return fmt.Errorf("unknown timestamp backfill %q", name)
+		if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill {
+			return fmt.Errorf("unknown column backfill %q", name)
 		}
 		if _, err := db.ExecContext(ctx, `INSERT INTO schema_backfills(name, cursor, done, rejected) VALUES (?, '', 0, 0) ON CONFLICT(name) DO UPDATE SET cursor = '', done = 0, rejected = 0`, name); err != nil {
 			return fmt.Errorf("register backfill %q: %w", name, err)
@@ -297,8 +417,8 @@ func (s *Store) BackfillStatuses(ctx context.Context) ([]BackfillStatus, error) 
 // Without it, repairing the rows a pass rejected required hand-editing
 // schema_backfills, which is the SQL client the notices exist to remove.
 func (s *Store) ResetBackfill(ctx context.Context, name string) error {
-	if _, ok := timestampBackfills[name]; !ok && name != messagesIdentityBackfill {
-		return fmt.Errorf("unknown timestamp backfill %q", name)
+	if _, ok := columnBackfills[name]; !ok && name != messagesIdentityBackfill {
+		return fmt.Errorf("unknown column backfill %q", name)
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO schema_backfills(name, cursor, done, rejected) VALUES (?, '', 0, 0) ON CONFLICT(name) DO UPDATE SET cursor = '', done = 0, rejected = 0`, name)
 	return err
@@ -316,11 +436,11 @@ func (s *Store) runPendingBackfills(ctx context.Context) error {
 	}
 	for _, name := range pending {
 		var runErr error
-		switch task, known := timestampBackfills[name]; {
+		switch task, known := columnBackfills[name]; {
 		case name == messagesIdentityBackfill:
 			runErr = s.runMessageIdentityBackfill(ctx)
 		case known:
-			runErr = s.runTimestampBackfill(ctx, task)
+			runErr = s.runColumnBackfill(ctx, task)
 		default:
 			// A name written by a newer binary. Leaving it pending is correct:
 			// this binary does not know how to satisfy it and must not mark it
@@ -387,9 +507,10 @@ func (s *Store) observeChunk(name string, chunk int) error {
 	return (*observer)(name, chunk)
 }
 
-// backfillIndexName is the transient index that makes a re-encoding pass linear.
-func backfillIndexName(task timestampBackfill) string {
-	return "backfill_" + task.table + "_" + task.column
+// backfillIndexName is the transient index that makes a value-ordered pass
+// linear.
+func backfillIndexName(task columnBackfill) string {
+	return "backfill_" + task.table + "_" + task.key
 }
 
 // createBackfillIndex is what removes the quadratic term. Without an index that
@@ -404,22 +525,28 @@ func backfillIndexName(task timestampBackfill) string {
 // It is created once per pass and dropped when the pass finishes. An interrupted
 // pass deliberately leaves it: the resumed pass reuses it instead of paying for
 // a second build.
-func (s *Store) createBackfillIndex(ctx context.Context, task timestampBackfill) error {
-	statement := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(%s)`, backfillIndexName(task), task.table, task.column)
+func (s *Store) createBackfillIndex(ctx context.Context, task columnBackfill) error {
+	if !task.index {
+		return nil
+	}
+	statement := fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(%s)`, backfillIndexName(task), task.table, task.key)
 	if err := underContention(ctx, func() error { _, err := s.db.ExecContext(ctx, statement); return err }); err != nil {
 		return fmt.Errorf("create backfill index on %s: %w", task.name, err)
 	}
 	return nil
 }
 
-func (s *Store) dropBackfillIndex(ctx context.Context, task timestampBackfill) error {
+func (s *Store) dropBackfillIndex(ctx context.Context, task columnBackfill) error {
+	if !task.index {
+		return nil
+	}
 	if _, err := s.db.ExecContext(ctx, `DROP INDEX IF EXISTS `+backfillIndexName(task)); err != nil {
 		return fmt.Errorf("drop backfill index on %s: %w", task.name, err)
 	}
 	return nil
 }
 
-func (s *Store) runTimestampBackfill(ctx context.Context, task timestampBackfill) error {
+func (s *Store) runColumnBackfill(ctx context.Context, task columnBackfill) error {
 	// Checked before the index is built, so a pass that is already finished — or
 	// that was never registered, which is how a fresh database reaches this —
 	// costs one row read and leaves nothing behind.
@@ -450,7 +577,7 @@ func (s *Store) runTimestampBackfill(ctx context.Context, task timestampBackfill
 			return err
 		}
 		if len(values) == 0 {
-			return s.finishTimestampBackfill(ctx, task)
+			return s.finishColumnBackfill(ctx, task)
 		}
 		if err := s.observeChunk(task.name, chunk); err != nil {
 			return err
@@ -462,7 +589,7 @@ func (s *Store) runTimestampBackfill(ctx context.Context, task timestampBackfill
 			return err
 		}
 		if len(values) < backfillChunkSize {
-			return s.finishTimestampBackfill(ctx, task)
+			return s.finishColumnBackfill(ctx, task)
 		}
 	}
 }
@@ -480,19 +607,33 @@ func (s *Store) backfillProgress(ctx context.Context, name string) (string, bool
 	return cursor, done != 0, nil
 }
 
-func (s *Store) selectBackfillChunk(ctx context.Context, task timestampBackfill, cursor string) ([]string, error) {
-	query := `SELECT DISTINCT ` + task.column + ` FROM ` + task.table +
-		` WHERE ` + task.column + ` > ? AND ` + task.pending +
-		` ORDER BY ` + task.column + ` LIMIT ?`
+// backfillRow is one chunk entry: the value the pass chunks by and the value the
+// rewrite reads. A pass that chunks by the column it reads has them equal, and
+// its chunk query stays the DISTINCT it always was.
+type backfillRow struct{ key, source string }
+
+func (s *Store) selectBackfillChunk(ctx context.Context, task columnBackfill, cursor string) ([]backfillRow, error) {
+	projection := `SELECT DISTINCT ` + task.key
+	if !task.keyed() {
+		projection = `SELECT ` + task.key + `, ` + task.source
+	}
+	query := projection + ` FROM ` + task.table +
+		` WHERE ` + task.key + ` > ? AND ` + task.pending +
+		` ORDER BY ` + task.key + ` LIMIT ?`
 	rows, err := s.db.QueryContext(ctx, query, cursor, backfillChunkSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	values := make([]string, 0, backfillChunkSize)
+	values := make([]backfillRow, 0, backfillChunkSize)
 	for rows.Next() {
-		var value string
-		if err := rows.Scan(&value); err != nil {
+		var value backfillRow
+		if task.keyed() {
+			if err := rows.Scan(&value.key); err != nil {
+				return nil, err
+			}
+			value.source = value.key
+		} else if err := rows.Scan(&value.key, &value.source); err != nil {
 			return nil, err
 		}
 		values = append(values, value)
@@ -502,11 +643,8 @@ func (s *Store) selectBackfillChunk(ctx context.Context, task timestampBackfill,
 
 // applyBackfillChunk rewrites one chunk and advances the durable cursor in the
 // same transaction, so progress and work are never out of step.
-func (s *Store) applyBackfillChunk(ctx context.Context, task timestampBackfill, cursor string, values []string) error {
-	type rewrite struct {
-		from string
-		to   domain.StoredTime
-	}
+func (s *Store) applyBackfillChunk(ctx context.Context, task columnBackfill, cursor string, values []backfillRow) error {
+	type rewrite struct{ key, to string }
 	rewrites := make([]rewrite, 0, len(values))
 	type reject struct {
 		value  string
@@ -514,67 +652,70 @@ func (s *Store) applyBackfillChunk(ctx context.Context, task timestampBackfill, 
 	}
 	rejects := make([]reject, 0)
 	for _, value := range values {
-		parsed, err := domain.ParseStoredTime(value)
+		rewritten, err := task.rewrite(value.source)
 		if err != nil {
-			// An undecodable value must not brick the process. Aborting here left
-			// the schema at its old version and failed identically on every
-			// restart of every binary, with no skip, no repair mode and no way to
-			// reach the database through the product — and the authors already
-			// knew free-form text lives in timestamp columns in the field, which
-			// is why schema_migrations.applied_at is exempt from this rewrite.
-			// The value is left exactly as it is, it is counted in
-			// schema_backfills.rejected so "done" cannot mean "done and clean",
-			// and it is recorded so an operator can find it.
-			rejects = append(rejects, reject{value: value, reason: err.Error()})
+			var fatal fatalRewrite
+			if errors.As(err, &fatal) {
+				return err
+			}
+			// An unrepairable value must not brick the process. Aborting left the
+			// schema at its old version and failed identically on every restart of
+			// every binary, with no skip, no repair mode and no way to reach the
+			// database through the product. The value is left exactly as it is, it
+			// is counted in schema_backfills.rejected so "done" cannot mean "done
+			// and clean", and it is recorded so an operator can find it.
+			rejects = append(rejects, reject{value: value.source, reason: err.Error()})
 			continue
 		}
-		normalized := domain.NewStoredTime(parsed)
-		if !normalized.Ordered() {
-			return fmt.Errorf("rewrite of %q produced the non-ordered value %q", value, string(normalized))
+		// A row that already holds the value the rewrite derives is not written.
+		// For a re-encoding that is the common case; for a folded copy it is every
+		// row a writer of this release produced.
+		if task.keyed() && rewritten == value.source {
+			continue
 		}
-		if string(normalized) != value {
-			rewrites = append(rewrites, rewrite{from: value, to: normalized})
-		}
+		rewrites = append(rewrites, rewrite{key: value.key, to: rewritten})
 	}
 
-	last := values[len(values)-1]
+	last := values[len(values)-1].key
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	if len(rewrites) > 0 {
-		// One statement per chunk: "SET col = CASE col WHEN ? THEN ? … ELSE col
-		// END WHERE col > ? AND col <= ?".
+		// One statement per chunk: "SET target = CASE key WHEN ? THEN ? … ELSE
+		// target END WHERE key > ? AND key <= ?".
 		//
-		// The bound is the chunk's own value range, which is two parameters; the
+		// The bound is the chunk's own key range, which is two parameters; the
 		// previous shape repeated all 500 values a second time in an `IN (…)`
 		// list, and under a non-deterministic ICU collation on PostgreSQL that
 		// list could match a value no WHEN arm covered, whereupon the missing
-		// ELSE wrote NULL into a NOT NULL column. `ELSE col` also makes the
+		// ELSE wrote NULL into a NOT NULL column. `ELSE target` also makes the
 		// statement idempotent if the engine revisits a row it has already
 		// rewritten, which an UPDATE that moves rows within the index it is
-		// scanning may do: a canonical value matches no WHEN arm, so the second
+		// scanning may do: a rewritten value matches no WHEN arm, so the second
 		// visit is a no-op.
 		var builder strings.Builder
 		builder.WriteString(`UPDATE `)
 		builder.WriteString(task.table)
 		builder.WriteString(` SET `)
-		builder.WriteString(task.column)
+		builder.WriteString(task.target)
 		builder.WriteString(` = CASE `)
-		builder.WriteString(task.column)
+		builder.WriteString(task.key)
 		arguments := make([]any, 0, len(rewrites)*2+2)
 		for _, value := range rewrites {
 			builder.WriteString(` WHEN ? THEN ?`)
-			arguments = append(arguments, value.from, string(value.to))
+			arguments = append(arguments, value.key, value.to)
 		}
 		builder.WriteString(` ELSE `)
-		builder.WriteString(task.column)
+		builder.WriteString(task.target)
 		builder.WriteString(` END WHERE `)
-		builder.WriteString(task.column)
+		builder.WriteString(task.key)
 		builder.WriteString(` > ? AND `)
-		builder.WriteString(task.column)
+		builder.WriteString(task.key)
 		builder.WriteString(` <= ?`)
+		builder.WriteString(` AND `)
+		builder.WriteString(task.pending)
 		arguments = append(arguments, cursor, last)
 		if _, err := tx.ExecContext(ctx, builder.String(), arguments...); err != nil {
 			return err
@@ -607,7 +748,7 @@ func advanceBackfillCursorOn(ctx context.Context, db queryExecutor, name, cursor
 	return err
 }
 
-func (s *Store) finishTimestampBackfill(ctx context.Context, task timestampBackfill) error {
+func (s *Store) finishColumnBackfill(ctx context.Context, task columnBackfill) error {
 	if err := s.finishBackfill(ctx, task.name); err != nil {
 		return err
 	}
@@ -669,7 +810,7 @@ func (s *Store) runMessageIdentityBackfill(ctx context.Context) error {
 	// the wrong order and push hundreds of messages forward for nothing. The call
 	// returns immediately when that pass is already finished or was never
 	// registered.
-	if err := s.runTimestampBackfill(ctx, timestampBackfills[messagesCreatedAtBackfill]); err != nil {
+	if err := s.runColumnBackfill(ctx, columnBackfills[messagesCreatedAtBackfill]); err != nil {
 		return err
 	}
 	for chunk := 1; ; chunk++ {
