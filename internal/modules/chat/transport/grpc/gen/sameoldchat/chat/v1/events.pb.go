@@ -29,8 +29,12 @@ type EventRecord struct {
 	Topic             string                 `protobuf:"bytes,4,opt,name=topic,proto3" json:"topic,omitempty"`
 	Payload           string                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	CreatedAtUnixNano int64                  `protobuf:"varint,6,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The actor is part of events.Event and was absent from this message, so every
+	// record delivered through the seam lost the user who caused it while the
+	// monolith kept it.
+	ActorId       string `protobuf:"bytes,7,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *EventRecord) Reset() {
@@ -103,6 +107,13 @@ func (x *EventRecord) GetCreatedAtUnixNano() int64 {
 		return x.CreatedAtUnixNano
 	}
 	return 0
+}
+
+func (x *EventRecord) GetActorId() string {
+	if x != nil {
+		return x.ActorId
+	}
+	return ""
 }
 
 type EventsRequest struct {
@@ -221,14 +232,15 @@ var File_sameoldchat_chat_v1_events_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\n" +
-	" sameoldchat/chat/v1/events.proto\x12\x13sameoldchat.chat.v1\"\xbd\x01\n" +
+	" sameoldchat/chat/v1/events.proto\x12\x13sameoldchat.chat.v1\"\xd8\x01\n" +
 	"\vEventRecord\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05topic\x18\x04 \x01(\tR\x05topic\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\tR\apayload\x12/\n" +
-	"\x14created_at_unix_nano\x18\x06 \x01(\x03R\x11createdAtUnixNano\"u\n" +
+	"\x14created_at_unix_nano\x18\x06 \x01(\x03R\x11createdAtUnixNano\x12\x19\n" +
+	"\bactor_id\x18\a \x01(\tR\aactorId\"u\n" +
 	"\rEventsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05after\x18\x02 \x01(\x04R\x05after\x12\x14\n" +

@@ -366,11 +366,30 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	}
 }
 
+// seedWorkspaceAdmin promotes a seeded user to workspace administrator.
+// memory.Store.SeedUser creates a member membership, which is deliberately not
+// enough for any Admin* method.
+func seedWorkspaceAdmin(t *testing.T, store *memory.Store, workspaceID domain.WorkspaceID, userID domain.UserID) {
+	t.Helper()
+	event, err := events.New(domain.EventID("evt_seed_admin_"+string(userID)), workspaceID, "", events.NewPayload("workspace.role_changed", events.String("user_id", string(userID)), events.String("role", string(domain.WorkspaceRoleAdmin))), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("build role event: %v", err)
+	}
+	if err := store.SetWorkspaceRole(context.Background(), workspaceID, userID, domain.WorkspaceRoleAdmin, event); err != nil {
+		t.Fatalf("promote %s to workspace administrator: %v", userID, err)
+	}
+}
+
 func TestRemoteUsesSameChatContract(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	// The administrative operations below are exercised as U1, so U1 has to hold
+	// the administrator role. memory.Store.SeedUser makes a member, and a member is
+	// now refused every Admin* method — which is the contract this test asserts
+	// parity of, not an obstacle to it.
+	seedWorkspaceAdmin(t, store, "T1", "U1")
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversationMember("C1", "U2")
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
@@ -757,9 +776,21 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := remote.LeaveConversation(ctx, "T1", "U1", "C1"); err != nil {
 		t.Fatal(err)
 	}
-	records, err := remote.ListEventsAfter(ctx, "T1", 0, 23)
-	if err != nil || len(records) != 23 || records[0].Sequence != 1 || records[0].Event.Topic != "user.created" || records[0].Event.Payload != string(createdUser.ID) {
+	// Sequence 1 is the fixture's own role seed, which is a durable journal record
+	// like any other role change. The contract records this test asserts begin
+	// after it; the count, ordering, payload and actor assertions are unchanged.
+	records, err := remote.ListEventsAfter(ctx, "T1", 1, 23)
+	if err != nil || len(records) != 23 || records[0].Sequence != 2 || records[0].Event.Topic != "user.created" {
 		t.Fatalf("events=%+v err=%v", records, err)
+	}
+	// The payload is a self-describing JSON object and crosses the seam verbatim;
+	// the actor is a field of its own, and it used to be dropped by the converter
+	// so every record delivered through the seam lost the user who caused it.
+	if !strings.Contains(records[0].Event.Payload, string(createdUser.ID)) {
+		t.Fatalf("first event payload=%q, want the created user identifier", records[0].Event.Payload)
+	}
+	if records[0].Event.ActorID != "U1" {
+		t.Fatalf("first event actor=%q, want the acting user", records[0].Event.ActorID)
 	}
 }
 

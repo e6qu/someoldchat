@@ -12,11 +12,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
-	"github.com/sameoldchat/sameoldchat/internal/service"
-	"github.com/sameoldchat/sameoldchat/internal/store"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 type Remote struct {
@@ -50,10 +46,11 @@ type Remote struct {
 	canvases      chatv1.CanvasesServiceClient
 }
 
-// mappedClientConn preserves the domain error contract when an implementation
-// is moved behind gRPC. The server maps store invariants to canonical status
-// codes; the client maps those codes back to errors that callers can inspect
-// with errors.Is while retaining the original gRPC status.
+// mappedClientConn preserves the domain error contract when an implementation is
+// moved behind gRPC. Every call and every stream message passes through
+// mapRemoteError, which restores the sentinel the chat process failed with from
+// the single error table in errors.go, so a caller inspecting the result with
+// errors.Is gets the same answer in both compositions.
 type mappedClientConn struct {
 	grpc.ClientConnInterface
 }
@@ -80,41 +77,6 @@ func (s mappedClientStream) SendMsg(message any) error {
 
 func (s mappedClientStream) RecvMsg(message any) error {
 	return mapRemoteError(s.ClientStream.RecvMsg(message))
-}
-
-type remoteDomainError struct {
-	status *status.Status
-	cause  error
-}
-
-func (e remoteDomainError) Error() string              { return e.status.Err().Error() }
-func (e remoteDomainError) Unwrap() error              { return e.cause }
-func (e remoteDomainError) GRPCStatus() *status.Status { return e.status }
-
-func mapRemoteError(err error) error {
-	if err == nil {
-		return nil
-	}
-	remoteStatus, ok := status.FromError(err)
-	if !ok {
-		return err
-	}
-	var cause error
-	switch remoteStatus.Code() {
-	case codes.Canceled:
-		cause = context.Canceled
-	case codes.DeadlineExceeded:
-		cause = context.DeadlineExceeded
-	case codes.NotFound:
-		cause = store.ErrNotFound
-	case codes.AlreadyExists:
-		cause = store.ErrAlreadyExists
-	case codes.Aborted:
-		cause = store.ErrConflict
-	default:
-		return err
-	}
-	return remoteDomainError{status: remoteStatus, cause: cause}
 }
 
 var _ chatapi.Service = Remote{}
@@ -570,26 +532,12 @@ func (r Remote) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, 
 		return domain.File{}, err
 	}
 	if err := stream.Send(&chatv1.UploadFilePart{Part: &chatv1.UploadFilePart_Metadata{Metadata: header}}); err != nil {
-		return domain.File{}, err
+		return domain.File{}, uploadFailure(err, func() error { _, recvErr := stream.CloseAndRecv(); return recvErr })
 	}
-	buffer := make([]byte, 64<<10)
-	for {
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			chunk := &chatv1.UploadFilePart{Part: &chatv1.UploadFilePart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}
-			if err := stream.Send(chunk); err != nil {
-				return domain.File{}, err
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return domain.File{}, readErr
-		}
-		if read == 0 {
-			return domain.File{}, errors.New("file source returned no data or error")
-		}
+	if err := sendChunks(source, "file source", func(chunk []byte) error {
+		return stream.Send(&chatv1.UploadFilePart{Part: &chatv1.UploadFilePart_Chunk{Chunk: append([]byte(nil), chunk...)}})
+	}); err != nil {
+		return domain.File{}, uploadFailure(err, func() error { _, recvErr := stream.CloseAndRecv(); return recvErr })
 	}
 	if err := stream.CloseSend(); err != nil {
 		return domain.File{}, err
@@ -610,25 +558,12 @@ func (r Remote) SetUserPhoto(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.User{}, err
 	}
 	if err := stream.Send(&chatv1.UserPhotoUploadPart{Part: &chatv1.UserPhotoUploadPart_Metadata{Metadata: &chatv1.UserPhotoUploadRequest{WorkspaceId: string(workspaceID), UserId: string(userID), MimeType: mimeType, Size: size}}}); err != nil {
-		return domain.User{}, err
+		return domain.User{}, uploadFailure(err, func() error { _, recvErr := stream.CloseAndRecv(); return recvErr })
 	}
-	buffer := make([]byte, 64<<10)
-	for {
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			if err := stream.Send(&chatv1.UserPhotoUploadPart{Part: &chatv1.UserPhotoUploadPart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}); err != nil {
-				return domain.User{}, err
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return domain.User{}, readErr
-		}
-		if read == 0 {
-			return domain.User{}, errors.New("user photo source returned no data or error")
-		}
+	if err := sendChunks(source, "user photo source", func(chunk []byte) error {
+		return stream.Send(&chatv1.UserPhotoUploadPart{Part: &chatv1.UserPhotoUploadPart_Chunk{Chunk: append([]byte(nil), chunk...)}})
+	}); err != nil {
+		return domain.User{}, uploadFailure(err, func() error { _, recvErr := stream.CloseAndRecv(); return recvErr })
 	}
 	if err := stream.CloseSend(); err != nil {
 		return domain.User{}, err
@@ -919,6 +854,20 @@ func (r Remote) openUserPhotoStream(ctx context.Context, workspaceID domain.Work
 	if metadata == nil {
 		cancel()
 		return domain.User{}, nil, errors.New("user photo stream did not begin with metadata")
+	}
+	// The stream carries the user the chat process resolved. The client used to
+	// synthesise domain.User{ID, WorkspaceID} and ignore the metadata part
+	// entirely, so a caller that read any other field of the returned user saw the
+	// stored record in the monolith and an identifier-only stub across the seam.
+	// A peer that sends no user (a chat process older than the field) still yields
+	// the stub, which is what it used to send.
+	if metadata.GetUser() != nil {
+		user, err := decodeProtoUser(metadata.GetUser())
+		if err != nil {
+			cancel()
+			return domain.User{}, nil, err
+		}
+		return user, &remoteUserPhotoReader{stream: stream, cancel: cancel, buffer: first.GetChunk()}, nil
 	}
 	return domain.User{ID: userID, WorkspaceID: workspaceID}, &remoteUserPhotoReader{stream: stream, cancel: cancel, buffer: first.GetChunk()}, nil
 }
@@ -1473,7 +1422,7 @@ func (r Remote) AdminGetConversationPrefs(ctx context.Context, workspaceID domai
 }
 
 func (r Remote) AdminSetConversationPrefs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, value domain.ConversationPrefs) (domain.ConversationPrefs, error) {
-	out, err := r.directory.SetConversationPrefs(ctx, &chatv1.SetConversationPrefsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Prefs: encodeProtoConversationPrefs(value)})
+	out, err := r.directory.SetConversationPrefs(ctx, &chatv1.SetConversationPrefsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Prefs: encodeProtoConversationPrefs(value)})
 	if err != nil {
 		return domain.ConversationPrefs{}, err
 	}
@@ -1509,6 +1458,37 @@ func (r Remote) AdminCreateUser(ctx context.Context, workspaceID domain.Workspac
 		return domain.User{}, err
 	}
 	return decodeProtoUser(out)
+}
+
+func (r Remote) WorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) (domain.WorkspaceMembership, error) {
+	out, err := r.directory.GetWorkspaceMembership(ctx, &chatv1.WorkspaceMembershipRequest{WorkspaceId: string(workspaceID), UserId: string(actorID), TargetUserId: string(targetID)})
+	if err != nil {
+		return domain.WorkspaceMembership{}, err
+	}
+	return decodeProtoWorkspaceMembership(out)
+}
+
+// ProvisionExternalUser and SynchronizeExternalUserRole carry no actor; see the
+// contract on service.ProvisionExternalUser. The connection this crosses is
+// mutually authenticated, which is what stands in for an end-user authority
+// check.
+func (r Remote) ProvisionExternalUser(ctx context.Context, workspaceID domain.WorkspaceID, email, realName string, role domain.WorkspaceRole) (domain.User, error) {
+	out, err := r.directory.ProvisionExternalUser(ctx, &chatv1.ProvisionExternalUserRequest{WorkspaceId: string(workspaceID), Email: email, RealName: realName, Role: string(role)})
+	if err != nil {
+		return domain.User{}, err
+	}
+	return decodeProtoUser(out)
+}
+
+func (r Remote) SynchronizeExternalUserRole(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID, role domain.WorkspaceRole) error {
+	out, err := r.directory.SynchronizeExternalUserRole(ctx, &chatv1.SynchronizeExternalUserRoleRequest{WorkspaceId: string(workspaceID), TargetUserId: string(targetID), Role: string(role)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed external role synchronisation was not acknowledged")
+	}
+	return nil
 }
 
 func (r Remote) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
@@ -2431,7 +2411,7 @@ func (s *Server) LookupCanvasSections(ctx context.Context, input *chatv1.CanvasS
 
 func (s *Server) createCanvasProto(ctx context.Context, input *chatv1.CreateCanvasRequest) (*chatv1.Canvas, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	canvas, err := s.implementation.CreateCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTitle(), input.GetDocumentContent(), domain.ConversationID(input.GetChannelId()))
 	if err != nil {
@@ -2442,7 +2422,7 @@ func (s *Server) createCanvasProto(ctx context.Context, input *chatv1.CreateCanv
 
 func (s *Server) editCanvasProto(ctx context.Context, input *chatv1.EditCanvasRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" || input.GetChanges() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, canvas_id, and changes are required")
+		return nil, invalidArgument("workspace_id, user_id, canvas_id, and changes are required")
 	}
 	if err := s.implementation.EditCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetChanges()); err != nil {
 		return nil, mapError(err)
@@ -2452,7 +2432,7 @@ func (s *Server) editCanvasProto(ctx context.Context, input *chatv1.EditCanvasRe
 
 func (s *Server) deleteCanvasProto(ctx context.Context, input *chatv1.CanvasRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and canvas_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and canvas_id are required")
 	}
 	if err := s.implementation.DeleteCanvas(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId())); err != nil {
 		return nil, mapError(err)
@@ -2462,7 +2442,7 @@ func (s *Server) deleteCanvasProto(ctx context.Context, input *chatv1.CanvasRequ
 
 func (s *Server) setCanvasAccessProto(ctx context.Context, input *chatv1.CanvasAccessRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" || input.GetAccessLevel() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, canvas_id, and access_level are required")
+		return nil, invalidArgument("workspace_id, user_id, canvas_id, and access_level are required")
 	}
 	if err := s.implementation.SetCanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetAccessLevel(), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
 		return nil, mapError(err)
@@ -2472,7 +2452,7 @@ func (s *Server) setCanvasAccessProto(ctx context.Context, input *chatv1.CanvasA
 
 func (s *Server) deleteCanvasAccessProto(ctx context.Context, input *chatv1.CanvasAccessDeleteRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and canvas_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and canvas_id are required")
 	}
 	if err := s.implementation.DeleteCanvasAccess(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), conversationIDs(input.GetChannelIds()), userIDs(input.GetUserIds())); err != nil {
 		return nil, mapError(err)
@@ -2482,7 +2462,7 @@ func (s *Server) deleteCanvasAccessProto(ctx context.Context, input *chatv1.Canv
 
 func (s *Server) lookupCanvasSectionsProto(ctx context.Context, input *chatv1.CanvasSectionsLookupRequest) (*chatv1.CanvasSectionsResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetCanvasId() == "" || input.GetCriteria() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, canvas_id, and criteria are required")
+		return nil, invalidArgument("workspace_id, user_id, canvas_id, and criteria are required")
 	}
 	sections, err := s.implementation.LookupCanvasSections(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.CanvasID(input.GetCanvasId()), input.GetCriteria())
 	if err != nil {
@@ -2512,9 +2492,13 @@ func userIDs(values []string) []domain.UserID {
 }
 
 func (s *Server) postProto(ctx context.Context, input *chatv1.PostRequest) (*chatv1.Message, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetText() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and text are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
 	message, err := s.implementation.Post(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetText(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
 	if err != nil {
 		return nil, mapError(err)
@@ -2552,7 +2536,7 @@ func (s *Server) setUserGroupEnabled(ctx context.Context, input *chatv1.UserGrou
 func (s *Server) UserGroups(ctx context.Context, input *chatv1.UserGroupsRequest) (*chatv1.UserGroupPage, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.ListUserGroups(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetIncludeDisabled(), request)
 	if err != nil {
@@ -2797,7 +2781,7 @@ func (s *Server) AdminConvertConversationToPrivate(ctx context.Context, input *c
 func (s *Server) AdminConversationTeams(ctx context.Context, input *chatv1.AdminConversationTeamsRequest) (*chatv1.AdminConversationTeamsResponse, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	teams, hasMore, nextCursor, err := s.implementation.AdminConversationTeams(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
@@ -2860,7 +2844,7 @@ func (s *Server) RenameEmoji(ctx context.Context, input *chatv1.EmojiMutationReq
 func (s *Server) SearchConversations(ctx context.Context, input *chatv1.SearchConversationsRequest) (*chatv1.ConversationPage, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	value, err := s.implementation.AdminSearchConversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), request)
 	if err != nil {
@@ -2922,7 +2906,18 @@ func (s *Server) GetConversationPrefs(ctx context.Context, input *chatv1.Convers
 }
 
 func (s *Server) SetConversationPrefs(ctx context.Context, input *chatv1.SetConversationPrefsRequest) (*chatv1.ConversationPrefs, error) {
-	value, err := s.implementation.AdminSetConversationPrefs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetPrefs().GetConversationId()), decodeProtoConversationPrefsValue(input.GetPrefs()))
+	// The target is the request's conversation_id, which is the parameter the
+	// module contract takes. The server used to re-derive it from
+	// prefs.conversation_id while the client dropped the parameter, so a call
+	// whose parameter and payload disagreed mutated one conversation in process
+	// and another across the seam. prefs.conversation_id remains the fallback only
+	// for a client old enough not to send the field, which a rolling deployment of
+	// the two processes can still produce.
+	target := domain.ConversationID(input.GetConversationId())
+	if target == "" {
+		target = domain.ConversationID(input.GetPrefs().GetConversationId())
+	}
+	value, err := s.implementation.AdminSetConversationPrefs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), target, decodeProtoConversationPrefsValue(input.GetPrefs()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -2932,7 +2927,7 @@ func (s *Server) SetConversationPrefs(ctx context.Context, input *chatv1.SetConv
 func (s *Server) AdminTeamUsers(ctx context.Context, input *chatv1.AdminTeamUsersRequest) (*chatv1.UserPage, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	value, err := s.implementation.AdminTeamUsers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.WorkspaceRole(input.GetRole()), request)
 	if err != nil {
@@ -2971,13 +2966,49 @@ func (s *Server) AdminCreateUser(ctx context.Context, input *chatv1.AdminCreateU
 	return encodeProtoUser(value), nil
 }
 
+func (s *Server) GetWorkspaceMembership(ctx context.Context, input *chatv1.WorkspaceMembershipRequest) (*chatv1.WorkspaceMembership, error) {
+	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetTargetUserId() == "" {
+		return nil, invalidArgument("workspace_id, user_id and target_user_id are required")
+	}
+	value, err := s.implementation.WorkspaceMembership(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspaceMembership(value), nil
+}
+
+// ProvisionExternalUser and SynchronizeExternalUserRole take no actor by design;
+// see the contract on service.ProvisionExternalUser. They are reachable only over
+// the mutually authenticated chat connection, so the required fields are the ones
+// the operation itself needs and there is no user_id to validate.
+func (s *Server) ProvisionExternalUser(ctx context.Context, input *chatv1.ProvisionExternalUserRequest) (*chatv1.User, error) {
+	if input.GetWorkspaceId() == "" {
+		return nil, invalidArgument("workspace_id is required")
+	}
+	value, err := s.implementation.ProvisionExternalUser(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetEmail(), input.GetRealName(), domain.WorkspaceRole(input.GetRole()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoUser(value), nil
+}
+
+func (s *Server) SynchronizeExternalUserRole(ctx context.Context, input *chatv1.SynchronizeExternalUserRoleRequest) (*chatv1.MutationResponse, error) {
+	if input.GetWorkspaceId() == "" || input.GetTargetUserId() == "" {
+		return nil, invalidArgument("workspace_id and target_user_id are required")
+	}
+	if err := s.implementation.SynchronizeExternalUserRole(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetTargetUserId()), domain.WorkspaceRole(input.GetRole())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) AdminListUsers(ctx context.Context, input *chatv1.AdminUsersRequest) (*chatv1.AdminUserPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	value, err := s.implementation.AdminListUsers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -3007,7 +3038,7 @@ func (s *Server) AdminDenyInviteRequest(ctx context.Context, input *chatv1.Invit
 func (s *Server) AdminListInviteRequests(ctx context.Context, input *chatv1.InviteRequestsRequest) (*chatv1.InviteRequestPage, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.AdminListInviteRequests(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.InviteRequestStatus(input.GetStatus()), request)
 	if err != nil {
@@ -3037,7 +3068,7 @@ func (s *Server) AdminRestrictApp(ctx context.Context, input *chatv1.AppApproval
 func (s *Server) AdminListApps(ctx context.Context, input *chatv1.AppApprovalsRequest) (*chatv1.AppApprovalPage, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.AdminListApps(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppApprovalStatus(input.GetStatus()), request)
 	if err != nil {
@@ -3056,7 +3087,7 @@ func (s *Server) LookupToken(ctx context.Context, input *chatv1.TokenRequest) (*
 
 func (s *Server) LookupAppToken(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.AppTokenRecord, error) {
 	if input == nil || input.GetToken() == "" {
-		return nil, status.Error(codes.InvalidArgument, "token is required")
+		return nil, invalidArgument("token is required")
 	}
 	value, err := s.implementation.LookupAppToken(ctx, input.GetToken())
 	if err != nil {
@@ -3067,12 +3098,12 @@ func (s *Server) LookupAppToken(ctx context.Context, input *chatv1.TokenRequest)
 
 func (s *Server) CreateAppInstallation(ctx context.Context, input *chatv1.AppInstallationRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input == nil || input.GetInstallation() == nil {
-		return nil, status.Error(codes.InvalidArgument, "installation is required")
+		return nil, invalidArgument("installation is required")
 	}
 	value := input.GetInstallation()
 	created, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "installation created_at is invalid")
+		return nil, invalidArgument("installation created_at is invalid")
 	}
 	if err := s.implementation.CreateAppInstallation(ctx, domain.AppInstallation{AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Enabled: value.GetEnabled(), CreatedAt: created}); err != nil {
 		return nil, mapError(err)
@@ -3082,7 +3113,7 @@ func (s *Server) CreateAppInstallation(ctx context.Context, input *chatv1.AppIns
 
 func (s *Server) ListAppInstallations(ctx context.Context, input *chatv1.AppInstallationRequest) (*chatv1.AppInstallationsResponse, error) {
 	if input == nil || input.GetAppId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "app_id is required")
+		return nil, invalidArgument("app_id is required")
 	}
 	values, err := s.implementation.ListAppInstallations(ctx, domain.AppID(input.GetAppId()))
 	if err != nil {
@@ -3101,11 +3132,11 @@ func (s *Server) LookupSession(ctx context.Context, input *chatv1.TokenRequest) 
 
 func (s *Server) CreateSession(ctx context.Context, input *chatv1.CreateSessionRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input == nil || input.GetSession() == nil {
-		return nil, status.Error(codes.InvalidArgument, "session is required")
+		return nil, invalidArgument("session is required")
 	}
 	record, err := decodeProtoSession(input.GetSession())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	if err := s.implementation.CreateSession(ctx, input.GetToken(), record); err != nil {
 		return nil, mapError(err)
@@ -3115,7 +3146,7 @@ func (s *Server) CreateSession(ctx context.Context, input *chatv1.CreateSessionR
 
 func (s *Server) GetAuthMethod(ctx context.Context, input *chatv1.AuthMethodRequest) (*chatv1.AuthMethod, error) {
 	if input == nil || input.GetWorkspaceId() == "" || input.GetProvider() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace and provider are required")
+		return nil, invalidArgument("workspace and provider are required")
 	}
 	value, err := s.implementation.GetAuthMethod(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetProvider())
 	if err != nil {
@@ -3126,7 +3157,7 @@ func (s *Server) GetAuthMethod(ctx context.Context, input *chatv1.AuthMethodRequ
 
 func (s *Server) SetAuthMethod(ctx context.Context, input *chatv1.AuthMethodRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input == nil || input.GetWorkspaceId() == "" || input.GetProvider() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace and provider are required")
+		return nil, invalidArgument("workspace and provider are required")
 	}
 	if err := s.implementation.SetAuthMethod(ctx, domain.AuthMethod{WorkspaceID: domain.WorkspaceID(input.GetWorkspaceId()), Provider: input.GetProvider(), Enabled: input.GetEnabled()}); err != nil {
 		return nil, mapError(err)
@@ -3136,7 +3167,7 @@ func (s *Server) SetAuthMethod(ctx context.Context, input *chatv1.AuthMethodRequ
 
 func (s *Server) GetExternalIdentity(ctx context.Context, input *chatv1.ExternalIdentityRequest) (*chatv1.ExternalIdentity, error) {
 	if input == nil || input.GetWorkspaceId() == "" || input.GetProvider() == "" || input.GetSubject() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace, provider, and subject are required")
+		return nil, invalidArgument("workspace, provider, and subject are required")
 	}
 	value, err := s.implementation.GetExternalIdentity(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetProvider(), input.GetSubject())
 	if err != nil {
@@ -3147,7 +3178,7 @@ func (s *Server) GetExternalIdentity(ctx context.Context, input *chatv1.External
 
 func (s *Server) CreateExternalIdentity(ctx context.Context, input *chatv1.ExternalIdentityRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input == nil || input.GetWorkspaceId() == "" || input.GetProvider() == "" || input.GetSubject() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "external identity is incomplete")
+		return nil, invalidArgument("external identity is incomplete")
 	}
 	if err := s.implementation.CreateExternalIdentity(ctx, domain.ExternalIdentity{WorkspaceID: domain.WorkspaceID(input.GetWorkspaceId()), Provider: input.GetProvider(), Subject: input.GetSubject(), UserID: domain.UserID(input.GetUserId())}); err != nil {
 		return nil, mapError(err)
@@ -3157,11 +3188,11 @@ func (s *Server) CreateExternalIdentity(ctx context.Context, input *chatv1.Exter
 
 func (s *Server) RevokeOIDCSessions(ctx context.Context, input *chatv1.RevokeOIDCSessionsRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input == nil || input.GetWorkspaceId() == "" || input.GetProvider() == "" || (input.GetSubject() == "" && input.GetSid() == "") || input.GetTokenId() == "" || input.GetExpiresAt() == "" {
-		return nil, status.Error(codes.InvalidArgument, "OpenID Connect session revocation is incomplete")
+		return nil, invalidArgument("OpenID Connect session revocation is incomplete")
 	}
 	expiresAt, err := time.Parse(time.RFC3339Nano, input.GetExpiresAt())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, "OpenID Connect logout token expiry is invalid")
+		return nil, invalidArgument("OpenID Connect logout token expiry is invalid")
 	}
 	if err := s.implementation.RevokeOIDCSessions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetProvider(), input.GetSubject(), input.GetSid(), input.GetTokenId(), expiresAt); err != nil {
 		return nil, mapError(err)
@@ -3377,7 +3408,7 @@ func (s *Server) ListOriginalConnectedChannelInfo(ctx context.Context, input *ch
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	values, more, next, err := s.implementation.AdminConnectedChannelInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), channels, teams, request)
 	if err != nil {
@@ -3486,7 +3517,7 @@ func (s *Server) ConsumeConnection(ctx context.Context, input *chatv1.RTMConnect
 
 func (s *Server) CreateSocketModeConnection(ctx context.Context, input *chatv1.SocketModeConnectionRequest) (*chatv1.SocketModeConnection, error) {
 	if input == nil || input.GetId() == "" || input.GetAppId() == "" || input.GetExpiresAtUnixNano() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "Socket Mode connection fields are required")
+		return nil, invalidArgument("Socket Mode connection fields are required")
 	}
 	value := domain.SocketModeConnection{ID: input.GetId(), AppID: domain.AppID(input.GetAppId()), ExpiresAt: time.Unix(0, input.GetExpiresAtUnixNano()).UTC()}
 	if err := s.implementation.CreateSocketModeConnection(ctx, value); err != nil {
@@ -3497,7 +3528,7 @@ func (s *Server) CreateSocketModeConnection(ctx context.Context, input *chatv1.S
 
 func (s *Server) ConsumeSocketModeConnection(ctx context.Context, input *chatv1.RTMConnectionIDRequest) (*chatv1.SocketModeConnection, error) {
 	if input == nil || input.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "connection ID is required")
+		return nil, invalidArgument("connection ID is required")
 	}
 	value, err := s.implementation.ConsumeSocketModeConnection(ctx, input.GetId())
 	if err != nil {
@@ -3508,7 +3539,7 @@ func (s *Server) ConsumeSocketModeConnection(ctx context.Context, input *chatv1.
 
 func (s *Server) RenewSocketModeConnection(ctx context.Context, input *chatv1.SocketModeConnectionRenewalRequest) (*chatv1.SocketModeConnection, error) {
 	if input == nil || input.GetId() == "" || input.GetExpiresAtUnixNano() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "connection renewal fields are required")
+		return nil, invalidArgument("connection renewal fields are required")
 	}
 	if err := s.implementation.RenewSocketModeConnection(ctx, input.GetId(), time.Unix(0, input.GetExpiresAtUnixNano()).UTC()); err != nil {
 		return nil, mapError(err)
@@ -3518,7 +3549,7 @@ func (s *Server) RenewSocketModeConnection(ctx context.Context, input *chatv1.So
 
 func (s *Server) ReleaseSocketModeConnection(ctx context.Context, input *chatv1.RTMConnectionIDRequest) (*chatv1.SocketModeConnection, error) {
 	if input == nil || input.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "connection ID is required")
+		return nil, invalidArgument("connection ID is required")
 	}
 	if err := s.implementation.ReleaseSocketModeConnection(ctx, input.GetId()); err != nil {
 		return nil, mapError(err)
@@ -3528,7 +3559,7 @@ func (s *Server) ReleaseSocketModeConnection(ctx context.Context, input *chatv1.
 
 func (s *Server) CountSocketModeConnections(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeConnectionCount, error) {
 	if input == nil || input.GetAppId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "app ID is required")
+		return nil, invalidArgument("app ID is required")
 	}
 	count, err := s.implementation.CountSocketModeConnections(ctx, domain.AppID(input.GetAppId()))
 	if err != nil {
@@ -3539,7 +3570,7 @@ func (s *Server) CountSocketModeConnections(ctx context.Context, input *chatv1.S
 
 func (s *Server) GetSocketModeCursor(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeCursor, error) {
 	if input == nil || input.GetAppId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "app ID is required")
+		return nil, invalidArgument("app ID is required")
 	}
 	cursor, err := s.implementation.GetSocketModeCursor(ctx, domain.AppID(input.GetAppId()))
 	if err != nil {
@@ -3550,7 +3581,7 @@ func (s *Server) GetSocketModeCursor(ctx context.Context, input *chatv1.SocketMo
 
 func (s *Server) SetSocketModeCursor(ctx context.Context, input *chatv1.SocketModeCursorRequest) (*chatv1.SocketModeCursor, error) {
 	if input == nil || input.GetAppId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "app ID is required")
+		return nil, invalidArgument("app ID is required")
 	}
 	if err := s.implementation.SetSocketModeCursor(ctx, domain.AppID(input.GetAppId()), input.GetSequence()); err != nil {
 		return nil, mapError(err)
@@ -3560,7 +3591,7 @@ func (s *Server) SetSocketModeCursor(ctx context.Context, input *chatv1.SocketMo
 
 func (s *Server) RecordSocketModeResponse(ctx context.Context, input *chatv1.SocketModeResponseRequest) (*chatv1.SocketModeResponse, error) {
 	if input == nil || input.GetAppId() == "" || input.GetEnvelopeId() == "" || input.GetPayload() == "" || input.GetReceivedAtUnixNano() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "Socket Mode response fields are required")
+		return nil, invalidArgument("Socket Mode response fields are required")
 	}
 	value := domain.SocketModeResponse{AppID: domain.AppID(input.GetAppId()), EnvelopeID: input.GetEnvelopeId(), Payload: input.GetPayload(), ReceivedAt: time.Unix(0, input.GetReceivedAtUnixNano()).UTC()}
 	if err := s.implementation.RecordSocketModeResponse(ctx, value); err != nil {
@@ -3571,7 +3602,7 @@ func (s *Server) RecordSocketModeResponse(ctx context.Context, input *chatv1.Soc
 
 func (s *Server) ClaimSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseLeaseRequest) (*chatv1.SocketModeResponseBatch, error) {
 	if input == nil || input.GetAppId() == "" || input.GetOwner() == "" || input.GetLimit() < 1 || input.GetLeaseNanos() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "Socket Mode response lease fields are required")
+		return nil, invalidArgument("Socket Mode response lease fields are required")
 	}
 	values, err := s.implementation.ClaimSocketModeResponses(ctx, domain.AppID(input.GetAppId()), input.GetOwner(), int(input.GetLimit()), time.Duration(input.GetLeaseNanos()))
 	if err != nil {
@@ -3586,11 +3617,11 @@ func (s *Server) ClaimSocketModeResponses(ctx context.Context, input *chatv1.Soc
 
 func (s *Server) RenewSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseRenewRequest) (*chatv1.SocketModeResponseBatch, error) {
 	if input == nil || input.GetOwner() == "" || len(input.GetResponses()) == 0 || input.GetLeaseNanos() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "Socket Mode response renewal fields are required")
+		return nil, invalidArgument("Socket Mode response renewal fields are required")
 	}
 	values, err := socketModeResponseKeys(input.GetResponses())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	if err := s.implementation.RenewSocketModeResponses(ctx, input.GetOwner(), values, time.Duration(input.GetLeaseNanos())); err != nil {
 		return nil, mapError(err)
@@ -3600,11 +3631,11 @@ func (s *Server) RenewSocketModeResponses(ctx context.Context, input *chatv1.Soc
 
 func (s *Server) AckSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseAckRequest) (*chatv1.SocketModeResponseBatch, error) {
 	if input == nil || input.GetOwner() == "" || len(input.GetResponses()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "Socket Mode response acknowledgement fields are required")
+		return nil, invalidArgument("Socket Mode response acknowledgement fields are required")
 	}
 	values, err := socketModeResponseKeys(input.GetResponses())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	if err := s.implementation.AckSocketModeResponses(ctx, input.GetOwner(), values); err != nil {
 		return nil, mapError(err)
@@ -3614,11 +3645,11 @@ func (s *Server) AckSocketModeResponses(ctx context.Context, input *chatv1.Socke
 
 func (s *Server) ReleaseSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseReleaseRequest) (*chatv1.SocketModeResponseBatch, error) {
 	if input == nil || input.GetOwner() == "" || len(input.GetResponses()) == 0 || input.GetRetryAtUnixNano() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "Socket Mode response release fields are required")
+		return nil, invalidArgument("Socket Mode response release fields are required")
 	}
 	values, err := socketModeResponseKeys(input.GetResponses())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	if err := s.implementation.ReleaseSocketModeResponses(ctx, input.GetOwner(), values, time.Unix(0, input.GetRetryAtUnixNano()).UTC()); err != nil {
 		return nil, mapError(err)
@@ -3696,7 +3727,7 @@ func (s *Server) GetListItem(ctx context.Context, input *chatv1.ListItemRequest)
 func (s *Server) ListItems(ctx context.Context, input *chatv1.ListItemsRequest) (*chatv1.ListItemsResponse, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	value, err := s.implementation.ListItems(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ListID(input.GetListId()), request, input.GetArchived())
 	if err != nil {
@@ -3816,7 +3847,7 @@ func (s *Server) RemoteFileInfo(ctx context.Context, input *chatv1.RemoteFileReq
 func (s *Server) RemoteFiles(ctx context.Context, input *chatv1.RemoteFilesRequest) (*chatv1.RemoteFilePage, error) {
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	value, err := s.implementation.RemoteFiles(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -3860,7 +3891,7 @@ func (s *Server) UpdateRemoteFile(ctx context.Context, input *chatv1.UpdateRemot
 		case "indexable_contents":
 			update.SetIndexableData = true
 		default:
-			return nil, status.Error(codes.InvalidArgument, "unknown remote file update field")
+			return nil, invalidArgument("unknown remote file update field")
 		}
 	}
 	value, err := s.implementation.UpdateRemoteFile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), update)
@@ -3996,7 +4027,7 @@ func (s *Server) EndDND(ctx context.Context, input *chatv1.DoNotDisturbRequest) 
 
 func (s *Server) updateProto(ctx context.Context, input *chatv1.UpdateRequest) (*chatv1.Message, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" || input.GetText() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, timestamp, and text are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, timestamp, and text are required")
 	}
 	message, err := s.implementation.Update(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetText())
 	if err != nil {
@@ -4007,7 +4038,7 @@ func (s *Server) updateProto(ctx context.Context, input *chatv1.UpdateRequest) (
 
 func (s *Server) deleteProto(ctx context.Context, input *chatv1.DeleteRequest) (*chatv1.Message, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	message, err := s.implementation.Delete(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()))
 	if err != nil {
@@ -4018,7 +4049,7 @@ func (s *Server) deleteProto(ctx context.Context, input *chatv1.DeleteRequest) (
 
 func (s *Server) permalinkProto(ctx context.Context, input *chatv1.PermalinkRequest) (*chatv1.PermalinkResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	value, err := s.implementation.Permalink(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()))
 	if err != nil {
@@ -4029,11 +4060,11 @@ func (s *Server) permalinkProto(ctx context.Context, input *chatv1.PermalinkRequ
 
 func (s *Server) historyProto(ctx context.Context, input *chatv1.HistoryRequest) (*chatv1.MessagePage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.History(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
@@ -4043,12 +4074,16 @@ func (s *Server) historyProto(ctx context.Context, input *chatv1.HistoryRequest)
 }
 
 func (s *Server) searchProto(ctx context.Context, input *chatv1.SearchRequest) (*chatv1.MessagePage, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetQuery() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and query are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.Search(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), request)
 	if err != nil {
@@ -4059,7 +4094,7 @@ func (s *Server) searchProto(ctx context.Context, input *chatv1.SearchRequest) (
 
 func (s *Server) fileInfoProto(ctx context.Context, input *chatv1.FileRequest) (*chatv1.File, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetFileId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and file_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and file_id are required")
 	}
 	file, err := s.implementation.FileInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId()))
 	if err != nil {
@@ -4070,7 +4105,7 @@ func (s *Server) fileInfoProto(ctx context.Context, input *chatv1.FileRequest) (
 
 func (s *Server) deleteFileProto(ctx context.Context, input *chatv1.FileRequest) (*chatv1.DeleteFileResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetFileId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and file_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and file_id are required")
 	}
 	if err := s.implementation.DeleteFile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId())); err != nil {
 		return nil, mapError(err)
@@ -4080,11 +4115,11 @@ func (s *Server) deleteFileProto(ctx context.Context, input *chatv1.FileRequest)
 
 func (s *Server) filesProto(ctx context.Context, input *chatv1.FilesRequest) (*chatv1.FilePage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.Files(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -4100,13 +4135,13 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 	}
 	header := first.GetMetadata()
 	if header == nil {
-		return status.Error(codes.InvalidArgument, "upload stream must begin with metadata")
+		return invalidArgument("upload stream must begin with metadata")
 	}
 	if header.GetWorkspaceId() == "" || header.GetUserId() == "" || header.GetName() == "" || header.GetTitle() == "" || header.GetMimeType() == "" {
-		return status.Error(codes.InvalidArgument, "workspace_id, user_id, name, title, and mime_type are required")
+		return invalidArgument("workspace_id, user_id, name, title, and mime_type are required")
 	}
 	if header.GetSize() < 0 {
-		return status.Error(codes.InvalidArgument, "size must be a non-negative integer")
+		return invalidArgument("size must be a non-negative integer")
 	}
 	reader, writer := io.Pipe()
 	type uploadResult struct {
@@ -4115,6 +4150,19 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 	}
 	result := make(chan uploadResult, 1)
 	go func() {
+		// The implementation runs on its own stack, which no interceptor
+		// unwinds: a panic here would terminate the whole chat process and
+		// every other in-flight request with it, where the monolith loses one
+		// request. Recovering turns it into the same codes.Internal the
+		// interceptor produces, and closes the pipe so the receive loop below
+		// cannot block forever waiting for a reader that no longer exists.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				failure := panicError(recovered)
+				result <- uploadResult{err: failure}
+				_ = writer.CloseWithError(failure)
+			}
+		}()
 		file, uploadErr := s.implementation.UploadFile(stream.Context(), domain.WorkspaceID(header.GetWorkspaceId()), domain.UserID(header.GetUserId()), header.GetName(), header.GetTitle(), header.GetMimeType(), header.GetSize(), reader)
 		result <- uploadResult{file: file, err: uploadErr}
 		if uploadErr != nil {
@@ -4140,11 +4188,17 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 		if len(chunk) == 0 {
 			_ = writer.CloseWithError(errors.New("upload stream contained an empty file chunk"))
 			<-result
-			return status.Error(codes.InvalidArgument, "upload stream contained an empty file chunk")
+			return invalidArgument("upload stream contained an empty file chunk")
 		}
 		if _, err := writer.Write(chunk); err != nil {
 			_ = writer.CloseWithError(err)
-			<-result
+			// A write fails because the implementation stopped reading, so its
+			// error is the cause and the pipe error is the symptom. Reporting the
+			// symptom made the seam answer codes.Unavailable with no domain class
+			// for a failure the monolith reports as service.ErrBlobUnavailable.
+			if completed := <-result; completed.err != nil {
+				return mapError(completed.err)
+			}
 			return mapError(err)
 		}
 	}
@@ -4157,7 +4211,7 @@ func (s *Server) UploadUserPhoto(stream chatv1.ChatService_UploadUserPhotoServer
 	}
 	header := first.GetMetadata()
 	if header == nil {
-		return status.Error(codes.InvalidArgument, "user photo stream must begin with metadata")
+		return invalidArgument("user photo stream must begin with metadata")
 	}
 	reader, writer := io.Pipe()
 	type result struct {
@@ -4166,6 +4220,15 @@ func (s *Server) UploadUserPhoto(stream chatv1.ChatService_UploadUserPhotoServer
 	}
 	done := make(chan result, 1)
 	go func() {
+		// See Server.UploadFile: a panic on this stack is not reachable by the
+		// stream interceptor, so it is recovered where it happens.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				failure := panicError(recovered)
+				done <- result{err: failure}
+				_ = writer.CloseWithError(failure)
+			}
+		}()
 		user, uploadErr := s.implementation.SetUserPhoto(stream.Context(), domain.WorkspaceID(header.GetWorkspaceId()), domain.UserID(header.GetUserId()), header.GetMimeType(), header.GetSize(), reader)
 		done <- result{user: user, err: uploadErr}
 		if uploadErr != nil {
@@ -4191,11 +4254,15 @@ func (s *Server) UploadUserPhoto(stream chatv1.ChatService_UploadUserPhotoServer
 		if len(chunk) == 0 {
 			_ = writer.CloseWithError(errors.New("user photo stream contained an empty chunk"))
 			<-done
-			return status.Error(codes.InvalidArgument, "user photo stream contained an empty chunk")
+			return invalidArgument("user photo stream contained an empty chunk")
 		}
 		if _, err := writer.Write(chunk); err != nil {
 			_ = writer.CloseWithError(err)
-			<-done
+			// See Server.UploadFile: the implementation's error is the cause of a
+			// failed pipe write.
+			if completed := <-done; completed.err != nil {
+				return mapError(completed.err)
+			}
 			return mapError(err)
 		}
 	}
@@ -4203,7 +4270,7 @@ func (s *Server) UploadUserPhoto(stream chatv1.ChatService_UploadUserPhotoServer
 
 func (s *Server) DeleteUserPhoto(ctx context.Context, input *chatv1.UserPhotoDeleteRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	if err := s.implementation.DeleteUserPhoto(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId())); err != nil {
 		return nil, mapError(err)
@@ -4213,7 +4280,7 @@ func (s *Server) DeleteUserPhoto(ctx context.Context, input *chatv1.UserPhotoDel
 
 func (s *Server) DownloadFile(input *chatv1.DownloadFileRequest, stream chatv1.ChatService_DownloadFileServer) error {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetFileId() == "" {
-		return status.Error(codes.InvalidArgument, "workspace_id, user_id, and file_id are required")
+		return invalidArgument("workspace_id, user_id, and file_id are required")
 	}
 	file, reader, err := s.implementation.OpenFile(stream.Context(), domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId()))
 	if err != nil {
@@ -4223,29 +4290,14 @@ func (s *Server) DownloadFile(input *chatv1.DownloadFileRequest, stream chatv1.C
 	if err := stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Metadata{Metadata: encodeProtoFile(file)}}); err != nil {
 		return err
 	}
-	buffer := make([]byte, 64<<10)
-	for {
-		read, readErr := reader.Read(buffer)
-		if read > 0 {
-			if err := stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}); err != nil {
-				return err
-			}
-		}
-		if readErr == io.EOF {
-			return nil
-		}
-		if readErr != nil {
-			return mapError(readErr)
-		}
-		if read == 0 {
-			return errors.New("file reader returned no data or error")
-		}
-	}
+	return mapError(sendChunks(reader, "file reader", func(chunk []byte) error {
+		return stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Chunk{Chunk: append([]byte(nil), chunk...)}})
+	}))
 }
 
 func (s *Server) DownloadPublicFile(input *chatv1.PublicFileTokenRequest, stream chatv1.ChatService_DownloadPublicFileServer) error {
 	if input.GetToken() == "" {
-		return status.Error(codes.InvalidArgument, "token is required")
+		return invalidArgument("token is required")
 	}
 	file, reader, err := s.implementation.OpenPublicFile(stream.Context(), input.GetToken())
 	if err != nil {
@@ -4255,61 +4307,35 @@ func (s *Server) DownloadPublicFile(input *chatv1.PublicFileTokenRequest, stream
 	if err := stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Metadata{Metadata: encodeProtoFile(file)}}); err != nil {
 		return err
 	}
-	buffer := make([]byte, 64<<10)
-	for {
-		read, readErr := reader.Read(buffer)
-		if read > 0 {
-			if err := stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}); err != nil {
-				return err
-			}
-		}
-		if readErr == io.EOF {
-			return nil
-		}
-		if readErr != nil {
-			return mapError(readErr)
-		}
-		if read == 0 {
-			return errors.New("public file reader returned no data or error")
-		}
-	}
+	return mapError(sendChunks(reader, "public file reader", func(chunk []byte) error {
+		return stream.Send(&chatv1.DownloadFilePart{Part: &chatv1.DownloadFilePart_Chunk{Chunk: append([]byte(nil), chunk...)}})
+	}))
 }
 
 func (s *Server) DownloadUserPhoto(input *chatv1.UserPhotoDownloadRequest, stream chatv1.ChatService_DownloadUserPhotoServer) error {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetToken() == "" {
-		return status.Error(codes.InvalidArgument, "workspace_id, user_id, and token are required")
+		return invalidArgument("workspace_id, user_id, and token are required")
 	}
-	_, reader, err := s.implementation.OpenUserPhoto(stream.Context(), domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetToken())
+	user, reader, err := s.implementation.OpenUserPhoto(stream.Context(), domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetToken())
 	if err != nil {
 		return mapError(err)
 	}
 	defer reader.Close()
-	if err := stream.Send(&chatv1.UserPhotoDownloadPart{Part: &chatv1.UserPhotoDownloadPart_Metadata{Metadata: &chatv1.UserPhotoMetadata{MimeType: "application/octet-stream", Token: input.GetToken()}}}); err != nil {
+	// The resolved user is sent rather than discarded, and no MIME type is
+	// invented: the module contract returns a user and a reader and exposes no
+	// media type, so a hardcoded "application/octet-stream" claimed knowledge the
+	// server does not have.
+	if err := stream.Send(&chatv1.UserPhotoDownloadPart{Part: &chatv1.UserPhotoDownloadPart_Metadata{Metadata: &chatv1.UserPhotoMetadata{Token: input.GetToken(), User: encodeProtoUser(user)}}}); err != nil {
 		return err
 	}
-	buffer := make([]byte, 64<<10)
-	for {
-		read, readErr := reader.Read(buffer)
-		if read > 0 {
-			if err := stream.Send(&chatv1.UserPhotoDownloadPart{Part: &chatv1.UserPhotoDownloadPart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}); err != nil {
-				return err
-			}
-		}
-		if readErr == io.EOF {
-			return nil
-		}
-		if readErr != nil {
-			return mapError(readErr)
-		}
-		if read == 0 {
-			return errors.New("user photo reader returned no data or error")
-		}
-	}
+	return mapError(sendChunks(reader, "user photo reader", func(chunk []byte) error {
+		return stream.Send(&chatv1.UserPhotoDownloadPart{Part: &chatv1.UserPhotoDownloadPart_Chunk{Chunk: append([]byte(nil), chunk...)}})
+	}))
 }
 
 func (s *Server) lookupTokenProto(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.TokenRecord, error) {
 	if input.GetToken() == "" {
-		return nil, status.Error(codes.InvalidArgument, "token is required")
+		return nil, invalidArgument("token is required")
 	}
 	record, err := s.tokens.LookupToken(ctx, input.GetToken())
 	if err != nil {
@@ -4320,7 +4346,7 @@ func (s *Server) lookupTokenProto(ctx context.Context, input *chatv1.TokenReques
 
 func (s *Server) lookupSessionProto(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.SessionRecord, error) {
 	if input.GetToken() == "" {
-		return nil, status.Error(codes.InvalidArgument, "token is required")
+		return nil, invalidArgument("token is required")
 	}
 	record, err := s.sessions.LookupSession(ctx, input.GetToken())
 	if err != nil {
@@ -4331,7 +4357,7 @@ func (s *Server) lookupSessionProto(ctx context.Context, input *chatv1.TokenRequ
 
 func (s *Server) revokeSessionProto(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input.GetToken() == "" {
-		return nil, status.Error(codes.InvalidArgument, "token is required")
+		return nil, invalidArgument("token is required")
 	}
 	if err := s.revoker.RevokeSession(ctx, input.GetToken()); err != nil {
 		return nil, mapError(err)
@@ -4341,7 +4367,7 @@ func (s *Server) revokeSessionProto(ctx context.Context, input *chatv1.TokenRequ
 
 func (s *Server) revokeTokenProto(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.AuthRevokeResponse, error) {
 	if input.GetToken() == "" {
-		return nil, status.Error(codes.InvalidArgument, "token is required")
+		return nil, invalidArgument("token is required")
 	}
 	if err := s.tokenRevoker.RevokeToken(ctx, input.GetToken()); err != nil {
 		return nil, mapError(err)
@@ -4351,11 +4377,11 @@ func (s *Server) revokeTokenProto(ctx context.Context, input *chatv1.TokenReques
 
 func (s *Server) repliesProto(ctx context.Context, input *chatv1.RepliesRequest) (*chatv1.MessagePage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.Replies(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), request)
 	if err != nil {
@@ -4366,7 +4392,7 @@ func (s *Server) repliesProto(ctx context.Context, input *chatv1.RepliesRequest)
 
 func (s *Server) conversationInfoProto(ctx context.Context, input *chatv1.ConversationInfoRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	result, err := s.implementation.ConversationInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
 	if err != nil {
@@ -4377,7 +4403,7 @@ func (s *Server) conversationInfoProto(ctx context.Context, input *chatv1.Conver
 
 func (s *Server) userInfoProto(ctx context.Context, input *chatv1.UserRequest) (*chatv1.User, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetRequestedUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and requested_user_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and requested_user_id are required")
 	}
 	result, err := s.implementation.UserInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetRequestedUserId()))
 	if err != nil {
@@ -4388,7 +4414,7 @@ func (s *Server) userInfoProto(ctx context.Context, input *chatv1.UserRequest) (
 
 func (s *Server) userByEmailProto(ctx context.Context, input *chatv1.UserByEmailRequest) (*chatv1.User, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetEmail() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and email are required")
+		return nil, invalidArgument("workspace_id, user_id, and email are required")
 	}
 	result, err := s.implementation.UserByEmail(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetEmail())
 	if err != nil {
@@ -4398,9 +4424,15 @@ func (s *Server) userByEmailProto(ctx context.Context, input *chatv1.UserByEmail
 }
 
 func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserProfileRequest) (*chatv1.User, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetProfile() == nil {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and profile are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
+	// An absent profile is the empty profile, which is a valid request: the local
+	// path accepts it and clears the fields.
 	p := input.GetProfile()
 	profile := domain.UserProfile{
 		DisplayName: p.GetDisplayName(), StatusText: p.GetStatusText(), StatusEmoji: p.GetStatusEmoji(),
@@ -4415,9 +4447,13 @@ func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserP
 }
 
 func (s *Server) setUserPresenceProto(ctx context.Context, input *chatv1.SetUserPresenceRequest) (*chatv1.User, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetPresence() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and presence are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
 	result, err := s.implementation.SetUserPresence(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.Presence(input.GetPresence()))
 	if err != nil {
 		return nil, mapError(err)
@@ -4427,7 +4463,7 @@ func (s *Server) setUserPresenceProto(ctx context.Context, input *chatv1.SetUser
 
 func (s *Server) doNotDisturbInfoProto(ctx context.Context, input *chatv1.DoNotDisturbRequest) (*chatv1.DoNotDisturb, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	result, err := s.implementation.DoNotDisturbInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetRequestedUserId()))
 	if err != nil {
@@ -4438,7 +4474,7 @@ func (s *Server) doNotDisturbInfoProto(ctx context.Context, input *chatv1.DoNotD
 
 func (s *Server) setSnoozeProto(ctx context.Context, input *chatv1.SetSnoozeRequest) (*chatv1.DoNotDisturb, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetMinutes() == 0 {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and positive minutes are required")
+		return nil, invalidArgument("workspace_id, user_id, and positive minutes are required")
 	}
 	result, err := s.implementation.SetSnooze(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetMinutes())
 	if err != nil {
@@ -4449,7 +4485,7 @@ func (s *Server) setSnoozeProto(ctx context.Context, input *chatv1.SetSnoozeRequ
 
 func (s *Server) endSnoozeProto(ctx context.Context, input *chatv1.DoNotDisturbRequest) (*chatv1.DoNotDisturb, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	result, err := s.implementation.EndSnooze(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
 	if err != nil {
@@ -4460,7 +4496,7 @@ func (s *Server) endSnoozeProto(ctx context.Context, input *chatv1.DoNotDisturbR
 
 func (s *Server) endDNDProto(ctx context.Context, input *chatv1.DoNotDisturbRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	if err := s.implementation.EndDND(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId())); err != nil {
 		return nil, mapError(err)
@@ -4470,11 +4506,11 @@ func (s *Server) endDNDProto(ctx context.Context, input *chatv1.DoNotDisturbRequ
 
 func (s *Server) usersProto(ctx context.Context, input *chatv1.UsersRequest) (*chatv1.UserPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.Users(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -4485,11 +4521,11 @@ func (s *Server) usersProto(ctx context.Context, input *chatv1.UsersRequest) (*c
 
 func (s *Server) conversationMembersProto(ctx context.Context, input *chatv1.ConversationMembersRequest) (*chatv1.UserPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.ConversationMembers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
@@ -4500,7 +4536,7 @@ func (s *Server) conversationMembersProto(ctx context.Context, input *chatv1.Con
 
 func (s *Server) workspaceInfoProto(ctx context.Context, input *chatv1.WorkspaceRequest) (*chatv1.Workspace, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	result, err := s.implementation.WorkspaceInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
 	if err != nil {
@@ -4511,11 +4547,11 @@ func (s *Server) workspaceInfoProto(ctx context.Context, input *chatv1.Workspace
 
 func (s *Server) conversationsProto(ctx context.Context, input *chatv1.ConversationsRequest) (*chatv1.ConversationPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoConversationListRequest(input)
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.Conversations(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -4546,11 +4582,11 @@ func protoConversationListRequest(input *chatv1.ConversationsRequest) (domain.Co
 
 func (s *Server) openConversationProto(ctx context.Context, input *chatv1.OpenConversationRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	users, err := protoUserIDs(input.GetUsers())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	conversation, err := s.implementation.OpenConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), users)
 	if err != nil {
@@ -4560,9 +4596,13 @@ func (s *Server) openConversationProto(ctx context.Context, input *chatv1.OpenCo
 }
 
 func (s *Server) createConversationProto(ctx context.Context, input *chatv1.CreateConversationRequest) (*chatv1.Conversation, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and name are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
 	conversation, err := s.implementation.CreateConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetPrivate())
 	if err != nil {
 		return nil, mapError(err)
@@ -4572,7 +4612,7 @@ func (s *Server) createConversationProto(ctx context.Context, input *chatv1.Crea
 
 func (s *Server) joinConversationProto(ctx context.Context, input *chatv1.ConversationRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	conversation, err := s.implementation.JoinConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
 	if err != nil {
@@ -4583,11 +4623,11 @@ func (s *Server) joinConversationProto(ctx context.Context, input *chatv1.Conver
 
 func (s *Server) inviteConversationMembersProto(ctx context.Context, input *chatv1.InviteConversationMembersRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	users, err := protoUserIDs(input.GetUsers())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	conversation, err := s.implementation.InviteConversationMembers(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), users)
 	if err != nil {
@@ -4598,7 +4638,7 @@ func (s *Server) inviteConversationMembersProto(ctx context.Context, input *chat
 
 func (s *Server) leaveConversationProto(ctx context.Context, input *chatv1.ConversationRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	if err := s.implementation.LeaveConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId())); err != nil {
 		return nil, mapError(err)
@@ -4608,7 +4648,7 @@ func (s *Server) leaveConversationProto(ctx context.Context, input *chatv1.Conve
 
 func (s *Server) kickConversationMemberProto(ctx context.Context, input *chatv1.KickConversationMemberRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTargetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and target_id are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and target_id are required")
 	}
 	if err := s.implementation.KickConversationMember(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetTargetId())); err != nil {
 		return nil, mapError(err)
@@ -4618,7 +4658,7 @@ func (s *Server) kickConversationMemberProto(ctx context.Context, input *chatv1.
 
 func (s *Server) renameConversationProto(ctx context.Context, input *chatv1.RenameConversationRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and name are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and name are required")
 	}
 	result, err := s.implementation.RenameConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetName())
 	if err != nil {
@@ -4629,7 +4669,7 @@ func (s *Server) renameConversationProto(ctx context.Context, input *chatv1.Rena
 
 func (s *Server) setConversationTopicProto(ctx context.Context, input *chatv1.SetConversationTopicRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	result, err := s.implementation.SetConversationTopic(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetTopic())
 	if err != nil {
@@ -4640,7 +4680,7 @@ func (s *Server) setConversationTopicProto(ctx context.Context, input *chatv1.Se
 
 func (s *Server) setConversationPurposeProto(ctx context.Context, input *chatv1.SetConversationPurposeRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	result, err := s.implementation.SetConversationPurpose(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetPurpose())
 	if err != nil {
@@ -4651,7 +4691,7 @@ func (s *Server) setConversationPurposeProto(ctx context.Context, input *chatv1.
 
 func (s *Server) setConversationArchivedProto(ctx context.Context, input *chatv1.SetConversationArchivedRequest) (*chatv1.Conversation, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	result, err := s.implementation.SetConversationArchived(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetArchived())
 	if err != nil {
@@ -4662,7 +4702,7 @@ func (s *Server) setConversationArchivedProto(ctx context.Context, input *chatv1
 
 func (s *Server) markReadProto(ctx context.Context, input *chatv1.MarkReadRequest) (*chatv1.ReadCursor, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	cursor, err := s.implementation.MarkRead(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()))
 	if err != nil {
@@ -4672,9 +4712,13 @@ func (s *Server) markReadProto(ctx context.Context, input *chatv1.MarkReadReques
 }
 
 func (s *Server) addReactionProto(ctx context.Context, input *chatv1.ReactionRequest) (*chatv1.MutationResponse, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" || input.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, timestamp, and name are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
 	if err := s.implementation.AddReaction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetName()); err != nil {
 		return nil, mapError(err)
 	}
@@ -4683,7 +4727,7 @@ func (s *Server) addReactionProto(ctx context.Context, input *chatv1.ReactionReq
 
 func (s *Server) removeReactionProto(ctx context.Context, input *chatv1.ReactionRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" || input.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, timestamp, and name are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, timestamp, and name are required")
 	}
 	if err := s.implementation.RemoveReaction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetName()); err != nil {
 		return nil, mapError(err)
@@ -4693,11 +4737,11 @@ func (s *Server) removeReactionProto(ctx context.Context, input *chatv1.Reaction
 
 func (s *Server) reactionsProto(ctx context.Context, input *chatv1.ReactionPageRequest) (*chatv1.ReactionPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	items, next, more, err := s.implementation.Reactions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), request)
 	if err != nil {
@@ -4708,11 +4752,11 @@ func (s *Server) reactionsProto(ctx context.Context, input *chatv1.ReactionPageR
 
 func (s *Server) userReactionsProto(ctx context.Context, input *chatv1.UserReactionsRequest) (*chatv1.UserReactionPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.UserReactions(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -4723,7 +4767,7 @@ func (s *Server) userReactionsProto(ctx context.Context, input *chatv1.UserReact
 
 func (s *Server) addPinProto(ctx context.Context, input *chatv1.PinRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	if err := s.implementation.AddPin(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp())); err != nil {
 		return nil, mapError(err)
@@ -4733,7 +4777,7 @@ func (s *Server) addPinProto(ctx context.Context, input *chatv1.PinRequest) (*ch
 
 func (s *Server) removePinProto(ctx context.Context, input *chatv1.PinRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	if err := s.implementation.RemovePin(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp())); err != nil {
 		return nil, mapError(err)
@@ -4743,11 +4787,11 @@ func (s *Server) removePinProto(ctx context.Context, input *chatv1.PinRequest) (
 
 func (s *Server) pinsProto(ctx context.Context, input *chatv1.PinsRequest) (*chatv1.PinPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	items, next, more, err := s.implementation.Pins(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
@@ -4758,7 +4802,7 @@ func (s *Server) pinsProto(ctx context.Context, input *chatv1.PinsRequest) (*cha
 
 func (s *Server) addStarProto(ctx context.Context, input *chatv1.PinRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	if err := s.implementation.AddStar(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp())); err != nil {
 		return nil, mapError(err)
@@ -4768,7 +4812,7 @@ func (s *Server) addStarProto(ctx context.Context, input *chatv1.PinRequest) (*c
 
 func (s *Server) removeStarProto(ctx context.Context, input *chatv1.PinRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTimestamp() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and timestamp are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and timestamp are required")
 	}
 	if err := s.implementation.RemoveStar(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp())); err != nil {
 		return nil, mapError(err)
@@ -4778,11 +4822,11 @@ func (s *Server) removeStarProto(ctx context.Context, input *chatv1.PinRequest) 
 
 func (s *Server) starsProto(ctx context.Context, input *chatv1.StarsRequest) (*chatv1.StarPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	items, next, more, err := s.implementation.Stars(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -4792,9 +4836,13 @@ func (s *Server) starsProto(ctx context.Context, input *chatv1.StarsRequest) (*c
 }
 
 func (s *Server) addBookmarkProto(ctx context.Context, input *chatv1.AddBookmarkRequest) (*chatv1.Bookmark, error) {
-	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetTitle() == "" || input.GetType() == "" || input.GetLink() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, title, type, and link are required")
-	}
+	// Required fields are validated by the implementation, not here. A duplicate
+	// check in the transport answered a different error than the monolith for the
+	// same request — the module returns its own validation sentinel, and the
+	// authorisation it performs first can turn a missing workspace into
+	// store.ErrNotFound — so the caller derived a different HTTP status depending
+	// on the composition. Delegating makes the two identical for every input
+	// rather than for the inputs a test happens to cover.
 	bookmark, err := s.implementation.AddBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetTitle(), input.GetType(), input.GetLink(), input.GetEmoji(), input.GetEntityId(), input.GetAccessLevel(), input.GetParentId())
 	if err != nil {
 		return nil, mapError(err)
@@ -4804,7 +4852,7 @@ func (s *Server) addBookmarkProto(ctx context.Context, input *chatv1.AddBookmark
 
 func (s *Server) editBookmarkProto(ctx context.Context, input *chatv1.EditBookmarkRequest) (*chatv1.Bookmark, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetBookmarkId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and bookmark_id are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and bookmark_id are required")
 	}
 	bookmark, err := s.implementation.EditBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.BookmarkID(input.GetBookmarkId()), domain.BookmarkUpdate{Title: input.GetTitle(), Link: input.GetLink(), Emoji: input.GetEmoji(), SetTitle: input.Title != nil, SetLink: input.Link != nil, SetEmoji: input.Emoji != nil})
 	if err != nil {
@@ -4815,7 +4863,7 @@ func (s *Server) editBookmarkProto(ctx context.Context, input *chatv1.EditBookma
 
 func (s *Server) bookmarksProto(ctx context.Context, input *chatv1.BookmarksRequest) (*chatv1.BookmarksResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and conversation_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and conversation_id are required")
 	}
 	items, err := s.implementation.Bookmarks(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()))
 	if err != nil {
@@ -4830,7 +4878,7 @@ func (s *Server) bookmarksProto(ctx context.Context, input *chatv1.BookmarksRequ
 
 func (s *Server) removeBookmarkProto(ctx context.Context, input *chatv1.BookmarkRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetConversationId() == "" || input.GetBookmarkId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, conversation_id, and bookmark_id are required")
+		return nil, invalidArgument("workspace_id, user_id, conversation_id, and bookmark_id are required")
 	}
 	if err := s.implementation.RemoveBookmark(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.BookmarkID(input.GetBookmarkId())); err != nil {
 		return nil, mapError(err)
@@ -4840,7 +4888,7 @@ func (s *Server) removeBookmarkProto(ctx context.Context, input *chatv1.Bookmark
 
 func (s *Server) addReminderProto(ctx context.Context, input *chatv1.AddReminderRequest) (*chatv1.Reminder, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetText() == "" || input.GetTime() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, text, and positive time are required")
+		return nil, invalidArgument("workspace_id, user_id, text, and positive time are required")
 	}
 	reminder, err := s.implementation.AddReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), input.GetText(), time.Unix(input.GetTime(), 0).UTC())
 	if err != nil {
@@ -4851,7 +4899,7 @@ func (s *Server) addReminderProto(ctx context.Context, input *chatv1.AddReminder
 
 func (s *Server) reminderInfoProto(ctx context.Context, input *chatv1.ReminderRequest) (*chatv1.Reminder, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetReminderId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and reminder_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and reminder_id are required")
 	}
 	reminder, err := s.implementation.ReminderInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ReminderID(input.GetReminderId()))
 	if err != nil {
@@ -4862,11 +4910,11 @@ func (s *Server) reminderInfoProto(ctx context.Context, input *chatv1.ReminderRe
 
 func (s *Server) remindersProto(ctx context.Context, input *chatv1.RemindersRequest) (*chatv1.ReminderPage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.Reminders(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
@@ -4881,7 +4929,7 @@ func (s *Server) remindersProto(ctx context.Context, input *chatv1.RemindersRequ
 
 func (s *Server) completeReminderProto(ctx context.Context, input *chatv1.ReminderRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetReminderId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and reminder_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and reminder_id are required")
 	}
 	if err := s.implementation.CompleteReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ReminderID(input.GetReminderId())); err != nil {
 		return nil, mapError(err)
@@ -4891,7 +4939,7 @@ func (s *Server) completeReminderProto(ctx context.Context, input *chatv1.Remind
 
 func (s *Server) deleteReminderProto(ctx context.Context, input *chatv1.ReminderRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetReminderId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and reminder_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and reminder_id are required")
 	}
 	if err := s.implementation.DeleteReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ReminderID(input.GetReminderId())); err != nil {
 		return nil, mapError(err)
@@ -4901,7 +4949,7 @@ func (s *Server) deleteReminderProto(ctx context.Context, input *chatv1.Reminder
 
 func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetChannelId() == "" || input.GetPostAt() <= 0 || (input.GetText() == "" && input.GetBlocks() == "") {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, channel_id, text or blocks, and positive post_at are required")
+		return nil, invalidArgument("workspace_id, user_id, channel_id, text or blocks, and positive post_at are required")
 	}
 	value, err := s.implementation.ScheduleMessageWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), time.Unix(input.GetPostAt(), 0).UTC())
 	if err != nil {
@@ -4912,11 +4960,11 @@ func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.Schedul
 
 func (s *Server) scheduledMessagesProto(ctx context.Context, input *chatv1.ScheduledMessagesRequest) (*chatv1.ScheduledMessagePage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id and user_id are required")
+		return nil, invalidArgument("workspace_id and user_id are required")
 	}
 	request, err := protoPageRequest(input.GetLimit(), input.GetCursor())
 	if err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
+		return nil, invalidArgumentFrom(err)
 	}
 	page, err := s.implementation.ScheduledMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), request)
 	if err != nil {
@@ -4931,7 +4979,7 @@ func (s *Server) scheduledMessagesProto(ctx context.Context, input *chatv1.Sched
 
 func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.DeleteScheduledMessageRequest) (*chatv1.MutationResponse, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetChannelId() == "" || input.GetScheduledMessageId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, channel_id, and scheduled_message_id are required")
+		return nil, invalidArgument("workspace_id, user_id, channel_id, and scheduled_message_id are required")
 	}
 	if err := s.implementation.DeleteScheduledMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), domain.ScheduledMessageID(input.GetScheduledMessageId())); err != nil {
 		return nil, mapError(err)
@@ -4941,10 +4989,10 @@ func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.
 
 func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
 	if input.GetWorkspaceId() == "" && input.GetAppId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id or app_id is required")
+		return nil, invalidArgument("workspace_id or app_id is required")
 	}
 	if input.GetLimit() < 1 || input.GetLimit() > 100 {
-		return nil, status.Error(codes.InvalidArgument, "limit must be between 1 and 100")
+		return nil, invalidArgument("limit must be between 1 and 100")
 	}
 	var records []events.Record
 	var err error
@@ -4957,75 +5005,6 @@ func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsR
 		return nil, mapError(err)
 	}
 	return encodeProtoEvents(records), nil
-}
-
-func mapError(err error) error {
-	if errors.Is(err, context.Canceled) {
-		return status.Error(codes.Canceled, err.Error())
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return status.Error(codes.DeadlineExceeded, err.Error())
-	}
-	if matchesAny(err,
-		service.ErrInvalidMessage, service.ErrInvalidTimestamp,
-		service.ErrInvalidConversation, service.ErrInvalidWorkspace,
-		service.ErrInvalidConversationPrefs, service.ErrInvalidReaction,
-		service.ErrInvalidFile, service.ErrInvalidSearch,
-		service.ErrInvalidProfile, service.ErrInvalidPresence,
-		service.ErrInvalidSnooze, service.ErrInvalidReminder,
-		service.ErrInvalidCall, service.ErrInvalidUserGroup,
-		service.ErrInvalidEphemeral, service.ErrInvalidAccessLog,
-		service.ErrInvalidEmoji, service.ErrInvalidRemoteFile,
-		service.ErrInvalidInviteRequest, service.ErrInvalidAppApproval,
-		service.ErrInvalidView, service.ErrInvalidWorkflowStep,
-		service.ErrInvalidDialog, service.ErrInvalidBot,
-		service.ErrInvalidMigration, service.ErrInvalidOAuth,
-		service.ErrInvalidOAuthClient, service.ErrInvalidIntegrationLogs,
-		store.ErrInvalidConversationType, store.ErrInvalidInviteRequest,
-		store.ErrInvalidAppApproval, domain.ErrInvalidCursor,
-		service.ErrInvalidList,
-		service.ErrInvalidEntity,
-		service.ErrInvalidBookmark,
-		service.ErrInvalidCanvas,
-		service.ErrInvalidExternalUpload,
-		store.ErrInvalidArgument,
-	) {
-		return status.Error(codes.InvalidArgument, err.Error())
-	}
-	if errors.Is(err, service.ErrEmojiAlreadyExists) {
-		return status.Error(codes.AlreadyExists, err.Error())
-	}
-	if errors.Is(err, service.ErrBlobUnavailable) {
-		return status.Error(codes.Unavailable, err.Error())
-	}
-	if errors.Is(err, store.ErrAlreadyExists) {
-		return status.Error(codes.AlreadyExists, err.Error())
-	}
-	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrIdempotencyConflict) {
-		return status.Error(codes.Aborted, err.Error())
-	}
-	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
-		return status.Error(codes.ResourceExhausted, err.Error())
-	}
-	if errors.Is(err, service.ErrMessageNotOwned) {
-		return status.Error(codes.PermissionDenied, err.Error())
-	}
-	if errors.Is(err, service.ErrMessageAlreadyDeleted) {
-		return status.Error(codes.FailedPrecondition, err.Error())
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		return status.Error(codes.NotFound, err.Error())
-	}
-	return status.Error(codes.Unavailable, err.Error())
-}
-
-func matchesAny(err error, targets ...error) bool {
-	for _, target := range targets {
-		if errors.Is(err, target) {
-			return true
-		}
-	}
-	return false
 }
 
 func encodeProtoUser(value domain.User) *chatv1.User {
@@ -5124,6 +5103,17 @@ func encodeProtoUserPage(page domain.UserPage) *chatv1.UserPage {
 		users = append(users, encodeProtoUser(user))
 	}
 	return &chatv1.UserPage{Users: users, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+}
+
+func encodeProtoWorkspaceMembership(value domain.WorkspaceMembership) *chatv1.WorkspaceMembership {
+	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active}
+}
+
+func decodeProtoWorkspaceMembership(value *chatv1.WorkspaceMembership) (domain.WorkspaceMembership, error) {
+	if value == nil {
+		return domain.WorkspaceMembership{}, errors.New("missing workspace membership")
+	}
+	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive()}, nil
 }
 
 func encodeProtoAdminUserPage(page domain.AdminUserPage) *chatv1.AdminUserPage {
@@ -5325,7 +5315,9 @@ func encodeProtoConversation(value domain.Conversation) *chatv1.Conversation {
 }
 
 func decodeProtoConversation(value *chatv1.Conversation) (domain.Conversation, error) {
-	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetName() == "" {
+	// Name is not required: a stored conversation with an empty name is returned
+	// by the local path, and rejecting it here would diverge.
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" {
 		return domain.Conversation{}, errors.New("typed conversation response is incomplete")
 	}
 	if value.GetUnreadCount() < 0 || value.GetUnreadCount() > int64(^uint(0)>>1) {
@@ -5410,7 +5402,9 @@ func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
 	return &chatv1.AccessLog{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Username: value.Username, CreatedAt: value.CreatedAt.Unix(), Ip: value.IP, UserAgent: value.UserAgent}
 }
 func decodeProtoAccessLog(value *chatv1.AccessLog) (domain.AccessLog, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetUsername() == "" || value.GetCreatedAt() <= 0 {
+	// created_at is a Unix timestamp and is decoded as sent; the local path does
+	// not require it to be positive.
+	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetUsername() == "" {
 		return domain.AccessLog{}, errors.New("typed access log is incomplete")
 	}
 	return domain.AccessLog{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Username: value.GetUsername(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), IP: value.GetIp(), UserAgent: value.GetUserAgent()}, nil
@@ -5460,7 +5454,10 @@ func encodeProtoFile(value domain.File) *chatv1.File {
 }
 
 func decodeProtoFile(value *chatv1.File) (domain.File, error) {
-	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUploader() == "" || value.GetName() == "" || value.GetTitle() == "" || value.GetMimeType() == "" {
+	// Title and mime_type are not required: the local path returns a stored file
+	// with either one empty, so requiring them here would fail a call in the split
+	// composition that succeeds in the monolith.
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUploader() == "" || value.GetName() == "" {
 		return domain.File{}, errors.New("typed file response is incomplete")
 	}
 	if value.GetSize() < 0 {
@@ -5561,9 +5558,6 @@ func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" {
 		return domain.TokenRecord{}, errors.New("typed token record is incomplete")
 	}
-	if len(value.GetScopes()) == 0 {
-		return domain.TokenRecord{}, errors.New("typed token scopes are required")
-	}
 	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Scopes: domain.NormalizeScopes(value.GetScopes()), Revoked: value.GetRevoked()}, nil
 }
 
@@ -5575,9 +5569,6 @@ func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, erro
 	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" {
 		return domain.SessionRecord{}, errors.New("typed session record is incomplete")
 	}
-	if len(value.GetScopes()) == 0 {
-		return domain.SessionRecord{}, errors.New("typed session scopes are required")
-	}
 	expires, err := time.Parse(time.RFC3339Nano, value.GetExpiresAt())
 	if err != nil {
 		return domain.SessionRecord{}, errors.New("typed session expires_at is invalid")
@@ -5588,7 +5579,7 @@ func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, erro
 func encodeProtoEvents(records []events.Record) *chatv1.EventsResponse {
 	result := make([]*chatv1.EventRecord, 0, len(records))
 	for _, record := range records {
-		result = append(result, &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), Topic: record.Event.Topic, Payload: record.Event.Payload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano()})
+		result = append(result, &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano()})
 	}
 	return &chatv1.EventsResponse{Records: result}
 }
@@ -5602,7 +5593,7 @@ func decodeProtoEvents(value *chatv1.EventsResponse) ([]events.Record, error) {
 		if item == nil || item.GetSequence() == 0 || item.GetId() == "" || item.GetWorkspaceId() == "" || item.GetTopic() == "" || item.GetCreatedAtUnixNano() == 0 {
 			return nil, errors.New("typed event record is incomplete")
 		}
-		result = append(result, events.Record{Sequence: item.GetSequence(), Event: events.Event{ID: domain.EventID(item.GetId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), Topic: item.GetTopic(), Payload: item.GetPayload(), CreatedAt: time.Unix(0, item.GetCreatedAtUnixNano()).UTC()}})
+		result = append(result, events.Record{Sequence: item.GetSequence(), Event: events.Event{ID: domain.EventID(item.GetId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), ActorID: domain.UserID(item.GetActorId()), Topic: item.GetTopic(), Payload: item.GetPayload(), CreatedAt: time.Unix(0, item.GetCreatedAtUnixNano()).UTC()}})
 	}
 	return result, nil
 }
@@ -5848,14 +5839,14 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetName() == "" {
 		return domain.User{}, errors.New("typed user response is incomplete")
 	}
+	// Presence and profile are decoded as sent. Requiring "auto" or "away" and a
+	// non-nil profile made the remote path reject a record the local path
+	// returns: the store defaults presence today, so the rejection was
+	// unreachable, but it was an invariant that existed only across the seam and
+	// would have turned a stored user into a hard error in one composition and a
+	// value in the other. The invariant belongs to the store, not to a decoder.
 	presence := domain.Presence(value.GetPresence())
-	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
-		return domain.User{}, errors.New("typed user presence is invalid")
-	}
 	profile := value.GetProfile()
-	if profile == nil {
-		return domain.User{}, errors.New("typed user profile is required")
-	}
 	return domain.User{
 		ID:          domain.UserID(value.GetId()),
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
@@ -5927,7 +5918,9 @@ func encodeProtoUserGroup(value domain.UserGroup) *chatv1.UserGroup {
 }
 
 func decodeProtoUserGroup(value *chatv1.UserGroup) (domain.UserGroup, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetName() == "" || value.GetHandle() == "" || value.GetCreatorId() == "" || value.GetUpdatedBy() == "" || value.GetCreatedAt() <= 0 || value.GetUpdatedAt() <= 0 {
+	// created_at and updated_at are Unix timestamps and are decoded as sent; the
+	// local path does not require them to be positive.
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetName() == "" || value.GetHandle() == "" || value.GetCreatorId() == "" || value.GetUpdatedBy() == "" {
 		return domain.UserGroup{}, errors.New("typed user group response is incomplete")
 	}
 	users := make([]domain.UserID, 0, len(value.GetUsers()))
@@ -5964,7 +5957,9 @@ func encodeProtoCall(value domain.Call) *chatv1.Call {
 }
 
 func decodeProtoCall(value *chatv1.Call) (domain.Call, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetExternalUniqueId() == "" || value.GetJoinUrl() == "" || value.GetCreatedBy() == "" || value.GetStartedAt() <= 0 {
+	// started_at is not required to be positive: it is a Unix timestamp, and the
+	// local path returns calls whose start is unset or predates the epoch.
+	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetExternalUniqueId() == "" || value.GetJoinUrl() == "" || value.GetCreatedBy() == "" {
 		return domain.Call{}, errors.New("typed call response is incomplete")
 	}
 	participants := make([]domain.UserID, 0, len(value.GetParticipants()))
@@ -6213,22 +6208,12 @@ func (r Remote) UploadExternalFile(ctx context.Context, id domain.ExternalUpload
 		return err
 	}
 	if err := stream.Send(&chatv1.ExternalUploadPart{Part: &chatv1.ExternalUploadPart_Metadata{Metadata: &chatv1.ExternalUploadRequest{UploadId: string(id), Size: size}}}); err != nil {
-		return err
+		return uploadFailure(err, func() error { _, recvErr := stream.CloseAndRecv(); return recvErr })
 	}
-	buffer := make([]byte, 64*1024)
-	for {
-		read, readErr := source.Read(buffer)
-		if read > 0 {
-			if err := stream.Send(&chatv1.ExternalUploadPart{Part: &chatv1.ExternalUploadPart_Chunk{Chunk: append([]byte(nil), buffer[:read]...)}}); err != nil {
-				return err
-			}
-		}
-		if errors.Is(readErr, io.EOF) {
-			break
-		}
-		if readErr != nil {
-			return readErr
-		}
+	if err := sendChunks(source, "external upload source", func(chunk []byte) error {
+		return stream.Send(&chatv1.ExternalUploadPart{Part: &chatv1.ExternalUploadPart_Chunk{Chunk: append([]byte(nil), chunk...)}})
+	}); err != nil {
+		return uploadFailure(err, func() error { _, recvErr := stream.CloseAndRecv(); return recvErr })
 	}
 	_, err = stream.CloseAndRecv()
 	return err
@@ -6244,7 +6229,7 @@ func (r Remote) CompleteExternalUpload(ctx context.Context, workspaceID domain.W
 
 func (s *Server) CreateExternalUpload(ctx context.Context, input *chatv1.ExternalUploadRequest) (*chatv1.ExternalUpload, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetName() == "" || input.GetMimeType() == "" || input.GetSize() <= 0 || input.GetTtlSeconds() <= 0 {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, name, mime_type, size, and ttl_seconds are required")
+		return nil, invalidArgument("workspace_id, user_id, name, mime_type, size, and ttl_seconds are required")
 	}
 	value, err := s.implementation.CreateExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetName(), input.GetMimeType(), input.GetSize(), time.Duration(input.GetTtlSeconds())*time.Second)
 	if err != nil {
@@ -6260,12 +6245,19 @@ func (s *Server) UploadExternalFile(stream chatv1.FilesService_UploadExternalFil
 	}
 	header := first.GetMetadata()
 	if header == nil || header.GetUploadId() == "" || header.GetSize() < 0 {
-		return status.Error(codes.InvalidArgument, "upload stream must begin with upload_id and size metadata")
+		return invalidArgument("upload stream must begin with upload_id and size metadata")
 	}
 	reader, writer := io.Pipe()
 	readErr := make(chan error, 1)
 	go func() {
 		defer writer.Close()
+		// A panic on this stack is not reachable by the stream interceptor; see
+		// Server.UploadFile.
+		defer func() {
+			if recovered := recover(); recovered != nil {
+				readErr <- panicError(recovered)
+			}
+		}()
 		for {
 			part, recvErr := stream.Recv()
 			if recvErr == io.EOF {
@@ -6278,7 +6270,7 @@ func (s *Server) UploadExternalFile(stream chatv1.FilesService_UploadExternalFil
 			}
 			chunk := part.GetChunk()
 			if chunk == nil {
-				readErr <- status.Error(codes.InvalidArgument, "external upload stream contains a non-chunk part")
+				readErr <- invalidArgument("external upload stream contains a non-chunk part")
 				return
 			}
 			if _, writeErr := writer.Write(chunk); writeErr != nil {
@@ -6302,7 +6294,7 @@ func (s *Server) UploadExternalFile(stream chatv1.FilesService_UploadExternalFil
 
 func (s *Server) CompleteExternalUpload(ctx context.Context, input *chatv1.CompleteExternalUploadRequest) (*chatv1.File, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || input.GetUploadId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and upload_id are required")
+		return nil, invalidArgument("workspace_id, user_id, and upload_id are required")
 	}
 	file, err := s.implementation.CompleteExternalUpload(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ExternalUploadID(input.GetUploadId()), input.GetTitle(), conversationIDs(input.GetChannelIds()), input.GetInitialComment(), input.GetBlocks(), domain.MessageTimestamp(input.GetThreadTimestamp()))
 	if err != nil {
@@ -6311,8 +6303,19 @@ func (s *Server) CompleteExternalUpload(ctx context.Context, input *chatv1.Compl
 	return encodeProtoFile(file), nil
 }
 
+// encodeProtoExternalUpload formats in UTC, like every other encoder on this
+// contract. It was the only one that formatted in time.Local, so a chat process
+// running outside UTC emitted offset-bearing timestamps where the rest of the
+// surface emits Z.
 func encodeProtoExternalUpload(value domain.ExternalUpload) *chatv1.ExternalUpload {
-	return &chatv1.ExternalUpload{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size, Status: string(value.Status), CreatedAt: value.CreatedAt.Format(time.RFC3339Nano), ExpiresAt: value.ExpiresAt.Format(time.RFC3339Nano), UploadedAt: value.UploadedAt.Format(time.RFC3339Nano), CompletedAt: value.CompletedAt.Format(time.RFC3339Nano)}
+	result := &chatv1.ExternalUpload{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), Uploader: string(value.Uploader), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size, Status: string(value.Status), CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano)}
+	if !value.UploadedAt.IsZero() {
+		result.UploadedAt = value.UploadedAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !value.CompletedAt.IsZero() {
+		result.CompletedAt = value.CompletedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return result
 }
 
 func decodeProtoExternalUpload(value *chatv1.ExternalUpload) (domain.ExternalUpload, error) {
@@ -6327,7 +6330,34 @@ func decodeProtoExternalUpload(value *chatv1.ExternalUpload) (domain.ExternalUpl
 	if err != nil {
 		return domain.ExternalUpload{}, err
 	}
-	return domain.ExternalUpload{ID: domain.ExternalUploadID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), Status: domain.ExternalUploadStatus(value.GetStatus()), CreatedAt: created, ExpiresAt: expires}, nil
+	// uploaded_at and completed_at were carried on the wire and dropped here, so
+	// CreateExternalUpload and CompleteExternalUpload returned uploads whose
+	// UploadedAt and CompletedAt were populated in the monolith and zero across
+	// the seam. Both are optional, so an absent value stays zero rather than
+	// failing the decode.
+	uploaded, err := decodeOptionalProtoTime(value.GetUploadedAt())
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	completed, err := decodeOptionalProtoTime(value.GetCompletedAt())
+	if err != nil {
+		return domain.ExternalUpload{}, err
+	}
+	return domain.ExternalUpload{ID: domain.ExternalUploadID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Uploader: domain.UserID(value.GetUploader()), Name: value.GetName(), Title: value.GetTitle(), MIMEType: value.GetMimeType(), Size: value.GetSize(), Status: domain.ExternalUploadStatus(value.GetStatus()), CreatedAt: created, ExpiresAt: expires, UploadedAt: uploaded, CompletedAt: completed}, nil
+}
+
+// decodeOptionalProtoTime decodes an RFC3339Nano timestamp that the sender omits
+// when it has no value, distinguishing "absent" from "malformed" instead of
+// silently zeroing both.
+func decodeOptionalProtoTime(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, nil
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return parsed.UTC(), nil
 }
 
 func (r Remote) CompleteExternalUploads(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, initialComment, blocks string, threadTimestamp domain.MessageTimestamp) ([]domain.File, error) {
@@ -6348,12 +6378,12 @@ func (r Remote) CompleteExternalUploads(ctx context.Context, workspaceID domain.
 
 func (s *Server) CompleteExternalUploads(ctx context.Context, input *chatv1.CompleteExternalUploadsRequest) (*chatv1.FilePage, error) {
 	if input.GetWorkspaceId() == "" || input.GetUserId() == "" || len(input.GetFiles()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "workspace_id, user_id, and files are required")
+		return nil, invalidArgument("workspace_id, user_id, and files are required")
 	}
 	completions := make([]domain.ExternalUploadCompletion, 0, len(input.GetFiles()))
 	for _, value := range input.GetFiles() {
 		if value == nil {
-			return nil, status.Error(codes.InvalidArgument, "files contains a nil entry")
+			return nil, invalidArgument("files contains a nil entry")
 		}
 		completions = append(completions, domain.ExternalUploadCompletion{ID: domain.ExternalUploadID(value.GetUploadId()), Title: value.GetTitle()})
 	}

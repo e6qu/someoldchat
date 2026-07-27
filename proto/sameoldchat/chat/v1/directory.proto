@@ -198,10 +198,19 @@ message ConversationPrefsRequest {
   string conversation_id = 3;
 }
 
+// SetConversationPrefsRequest names its target conversation explicitly.
+//
+// `conversation_id` is the target; `prefs.conversation_id` is ignored by the
+// server. The field exists because the module contract takes the conversation as
+// a parameter (AdminSetConversationPrefs) and the client used to drop it and let
+// the server re-derive the target from the payload, so a call whose parameter
+// and payload disagreed mutated one conversation in process and a different one
+// across the seam.
 message SetConversationPrefsRequest {
   string workspace_id = 1;
   string user_id = 2;
   ConversationPrefs prefs = 3;
+  string conversation_id = 4;
 }
 
 message AdminTeamUsersRequest {
@@ -231,6 +240,42 @@ message AdminCreateUserRequest {
   string email = 3;
   string real_name = 4;
   string role = 5;
+}
+
+// WorkspaceMembershipRequest names the actor and the target separately: an actor
+// may read their own membership, and reading another user's is an administrative
+// read. Collapsing them would lose the distinction the authority rule is made of.
+message WorkspaceMembershipRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string target_user_id = 3;
+}
+
+message WorkspaceMembership {
+  string workspace_id = 1;
+  string user_id = 2;
+  string role = 3;
+  bool active = 4;
+}
+
+// ProvisionExternalUserRequest carries no actor. The operation is the first-login
+// provisioning of a federated workspace and has no end-user authority; see the
+// contract on service.ProvisionExternalUser. This RPC must only be reached over
+// the mutually authenticated chat connection.
+message ProvisionExternalUserRequest {
+  string workspace_id = 1;
+  string email = 2;
+  string real_name = 3;
+  string role = 4;
+}
+
+// SynchronizeExternalUserRoleRequest carries no actor, for the same reason as
+// ProvisionExternalUserRequest: the authority is the verified provider assertion
+// the role claim came from.
+message SynchronizeExternalUserRoleRequest {
+  string workspace_id = 1;
+  string target_user_id = 2;
+  string role = 3;
 }
 
 message AdminAssignUserRequest {
@@ -342,4 +387,7 @@ service DirectoryService {
   rpc AdminApproveApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminRestrictApp(AppApprovalMutationRequest) returns (MutationResponse);
   rpc AdminListApps(AppApprovalsRequest) returns (AppApprovalPage);
+  rpc GetWorkspaceMembership(WorkspaceMembershipRequest) returns (WorkspaceMembership);
+  rpc ProvisionExternalUser(ProvisionExternalUserRequest) returns (User);
+  rpc SynchronizeExternalUserRole(SynchronizeExternalUserRoleRequest) returns (MutationResponse);
 }

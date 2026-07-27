@@ -53,6 +53,9 @@ const (
 	DirectoryService_AdminApproveApp_FullMethodName             = "/sameoldchat.chat.v1.DirectoryService/AdminApproveApp"
 	DirectoryService_AdminRestrictApp_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/AdminRestrictApp"
 	DirectoryService_AdminListApps_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/AdminListApps"
+	DirectoryService_GetWorkspaceMembership_FullMethodName      = "/sameoldchat.chat.v1.DirectoryService/GetWorkspaceMembership"
+	DirectoryService_ProvisionExternalUser_FullMethodName       = "/sameoldchat.chat.v1.DirectoryService/ProvisionExternalUser"
+	DirectoryService_SynchronizeExternalUserRole_FullMethodName = "/sameoldchat.chat.v1.DirectoryService/SynchronizeExternalUserRole"
 )
 
 // DirectoryServiceClient is the client API for DirectoryService service.
@@ -93,6 +96,9 @@ type DirectoryServiceClient interface {
 	AdminApproveApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminRestrictApp(ctx context.Context, in *AppApprovalMutationRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	AdminListApps(ctx context.Context, in *AppApprovalsRequest, opts ...grpc.CallOption) (*AppApprovalPage, error)
+	GetWorkspaceMembership(ctx context.Context, in *WorkspaceMembershipRequest, opts ...grpc.CallOption) (*WorkspaceMembership, error)
+	ProvisionExternalUser(ctx context.Context, in *ProvisionExternalUserRequest, opts ...grpc.CallOption) (*User, error)
+	SynchronizeExternalUserRole(ctx context.Context, in *SynchronizeExternalUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 }
 
 type directoryServiceClient struct {
@@ -443,6 +449,36 @@ func (c *directoryServiceClient) AdminListApps(ctx context.Context, in *AppAppro
 	return out, nil
 }
 
+func (c *directoryServiceClient) GetWorkspaceMembership(ctx context.Context, in *WorkspaceMembershipRequest, opts ...grpc.CallOption) (*WorkspaceMembership, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspaceMembership)
+	err := c.cc.Invoke(ctx, DirectoryService_GetWorkspaceMembership_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) ProvisionExternalUser(ctx context.Context, in *ProvisionExternalUserRequest, opts ...grpc.CallOption) (*User, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(User)
+	err := c.cc.Invoke(ctx, DirectoryService_ProvisionExternalUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) SynchronizeExternalUserRole(ctx context.Context, in *SynchronizeExternalUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, DirectoryService_SynchronizeExternalUserRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DirectoryServiceServer is the server API for DirectoryService service.
 // All implementations should embed UnimplementedDirectoryServiceServer
 // for forward compatibility.
@@ -481,6 +517,9 @@ type DirectoryServiceServer interface {
 	AdminApproveApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminRestrictApp(context.Context, *AppApprovalMutationRequest) (*MutationResponse, error)
 	AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error)
+	GetWorkspaceMembership(context.Context, *WorkspaceMembershipRequest) (*WorkspaceMembership, error)
+	ProvisionExternalUser(context.Context, *ProvisionExternalUserRequest) (*User, error)
+	SynchronizeExternalUserRole(context.Context, *SynchronizeExternalUserRoleRequest) (*MutationResponse, error)
 }
 
 // UnimplementedDirectoryServiceServer should be embedded to have
@@ -591,6 +630,15 @@ func (UnimplementedDirectoryServiceServer) AdminRestrictApp(context.Context, *Ap
 }
 func (UnimplementedDirectoryServiceServer) AdminListApps(context.Context, *AppApprovalsRequest) (*AppApprovalPage, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminListApps not implemented")
+}
+func (UnimplementedDirectoryServiceServer) GetWorkspaceMembership(context.Context, *WorkspaceMembershipRequest) (*WorkspaceMembership, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetWorkspaceMembership not implemented")
+}
+func (UnimplementedDirectoryServiceServer) ProvisionExternalUser(context.Context, *ProvisionExternalUserRequest) (*User, error) {
+	return nil, status.Error(codes.Unimplemented, "method ProvisionExternalUser not implemented")
+}
+func (UnimplementedDirectoryServiceServer) SynchronizeExternalUserRole(context.Context, *SynchronizeExternalUserRoleRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SynchronizeExternalUserRole not implemented")
 }
 func (UnimplementedDirectoryServiceServer) testEmbeddedByValue() {}
 
@@ -1224,6 +1272,60 @@ func _DirectoryService_AdminListApps_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DirectoryService_GetWorkspaceMembership_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkspaceMembershipRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).GetWorkspaceMembership(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_GetWorkspaceMembership_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).GetWorkspaceMembership(ctx, req.(*WorkspaceMembershipRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_ProvisionExternalUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ProvisionExternalUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).ProvisionExternalUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_ProvisionExternalUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).ProvisionExternalUser(ctx, req.(*ProvisionExternalUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_SynchronizeExternalUserRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SynchronizeExternalUserRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).SynchronizeExternalUserRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_SynchronizeExternalUserRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).SynchronizeExternalUserRole(ctx, req.(*SynchronizeExternalUserRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DirectoryService_ServiceDesc is the grpc.ServiceDesc for DirectoryService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1366,6 +1468,18 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "AdminListApps",
 			Handler:    _DirectoryService_AdminListApps_Handler,
+		},
+		{
+			MethodName: "GetWorkspaceMembership",
+			Handler:    _DirectoryService_GetWorkspaceMembership_Handler,
+		},
+		{
+			MethodName: "ProvisionExternalUser",
+			Handler:    _DirectoryService_ProvisionExternalUser_Handler,
+		},
+		{
+			MethodName: "SynchronizeExternalUserRole",
+			Handler:    _DirectoryService_SynchronizeExternalUserRole_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

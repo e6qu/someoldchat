@@ -57,6 +57,16 @@ var (
 	ErrInvalidBookmark          = errors.New("bookmark title, type, and link are invalid")
 	ErrInvalidCanvas            = errors.New("canvas content or access arguments are invalid")
 	ErrInvalidExternalUpload    = errors.New("external upload is invalid")
+
+	// ErrNotWorkspaceAdmin refuses an administrative operation to an actor whose
+	// durable workspace membership is not an administrator or an owner.
+	//
+	// It is distinct from store.ErrNotFound, which every administrative method
+	// already returned for an actor who is not a member of the workspace at all.
+	// Collapsing the two would tell an authenticated member that the workspace
+	// does not exist, and would hide the real reason from the operator reading the
+	// audit trail.
+	ErrNotWorkspaceAdmin = errors.New("actor is not a workspace administrator")
 )
 
 type Messages struct {
@@ -149,18 +159,18 @@ func (m Messages) RevokeSession(ctx context.Context, token string) error {
 }
 
 func (m Messages) ResetUserSessions(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
 		return store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.sessions_reset", events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.RevokeUserSessions(ctx, workspaceID, targetID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.sessions_reset", Payload: string(targetID), CreatedAt: time.Now().UTC()})
+	return m.Store.RevokeUserSessions(ctx, workspaceID, targetID, event)
 }
 
 func (m Messages) LookupSession(ctx context.Context, token string) (domain.SessionRecord, error) {
@@ -204,11 +214,11 @@ func (m Messages) RevokeOIDCSessions(ctx context.Context, workspaceID domain.Wor
 	if workspaceID == "" || provider == "" || (subject == "" && sid == "") || tokenID == "" || !expiresAt.After(time.Now().UTC()) {
 		return store.ErrInvalidArgument
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, "", events.NewPayload("user.sessions_revoked_by_oidc", events.String("provider", provider)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.RevokeOIDCSessions(ctx, workspaceID, provider, subject, sid, tokenID, expiresAt, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.sessions_revoked_by_oidc", Payload: provider, CreatedAt: time.Now().UTC()})
+	return m.Store.RevokeOIDCSessions(ctx, workspaceID, provider, subject, sid, tokenID, expiresAt, event)
 }
 
 func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType string, size int64, source io.Reader) (domain.File, error) {
@@ -235,7 +245,7 @@ func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID
 		}
 		return domain.File{}, err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("file.created", events.String("file_id", string(file.ID))), file.CreatedAt)
 	if err != nil {
 		cleanupErr := m.Blob.Delete(context.Background(), file.BlobKey)
 		if cleanupErr != nil {
@@ -243,7 +253,6 @@ func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID
 		}
 		return domain.File{}, err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(file.ID), CreatedAt: file.CreatedAt}
 	if err := m.Store.CreateFile(ctx, file, event); err != nil {
 		cleanupErr := m.Blob.Delete(context.Background(), file.BlobKey)
 		if cleanupErr != nil {
@@ -298,12 +307,11 @@ func (m Messages) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil || file.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.BlobKey(events.FileBlobDeleteTopic, file.BlobKey), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	deletedAt := time.Now().UTC()
-	if err := m.Store.DeleteFile(ctx, fileID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: events.FileBlobDeleteTopic, Payload: file.BlobKey, CreatedAt: deletedAt}); err != nil {
+	if err := m.Store.DeleteFile(ctx, fileID, event); err != nil {
 		return err
 	}
 	return nil
@@ -316,11 +324,11 @@ func (m Messages) DeleteFileComment(ctx context.Context, workspaceID domain.Work
 	if fileID == "" || commentID == "" {
 		return ErrInvalidFile
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("file.comment_deleted", events.String("file_id", string(fileID)), events.String("comment_id", string(commentID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.DeleteFileComment(ctx, workspaceID, fileID, commentID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.comment_deleted", Payload: string(fileID) + "|" + string(commentID), CreatedAt: time.Now().UTC()})
+	return m.Store.DeleteFileComment(ctx, workspaceID, fileID, commentID, event)
 }
 
 func (m Messages) ShareFilePublic(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID) (domain.File, error) {
@@ -336,11 +344,11 @@ func (m Messages) ShareFilePublic(ctx context.Context, workspaceID domain.Worksp
 		if err != nil {
 			return domain.File{}, err
 		}
-		eventID, err := domain.NewEventID()
+		event, err := newEvent(workspaceID, userID, events.NewPayload("file.public_shared", events.String("file_id", string(fileID))), time.Now().UTC())
 		if err != nil {
 			return domain.File{}, err
 		}
-		if err := m.Store.ShareFilePublic(ctx, workspaceID, fileID, token, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.public_shared", Payload: string(fileID), CreatedAt: time.Now().UTC()}); err != nil {
+		if err := m.Store.ShareFilePublic(ctx, workspaceID, fileID, token, event); err != nil {
 			return domain.File{}, err
 		}
 		file.PublicToken = token
@@ -357,11 +365,11 @@ func (m Messages) RevokeFilePublic(ctx context.Context, workspaceID domain.Works
 		return domain.File{}, store.ErrNotFound
 	}
 	if file.PublicToken != "" {
-		eventID, err := domain.NewEventID()
+		event, err := newEvent(workspaceID, userID, events.NewPayload("file.public_revoked", events.String("file_id", string(fileID))), time.Now().UTC())
 		if err != nil {
 			return domain.File{}, err
 		}
-		if err := m.Store.RevokeFilePublic(ctx, workspaceID, fileID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.public_revoked", Payload: string(fileID), CreatedAt: time.Now().UTC()}); err != nil {
+		if err := m.Store.RevokeFilePublic(ctx, workspaceID, fileID, event); err != nil {
 			return domain.File{}, err
 		}
 		file.PublicToken = ""
@@ -426,11 +434,11 @@ func (m Messages) AddRemoteFile(ctx context.Context, workspaceID domain.Workspac
 		return domain.RemoteFile{}, err
 	}
 	value.CreatedAt = time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("remote_file.created", events.String("file_id", string(value.ID)), events.String("external_id", value.ExternalID)), value.CreatedAt)
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	if err := m.Store.AddRemoteFile(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "remote_file.created", Payload: string(value.ID), CreatedAt: value.CreatedAt}); err != nil {
+	if err := m.Store.AddRemoteFile(ctx, value, event); err != nil {
 		if errors.Is(err, store.ErrAlreadyExists) {
 			return domain.RemoteFile{}, store.ErrAlreadyExists
 		}
@@ -467,11 +475,11 @@ func (m Messages) RemoveRemoteFile(ctx context.Context, workspaceID domain.Works
 	if !lookup.Valid() {
 		return ErrInvalidRemoteFile
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("remote_file.removed", events.String("file_id", string(lookup.ID)), events.String("external_id", lookup.ExternalID)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveRemoteFile(ctx, workspaceID, lookup, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "remote_file.removed", Payload: string(lookup.ID) + lookup.ExternalID, CreatedAt: time.Now().UTC()})
+	return m.Store.RemoveRemoteFile(ctx, workspaceID, lookup, event)
 }
 
 func (m Messages) ShareRemoteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, lookup domain.RemoteFileLookup, channels []domain.ConversationID) (domain.RemoteFile, error) {
@@ -487,11 +495,11 @@ func (m Messages) ShareRemoteFile(ctx context.Context, workspaceID domain.Worksp
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("remote_file.shared", events.String("file_id", string(lookup.ID)), events.String("external_id", lookup.ExternalID), events.Strings("channel_ids", conversationIDStrings(channels))), time.Now().UTC())
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	return m.Store.SetRemoteFileShares(ctx, workspaceID, lookup, channels, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "remote_file.shared", Payload: string(lookup.ID) + lookup.ExternalID, CreatedAt: time.Now().UTC()})
+	return m.Store.SetRemoteFileShares(ctx, workspaceID, lookup, channels, event)
 }
 
 func (m Messages) UpdateRemoteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, update domain.RemoteFileUpdate) (domain.RemoteFile, error) {
@@ -537,11 +545,11 @@ func (m Messages) UpdateRemoteFile(ctx context.Context, workspaceID domain.Works
 		}
 		value.IndexableContents = update.IndexableContents
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("remote_file.updated", events.String("file_id", string(value.ID)), events.String("external_id", value.ExternalID)), time.Now().UTC())
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
-	return m.Store.UpdateRemoteFile(ctx, workspaceID, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "remote_file.updated", Payload: string(value.ID), CreatedAt: time.Now().UTC()})
+	return m.Store.UpdateRemoteFile(ctx, workspaceID, value, event)
 }
 
 func validRemoteFileURL(value string, maxLength int) bool {
@@ -632,7 +640,15 @@ func (m Messages) IntegrationLogs(ctx context.Context, workspaceID domain.Worksp
 			default:
 				continue
 			}
-			value := domain.IntegrationLog{AppID: domain.AppID(strings.TrimSpace(record.Event.Payload)), AppType: "app", ChangeType: change, Date: record.Event.CreatedAt, Scope: "", UserID: record.Event.ActorID}
+			delivered, decodeErr := events.Deliverable(record.Event)
+			if decodeErr != nil {
+				continue
+			}
+			appIdentifier, hasApp := delivered.Field("app_id")
+			if !hasApp {
+				continue
+			}
+			value := domain.IntegrationLog{AppID: domain.AppID(strings.TrimSpace(appIdentifier)), AppType: "app", ChangeType: change, Date: record.Event.CreatedAt, Scope: "", UserID: record.Event.ActorID}
 			if value.AppID == "" || (appID != "" && string(value.AppID) != appID) || (changeType != "" && value.ChangeType != changeType) || (serviceID != "" && value.ServiceID != serviceID) || (userFilter != "" && string(value.UserID) != userFilter) {
 				continue
 			}
@@ -704,24 +720,31 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 }
 
 func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.removed", events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetUserDeleted(ctx, workspaceID, targetID, true, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.removed", Payload: string(targetID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetUserDeleted(ctx, workspaceID, targetID, true, event)
 }
 
 func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
+	return m.setWorkspaceRole(ctx, workspaceID, actorID, targetID, role)
+}
+
+// setWorkspaceRole is the validation and write shared by the administrative
+// SetUserRole and the provider-driven SynchronizeExternalUserRole. It performs no
+// authority check of its own; every caller must have decided authority first.
+func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
 		return errors.New("invalid workspace role")
 	}
@@ -729,15 +752,15 @@ func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil || target.WorkspaceID != workspaceID {
 		return store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("workspace.role_changed", events.String("user_id", string(targetID)), events.String("role", string(role))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetWorkspaceRole(ctx, workspaceID, targetID, role, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workspace.role_changed", Payload: string(targetID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetWorkspaceRole(ctx, workspaceID, targetID, role, event)
 }
 
 func (m Messages) SetUserExpiration(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, expiration time.Time) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	if targetID == "" || (!expiration.IsZero() && expiration.Before(time.Unix(0, 0).UTC())) {
@@ -747,45 +770,45 @@ func (m Messages) SetUserExpiration(ctx context.Context, workspaceID domain.Work
 	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
 		return store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.expiration_changed", events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetUserExpiration(ctx, workspaceID, targetID, expiration.UTC(), events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.expiration_changed", Payload: string(targetID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetUserExpiration(ctx, workspaceID, targetID, expiration.UTC(), event)
 }
 
 func (m Messages) AdminRenameConversation(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, name string) (domain.Conversation, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, conversationPayload("conversation.renamed_by_admin", conversationID), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.RenameConversation(ctx, conversationID, name, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.renamed_by_admin", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	return m.Store.RenameConversation(ctx, conversationID, name, event)
 }
 
 func (m Messages) AdminSetConversationArchived(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, archived bool) (domain.Conversation, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("conversation.archive_changed_by_admin", events.String("channel_id", string(conversationID)), events.Bool("archived", archived)), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.SetConversationArchived(ctx, conversationID, archived, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.archive_changed_by_admin", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetConversationArchived(ctx, conversationID, archived, event)
 }
 
 func (m Messages) AdminDeleteConversation(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -795,11 +818,11 @@ func (m Messages) AdminDeleteConversation(ctx context.Context, workspaceID domai
 	if conversation.IsDirect || conversation.IsGroupDirect {
 		return ErrInvalidConversation
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, conversationPayload("conversation.deleted", conversationID), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.DeleteConversation(ctx, workspaceID, conversationID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.deleted", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	return m.Store.DeleteConversation(ctx, workspaceID, conversationID, event)
 }
 
 func (m Messages) AdminAddConversationAccessGroup(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, groupID domain.UserGroupID) error {
@@ -811,7 +834,7 @@ func (m Messages) AdminRemoveConversationAccessGroup(ctx context.Context, worksp
 }
 
 func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID, groupID domain.UserGroupID, add bool) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -848,19 +871,19 @@ func (m Messages) changeConversationAccessGroup(ctx context.Context, workspaceID
 		groups = append(groups, current)
 	}
 	sort.Slice(groups, func(left, right int) bool { return groups[left] < groups[right] })
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return err
-	}
 	topic := "conversation.access_group_added"
 	if !add {
 		topic = "conversation.access_group_removed"
 	}
-	return m.Store.SetConversationAccessGroups(ctx, workspaceID, conversationID, groups, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: topic, Payload: string(conversationID) + "\x00" + string(groupID), CreatedAt: time.Now().UTC()})
+	event, err := newEvent(workspaceID, actorID, events.NewPayload(topic, events.String("channel_id", string(conversationID)), events.String("usergroup_id", string(groupID))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetConversationAccessGroups(ctx, workspaceID, conversationID, groups, event)
 }
 
 func (m Messages) AdminListConversationAccessGroups(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, conversationID domain.ConversationID) ([]domain.UserGroupID, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return nil, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -882,7 +905,7 @@ func (m Messages) AdminDenyInviteRequest(ctx context.Context, workspaceID domain
 }
 
 func (m Messages) changeInviteRequestStatus(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, id domain.InviteRequestID, status domain.InviteRequestStatus) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	if id == "" {
@@ -895,19 +918,19 @@ func (m Messages) changeInviteRequestStatus(ctx context.Context, workspaceID dom
 	if request.Status != domain.InviteRequestPending {
 		return ErrInvalidInviteRequest
 	}
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return err
-	}
 	topic := "invite_request.approved"
 	if status == domain.InviteRequestDenied {
 		topic = "invite_request.denied"
 	}
-	return m.Store.SetInviteRequestStatus(ctx, workspaceID, id, status, time.Now().UTC(), events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: topic, Payload: string(id), CreatedAt: time.Now().UTC()})
+	event, err := newEvent(workspaceID, actorID, events.NewPayload(topic, events.String("invite_request_id", string(id))), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetInviteRequestStatus(ctx, workspaceID, id, status, time.Now().UTC(), event)
 }
 
 func (m Messages) AdminListInviteRequests(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, status domain.InviteRequestStatus, request domain.PageRequest) (domain.InviteRequestPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.InviteRequestPage{}, err
 	}
 	if status != domain.InviteRequestPending && status != domain.InviteRequestApproved && status != domain.InviteRequestDenied {
@@ -917,7 +940,7 @@ func (m Messages) AdminListInviteRequests(ctx context.Context, workspaceID domai
 }
 
 func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, email string, channels []domain.ConversationID, customMessage, realName string, resend, restricted, ultraRestricted bool, guestExpirationAt time.Time) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
@@ -955,19 +978,25 @@ func (m Messages) AdminInviteUser(ctx context.Context, workspaceID domain.Worksp
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now}
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("invite_request.created", events.String("invite_request_id", string(value.ID))), now)
 	if err != nil {
 		return err
 	}
-	value := domain.InviteRequest{ID: domain.InviteRequestID(id), WorkspaceID: workspaceID, Email: email, RequestedBy: actorID, ChannelIDs: normalizedChannels, CustomMessage: customMessage, RealName: realName, Resend: resend, Restricted: restricted, UltraRestricted: ultraRestricted, GuestExpirationAt: guestExpirationAt.UTC(), Status: domain.InviteRequestPending, CreatedAt: now}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "invite_request.created", Payload: string(value.ID), CreatedAt: now}
 	return m.Store.CreateInviteRequest(ctx, value, event)
 }
 
 func (m Messages) AdminCreateUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, email, realName string, role domain.WorkspaceRole) (domain.User, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.User{}, err
 	}
+	return m.createWorkspaceUser(ctx, workspaceID, actorID, email, realName, role)
+}
+
+// createWorkspaceUser is the validation and write shared by the administrative
+// AdminCreateUser and the provider-driven ProvisionExternalUser. It performs no
+// authority check of its own; every caller must have decided authority first.
+func (m Messages) createWorkspaceUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, email, realName string, role domain.WorkspaceRole) (domain.User, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
 	realName = strings.TrimSpace(realName)
 	if workspaceID == "" || email == "" || !strings.Contains(email, "@") || len(email) > 320 || realName == "" || len(realName) > 200 {
@@ -985,21 +1014,21 @@ func (m Messages) AdminCreateUser(ctx context.Context, workspaceID domain.Worksp
 	if err != nil {
 		return domain.User{}, err
 	}
-	eventID, err := domain.NewEventID()
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.created", events.String("user_id", string(id))), now)
 	if err != nil {
 		return domain.User{}, err
 	}
-	now := time.Now().UTC()
 	user := domain.User{ID: id, WorkspaceID: workspaceID, Email: email, Name: realName, RealName: realName, Presence: domain.PresenceAuto}
 	membership := domain.WorkspaceMembership{WorkspaceID: workspaceID, UserID: id, Role: role, Active: true}
-	if err := m.Store.CreateUser(ctx, user, membership, events.Event{ID: eventID, WorkspaceID: workspaceID, ActorID: actorID, Topic: "user.created", Payload: string(id), CreatedAt: now}); err != nil {
+	if err := m.Store.CreateUser(ctx, user, membership, event); err != nil {
 		return domain.User{}, err
 	}
 	return user, nil
 }
 
 func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID, targetID domain.UserID, channels []domain.ConversationID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
@@ -1019,11 +1048,10 @@ func (m Messages) AdminAssignUser(ctx context.Context, workspaceID domain.Worksp
 		seen[channelID] = struct{}{}
 		normalized = append(normalized, channelID)
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.assigned", events.String("user_id", string(targetID)), events.Strings("channel_ids", conversationIDStrings(normalized))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.assigned", Payload: string(targetID) + "|" + strings.Join(conversationIDStrings(normalized), ","), CreatedAt: time.Now().UTC()}
 	return m.Store.AssignUser(ctx, workspaceID, targetID, normalized, event)
 }
 
@@ -1036,7 +1064,7 @@ func (m Messages) AdminRestrictApp(ctx context.Context, workspaceID domain.Works
 }
 
 func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
 	appID = domain.AppID(strings.TrimSpace(string(appID)))
@@ -1047,16 +1075,16 @@ func (m Messages) changeAppApproval(ctx context.Context, workspaceID domain.Work
 	if appID == "" {
 		appID = domain.AppID("request:" + string(requestID))
 	}
-	eventID, err := domain.NewEventID()
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("app."+string(status), events.String("app_id", string(appID)), events.String("app_request_id", string(requestID))), now)
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
-	return m.Store.SetAppApproval(ctx, workspaceID, appID, requestID, status, now, events.Event{ID: eventID, WorkspaceID: workspaceID, ActorID: actorID, Topic: "app." + string(status), Payload: string(appID), CreatedAt: now})
+	return m.Store.SetAppApproval(ctx, workspaceID, appID, requestID, status, now, event)
 }
 
 func (m Messages) AdminListApps(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, status domain.AppApprovalStatus, request domain.PageRequest) (domain.AppApprovalPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.AppApprovalPage{}, err
 	}
 	if status != domain.AppApprovalRequested && status != domain.AppApprovalApproved && status != domain.AppApprovalRestricted {
@@ -1085,12 +1113,11 @@ func (m Messages) RequestAppPermissions(ctx context.Context, workspaceID domain.
 	if err != nil {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	value := domain.AppPermissionRequest{ID: id, WorkspaceID: workspaceID, RequesterID: actor, TargetUserID: target, Scopes: scopes, TriggerID: triggerID, CreatedAt: time.Now().UTC()}
+	event, err := newEvent(workspaceID, actor, events.NewPayload("app.permissions_requested", events.String("app_request_id", string(id)), events.String("user_id", string(target)), events.Strings("scopes", scopes)), value.CreatedAt)
 	if err != nil {
 		return err
 	}
-	value := domain.AppPermissionRequest{ID: id, WorkspaceID: workspaceID, RequesterID: actor, TargetUserID: target, Scopes: scopes, TriggerID: triggerID, CreatedAt: time.Now().UTC()}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, ActorID: actor, Topic: "app.permissions_requested", Payload: string(id), CreatedAt: value.CreatedAt}
 	return m.Store.CreateAppPermissionRequest(ctx, value, event)
 }
 
@@ -1207,11 +1234,11 @@ func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID
 		value.RootViewID = rootID
 	}
 	value.PreviousViewID = previousID
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(value.WorkspaceID, user, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("user_id", string(user))), now)
 	if err != nil {
 		return domain.View{}, err
 	}
-	if err := m.Store.CreateView(ctx, value, events.Event{ID: eventID, WorkspaceID: value.WorkspaceID, Topic: topic, Payload: string(value.ID), CreatedAt: now}); err != nil {
+	if err := m.Store.CreateView(ctx, value, event); err != nil {
 		return domain.View{}, err
 	}
 	return value, nil
@@ -1233,11 +1260,11 @@ func (m Messages) updateView(ctx context.Context, workspaceID domain.WorkspaceID
 	value.Hash = viewHash(value.ID, value.Payload, now)
 	value.UpdatedAt = now
 	value.UserID = current.UserID
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("user_id", string(value.UserID))), now)
 	if err != nil {
 		return domain.View{}, err
 	}
-	return m.Store.UpdateView(ctx, value, expectedHash, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: topic, Payload: string(value.ID), CreatedAt: now})
+	return m.Store.UpdateView(ctx, value, expectedHash, event)
 }
 
 func workflowJSON(raw string, allowEmpty bool, array bool) (string, error) {
@@ -1325,11 +1352,11 @@ func (m Messages) setWorkflowStepWithValues(ctx context.Context, workspaceID dom
 	value.WorkspaceID = workspaceID
 	value.UserID = actor
 	value.UpdatedAt = now
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.step_"+string(value.Status), events.String("workflow_step_id", id)), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.SetWorkflowStep(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workflow.step_" + string(value.Status), Payload: id, CreatedAt: now})
+	return m.Store.SetWorkflowStep(ctx, value, event)
 }
 
 func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, triggerID, payload string) error {
@@ -1362,11 +1389,11 @@ func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("dialog.opened", events.String("dialog_id", string(id)), events.String("callback_id", strings.TrimSpace(callbackID))), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: actor, Payload: payload, CreatedAt: now}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "dialog.opened", Payload: string(id), CreatedAt: now})
+	return m.Store.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: actor, Payload: payload, CreatedAt: now}, event)
 }
 
 func (m Messages) BotInfo(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, botID domain.BotID) (domain.Bot, error) {
@@ -1436,7 +1463,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		}
 		return domain.OAuthToken{}, err
 	}
-	if client.SecretHash != domain.HashToken(clientSecret) {
+	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
 		return domain.OAuthToken{}, ErrInvalidOAuthClient
 	}
 	accessToken, err := domain.NewOAuthToken()
@@ -1509,11 +1536,10 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	if len(profile.DisplayName) > 80 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
 		return domain.User{}, ErrInvalidProfile
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return domain.User{}, err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.profile_changed", Payload: string(userID), CreatedAt: time.Now().UTC()}
 	return m.Store.UpdateUserProfile(ctx, workspaceID, userID, profile, event)
 }
 
@@ -1560,14 +1586,14 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 	oldToken := currentUserPhotoToken(workspaceID, user)
 	photoURL := userPhotoURL(workspaceID, userID, token)
 	user.Profile.Image24, user.Profile.Image32, user.Profile.Image48, user.Profile.Image72, user.Profile.Image192, user.Profile.Image512, user.Profile.Image1024 = photoURL, photoURL, photoURL, photoURL, photoURL, photoURL, photoURL
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
 			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
 		}
 		return domain.User{}, err
 	}
-	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.profile_changed", Payload: string(userID), CreatedAt: time.Now().UTC()})
+	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, event)
 	if err != nil {
 		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
 			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
@@ -1575,12 +1601,12 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 		return domain.User{}, err
 	}
 	if oldToken != "" {
-		cleanupID, cleanupErr := domain.NewEventID()
+		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
+		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, oldKey), time.Now().UTC())
 		if cleanupErr != nil {
 			return domain.User{}, cleanupErr
 		}
-		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
-		if cleanupErr := m.Store.AppendEvent(ctx, events.Event{ID: cleanupID, WorkspaceID: workspaceID, Topic: events.UserPhotoBlobDeleteTopic, Payload: oldKey, CreatedAt: time.Now().UTC()}); cleanupErr != nil {
+		if cleanupErr := m.Store.AppendEvent(ctx, cleanup); cleanupErr != nil {
 			return domain.User{}, cleanupErr
 		}
 	}
@@ -1617,20 +1643,20 @@ func (m Messages) DeleteUserPhoto(ctx context.Context, workspaceID domain.Worksp
 	}
 	oldToken := currentUserPhotoToken(workspaceID, user)
 	user.Profile.Image24, user.Profile.Image32, user.Profile.Image48, user.Profile.Image72, user.Profile.Image192, user.Profile.Image512, user.Profile.Image1024 = "", "", "", "", "", "", ""
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	if _, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.profile_changed", Payload: string(userID), CreatedAt: time.Now().UTC()}); err != nil {
+	if _, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, event); err != nil {
 		return err
 	}
 	if oldToken != "" {
-		cleanupID, err := domain.NewEventID()
+		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
+		cleanup, err := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, oldKey), time.Now().UTC())
 		if err != nil {
 			return err
 		}
-		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
-		return m.Store.AppendEvent(ctx, events.Event{ID: cleanupID, WorkspaceID: workspaceID, Topic: events.UserPhotoBlobDeleteTopic, Payload: oldKey, CreatedAt: time.Now().UTC()})
+		return m.Store.AppendEvent(ctx, cleanup)
 	}
 	return nil
 }
@@ -1642,11 +1668,10 @@ func (m Messages) SetUserPresence(ctx context.Context, workspaceID domain.Worksp
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return domain.User{}, ErrInvalidPresence
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.presence_changed", events.String("user_id", string(userID)), events.String("presence", string(presence))), time.Now().UTC())
 	if err != nil {
 		return domain.User{}, err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.presence_changed", Payload: string(userID), CreatedAt: time.Now().UTC()}
 	return m.Store.SetUserPresence(ctx, workspaceID, userID, presence, event)
 }
 
@@ -1679,11 +1704,11 @@ func (m Messages) SetSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 		return domain.DoNotDisturb{}, err
 	}
 	value.SnoozeUntil = time.Now().UTC().Truncate(time.Second).Add(time.Duration(minutes) * time.Minute)
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.dnd_snoozed", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return domain.DoNotDisturb{}, err
 	}
-	if err := m.Store.SetDoNotDisturb(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.dnd_snoozed", Payload: string(userID), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.SetDoNotDisturb(ctx, value, event); err != nil {
 		return domain.DoNotDisturb{}, err
 	}
 	return value, nil
@@ -1698,11 +1723,11 @@ func (m Messages) EndSnooze(ctx context.Context, workspaceID domain.WorkspaceID,
 		return domain.DoNotDisturb{}, err
 	}
 	value.SnoozeUntil = time.Time{}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.dnd_snooze_ended", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return domain.DoNotDisturb{}, err
 	}
-	if err := m.Store.SetDoNotDisturb(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.dnd_snooze_ended", Payload: string(userID), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.SetDoNotDisturb(ctx, value, event); err != nil {
 		return domain.DoNotDisturb{}, err
 	}
 	return value, nil
@@ -1719,11 +1744,11 @@ func (m Messages) EndDND(ctx context.Context, workspaceID domain.WorkspaceID, us
 	value.Enabled = false
 	value.NextStartAt = time.Time{}
 	value.NextEndAt = time.Time{}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("user.dnd_ended", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetDoNotDisturb(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "user.dnd_ended", Payload: string(userID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetDoNotDisturb(ctx, value, event)
 }
 
 func (m Messages) Users(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.UserPage, error) {
@@ -1734,7 +1759,7 @@ func (m Messages) Users(ctx context.Context, workspaceID domain.WorkspaceID, use
 }
 
 func (m Messages) AdminListUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) (domain.AdminUserPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.AdminUserPage{}, err
 	}
 	return m.Store.ListAdminUsers(ctx, workspaceID, request)
@@ -1755,7 +1780,7 @@ func (m Messages) WorkspaceInfo(ctx context.Context, workspaceID domain.Workspac
 }
 
 func (m Messages) AdminCreateWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, domainName, name, description string, discoverability domain.WorkspaceDiscoverability) (domain.Workspace, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
 	}
 	domainName = strings.ToLower(strings.TrimSpace(domainName))
@@ -1774,12 +1799,11 @@ func (m Messages) AdminCreateWorkspace(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	eventID, err := domain.NewEventID()
+	value := domain.Workspace{ID: id, Domain: domainName, Name: name, Description: description, Discoverability: discoverability}
+	event, err := newEvent(id, actor, events.NewPayload("workspace.created", events.String("workspace_id", string(id)), events.String("domain", domainName)), time.Now().UTC())
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	value := domain.Workspace{ID: id, Domain: domainName, Name: name, Description: description, Discoverability: discoverability}
-	event := events.Event{ID: eventID, WorkspaceID: id, Topic: "workspace.created", Payload: string(id), CreatedAt: time.Now().UTC()}
 	if err := m.Store.CreateWorkspace(ctx, value, event); err != nil {
 		return domain.Workspace{}, err
 	}
@@ -1998,7 +2022,7 @@ func (m Messages) AdminInviteConversationMembers(ctx context.Context, workspaceI
 }
 
 func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Conversation, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -2008,15 +2032,15 @@ func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspa
 	if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.converted_to_private", conversationID), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	return m.Store.SetConversationPrivate(ctx, conversationID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.converted_to_private", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetConversationPrivate(ctx, conversationID, event)
 }
 
 func (m Messages) AdminGetConversationPrefs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationPrefs, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.ConversationPrefs{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -2027,7 +2051,7 @@ func (m Messages) AdminGetConversationPrefs(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) AdminSetConversationPrefs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, value domain.ConversationPrefs) (domain.ConversationPrefs, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.ConversationPrefs{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -2044,11 +2068,11 @@ func (m Messages) AdminSetConversationPrefs(ctx context.Context, workspaceID dom
 			return domain.ConversationPrefs{}, ErrInvalidConversationPrefs
 		}
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, conversationPayload("conversation.preferences_changed", conversationID), time.Now().UTC())
 	if err != nil {
 		return domain.ConversationPrefs{}, err
 	}
-	return m.Store.SetConversationPrefs(ctx, conversationID, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.preferences_changed", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	return m.Store.SetConversationPrefs(ctx, conversationID, value, event)
 }
 
 func normalizeConversationPrefs(value domain.ConversationPrefs) (domain.ConversationPrefs, error) {
@@ -2100,7 +2124,7 @@ func normalizeConversationPreferenceList(value domain.ConversationPreferenceList
 }
 
 func (m Messages) AdminSearchConversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.ConversationPage{}, err
 	}
 	query = strings.Join(strings.Fields(strings.ToLower(query)), " ")
@@ -2111,7 +2135,7 @@ func (m Messages) AdminSearchConversations(ctx context.Context, workspaceID doma
 }
 
 func (m Messages) AdminConversationTeams(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) ([]domain.WorkspaceID, bool, domain.Cursor, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err
 	}
 	if request.Limit <= 0 {
@@ -2152,7 +2176,7 @@ func (m Messages) AdminConversationTeams(ctx context.Context, workspaceID domain
 }
 
 func (m Messages) AdminSetConversationTeams(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, teams []domain.WorkspaceID, orgChannel bool) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -2173,20 +2197,20 @@ func (m Messages) AdminSetConversationTeams(ctx context.Context, workspaceID dom
 	if len(seen) == 0 && !orgChannel {
 		return ErrInvalidConversation
 	}
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return err
-	}
 	normalized := make([]domain.WorkspaceID, 0, len(seen))
 	for teamID := range seen {
 		normalized = append(normalized, teamID)
 	}
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i] < normalized[j] })
-	return m.Store.SetConversationTeams(ctx, workspaceID, conversationID, normalized, orgChannel, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.teams_changed", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	event, err := newEvent(workspaceID, actor, events.NewPayload("conversation.teams_changed", events.String("channel_id", string(conversationID)), events.Strings("team_ids", workspaceIDStrings(normalized)), events.Bool("org_channel", orgChannel)), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.SetConversationTeams(ctx, workspaceID, conversationID, normalized, orgChannel, event)
 }
 
 func (m Messages) AdminDisconnectSharedConversation(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, leaving []domain.WorkspaceID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return err
 	}
 	for index, team := range leaving {
@@ -2195,15 +2219,15 @@ func (m Messages) AdminDisconnectSharedConversation(ctx context.Context, workspa
 			return ErrInvalidConversation
 		}
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("conversation.shared_disconnected", events.String("channel_id", string(conversationID)), events.Strings("team_ids", workspaceIDStrings(leaving))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.DisconnectConversationTeams(ctx, workspaceID, conversationID, leaving, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.shared_disconnected", Payload: string(conversationID), CreatedAt: time.Now().UTC()})
+	return m.Store.DisconnectConversationTeams(ctx, workspaceID, conversationID, leaving, event)
 }
 
 func (m Messages) AdminConnectedChannelInfo(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, channels []domain.ConversationID, teams []domain.WorkspaceID, request domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err
 	}
 	if request.Limit <= 0 {
@@ -2224,18 +2248,18 @@ func (m Messages) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, us
 }
 
 func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, url string) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
 	}
 	name, url = normalizeEmojiName(name), strings.TrimSpace(url)
 	if name == "" || len(name) > 255 || url == "" || len(url) > 2048 {
 		return ErrInvalidEmoji
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: url}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "emoji.added", Payload: name, CreatedAt: time.Now().UTC()})
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: url}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -2243,7 +2267,7 @@ func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.Workspac
 }
 
 func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, target string) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
 	}
 	name, target = normalizeEmojiName(name), normalizeEmojiName(target)
@@ -2264,11 +2288,11 @@ func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.Wor
 	if !found {
 		return store.ErrNotFound
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.alias_added", events.String("name", name), events.String("alias_for", target)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, AliasFor: target}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "emoji.alias_added", Payload: name + "|" + target, CreatedAt: time.Now().UTC()})
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, AliasFor: target}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -2276,33 +2300,33 @@ func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) AdminRemoveEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
 	}
 	name = normalizeEmojiName(name)
 	if name == "" {
 		return ErrInvalidEmoji
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.removed", events.String("name", name)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveEmoji(ctx, workspaceID, name, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "emoji.removed", Payload: name, CreatedAt: time.Now().UTC()})
+	return m.Store.RemoveEmoji(ctx, workspaceID, name, event)
 }
 
 func (m Messages) AdminRenameEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, oldName, newName string) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
 	}
 	oldName, newName = normalizeEmojiName(oldName), normalizeEmojiName(newName)
 	if oldName == "" || newName == "" || oldName == newName || len(oldName) > 255 || len(newName) > 255 {
 		return ErrInvalidEmoji
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.renamed", events.String("old_name", oldName), events.String("new_name", newName)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	err = m.Store.RenameEmoji(ctx, workspaceID, oldName, newName, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "emoji.renamed", Payload: oldName + "|" + newName, CreatedAt: time.Now().UTC()})
+	err = m.Store.RenameEmoji(ctx, workspaceID, oldName, newName, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -2355,18 +2379,18 @@ func (m Messages) AddUserGroupChannels(ctx context.Context, workspaceID domain.W
 	if err != nil {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.channels_changed", events.String("usergroup_id", string(id)), events.Strings("channel_ids", conversationIDStrings(combined))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetUserGroupChannels(ctx, workspaceID, id, combined, actor, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "usergroup.channels_changed", Payload: string(id), CreatedAt: time.Now().UTC()})
+	return m.Store.SetUserGroupChannels(ctx, workspaceID, id, combined, actor, event)
 }
 
 // AdminAddUserGroupTeams validates the organization-level association against
 // this process's single-workspace topology. The workspace is already implicit
 // in UserGroup, so a valid association needs no additional persisted edge.
 func (m Messages) AdminAddUserGroupTeams(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, teams []domain.WorkspaceID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetUserGroup(ctx, workspaceID, id); err != nil {
@@ -2414,59 +2438,59 @@ func (m Messages) RemoveUserGroupChannels(ctx context.Context, workspaceID domai
 			remaining = append(remaining, channel)
 		}
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.channels_changed", events.String("usergroup_id", string(id)), events.Strings("channel_ids", conversationIDStrings(remaining))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetUserGroupChannels(ctx, workspaceID, id, remaining, actor, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "usergroup.channels_changed", Payload: string(id), CreatedAt: time.Now().UTC()})
+	return m.Store.SetUserGroupChannels(ctx, workspaceID, id, remaining, actor, event)
 }
 
 func (m Messages) AdminSetWorkspaceName(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, name string) (domain.Workspace, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
 	}
 	name = strings.Join(strings.Fields(strings.TrimSpace(name)), " ")
 	if name == "" || len(name) > 255 {
 		return domain.Workspace{}, ErrInvalidConversation
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workspace.name_changed", events.String("name", name)), time.Now().UTC())
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	return m.Store.SetWorkspaceName(ctx, workspaceID, name, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workspace.name_changed", Payload: name, CreatedAt: time.Now().UTC()})
+	return m.Store.SetWorkspaceName(ctx, workspaceID, name, event)
 }
 
 func (m Messages) AdminSetWorkspaceDescription(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, description string) (domain.Workspace, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
 	}
 	description = strings.Join(strings.Fields(strings.TrimSpace(description)), " ")
 	if len(description) > 255 {
 		return domain.Workspace{}, ErrInvalidWorkspace
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workspace.description_changed", events.String("description", description)), time.Now().UTC())
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	return m.Store.SetWorkspaceDescription(ctx, workspaceID, description, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workspace.description_changed", Payload: description, CreatedAt: time.Now().UTC()})
+	return m.Store.SetWorkspaceDescription(ctx, workspaceID, description, event)
 }
 
 func (m Messages) AdminSetWorkspaceDiscoverability(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, discoverability domain.WorkspaceDiscoverability) (domain.Workspace, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
 	}
 	if !discoverability.Valid() {
 		return domain.Workspace{}, ErrInvalidWorkspace
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workspace.discoverability_changed", events.String("discoverability", string(discoverability))), time.Now().UTC())
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	return m.Store.SetWorkspaceDiscoverability(ctx, workspaceID, discoverability, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workspace.discoverability_changed", Payload: string(discoverability), CreatedAt: time.Now().UTC()})
+	return m.Store.SetWorkspaceDiscoverability(ctx, workspaceID, discoverability, event)
 }
 
 func (m Messages) AdminSetWorkspaceIcon(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, iconURL string) (domain.Workspace, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
 	}
 	iconURL = strings.TrimSpace(iconURL)
@@ -2474,26 +2498,26 @@ func (m Messages) AdminSetWorkspaceIcon(ctx context.Context, workspaceID domain.
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || len(iconURL) > 2048 {
 		return domain.Workspace{}, ErrInvalidWorkspace
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workspace.icon_changed", events.String("icon_url", iconURL)), time.Now().UTC())
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	return m.Store.SetWorkspaceIcon(ctx, workspaceID, iconURL, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workspace.icon_changed", Payload: iconURL, CreatedAt: time.Now().UTC()})
+	return m.Store.SetWorkspaceIcon(ctx, workspaceID, iconURL, event)
 }
 
 func (m Messages) AdminSetWorkspaceDefaultChannels(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, channels []domain.ConversationID) (domain.Workspace, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.Workspace{}, err
 	}
 	channels, err := normalizeWorkspaceDefaultChannels(channels)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workspace.default_channels_changed", events.Strings("channel_ids", conversationIDStrings(channels))), time.Now().UTC())
 	if err != nil {
 		return domain.Workspace{}, err
 	}
-	return m.Store.SetWorkspaceDefaultChannels(ctx, workspaceID, channels, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "workspace.default_channels_changed", Payload: strings.Join(conversationIDStrings(channels), ","), CreatedAt: time.Now().UTC()})
+	return m.Store.SetWorkspaceDefaultChannels(ctx, workspaceID, channels, event)
 }
 
 func normalizeWorkspaceDefaultChannels(values []domain.ConversationID) ([]domain.ConversationID, error) {
@@ -2525,8 +2549,24 @@ func conversationIDStrings(values []domain.ConversationID) []string {
 	return result
 }
 
+func workspaceIDStrings(values []domain.WorkspaceID) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, string(value))
+	}
+	return result
+}
+
+func userIDStrings(values []domain.UserID) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, string(value))
+	}
+	return result
+}
+
 func (m Messages) AdminTeamUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, role domain.WorkspaceRole, request domain.PageRequest) (domain.UserPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserPage{}, err
 	}
 	if role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
@@ -2535,12 +2575,17 @@ func (m Messages) AdminTeamUsers(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.ListUsersByRole(ctx, workspaceID, role, request)
 }
 
-func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, requireMembership bool) (domain.Conversation, error) {
-	if requireMembership {
+// inviteConversationMembers serves two callers with different authority.
+// asConversationMember is the ordinary conversations.invite, where the inviter has
+// to be in the conversation; the administrative admin.conversations.invite reaches
+// conversations the actor is not in, so it requires a workspace administrator
+// instead. Workspace membership alone authorizes neither.
+func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, asConversationMember bool) (domain.Conversation, error) {
+	if asConversationMember {
 		if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 			return domain.Conversation{}, err
 		}
-	} else if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	} else if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -2567,15 +2612,10 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 	if len(normalized) == 0 {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
-	event, err := conversationEvent(workspaceID, "conversation.members_invited", conversationID)
+	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.members_invited", events.String("channel_id", string(conversationID)), events.Strings("user_ids", userIDStrings(normalized))), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	payloadUsers := make([]string, 0, len(normalized))
-	for _, targetID := range normalized {
-		payloadUsers = append(payloadUsers, string(targetID))
-	}
-	event.Payload = string(conversationID) + "|" + strings.Join(payloadUsers, ",")
 	if err := m.Store.InviteConversationMembers(ctx, conversationID, normalized, event); err != nil {
 		return domain.Conversation{}, err
 	}
@@ -2590,11 +2630,10 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.member_left", events.String("channel_id", string(conversationID)), events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.member_left", Payload: string(conversationID) + "|" + string(userID), CreatedAt: time.Now().UTC()}
 	return m.Store.RemoveConversationMember(ctx, conversationID, userID, event)
 }
 
@@ -2606,11 +2645,10 @@ func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain
 	if err != nil || target.WorkspaceID != workspaceID || target.Deleted {
 		return store.ErrNotFound
 	}
-	event, err := conversationEvent(workspaceID, "conversation.member_kicked", conversationID)
+	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.member_kicked", events.String("channel_id", string(conversationID)), events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	event.Payload = string(conversationID) + "|" + string(targetID)
 	return m.Store.RemoveConversationMember(ctx, conversationID, targetID, event)
 }
 
@@ -2623,11 +2661,10 @@ func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, 
 	}
 	now := time.Now().UTC()
 	cursor := domain.ReadCursor{WorkspaceID: workspaceID, UserID: userID, Conversation: conversationID, LastRead: timestamp, UpdatedAt: now}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.read", events.String("channel_id", string(conversationID)), events.String("user_id", string(userID)), events.String("ts", string(timestamp))), now)
 	if err != nil {
 		return domain.ReadCursor{}, err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "conversation.read", Payload: string(conversationID) + "|" + string(timestamp), CreatedAt: now}
 	if err := m.Store.SetReadCursor(ctx, cursor, event); err != nil {
 		return domain.ReadCursor{}, err
 	}
@@ -2641,11 +2678,10 @@ func (m Messages) AddReaction(ctx context.Context, workspaceID domain.WorkspaceI
 	}
 	now := time.Now().UTC()
 	reaction.CreatedAt = now
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.added", reaction, userID, conversationID), now)
 	if err != nil {
 		return err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "reaction.added", Payload: string(reaction.Message) + "|" + reaction.Name + "|" + string(userID), CreatedAt: now}
 	return m.Store.AddReaction(ctx, reaction, event)
 }
 
@@ -2655,11 +2691,10 @@ func (m Messages) RemoveReaction(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.removed", reaction, userID, conversationID), now)
 	if err != nil {
 		return err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "reaction.removed", Payload: string(reaction.Message) + "|" + reaction.Name + "|" + string(userID), CreatedAt: now}
 	return m.Store.RemoveReaction(ctx, reaction, event)
 }
 
@@ -2676,6 +2711,15 @@ func (m Messages) UserReactions(ctx context.Context, workspaceID domain.Workspac
 		return domain.UserReactionPage{}, err
 	}
 	return m.Store.ListUserReactions(ctx, workspaceID, userID, request)
+}
+
+func reactionPayload(topic string, reaction domain.Reaction, userID domain.UserID, conversationID domain.ConversationID) events.Payload {
+	return events.NewPayload(topic,
+		events.String("message_id", string(reaction.Message)),
+		events.String("channel_id", string(conversationID)),
+		events.String("reaction", reaction.Name),
+		events.String("user_id", string(userID)),
+	)
 }
 
 func (m Messages) reactionFor(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, name string) (domain.Reaction, error) {
@@ -2696,11 +2740,11 @@ func (m Messages) AddPin(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, messageItemPayload("pin.added", message.ID, conversationID, userID), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.AddPin(ctx, domain.Pin{Message: message.ID, UserID: userID, CreatedAt: now}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "pin.added", Payload: string(message.ID) + "|" + string(userID), CreatedAt: now})
+	return m.Store.AddPin(ctx, domain.Pin{Message: message.ID, UserID: userID, CreatedAt: now}, event)
 }
 
 func (m Messages) RemovePin(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
@@ -2709,11 +2753,19 @@ func (m Messages) RemovePin(ctx context.Context, workspaceID domain.WorkspaceID,
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, messageItemPayload("pin.removed", message.ID, conversationID, userID), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.RemovePin(ctx, domain.Pin{Message: message.ID, UserID: userID}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "pin.removed", Payload: string(message.ID) + "|" + string(userID), CreatedAt: now})
+	return m.Store.RemovePin(ctx, domain.Pin{Message: message.ID, UserID: userID}, event)
+}
+
+func messageItemPayload(topic string, messageID domain.MessageID, conversationID domain.ConversationID, userID domain.UserID) events.Payload {
+	return events.NewPayload(topic,
+		events.String("message_id", string(messageID)),
+		events.String("channel_id", string(conversationID)),
+		events.String("user_id", string(userID)),
+	)
 }
 
 func (m Messages) Pins(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error) {
@@ -2729,11 +2781,11 @@ func (m Messages) AddStar(ctx context.Context, workspaceID domain.WorkspaceID, u
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.added", message.ID, conversationID, userID), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.AddStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID, CreatedAt: now}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "star.added", Payload: string(message.ID) + "|" + string(userID), CreatedAt: now})
+	return m.Store.AddStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID, CreatedAt: now}, event)
 }
 
 func (m Messages) RemoveStar(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) error {
@@ -2742,11 +2794,11 @@ func (m Messages) RemoveStar(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, messageItemPayload("star.removed", message.ID, conversationID, userID), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.RemoveStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID}, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "star.removed", Payload: string(message.ID) + "|" + string(userID), CreatedAt: now})
+	return m.Store.RemoveStar(ctx, domain.Star{Message: message, Conversation: conversationID, UserID: userID}, event)
 }
 
 func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
@@ -2773,11 +2825,11 @@ func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceI
 	}
 	now := time.Now().UTC()
 	bookmark := domain.Bookmark{ID: id, WorkspaceID: workspaceID, Conversation: conversationID, Title: title, Type: bookmarkType, Link: link, Emoji: strings.TrimSpace(emoji), EntityID: strings.TrimSpace(entityID), AccessLevel: accessLevel, ParentID: domain.BookmarkID(strings.TrimSpace(parentID)), CreatedAt: now, UpdatedAt: now, UpdatedBy: userID}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, bookmarkPayload("bookmark.created", id, conversationID), now)
 	if err != nil {
 		return domain.Bookmark{}, err
 	}
-	if err := m.Store.CreateBookmark(ctx, bookmark, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "bookmark.created", Payload: string(id), CreatedAt: now}); err != nil {
+	if err := m.Store.CreateBookmark(ctx, bookmark, event); err != nil {
 		return domain.Bookmark{}, err
 	}
 	return bookmark, nil
@@ -2805,11 +2857,11 @@ func (m Messages) EditBookmark(ctx context.Context, workspaceID domain.Workspace
 	}
 	bookmark.UpdatedAt = time.Now().UTC()
 	bookmark.UpdatedBy = userID
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, bookmarkPayload("bookmark.updated", id, conversationID), bookmark.UpdatedAt)
 	if err != nil {
 		return domain.Bookmark{}, err
 	}
-	return m.Store.UpdateBookmark(ctx, bookmark, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "bookmark.updated", Payload: string(id), CreatedAt: bookmark.UpdatedAt})
+	return m.Store.UpdateBookmark(ctx, bookmark, event)
 }
 
 func (m Messages) Bookmarks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) ([]domain.Bookmark, error) {
@@ -2824,11 +2876,15 @@ func (m Messages) RemoveBookmark(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	now := time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, bookmarkPayload("bookmark.removed", id, conversationID), now)
 	if err != nil {
 		return err
 	}
-	return m.Store.DeleteBookmark(ctx, workspaceID, conversationID, id, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "bookmark.removed", Payload: string(id), CreatedAt: now})
+	return m.Store.DeleteBookmark(ctx, workspaceID, conversationID, id, event)
+}
+
+func bookmarkPayload(topic string, id domain.BookmarkID, conversationID domain.ConversationID) events.Payload {
+	return events.NewPayload(topic, events.String("bookmark_id", string(id)), events.String("channel_id", string(conversationID)))
 }
 
 func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID, text string, due time.Time) (domain.Reminder, error) {
@@ -2854,11 +2910,11 @@ func (m Messages) AddReminder(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Reminder{}, err
 	}
 	reminder := domain.Reminder{WorkspaceID: workspaceID, ID: id, Creator: userID, User: targetID, Text: text, Time: due.UTC()}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.created", events.String("reminder_id", string(id)), events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
 		return domain.Reminder{}, err
 	}
-	if err := m.Store.CreateReminder(ctx, reminder, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "reminder.created", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.CreateReminder(ctx, reminder, event); err != nil {
 		return domain.Reminder{}, err
 	}
 	return reminder, nil
@@ -2882,22 +2938,22 @@ func (m Messages) CompleteReminder(ctx context.Context, workspaceID domain.Works
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.completed", events.String("reminder_id", string(reminderID)), events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.CompleteReminder(ctx, workspaceID, userID, reminderID, time.Now().UTC(), events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "reminder.completed", Payload: string(reminderID), CreatedAt: time.Now().UTC()})
+	return m.Store.CompleteReminder(ctx, workspaceID, userID, reminderID, time.Now().UTC(), event)
 }
 
 func (m Messages) DeleteReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.ReminderID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("reminder.deleted", events.String("reminder_id", string(reminderID)), events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.DeleteReminder(ctx, workspaceID, userID, reminderID, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "reminder.deleted", Payload: string(reminderID), CreatedAt: time.Now().UTC()})
+	return m.Store.DeleteReminder(ctx, workspaceID, userID, reminderID, event)
 }
 
 func (m Messages) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -2923,11 +2979,11 @@ func (m Messages) DeleteScheduledMessage(ctx context.Context, workspaceID domain
 	if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("message.schedule_deleted", events.String("scheduled_message_id", string(id)), events.String("channel_id", string(channel))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.DeleteScheduledMessage(ctx, workspaceID, userID, channel, id, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.schedule_deleted", Payload: string(id), CreatedAt: time.Now().UTC()})
+	return m.Store.DeleteScheduledMessage(ctx, workspaceID, userID, channel, id, event)
 }
 
 func normalizeUserGroupHandle(value string) string {
@@ -2975,11 +3031,11 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	}
 	now := time.Now().UTC()
 	value := domain.UserGroup{WorkspaceID: workspaceID, ID: id, Name: name, Handle: handle, Description: description, Creator: actor, UpdatedBy: actor, CreatedAt: now, UpdatedAt: now, Enabled: true}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.created", events.String("usergroup_id", string(id)), events.String("handle", handle)), now)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	if err := m.Store.CreateUserGroup(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "usergroup.created", Payload: string(id), CreatedAt: now}); err != nil {
+	if err := m.Store.CreateUserGroup(ctx, value, event); err != nil {
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -3007,11 +3063,11 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 	}
 	value.UpdatedBy = actor
 	value.UpdatedAt = time.Now().UTC()
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.updated", events.String("usergroup_id", string(id)), events.String("handle", value.Handle)), value.UpdatedAt)
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	if err := m.Store.UpdateUserGroup(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "usergroup.updated", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.UpdateUserGroup(ctx, value, event); err != nil {
 		return domain.UserGroup{}, err
 	}
 	return value, nil
@@ -3021,11 +3077,11 @@ func (m Messages) SetUserGroupEnabled(ctx context.Context, workspaceID domain.Wo
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.enabled_changed", events.String("usergroup_id", string(id)), events.Bool("enabled", enabled)), time.Now().UTC())
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	if err := m.Store.SetUserGroupEnabled(ctx, workspaceID, id, enabled, actor, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "usergroup.enabled_changed", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.SetUserGroupEnabled(ctx, workspaceID, id, enabled, actor, event); err != nil {
 		return domain.UserGroup{}, err
 	}
 	return m.Store.GetUserGroup(ctx, workspaceID, id)
@@ -3066,11 +3122,11 @@ func (m Messages) SetUserGroupUsers(ctx context.Context, workspaceID domain.Work
 			return domain.UserGroup{}, store.ErrNotFound
 		}
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.users_changed", events.String("usergroup_id", string(id)), events.Strings("user_ids", userIDStrings(normalized))), time.Now().UTC())
 	if err != nil {
 		return domain.UserGroup{}, err
 	}
-	if err := m.Store.SetUserGroupUsers(ctx, workspaceID, id, normalized, actor, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "usergroup.users_changed", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.SetUserGroupUsers(ctx, workspaceID, id, normalized, actor, event); err != nil {
 		return domain.UserGroup{}, err
 	}
 	return m.Store.GetUserGroup(ctx, workspaceID, id)
@@ -3133,11 +3189,11 @@ func (m Messages) AddCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 		return domain.Call{}, err
 	}
 	value := domain.Call{ID: id, WorkspaceID: workspaceID, ExternalUniqueID: externalUniqueID, ExternalDisplayID: externalDisplayID, JoinURL: joinURL, DesktopAppJoinURL: desktopAppJoinURL, Title: title, CreatedBy: actor, Participants: normalized, StartedAt: startedAt}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("call.created", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
 	}
-	if err := m.Store.CreateCall(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "call.created", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.CreateCall(ctx, value, event); err != nil {
 		return domain.Call{}, err
 	}
 	return value, nil
@@ -3162,11 +3218,11 @@ func (m Messages) UpdateCall(ctx context.Context, workspaceID domain.WorkspaceID
 	if value.Title == "" && value.JoinURL == "" && value.DesktopAppJoinURL == "" {
 		return domain.Call{}, ErrInvalidCall
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("call.updated", events.String("call_id", string(id))), time.Now().UTC())
 	if err != nil {
 		return domain.Call{}, err
 	}
-	if err := m.Store.UpdateCall(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "call.updated", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
+	if err := m.Store.UpdateCall(ctx, value, event); err != nil {
 		return domain.Call{}, err
 	}
 	return m.Store.GetCall(ctx, workspaceID, id)
@@ -3179,11 +3235,11 @@ func (m Messages) EndCall(ctx context.Context, workspaceID domain.WorkspaceID, a
 	if duration < 0 {
 		return ErrInvalidCall
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("call.ended", events.String("call_id", string(id)), events.Int("duration", duration)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.EndCall(ctx, workspaceID, id, duration, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "call.ended", Payload: string(id), CreatedAt: time.Now().UTC()})
+	return m.Store.EndCall(ctx, workspaceID, id, duration, event)
 }
 
 func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID, add bool) error {
@@ -3225,11 +3281,11 @@ func (m Messages) changeCallParticipants(ctx context.Context, workspaceID domain
 	if err != nil && len(result) != 0 {
 		return err
 	}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("call.participants_changed", events.String("call_id", string(id)), events.Strings("user_ids", userIDStrings(result))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	return m.Store.SetCallParticipants(ctx, workspaceID, id, result, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "call.participants_changed", Payload: string(id), CreatedAt: time.Now().UTC()})
+	return m.Store.SetCallParticipants(ctx, workspaceID, id, result, event)
 }
 
 func (m Messages) AddCallParticipants(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.CallID, users []domain.UserID) error {
@@ -3307,7 +3363,7 @@ func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID do
 	if strings.TrimSpace(string(appID)) == "" {
 		return domain.IncomingWebhook{}, "", ErrInvalidMessage
 	}
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.IncomingWebhook{}, "", err
 	}
 	if err := m.authorizeConversation(ctx, workspaceID, actorID, conversationID); err != nil {
@@ -3350,10 +3406,10 @@ func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID do
 }
 
 func (m Messages) AdminSetIncomingWebhookEnabled(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, webhookID domain.IncomingWebhookID, enabled bool) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return err
 	}
-	event, err := mutationEvent(workspaceID, "incoming_webhook.enabled", domain.MessageID(webhookID))
+	event, err := newEvent(workspaceID, actorID, events.NewPayload("incoming_webhook.enabled", events.String("incoming_webhook_id", string(webhookID)), events.Bool("enabled", enabled)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
@@ -3377,7 +3433,7 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return domain.Message{}, ErrInvalidMessage
 	}
 	message.Unfurls = normalized
-	event, err := mutationEvent(workspaceID, "message.unfurled", message.ID)
+	event, err := messageEvent(workspaceID, "message.unfurled", message)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -3400,7 +3456,7 @@ func (m Messages) Delete(ctx context.Context, workspaceID domain.WorkspaceID, us
 		return domain.Message{}, ErrMessageAlreadyDeleted
 	}
 	message.Deleted = true
-	event, err := mutationEvent(workspaceID, "message.deleted", message.ID)
+	event, err := messageEvent(workspaceID, "message.deleted", message)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -3431,22 +3487,45 @@ func (m Messages) messageForMutation(ctx context.Context, workspaceID domain.Wor
 	return message, nil
 }
 
-func mutationEvent(workspaceID domain.WorkspaceID, topic string, messageID domain.MessageID) (events.Event, error) {
-	eventID, err := domain.NewEventID()
+// newEvent mints an event identifier and builds a durable record from a typed
+// payload. Every producer in this package goes through it, so no call site can
+// hand a bare identifier to the journal: events.New only accepts an
+// events.Payload, which cannot be built from a string.
+func newEvent(workspaceID domain.WorkspaceID, actorID domain.UserID, payload events.Payload, createdAt time.Time) (events.Event, error) {
+	id, err := domain.NewEventID()
 	if err != nil {
 		return events.Event{}, err
 	}
-	now := time.Now().UTC()
-	return events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: topic, Payload: string(messageID), CreatedAt: now}, nil
+	return events.New(id, workspaceID, actorID, payload, createdAt)
+}
+
+func messageEvent(workspaceID domain.WorkspaceID, topic string, message domain.Message) (events.Event, error) {
+	return newEvent(workspaceID, message.AuthorID, messagePayload(topic, message), time.Now().UTC())
+}
+
+// messagePayload deliberately omits the message text. The durable journal is
+// read by every workspace member's event stream and by every configured event
+// consumer, so the payload carries the identifiers needed to fetch the message
+// through an authorized read rather than the content itself.
+func messagePayload(topic string, message domain.Message) events.Payload {
+	fields := []events.Field{
+		events.String("message_id", string(message.ID)),
+		events.String("channel_id", string(message.Conversation)),
+		events.String("user_id", string(message.AuthorID)),
+		events.String("ts", string(domain.NewMessageTimestamp(message.CreatedAt))),
+	}
+	if message.ThreadTimestamp != "" {
+		fields = append(fields, events.String("thread_ts", string(message.ThreadTimestamp)))
+	}
+	return events.NewPayload(topic, fields...)
 }
 
 func conversationEvent(workspaceID domain.WorkspaceID, topic string, conversationID domain.ConversationID) (events.Event, error) {
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return events.Event{}, err
-	}
-	now := time.Now().UTC()
-	return events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: topic, Payload: string(conversationID), CreatedAt: now}, nil
+	return newEvent(workspaceID, "", conversationPayload(topic, conversationID), time.Now().UTC())
+}
+
+func conversationPayload(topic string, conversationID domain.ConversationID) events.Payload {
+	return events.NewPayload(topic, events.String("channel_id", string(conversationID)))
 }
 
 func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
@@ -3467,19 +3546,140 @@ func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.
 	return nil
 }
 
-func (m Messages) authorizeWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+// activeWorkspaceMembership resolves the durable membership an authority
+// decision is made from. It is the single place membership is established, so
+// authorizeWorkspace, requireWorkspaceAdmin and WorkspaceMembership cannot
+// disagree about what "belongs to this workspace" means.
+//
+// A user who is absent, deleted, in another workspace, or whose membership is
+// inactive is indistinguishable from a user who does not exist: the caller has
+// proved nothing about this workspace, so it learns nothing about it.
+func (m Messages) activeWorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceMembership, error) {
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
-		return err
+		return domain.WorkspaceMembership{}, err
 	}
 	user, err := m.Store.GetUser(ctx, userID)
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
-		return store.ErrNotFound
+		return domain.WorkspaceMembership{}, store.ErrNotFound
 	}
 	membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, userID)
 	if err != nil || !membership.Active {
-		return store.ErrNotFound
+		return domain.WorkspaceMembership{}, store.ErrNotFound
+	}
+	return membership, nil
+}
+
+// authorizeWorkspace admits any active member of the workspace. It is the check
+// for an operation whose authority is "you work here": reading the directory,
+// posting, managing your own profile.
+//
+// It is NOT the check for an operation that acts on the workspace itself or on
+// another member. Those use requireWorkspaceAdmin.
+func (m Messages) authorizeWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	_, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+	return err
+}
+
+// requireWorkspaceAdmin admits only an active administrator or owner.
+//
+// Every administrative method used to call authorizeWorkspace, which verifies
+// workspace MEMBERSHIP and not ROLE. A plain member holding admin.users:write —
+// which a browser session used to be minted with unconditionally — could
+// therefore call SetUserRole on their own user and become an owner. The role, not
+// the scope set on a token, is the authority: a scope list is a snapshot taken
+// when a credential was minted, and the role is the current state of the
+// workspace.
+//
+// The refusal is ErrNotWorkspaceAdmin for a member and store.ErrNotFound for a
+// non-member, so a caller cannot use the distinction to probe a workspace it has
+// no membership in.
+func (m Messages) requireWorkspaceAdmin(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) error {
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actorID)
+	if err != nil {
+		return err
+	}
+	if membership.Role != domain.WorkspaceRoleAdmin && membership.Role != domain.WorkspaceRoleOwner {
+		return ErrNotWorkspaceAdmin
 	}
 	return nil
+}
+
+// WorkspaceMembership reads one membership row: the target's role and whether it
+// is active.
+//
+// Authority: an actor may always read their OWN membership, because it is a fact
+// about themselves that every signed-in surface needs (the browser shell derives
+// its own capability display from it, and the login path derives the scopes of
+// the session it is about to mint). Reading SOMEONE ELSE's membership is an
+// administrative read and requires requireWorkspaceAdmin.
+//
+// It replaces a loop that paged the entire workspace through AdminListUsers to
+// find one row, which was both an administrative read performed on behalf of a
+// plain member and O(workspace) work for an O(1) question.
+func (m Messages) WorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) (domain.WorkspaceMembership, error) {
+	if actorID != targetID {
+		if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+			return domain.WorkspaceMembership{}, err
+		}
+	}
+	return m.activeWorkspaceMembership(ctx, workspaceID, targetID)
+}
+
+// ProvisionExternalUser creates the local user an external identity provider has
+// just asserted, during that user's first sign-in.
+//
+// This method carries NO end-user authority check BY DESIGN, and it must stay
+// that way: there is no actor to check. The user being provisioned has no local
+// account yet and the signing-in browser holds no session, so passing any actor
+// would mean naming an unrelated identity and calling its authority the caller's
+// own — which is exactly the defect that let a lookup identity seeded as a plain
+// member drive AdminCreateUser.
+//
+// The authority behind a call is therefore the provider assertion, and the caller
+// MUST have verified that assertion before calling: a signature, issuer,
+// audience and nonce that all validated, and an email address the provider
+// asserts as verified. internal/web/identity.go is the only caller and does both
+// before reaching here.
+//
+// It is not exposed on the Slack HTTP surface and must never be; a caller able to
+// name an email address and a role would otherwise mint an administrator. In the
+// distributed composition it crosses the chat gRPC boundary, which requires a
+// mutually authenticated TLS 1.3 connection (cmd/chatd/main.go configures
+// tls.RequireAndVerifyClientCert), so the only reachable callers are peers
+// holding a client certificate this deployment issued.
+func (m Messages) ProvisionExternalUser(ctx context.Context, workspaceID domain.WorkspaceID, email, realName string, role domain.WorkspaceRole) (domain.User, error) {
+	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
+		return domain.User{}, err
+	}
+	return m.createWorkspaceUser(ctx, workspaceID, "", email, realName, role)
+}
+
+// SynchronizeExternalUserRole writes through the workspace role an external
+// identity provider asserts for a user, during that user's sign-in.
+//
+// This method carries NO end-user authority check BY DESIGN. The provider's role
+// claim is authoritative for a federated workspace, and the user it describes is
+// signing in with no session yet, so there is no actor whose authority could be
+// checked. Running the write as the signing-in member instead would mean letting
+// a member change a role, which is the defect ErrNotWorkspaceAdmin exists to
+// remove; running it as a seeded "lookup" identity would mean making that
+// identity an administrator, which re-opens the same hole through a different
+// door.
+//
+// The caller MUST therefore have verified the provider assertion the role came
+// from before calling. internal/web/identity.go is the only caller: it reaches
+// here only after the OpenID Connect ID token verified and the userinfo subject
+// matched the token subject.
+//
+// It is not exposed on the Slack HTTP surface and must never be. In the
+// distributed composition it crosses the chat gRPC boundary, which requires a
+// mutually authenticated TLS 1.3 connection (cmd/chatd/main.go configures
+// tls.RequireAndVerifyClientCert).
+func (m Messages) SynchronizeExternalUserRole(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID, role domain.WorkspaceRole) error {
+	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
+		return err
+	}
+	return m.setWorkspaceRole(ctx, workspaceID, "", targetID, role)
 }
 
 func (m Messages) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
@@ -3523,11 +3723,10 @@ func (m Messages) post(ctx context.Context, workspaceID domain.WorkspaceID, auth
 		return domain.Message{}, err
 	}
 	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, authorID, messagePayload("message.created", message), message.CreatedAt)
 	if err != nil {
 		return domain.Message{}, err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}
 	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
 		if errors.Is(err, store.ErrIdempotencyConflict) {
 			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
@@ -3555,7 +3754,7 @@ func (m Messages) update(ctx context.Context, workspaceID domain.WorkspaceID, us
 	}
 	message.Text = text
 	message.Blocks = normalizedBlocks
-	event, err := mutationEvent(workspaceID, "message.changed", message.ID)
+	event, err := messageEvent(workspaceID, "message.changed", message)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -3589,11 +3788,11 @@ func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, w
 	}
 	now := time.Now().UTC()
 	value := domain.ScheduledMessage{WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, PostAt: postAt.UTC(), CreatedAt: now}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, userID, events.NewPayload("message.scheduled", events.String("scheduled_message_id", string(id)), events.String("channel_id", string(channel)), events.String("post_at", string(domain.NewMessageTimestamp(value.PostAt)))), now)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
-	if err := m.Store.CreateScheduledMessage(ctx, value, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.scheduled", Payload: string(id), CreatedAt: now}); err != nil {
+	if err := m.Store.CreateScheduledMessage(ctx, value, event); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
 	return value, nil
@@ -3619,15 +3818,23 @@ func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	}
 	now := time.Now().UTC()
 	value := domain.EphemeralMessage{WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now)}
-	payload, err := json.Marshal(map[string]string{"workspace_id": string(value.WorkspaceID), "channel_id": string(value.Conversation), "author_id": string(value.AuthorID), "user_id": string(value.RecipientID), "text": value.Text, "blocks": value.Blocks, "attachments": value.Attachments, "ts": string(value.Timestamp)})
+	// user_id names the single recipient. Every consumer that fans this record
+	// out has to filter on it, which is why it is a first-class payload field.
+	payload := events.NewPayload(events.EphemeralMessageTopic,
+		events.String("workspace_id", string(value.WorkspaceID)),
+		events.String("channel_id", string(value.Conversation)),
+		events.String("author_id", string(value.AuthorID)),
+		events.String("user_id", string(value.RecipientID)),
+		events.String("text", value.Text),
+		events.String("blocks", value.Blocks),
+		events.String("attachments", value.Attachments),
+		events.String("ts", string(value.Timestamp)),
+	)
+	event, err := newEvent(workspaceID, authorID, payload, now)
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	eventID, err := domain.NewEventID()
-	if err != nil {
-		return domain.EphemeralMessage{}, err
-	}
-	if err := m.Store.AppendEvent(ctx, events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: events.EphemeralMessageTopic, Payload: string(payload), CreatedAt: now}); err != nil {
+	if err := m.Store.AppendEvent(ctx, event); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
 	return value, nil
@@ -3671,11 +3878,10 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 		return domain.Message{}, err
 	}
 	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
-	eventID, err := domain.NewEventID()
+	event, err := newEvent(workspaceID, authorID, messagePayload("message.created", message), message.CreatedAt)
 	if err != nil {
 		return domain.Message{}, err
 	}
-	event := events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}
 	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
 		if errors.Is(err, store.ErrIdempotencyConflict) {
 			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
@@ -3709,7 +3915,7 @@ func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceI
 	message.Text = text
 	message.Blocks = normalizedBlocks
 	message.Attachments = normalizedAttachments
-	event, err := mutationEvent(workspaceID, "message.changed", message.ID)
+	event, err := messageEvent(workspaceID, "message.changed", message)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -3875,11 +4081,11 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		}
 		createdAt := time.Now().UTC()
 		files[index] = domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: createdAt, SharedChannels: append([]domain.ConversationID(nil), channels...)}
-		eventID, err := domain.NewEventID()
+		emitted, err := newEvent(workspaceID, userID, events.NewPayload("file.created", events.String("file_id", string(fileID)), events.Strings("channel_ids", conversationIDStrings(channels))), createdAt)
 		if err != nil {
 			return nil, err
 		}
-		eventsToEmit[index] = events.Event{ID: eventID, WorkspaceID: workspaceID, Topic: "file.created", Payload: string(fileID), CreatedAt: createdAt}
+		eventsToEmit[index] = emitted
 	}
 	if err := m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit); err != nil {
 		// A concurrent caller may have completed these tickets between the read

@@ -53,6 +53,19 @@ type Service interface {
 	UserInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.User, error)
 	RemoveUser(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) error
 	SetUserRole(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, domain.WorkspaceRole) error
+
+	// WorkspaceMembership reads one membership row. The actor may read their own;
+	// reading another user's requires a workspace administrator.
+	WorkspaceMembership(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.WorkspaceMembership, error)
+
+	// ProvisionExternalUser and SynchronizeExternalUserRole are the sign-in
+	// operations of a federated workspace. Neither takes an end-user actor and
+	// neither performs an end-user authority check; see the contract on
+	// service.Messages, which every implementation of this interface inherits.
+	// They must be called only after an identity-provider assertion has been
+	// verified, and they must never be exposed on the public HTTP surface.
+	ProvisionExternalUser(context.Context, domain.WorkspaceID, string, string, domain.WorkspaceRole) (domain.User, error)
+	SynchronizeExternalUserRole(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkspaceRole) error
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, time.Time) error
 	AdminRenameConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	AdminSetConversationArchived(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool) (domain.Conversation, error)

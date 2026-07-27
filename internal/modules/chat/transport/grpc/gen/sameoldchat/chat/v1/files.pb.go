@@ -2229,11 +2229,26 @@ func (x *UserPhotoDownloadRequest) GetToken() string {
 	return ""
 }
 
+// UserPhotoMetadata opens a user photo download stream.
+//
+// `user` carries the record ChatService.OpenUserPhoto resolved, so the value a
+// caller receives is the stored user in both compositions. Before it existed the
+// server discarded the real record and the client fabricated
+// `User{ID, WorkspaceID}`, which meant every other field (email, real name,
+// profile, presence, deleted) was populated in process and empty across the
+// seam.
+//
+// `mime_type` and `size` are left unset: chat.api.Service.OpenUserPhoto returns
+// a user and a reader and does not expose either value, and the server must not
+// invent one. They are kept rather than deleted so the field numbers stay
+// reserved for a change that adds the values to the module contract; a change
+// that decides they are not needed should delete them with `reserved 1, 2;`.
 type UserPhotoMetadata struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	MimeType      string                 `protobuf:"bytes,1,opt,name=mime_type,json=mimeType,proto3" json:"mime_type,omitempty"`
 	Size          int64                  `protobuf:"varint,2,opt,name=size,proto3" json:"size,omitempty"`
 	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	User          *User                  `protobuf:"bytes,4,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2287,6 +2302,13 @@ func (x *UserPhotoMetadata) GetToken() string {
 		return x.Token
 	}
 	return ""
+}
+
+func (x *UserPhotoMetadata) GetUser() *User {
+	if x != nil {
+		return x.User
+	}
+	return nil
 }
 
 type UserPhotoDownloadPart struct {
@@ -2615,11 +2637,12 @@ const file_sameoldchat_chat_v1_files_proto_rawDesc = "" +
 	"\x18UserPhotoDownloadRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token\"Z\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\"\x89\x01\n" +
 	"\x11UserPhotoMetadata\x12\x1b\n" +
 	"\tmime_type\x18\x01 \x01(\tR\bmimeType\x12\x12\n" +
 	"\x04size\x18\x02 \x01(\x03R\x04size\x12\x14\n" +
-	"\x05token\x18\x03 \x01(\tR\x05token\"}\n" +
+	"\x05token\x18\x03 \x01(\tR\x05token\x12-\n" +
+	"\x04user\x18\x04 \x01(\v2\x19.sameoldchat.chat.v1.UserR\x04user\"}\n" +
 	"\x15UserPhotoDownloadPart\x12D\n" +
 	"\bmetadata\x18\x01 \x01(\v2&.sameoldchat.chat.v1.UserPhotoMetadataH\x00R\bmetadata\x12\x16\n" +
 	"\x05chunk\x18\x02 \x01(\fH\x00R\x05chunkB\x06\n" +
@@ -2699,8 +2722,8 @@ var file_sameoldchat_chat_v1_files_proto_goTypes = []any{
 	(*UserPhotoMetadata)(nil),              // 28: sameoldchat.chat.v1.UserPhotoMetadata
 	(*UserPhotoDownloadPart)(nil),          // 29: sameoldchat.chat.v1.UserPhotoDownloadPart
 	(*UserPhotoDeleteRequest)(nil),         // 30: sameoldchat.chat.v1.UserPhotoDeleteRequest
-	(*MutationResponse)(nil),               // 31: sameoldchat.chat.v1.MutationResponse
-	(*User)(nil),                           // 32: sameoldchat.chat.v1.User
+	(*User)(nil),                           // 31: sameoldchat.chat.v1.User
+	(*MutationResponse)(nil),               // 32: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_files_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.FilePage.files:type_name -> sameoldchat.chat.v1.File
@@ -2710,56 +2733,57 @@ var file_sameoldchat_chat_v1_files_proto_depIdxs = []int32{
 	19, // 4: sameoldchat.chat.v1.UploadFilePart.metadata:type_name -> sameoldchat.chat.v1.UploadFileRequest
 	0,  // 5: sameoldchat.chat.v1.DownloadFilePart.metadata:type_name -> sameoldchat.chat.v1.File
 	25, // 6: sameoldchat.chat.v1.UserPhotoUploadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoUploadRequest
-	28, // 7: sameoldchat.chat.v1.UserPhotoDownloadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoMetadata
-	3,  // 8: sameoldchat.chat.v1.FilesService.CreateExternalUpload:input_type -> sameoldchat.chat.v1.ExternalUploadRequest
-	4,  // 9: sameoldchat.chat.v1.FilesService.UploadExternalFile:input_type -> sameoldchat.chat.v1.ExternalUploadPart
-	6,  // 10: sameoldchat.chat.v1.FilesService.CompleteExternalUpload:input_type -> sameoldchat.chat.v1.CompleteExternalUploadRequest
-	7,  // 11: sameoldchat.chat.v1.FilesService.CompleteExternalUploads:input_type -> sameoldchat.chat.v1.CompleteExternalUploadsRequest
-	15, // 12: sameoldchat.chat.v1.FilesService.FileInfo:input_type -> sameoldchat.chat.v1.FileRequest
-	15, // 13: sameoldchat.chat.v1.FilesService.DeleteFile:input_type -> sameoldchat.chat.v1.FileRequest
-	16, // 14: sameoldchat.chat.v1.FilesService.DeleteFileComment:input_type -> sameoldchat.chat.v1.FileCommentDeleteRequest
-	17, // 15: sameoldchat.chat.v1.FilesService.Files:input_type -> sameoldchat.chat.v1.FilesRequest
-	21, // 16: sameoldchat.chat.v1.FilesService.SharePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
-	21, // 17: sameoldchat.chat.v1.FilesService.RevokePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
-	11, // 18: sameoldchat.chat.v1.FilesService.AddRemoteFile:input_type -> sameoldchat.chat.v1.AddRemoteFileRequest
-	10, // 19: sameoldchat.chat.v1.FilesService.RemoteFileInfo:input_type -> sameoldchat.chat.v1.RemoteFileRequest
-	12, // 20: sameoldchat.chat.v1.FilesService.RemoteFiles:input_type -> sameoldchat.chat.v1.RemoteFilesRequest
-	10, // 21: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:input_type -> sameoldchat.chat.v1.RemoteFileRequest
-	13, // 22: sameoldchat.chat.v1.FilesService.ShareRemoteFile:input_type -> sameoldchat.chat.v1.ShareRemoteFileRequest
-	14, // 23: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:input_type -> sameoldchat.chat.v1.UpdateRemoteFileRequest
-	23, // 24: sameoldchat.chat.v1.ChatService.UploadFile:input_type -> sameoldchat.chat.v1.UploadFilePart
-	20, // 25: sameoldchat.chat.v1.ChatService.DownloadFile:input_type -> sameoldchat.chat.v1.DownloadFileRequest
-	22, // 26: sameoldchat.chat.v1.ChatService.DownloadPublicFile:input_type -> sameoldchat.chat.v1.PublicFileTokenRequest
-	26, // 27: sameoldchat.chat.v1.ChatService.UploadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoUploadPart
-	27, // 28: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDownloadRequest
-	30, // 29: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDeleteRequest
-	2,  // 30: sameoldchat.chat.v1.FilesService.CreateExternalUpload:output_type -> sameoldchat.chat.v1.ExternalUpload
-	31, // 31: sameoldchat.chat.v1.FilesService.UploadExternalFile:output_type -> sameoldchat.chat.v1.MutationResponse
-	0,  // 32: sameoldchat.chat.v1.FilesService.CompleteExternalUpload:output_type -> sameoldchat.chat.v1.File
-	1,  // 33: sameoldchat.chat.v1.FilesService.CompleteExternalUploads:output_type -> sameoldchat.chat.v1.FilePage
-	0,  // 34: sameoldchat.chat.v1.FilesService.FileInfo:output_type -> sameoldchat.chat.v1.File
-	18, // 35: sameoldchat.chat.v1.FilesService.DeleteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
-	18, // 36: sameoldchat.chat.v1.FilesService.DeleteFileComment:output_type -> sameoldchat.chat.v1.DeleteFileResponse
-	1,  // 37: sameoldchat.chat.v1.FilesService.Files:output_type -> sameoldchat.chat.v1.FilePage
-	0,  // 38: sameoldchat.chat.v1.FilesService.SharePublicURL:output_type -> sameoldchat.chat.v1.File
-	0,  // 39: sameoldchat.chat.v1.FilesService.RevokePublicURL:output_type -> sameoldchat.chat.v1.File
-	8,  // 40: sameoldchat.chat.v1.FilesService.AddRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
-	8,  // 41: sameoldchat.chat.v1.FilesService.RemoteFileInfo:output_type -> sameoldchat.chat.v1.RemoteFile
-	9,  // 42: sameoldchat.chat.v1.FilesService.RemoteFiles:output_type -> sameoldchat.chat.v1.RemoteFilePage
-	18, // 43: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
-	8,  // 44: sameoldchat.chat.v1.FilesService.ShareRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
-	8,  // 45: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
-	0,  // 46: sameoldchat.chat.v1.ChatService.UploadFile:output_type -> sameoldchat.chat.v1.File
-	24, // 47: sameoldchat.chat.v1.ChatService.DownloadFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
-	24, // 48: sameoldchat.chat.v1.ChatService.DownloadPublicFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
-	32, // 49: sameoldchat.chat.v1.ChatService.UploadUserPhoto:output_type -> sameoldchat.chat.v1.User
-	29, // 50: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:output_type -> sameoldchat.chat.v1.UserPhotoDownloadPart
-	31, // 51: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:output_type -> sameoldchat.chat.v1.MutationResponse
-	30, // [30:52] is the sub-list for method output_type
-	8,  // [8:30] is the sub-list for method input_type
-	8,  // [8:8] is the sub-list for extension type_name
-	8,  // [8:8] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	31, // 7: sameoldchat.chat.v1.UserPhotoMetadata.user:type_name -> sameoldchat.chat.v1.User
+	28, // 8: sameoldchat.chat.v1.UserPhotoDownloadPart.metadata:type_name -> sameoldchat.chat.v1.UserPhotoMetadata
+	3,  // 9: sameoldchat.chat.v1.FilesService.CreateExternalUpload:input_type -> sameoldchat.chat.v1.ExternalUploadRequest
+	4,  // 10: sameoldchat.chat.v1.FilesService.UploadExternalFile:input_type -> sameoldchat.chat.v1.ExternalUploadPart
+	6,  // 11: sameoldchat.chat.v1.FilesService.CompleteExternalUpload:input_type -> sameoldchat.chat.v1.CompleteExternalUploadRequest
+	7,  // 12: sameoldchat.chat.v1.FilesService.CompleteExternalUploads:input_type -> sameoldchat.chat.v1.CompleteExternalUploadsRequest
+	15, // 13: sameoldchat.chat.v1.FilesService.FileInfo:input_type -> sameoldchat.chat.v1.FileRequest
+	15, // 14: sameoldchat.chat.v1.FilesService.DeleteFile:input_type -> sameoldchat.chat.v1.FileRequest
+	16, // 15: sameoldchat.chat.v1.FilesService.DeleteFileComment:input_type -> sameoldchat.chat.v1.FileCommentDeleteRequest
+	17, // 16: sameoldchat.chat.v1.FilesService.Files:input_type -> sameoldchat.chat.v1.FilesRequest
+	21, // 17: sameoldchat.chat.v1.FilesService.SharePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
+	21, // 18: sameoldchat.chat.v1.FilesService.RevokePublicURL:input_type -> sameoldchat.chat.v1.PublicFileRequest
+	11, // 19: sameoldchat.chat.v1.FilesService.AddRemoteFile:input_type -> sameoldchat.chat.v1.AddRemoteFileRequest
+	10, // 20: sameoldchat.chat.v1.FilesService.RemoteFileInfo:input_type -> sameoldchat.chat.v1.RemoteFileRequest
+	12, // 21: sameoldchat.chat.v1.FilesService.RemoteFiles:input_type -> sameoldchat.chat.v1.RemoteFilesRequest
+	10, // 22: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:input_type -> sameoldchat.chat.v1.RemoteFileRequest
+	13, // 23: sameoldchat.chat.v1.FilesService.ShareRemoteFile:input_type -> sameoldchat.chat.v1.ShareRemoteFileRequest
+	14, // 24: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:input_type -> sameoldchat.chat.v1.UpdateRemoteFileRequest
+	23, // 25: sameoldchat.chat.v1.ChatService.UploadFile:input_type -> sameoldchat.chat.v1.UploadFilePart
+	20, // 26: sameoldchat.chat.v1.ChatService.DownloadFile:input_type -> sameoldchat.chat.v1.DownloadFileRequest
+	22, // 27: sameoldchat.chat.v1.ChatService.DownloadPublicFile:input_type -> sameoldchat.chat.v1.PublicFileTokenRequest
+	26, // 28: sameoldchat.chat.v1.ChatService.UploadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoUploadPart
+	27, // 29: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDownloadRequest
+	30, // 30: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:input_type -> sameoldchat.chat.v1.UserPhotoDeleteRequest
+	2,  // 31: sameoldchat.chat.v1.FilesService.CreateExternalUpload:output_type -> sameoldchat.chat.v1.ExternalUpload
+	32, // 32: sameoldchat.chat.v1.FilesService.UploadExternalFile:output_type -> sameoldchat.chat.v1.MutationResponse
+	0,  // 33: sameoldchat.chat.v1.FilesService.CompleteExternalUpload:output_type -> sameoldchat.chat.v1.File
+	1,  // 34: sameoldchat.chat.v1.FilesService.CompleteExternalUploads:output_type -> sameoldchat.chat.v1.FilePage
+	0,  // 35: sameoldchat.chat.v1.FilesService.FileInfo:output_type -> sameoldchat.chat.v1.File
+	18, // 36: sameoldchat.chat.v1.FilesService.DeleteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
+	18, // 37: sameoldchat.chat.v1.FilesService.DeleteFileComment:output_type -> sameoldchat.chat.v1.DeleteFileResponse
+	1,  // 38: sameoldchat.chat.v1.FilesService.Files:output_type -> sameoldchat.chat.v1.FilePage
+	0,  // 39: sameoldchat.chat.v1.FilesService.SharePublicURL:output_type -> sameoldchat.chat.v1.File
+	0,  // 40: sameoldchat.chat.v1.FilesService.RevokePublicURL:output_type -> sameoldchat.chat.v1.File
+	8,  // 41: sameoldchat.chat.v1.FilesService.AddRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
+	8,  // 42: sameoldchat.chat.v1.FilesService.RemoteFileInfo:output_type -> sameoldchat.chat.v1.RemoteFile
+	9,  // 43: sameoldchat.chat.v1.FilesService.RemoteFiles:output_type -> sameoldchat.chat.v1.RemoteFilePage
+	18, // 44: sameoldchat.chat.v1.FilesService.RemoveRemoteFile:output_type -> sameoldchat.chat.v1.DeleteFileResponse
+	8,  // 45: sameoldchat.chat.v1.FilesService.ShareRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
+	8,  // 46: sameoldchat.chat.v1.FilesService.UpdateRemoteFile:output_type -> sameoldchat.chat.v1.RemoteFile
+	0,  // 47: sameoldchat.chat.v1.ChatService.UploadFile:output_type -> sameoldchat.chat.v1.File
+	24, // 48: sameoldchat.chat.v1.ChatService.DownloadFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
+	24, // 49: sameoldchat.chat.v1.ChatService.DownloadPublicFile:output_type -> sameoldchat.chat.v1.DownloadFilePart
+	31, // 50: sameoldchat.chat.v1.ChatService.UploadUserPhoto:output_type -> sameoldchat.chat.v1.User
+	29, // 51: sameoldchat.chat.v1.ChatService.DownloadUserPhoto:output_type -> sameoldchat.chat.v1.UserPhotoDownloadPart
+	32, // 52: sameoldchat.chat.v1.ChatService.DeleteUserPhoto:output_type -> sameoldchat.chat.v1.MutationResponse
+	31, // [31:53] is the sub-list for method output_type
+	9,  // [9:31] is the sub-list for method input_type
+	9,  // [9:9] is the sub-list for extension type_name
+	9,  // [9:9] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_files_proto_init() }
