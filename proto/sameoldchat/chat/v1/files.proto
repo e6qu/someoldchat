@@ -234,10 +234,25 @@ message UserPhotoDownloadRequest {
   string token = 3;
 }
 
+// UserPhotoMetadata opens a user photo download stream.
+//
+// `user` carries the record ChatService.OpenUserPhoto resolved, so the value a
+// caller receives is the stored user in both compositions. Before it existed the
+// server discarded the real record and the client fabricated
+// `User{ID, WorkspaceID}`, which meant every other field (email, real name,
+// profile, presence, deleted) was populated in process and empty across the
+// seam.
+//
+// `mime_type` and `size` are left unset: chat.api.Service.OpenUserPhoto returns
+// a user and a reader and does not expose either value, and the server must not
+// invent one. They are kept rather than deleted so the field numbers stay
+// reserved for a change that adds the values to the module contract; a change
+// that decides they are not needed should delete them with `reserved 1, 2;`.
 message UserPhotoMetadata {
   string mime_type = 1;
   int64 size = 2;
   string token = 3;
+  User user = 4;
 }
 
 message UserPhotoDownloadPart {

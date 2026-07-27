@@ -3,6 +3,7 @@ package observability
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -109,9 +110,27 @@ func (r *Registry) Handler() http.Handler {
 		}
 		for _, name := range sortedKeys(snapshot.Durations) {
 			value := snapshot.Durations[name]
-			fmt.Fprintf(w, "# TYPE %s summary\n%s_count %d\n%s_sum_seconds %f\n", name, name, value.Count, name, value.SumSeconds)
+			base := durationFamily(name)
+			fmt.Fprintf(w, "# TYPE %s summary\n%s_count %d\n%s_sum %f\n", base, base, value.Count, base, value.SumSeconds)
 		}
 	})
+}
+
+// durationFamily is the Prometheus metric family for an observed duration.
+//
+// A summary family named X must expose the samples X_sum and X_count, and a
+// duration must carry its unit as a suffix on the family name. The exposition
+// used to declare "# TYPE <name> summary" and then emit <name>_count and
+// <name>_sum_seconds, so no sample belonged to the declared family:
+// promtool check metrics rejects it and Prometheus scrapes <name>_sum_seconds as
+// an untyped series unrelated to the summary. Callers name the measurement, not
+// the family, so the unit suffix is added here rather than by demanding every
+// call site repeat it.
+func durationFamily(name string) string {
+	if strings.HasSuffix(name, "_seconds") {
+		return name
+	}
+	return name + "_seconds"
 }
 
 func (r *Registry) require() {
@@ -120,9 +139,21 @@ func (r *Registry) require() {
 	}
 }
 
+// metricName is the Prometheus metric name grammar. Callers build names by
+// concatenation ("sameoldchat_lifecycle_state_"+state,
+// "sameoldchat_wake_stage_"+stage), and a single character outside this set makes
+// the whole exposition body unparseable, so the entire scrape fails rather than
+// one series. Rejecting the name where it is constructed turns that into an
+// immediate, attributable failure; every existing suffix is a closed set of Go
+// identifiers, so a rejection can only be a programming error.
+var metricName = regexp.MustCompile(`^[a-zA-Z_:][a-zA-Z0-9_:]*$`)
+
 func requireName(name string) {
 	if strings.TrimSpace(name) == "" {
 		panic("observability metric name is required")
+	}
+	if !metricName.MatchString(name) {
+		panic("observability metric name " + name + " is not a valid Prometheus metric name")
 	}
 }
 

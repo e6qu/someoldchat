@@ -19,33 +19,62 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 )
 
-func main() {
-	backend := flag.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
-	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
-	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory")
-	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address")
-	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
-	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name")
-	appID := flag.String("app-id", "", "Socket Mode application ID (required)")
-	owner := flag.String("owner", "", "unique worker owner ID (required)")
-	responseURL := flag.String("response-url", "", "HTTP response destination (required)")
-	limit := flag.Int("batch-size", 100, "bounded response batch size")
-	lease := flag.Duration("lease", 30*time.Second, "durable response lease")
-	retryDelay := flag.Duration("retry-delay", time.Second, "explicit retry delay after a delivery failure")
-	poll := flag.Duration("poll", 250*time.Millisecond, "poll interval")
-	flag.Parse()
+// exitConfiguration and exitRuntime separate "the operator gave us something
+// impossible" from "something failed while running".
+const (
+	exitConfiguration = 2
+	exitRuntime       = 1
+)
 
+func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// Every teardown runs through run's defers; main is the only place that
+	// exits, so the store is closed even on the documented failure exit that a
+	// deployment platform restarts.
+	if code := run(context.Background(), logger, os.Args[1:]); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func run(ctx context.Context, logger *slog.Logger, args []string) int {
+	flags := flag.NewFlagSet("sameoldchat-socketmode-worker", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	backend := flags.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
+	dsn := flags.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
+	dqliteDirectory := flags.String("dqlite-directory", "", "dqlite state directory")
+	dqliteAddress := flags.String("dqlite-address", "", "dqlite node address")
+	dqliteCluster := flags.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
+	dqliteDatabase := flags.String("dqlite-database", "", "dqlite database name")
+	appID := flags.String("app-id", "", "Socket Mode application ID (required)")
+	owner := flags.String("owner", "", "unique worker owner ID (required)")
+	responseURL := flags.String("response-url", "", "HTTP response destination (required)")
+	limit := flags.Int("batch-size", 100, "bounded response batch size")
+	lease := flags.Duration("lease", 30*time.Second, "durable response lease")
+	retryDelay := flags.Duration("retry-delay", time.Second, "explicit retry delay after a delivery failure")
+	poll := flags.Duration("poll", 250*time.Millisecond, "poll interval")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return exitConfiguration
+	}
 	if *backend == "" || *appID == "" || strings.TrimSpace(*owner) == "" || *responseURL == "" || *limit < 1 || *lease <= 0 || *retryDelay <= 0 || *poll <= 0 {
 		logger.Error("Socket Mode response worker requires explicit storage, application, owner, destination, and positive timing settings")
-		os.Exit(2)
+		return exitConfiguration
 	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
 	if err != nil {
 		logger.Error("parse dqlite cluster", "error", err)
-		os.Exit(2)
+		return exitConfiguration
 	}
-	runtime, err := localchat.Open(context.Background(), localchat.Config{
+	// The destination is validated before the store is opened: a rejected URL
+	// must not leave a created database or a joined dqlite node behind.
+	delivery, err := newHTTPResponseDelivery(*responseURL, &http.Client{Timeout: 30 * time.Second})
+	if err != nil {
+		logger.Error("configure response delivery", "error", err)
+		return exitConfiguration
+	}
+	runtime, err := localchat.Open(ctx, localchat.Config{
 		Backend:         localchat.Backend(*backend),
 		DSN:             *dsn,
 		DqliteDirectory: *dqliteDirectory,
@@ -55,14 +84,13 @@ func main() {
 	})
 	if err != nil {
 		logger.Error("open response worker store", "error", err)
-		os.Exit(1)
+		return exitRuntime
 	}
-	defer runtime.Closer.Close()
-	delivery, err := newHTTPResponseDelivery(*responseURL, &http.Client{Timeout: 30 * time.Second})
-	if err != nil {
-		logger.Error("configure response delivery", "error", err)
-		os.Exit(2)
-	}
+	defer func() {
+		if err := runtime.Closer.Close(); err != nil {
+			logger.Error("close response worker store", "error", err)
+		}
+	}()
 	processor := socketmode.ResponseProcessor{
 		Queue:      runtime.Service,
 		AppID:      domain.AppID(*appID),
@@ -71,24 +99,27 @@ func main() {
 		Lease:      *lease,
 		RetryDelay: *retryDelay,
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	ticker := time.NewTicker(*poll)
 	defer ticker.Stop()
 	for {
-		if err := processor.ProcessOnce(ctx, time.Now().UTC(), delivery); err != nil {
-			if ctx.Err() != nil {
-				return
+		if workerContext.Err() != nil {
+			return 0
+		}
+		if err := processor.ProcessOnce(workerContext, time.Now().UTC(), delivery); err != nil {
+			if workerContext.Err() != nil {
+				return 0
 			}
 			logger.Error("Socket Mode response processing failed", "error", err)
 			var deliveryErr socketmode.ResponseDeliveryError
 			if !errors.As(err, &deliveryErr) {
-				os.Exit(1)
+				return exitRuntime
 			}
 		}
 		select {
-		case <-ctx.Done():
-			return
+		case <-workerContext.Done():
+			return 0
 		case <-ticker.C:
 		}
 	}

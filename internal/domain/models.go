@@ -2,6 +2,7 @@ package domain
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -360,7 +361,24 @@ func VerifyPKCE(codeChallenge, method, verifier string) bool {
 		return false
 	}
 	hash := sha256.Sum256([]byte(verifier))
-	return base64.RawURLEncoding.EncodeToString(hash[:]) == codeChallenge
+	// The challenge arrives from the authorization request and the verifier from
+	// the token request, so this comparison runs against attacker-supplied input
+	// on every exchange. A data-dependent early exit would report how many
+	// leading characters of a guessed verifier hashed correctly.
+	return hmac.Equal([]byte(base64.RawURLEncoding.EncodeToString(hash[:])), []byte(codeChallenge))
+}
+
+// NormalizeEmail produces the single canonical form of a workspace e-mail
+// address. Case-insensitive identity must not be delegated to the database:
+// SQLite's built-in lower() folds ASCII only, PostgreSQL's lower() is
+// locale-aware, and the in-memory repository used strings.EqualFold, so
+// "Ä@x.test" and "ä@x.test" were one identity on PostgreSQL and in memory but
+// two distinct users on SQLite and dqlite — a workspace-scoped identity
+// collision reachable from sign-in. Normalizing in Go before the value reaches
+// any repository makes every profile agree by construction, and lets the
+// uniqueness index be a plain column index instead of a per-engine expression.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 func NormalizeScopes(scopes []string) []string {

@@ -13,6 +13,41 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
+// opener yields one storage profile under test. Every backend the product can be
+// configured with runs the same contract through runQualification, so a
+// divergence between profiles fails the suite instead of being discovered in
+// production.
+type opener func(*testing.T, context.Context) (qualificationStore, func())
+
+func runQualification(t *testing.T, open opener) {
+	t.Helper()
+	for _, contract := range []struct {
+		name string
+		run  func(*testing.T, opener)
+	}{
+		{"core repository", coreRepositoryContract},
+		{"OpenID refresh token rotation is durable", openIDRefreshTokenRotationIsDurable},
+		{"lists repository", listsRepositoryContract},
+		{"published wave one repository", publishedWaveOneRepositoryContract},
+		{"published integration repository", publishedIntegrationRepositoryContract},
+		{"durable event delivery repository", durableEventDeliveryRepositoryContract},
+		{"message order is chronological", messageOrderIsChronological},
+		{"unread count follows the read cursor", unreadCountFollowsTheReadCursor},
+		{"create message validates and is referential", createMessageValidatesAndIsReferential},
+		{"expired outbox lease is fenced", expiredOutboxLeaseIsFenced},
+		{"internal topics stay internal", internalTopicsStayInternal},
+		{"events retain their actor", eventsRetainTheirActor},
+		{"email identity is case folded", emailIdentityIsCaseFolded},
+		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
+		{"referential failures are sentinels", referentialFailuresAreSentinels},
+		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
+		{"Socket Mode batches are all or nothing", socketModeBatchesAreAllOrNothing},
+		{"seed helpers reject invalid input", seedHelpersRejectInvalidInput},
+	} {
+		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
+	}
+}
+
 type qualificationStore interface {
 	store.Store
 	SeedAppToken(context.Context, string, domain.AppTokenRecord) error
@@ -22,11 +57,11 @@ type qualificationStore interface {
 	SeedConversationMember(context.Context, domain.ConversationID, domain.UserID) error
 }
 
-func TestCoreRepositoryContract(t *testing.T) {
+func coreRepositoryContract(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repository, closeRepository := openStore(t, ctx)
+	repository, closeRepository := open(t, ctx)
 	defer closeRepository()
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -104,10 +139,10 @@ func TestCoreRepositoryContract(t *testing.T) {
 	}
 }
 
-func TestOpenIDRefreshTokenRotationIsDurable(t *testing.T) {
+func openIDRefreshTokenRotationIsDurable(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	repository, closeRepository := openStore(t, ctx)
+	repository, closeRepository := open(t, ctx)
 	defer closeRepository()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	workspaceID := domain.WorkspaceID("T-openid-" + suffix)
@@ -139,10 +174,10 @@ func TestOpenIDRefreshTokenRotationIsDurable(t *testing.T) {
 	}
 }
 
-func TestListsRepositoryContract(t *testing.T) {
+func listsRepositoryContract(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	repository, closeRepository := openStore(t, ctx)
+	repository, closeRepository := open(t, ctx)
 	defer closeRepository()
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
 	workspaceID := domain.WorkspaceID("T-lists-" + suffix)
@@ -205,11 +240,11 @@ func TestListsRepositoryContract(t *testing.T) {
 	}
 }
 
-func TestPublishedWaveOneRepositoryContract(t *testing.T) {
+func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repository, closeRepository := openStore(t, ctx)
+	repository, closeRepository := open(t, ctx)
 	defer closeRepository()
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -480,11 +515,11 @@ func TestPublishedWaveOneRepositoryContract(t *testing.T) {
 	}
 }
 
-func TestPublishedIntegrationRepositoryContract(t *testing.T) {
+func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repository, closeRepository := openStore(t, ctx)
+	repository, closeRepository := open(t, ctx)
 	defer closeRepository()
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
@@ -842,11 +877,11 @@ func TestPublishedIntegrationRepositoryContract(t *testing.T) {
 	})
 }
 
-func TestDurableEventDeliveryRepositoryContract(t *testing.T) {
+func durableEventDeliveryRepositoryContract(t *testing.T, open opener) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repository, closeRepository := openStore(t, ctx)
+	repository, closeRepository := open(t, ctx)
 	defer closeRepository()
 
 	suffix := fmt.Sprintf("%d", time.Now().UnixNano())

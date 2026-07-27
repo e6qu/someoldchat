@@ -18,6 +18,10 @@ how the application is structured, built, operated, and deployed.
   profile and qualification command.
 - [Files](files.md) describes durable file uploads and the external upload
   lifecycle.
+- [Blob lifecycle and reconciliation](blob-lifecycle.md) describes cleanup
+  leases and the bounded reconciliation audit.
+- [Incoming Webhooks](incoming-webhooks.md) describes the delivery endpoint,
+  administrative lifecycle, and payload compatibility boundary.
 - [Rebase audit](rebase-audit.md) describes checking that a rebased branch
   kept the work it contained.
 - [Benchmarks and profiling](performance.md) describes measuring the message
@@ -28,6 +32,9 @@ Normative, testable requirements and pinned upstream contract sources live in
 [`../specs/`](../specs/README.md). Current status and planned work are in
 [`../PLAN.md`](../PLAN.md). The [SDK qualification inventory](../specs/sdk-compatibility.yaml)
 records the official SDK sources used by the compatibility checks.
+
+The repository's binding engineering rules are in
+[`../AGENTS.md`](../AGENTS.md).
 
 The repository is licensed under the GNU Affero General Public License,
 version 3 or any later version. See the [license](../LICENSE).

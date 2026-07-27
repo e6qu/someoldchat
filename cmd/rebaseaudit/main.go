@@ -128,14 +128,26 @@ func changedFiles(parent, branch string) ([]string, error) {
 // revision yields ok=false rather than an error, which is the normal case for a
 // file the branch introduced.
 func fileAt(revision, path string) (string, bool, error) {
+	// Existence is decided by `git cat-file -e`'s exit status, not by matching
+	// English text in git's stderr. Under a non-English locale (LC_ALL=de_DE.UTF-8
+	// is ordinary on a developer machine) the old substring match failed, so a
+	// file the branch added produced an error, auditFile propagated it, and
+	// `make rebase-audit` aborted instead of auditing exactly the new-file case.
+	exists := exec.Command("git", "cat-file", "-e", revision+":"+path)
+	exists.Env = append(os.Environ(), "LC_ALL=C")
+	if err := exists.Run(); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("cat-file %s:%s: %w", revision, path, err)
+	}
 	command := exec.Command("git", "show", revision+":"+path)
+	command.Env = append(os.Environ(), "LC_ALL=C")
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 	if err := command.Run(); err != nil {
-		if strings.Contains(stderr.String(), "does not exist") || strings.Contains(stderr.String(), "exists on disk") {
-			return "", false, nil
-		}
 		return "", false, fmt.Errorf("show %s:%s: %s", revision, path, strings.TrimSpace(stderr.String()))
 	}
 	return stdout.String(), true, nil

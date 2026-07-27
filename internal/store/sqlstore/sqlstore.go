@@ -2,6 +2,7 @@ package sqlstore
 
 import (
 	"context"
+	"crypto/hmac"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -14,11 +15,13 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
 	"github.com/sameoldchat/sameoldchat/internal/store"
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const schema = `
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquired INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, domain TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', discoverability TEXT NOT NULL DEFAULT 'open', icon_url TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -53,7 +56,11 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS workspace_default_channels (workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (workspace_id, conversation_id));
 CREATE TABLE IF NOT EXISTS conversation_teams (conversation_id TEXT NOT NULL REFERENCES conversations(id), team_id TEXT NOT NULL REFERENCES workspaces(id), org_channel INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (conversation_id, team_id));
 CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, app_id TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '');
+-- oauth_codes.code holds domain.HashToken(code), never the code itself: an
+-- authorization code is a bearer credential, and a database copy, backup or
+-- replica of it is enough to redeem the grant. expires_at is UnixNano and bounds
+-- redemption to store.OAuthCodeLifetime.
+CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
@@ -226,7 +233,39 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 77
+const schemaVersion = 80
+
+// storedTimestampColumns lists every TEXT column that holds an encoded instant.
+// Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
+// lease-fencing comparison, or an equality lookup, so each of them has to carry
+// domain.StoredTime's fixed-width encoding for byte order to equal time order.
+// Migration step 78 rewrites any value still in the variable-width
+// time.RFC3339Nano form this repository used to write.
+// schema_migrations.applied_at is deliberately absent: it is bookkeeping that no
+// query ever compares, and databases in the field carry free-form text there.
+var storedTimestampColumns = []struct{ table, column string }{
+	{"sessions", "expires_at"},
+	{"messages", "created_at"},
+	{"reactions", "created_at"},
+	{"pins", "created_at"},
+	{"stars", "created_at"},
+	{"files", "created_at"},
+	{"external_uploads", "created_at"},
+	{"external_uploads", "expires_at"},
+	{"external_uploads", "uploaded_at"},
+	{"external_uploads", "completed_at"},
+	{"outbox", "created_at"},
+	{"outbox", "lease_until"},
+	{"outbox", "next_attempt_at"},
+	{"lifecycle_state", "wake_deadline"},
+	{"idempotency", "created_at"},
+	{"read_cursors", "updated_at"},
+	{"lists", "created_at"},
+	{"lists", "updated_at"},
+	{"list_items", "created_at"},
+	{"list_items", "updated_at"},
+	{"list_downloads", "created_at"},
+}
 
 const legacySessionScopes = "chat:write channels:history users:read users:read.email users:write channels:read channels:manage reactions:write reactions:read pins:write pins:read bookmarks:read bookmarks:write search:read files:write files:read canvases:read canvases:write lists:read lists:write team:read"
 
@@ -236,26 +275,48 @@ type queryExecutor interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-// insertOutboxStatement is the single durable-event enqueue used by every
-// store mutation. Keeping one statement keeps the outbox column contract in
-// one place; the SELECT-based and actor_id variants below are distinct
-// statements and intentionally remain separate.
-const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, 0, '', '', '')`
+// insertOutboxStatement is the durable-event enqueue used by every store
+// mutation whose event already carries its workspace. There used to be six
+// textual variants of it: four that omitted actor_id entirely — so every
+// mutation routed through them silently dropped events.Event.ActorID — plus an
+// actor_id form repeated verbatim at five call sites and a SELECT form repeated
+// at six. Two helpers now cover both shapes, and both take the whole event so a
+// column cannot be forgotten again.
+const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`
+
+// insertOutboxForConversationStatement derives the workspace from the
+// conversation being mutated, for the events whose caller does not carry it.
+const insertOutboxForConversationStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`
 
 func insertOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
-	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt))
+	return err
+}
+
+func insertOutboxForConversation(ctx context.Context, tx *sql.Tx, event events.Event, conversation domain.ConversationID) error {
+	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt), conversation)
 	return err
 }
 
 type Store struct {
 	db                     *sql.DB
 	migrationLockStatement string
+	// sqliteDialect records whether the underlying engine is SQLite-compatible, so
+	// SQLite-only statements are attempted only where they mean something.
+	sqliteDialect bool
+	// now is the clock the lease and expiry predicates compare against. It is a
+	// seam so the fencing contract can be asserted at an exact instant instead of
+	// being sampled from the wall clock; internal/activator/spool.go uses the
+	// same shape.
+	now func() time.Time
 }
+
+func systemClock() time.Time { return time.Now().UTC() }
 
 var _ store.Store = (*Store)(nil)
 
 func (s *Store) AppendEvent(ctx context.Context, event events.Event) error {
-	_, err := s.db.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt))
 	return err
 }
 
@@ -300,12 +361,45 @@ func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID
 	return values, hasMore, nil
 }
 
+// sqlitePragmas are connection settings, not database settings: SQLite applies
+// foreign_keys and busy_timeout per connection. Executing them once against a
+// pooled *sql.DB configures whichever connection the pool happened to hand out
+// and leaves every other connection with foreign keys OFF and no busy timeout,
+// which silently turned every REFERENCES clause in the shared schema into a
+// comment. Passing them in the DSN makes the driver apply them on every connect,
+// so the setting cannot depend on which connection serves a statement.
+// journal_mode is deliberately not in this list: it is a database-level setting
+// that persists in the file, and applying it on every connect makes a concurrent
+// first open fail with SQLITE_BUSY because switching journal mode needs
+// exclusive access. It is applied once, with a retry, by configure.
+var sqlitePragmas = []string{"foreign_keys(1)", "busy_timeout(5000)"}
+
+const sqliteJournalPragma = "PRAGMA journal_mode = WAL"
+
+// requiredSQLitePragmas is the enforced subset: journal_mode persists in the
+// database file, but these two are per-connection and are what the schema's
+// integrity depends on.
+var requiredSQLitePragmas = map[string]int64{"foreign_keys": 1, "busy_timeout": 5000}
+
+// sqliteDSN adds the required pragmas to a caller-supplied DSN.
+func sqliteDSN(dsn string) string {
+	separator := "?"
+	if strings.Contains(dsn, "?") {
+		separator = "&"
+	}
+	settings := make([]string, 0, len(sqlitePragmas))
+	for _, pragma := range sqlitePragmas {
+		settings = append(settings, "_pragma="+pragma)
+	}
+	return dsn + separator + strings.Join(settings, "&")
+}
+
 func Open(ctx context.Context, dsn string) (*Store, error) {
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", sqliteDSN(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	s, err := FromDB(ctx, db)
+	s, err := fromDB(ctx, db, true, []string{sqliteJournalPragma}, sqliteMigrationLockStatement)
 	if err != nil {
 		_ = db.Close()
 		return nil, err
@@ -313,30 +407,43 @@ func Open(ctx context.Context, dsn string) (*Store, error) {
 	return s, nil
 }
 
+// FromDB initializes the repository against a SQLite handle the caller opened.
+// The DSN is not ours to amend, so the pool is pinned to a single connection and
+// the pragmas are issued on it; that is the only way to guarantee the settings
+// apply to every statement. internal/activator/spool.go pins its spool handle
+// the same way. Prefer Open, which keeps the pool unbounded.
 func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, true, "")
+	if db == nil {
+		return nil, errors.New("SQL store requires a database handle")
+	}
+	db.SetMaxOpenConns(1)
+	return fromDB(ctx, db, true, []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000", sqliteJournalPragma}, sqliteMigrationLockStatement)
 }
 
 // FromDqliteDB initializes the repository against a dqlite-managed database.
 // dqlite owns connection configuration and rejects SQLite-only PRAGMA statements.
 func FromDqliteDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, false, "")
+	return fromDB(ctx, db, true, nil, sqliteMigrationLockStatement)
 }
 
 // FromPostgresDB initializes the repository against a PostgreSQL database
 // opened by the PostgreSQL adapter. The adapter owns PostgreSQL-specific
 // connection settings and SQL translation.
 func FromPostgresDB(ctx context.Context, db *sql.DB) (*Store, error) {
-	return fromDB(ctx, db, false, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`)
+	return fromDB(ctx, db, false, nil, `SELECT pg_advisory_xact_lock(hashtext(current_database()), hashtext('sameoldchat-schema-migration'))`)
 }
 
-func fromDB(ctx context.Context, db *sql.DB, configureSQLite bool, migrationLockStatement string) (*Store, error) {
+func fromDB(ctx context.Context, db *sql.DB, sqliteDialect bool, pragmas []string, migrationLockStatement string) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("SQL store requires a database handle")
 	}
-	s := &Store{db: db, migrationLockStatement: migrationLockStatement}
-	if configureSQLite {
-		if err := s.configure(ctx); err != nil {
+	s := &Store{db: db, migrationLockStatement: migrationLockStatement, sqliteDialect: sqliteDialect, now: systemClock}
+	if pragmas != nil {
+		if err := s.configure(ctx, pragmas...); err != nil {
+			return nil, err
+		}
+		// Refuse to hand out a repository whose foreign keys are inert.
+		if err := s.VerifyConnectionSettings(ctx); err != nil {
 			return nil, err
 		}
 	}
@@ -346,8 +453,8 @@ func fromDB(ctx context.Context, db *sql.DB, configureSQLite bool, migrationLock
 	return s, nil
 }
 
-func (s *Store) configure(ctx context.Context) error {
-	for _, statement := range []string{"PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000", "PRAGMA journal_mode = WAL"} {
+func (s *Store) configure(ctx context.Context, statements ...string) error {
+	for _, statement := range statements {
 		deadline := time.Now().Add(5 * time.Second)
 		backoff := 5 * time.Millisecond
 		for {
@@ -371,14 +478,63 @@ func (s *Store) configure(ctx context.Context) error {
 	return nil
 }
 
+// VerifyConnectionSettings checks the per-connection SQLite settings the schema
+// depends on, on as many simultaneous connections as the pool allows. Checking
+// one connection proves nothing: the defect this guards against was a pragma
+// that applied to exactly one pooled connection.
+func (s *Store) VerifyConnectionSettings(ctx context.Context) error {
+	probes := 4
+	if limit := s.db.Stats().MaxOpenConnections; limit > 0 && limit < probes {
+		probes = limit
+	}
+	held := make([]*sql.Conn, 0, probes)
+	defer func() {
+		for _, connection := range held {
+			_ = connection.Close()
+		}
+	}()
+	for index := 0; index < probes; index++ {
+		connection, err := s.db.Conn(ctx)
+		if err != nil {
+			return fmt.Errorf("acquire sqlite connection %d: %w", index, err)
+		}
+		held = append(held, connection)
+		for pragma, want := range requiredSQLitePragmas {
+			var got int64
+			if err := connection.QueryRowContext(ctx, "PRAGMA "+pragma).Scan(&got); err != nil {
+				return fmt.Errorf("read sqlite %s on connection %d: %w", pragma, index, err)
+			}
+			if got != want {
+				return fmt.Errorf("sqlite %s is %d on connection %d, want %d", pragma, got, index, want)
+			}
+		}
+	}
+	return nil
+}
+
 func sqliteBusy(err error) bool {
+	var typed *sqlite.Error
+	if errors.As(err, &typed) {
+		return typed.Code() == sqlite3.SQLITE_BUSY || typed.Code() == sqlite3.SQLITE_LOCKED
+	}
+	// The driver reports contention raised inside a statement as a plain error,
+	// so the message check stays as a fallback rather than the only signal.
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
 }
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// ErrIntegrityCheckUnsupported reports a storage profile with no physical
+// integrity check. It replaces a rewrite that turned PRAGMA integrity_check into
+// SELECT 'ok' on PostgreSQL — a check that could never fail and therefore said
+// nothing. A stated limitation is auditable; a tautology is not.
+var ErrIntegrityCheckUnsupported = errors.New("integrity check is not available on this storage profile")
+
 func (s *Store) IntegrityCheck(ctx context.Context) error {
+	if !s.sqliteDialect {
+		return ErrIntegrityCheckUnsupported
+	}
 	var result string
 	if err := s.db.QueryRowContext(ctx, `PRAGMA integrity_check`).Scan(&result); err != nil {
 		return err
@@ -401,6 +557,21 @@ func (s *Store) SeedWorkspace(ctx context.Context, value domain.Workspace) error
 	return err
 }
 
+// SeedUser creates the bootstrap identity and then leaves it alone. It is called
+// on every process start by every binary that opens the store — cmd/worker,
+// cmd/blobgc and cmd/socketmode-worker among them, none of which is given the
+// bootstrap administrator e-mail — so an upsert that overwrote the row destroyed
+// operator state on a shared database at every restart: the administrator's
+// e-mail and profile were blanked, and `deleted = excluded.deleted` silently
+// undid an administrative deactivation.
+//
+// The conflict clause therefore preserves every column an operator can change.
+// The one exception is an e-mail that is still unset: the only writer of
+// users.email is CreateUser, so there is no administrative path that can attach
+// an address to an already seeded bootstrap identity, and refusing to fill a
+// blank would make the -bootstrap-admin-email flag inert on any database created
+// before it was set. Filling a blank is not overwriting a decision; replacing a
+// stored address would be.
 func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 	deleted := 0
 	if value.Deleted {
@@ -418,8 +589,8 @@ func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return errors.New("invalid user presence")
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, email = excluded.email, name = excluded.name, real_name = excluded.real_name, display_name = excluded.display_name, status_text = excluded.status_text, status_emoji = excluded.status_emoji, image_24 = excluded.image_24, image_32 = excluded.image_32, image_48 = excluded.image_48, image_72 = excluded.image_72, image_192 = excluded.image_192, image_512 = excluded.image_512, image_1024 = excluded.image_1024, deleted = excluded.deleted, presence = excluded.presence`, value.ID, value.WorkspaceID, strings.ToLower(strings.TrimSpace(value.Email)), value.Name, value.RealName, value.Profile.DisplayName, value.Profile.StatusText, value.Profile.StatusEmoji, value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, value.Profile.StatusText, value.Profile.StatusEmoji, value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence); err != nil {
+		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, 'member', 1) ON CONFLICT(workspace_id, user_id) DO NOTHING`, value.WorkspaceID, value.ID); err != nil {
 		return err
@@ -467,12 +638,39 @@ func (s *Store) SeedConversationMember(ctx context.Context, conversation domain.
 	return err
 }
 
+// sqliteMigrationLockStatement fences the migration on the SQLite-family
+// profiles. BEGIN IMMEDIATE is not enough on its own for dqlite, which does not
+// honour SQLite's locking verbs, and the multi-node profile is precisely the one
+// where replicas start concurrently. Updating a sentinel row inside the
+// migration transaction takes a real write lock on every SQLite-family engine.
+const sqliteMigrationLockStatement = `UPDATE schema_migration_lock SET acquired = acquired + 1 WHERE id = 1`
+
 func (s *Store) Migrate(ctx context.Context) error {
 	connection, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migration connection: %w", err)
 	}
 	defer connection.Close()
+	// The fence table has to exist before the transaction that locks it.
+	//
+	// CREATE TABLE IF NOT EXISTS is NOT safe against a concurrent creator on
+	// PostgreSQL: the existence check and the catalog insert are not atomic, so
+	// two replicas starting together can both pass the check and one then fails
+	// on the pg_type unique index. That is precisely the situation this fence
+	// exists to survive, so a losing creator is an expected outcome rather than
+	// an error: if the table is there afterwards, whoever created it is
+	// immaterial.
+	if _, err := connection.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquired INTEGER NOT NULL DEFAULT 0)`); err != nil {
+		if !errors.Is(classify(err), store.ErrAlreadyExists) {
+			return fmt.Errorf("create migration fence: %w", err)
+		}
+		if _, verifyErr := connection.ExecContext(ctx, `SELECT 1 FROM schema_migration_lock WHERE 1 = 0`); verifyErr != nil {
+			return fmt.Errorf("create migration fence: %w", errors.Join(err, verifyErr))
+		}
+	}
+	if _, err := connection.ExecContext(ctx, `INSERT INTO schema_migration_lock(id, acquired) VALUES (1, 0) ON CONFLICT(id) DO NOTHING`); err != nil {
+		return fmt.Errorf("initialize migration fence: %w", err)
+	}
 	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
@@ -519,7 +717,7 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 3 {
-		if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO lifecycle_state(id, state, generation) VALUES (1, 'hibernated', 0)`); err != nil {
+		if _, err := db.ExecContext(ctx, `INSERT INTO lifecycle_state(id, state, generation) VALUES (1, 'hibernated', 0) ON CONFLICT(id) DO NOTHING`); err != nil {
 			return fmt.Errorf("initialize lifecycle state: %w", err)
 		}
 	}
@@ -578,7 +776,11 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 13 {
-		if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_members(workspace_id, user_id, role, active) SELECT workspace_id, id, 'member', 1 FROM users`); err != nil {
+		// The membership backfill is scoped to users whose workspace row exists.
+		// SQLite's INSERT OR IGNORE silently skipped orphans while PostgreSQL's
+		// ON CONFLICT DO NOTHING still raised the foreign-key violation, so the
+		// same database upgraded on one profile and failed on the other.
+		if _, err := db.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) SELECT u.workspace_id, u.id, 'member', 1 FROM users u WHERE EXISTS (SELECT 1 FROM workspaces w WHERE w.id = u.workspace_id) ON CONFLICT(workspace_id, user_id) DO NOTHING`); err != nil {
 			return fmt.Errorf("backfill workspace memberships: %w", err)
 		}
 	}
@@ -996,7 +1198,10 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS users_workspace_email`); err != nil {
 			return fmt.Errorf("replace user email index: %w", err)
 		}
-		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX users_workspace_email ON users(workspace_id, lower(email)) WHERE email <> ''`); err != nil {
+		// IF NOT EXISTS matters on the multi-node profile: replicas start
+		// concurrently, and a lost race on a bare CREATE UNIQUE INDEX is a hard
+		// startup failure instead of a no-op.
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS users_workspace_email ON users(workspace_id, lower(email)) WHERE email <> ''`); err != nil {
 			return fmt.Errorf("index user emails: %w", err)
 		}
 	}
@@ -1182,7 +1387,44 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate OpenID Connect logout tokens: %w", err)
 		}
 	}
-	if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)`, schemaVersion, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if version < 78 {
+		if err := s.normalizeStoredTimestamps(ctx, db); err != nil {
+			return err
+		}
+	}
+	if version < 79 {
+		if err := s.normalizeUserEmails(ctx, db); err != nil {
+			return err
+		}
+	}
+	if version < 80 {
+		// Authorization codes were stored in plaintext and never expired. The
+		// column cannot be converted in SQL — the hash is computed in Go — and a
+		// plaintext credential must not survive the upgrade, so the outstanding
+		// codes are discarded. An authorization code is single use and lives for
+		// minutes, so the worst outcome is that an authorization started
+		// seconds before the restart has to be restarted; leaving redeemable
+		// plaintext in the database is not an acceptable alternative. Both
+		// statements are idempotent, so concurrently starting replicas race
+		// safely.
+		columns, err := s.tableColumns(ctx, db, "oauth_codes")
+		if err != nil {
+			return err
+		}
+		if !columns["expires_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE oauth_codes ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate oauth code expiry: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `DELETE FROM oauth_codes`); err != nil {
+			return fmt.Errorf("discard plaintext oauth codes: %w", err)
+		}
+	}
+	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
+	// suppresses every constraint class, while the PostgreSQL rewrite of it only
+	// suppresses unique conflicts, so the two profiles disagreed about which
+	// failures a backfill was allowed to skip.
+	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migrations(version, applied_at) VALUES (?, ?) ON CONFLICT(version) DO NOTHING`, schemaVersion, domain.NewStoredTime(time.Now())); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migrations`).Scan(&version); err != nil {
@@ -1223,22 +1465,133 @@ func (s *Store) CompareAndSwap(expected, next lifecycle.StateRecord) error {
 	return nil
 }
 
-func formatLifecycleWakeDeadline(deadline time.Time) string {
+func formatLifecycleWakeDeadline(deadline time.Time) domain.StoredTime {
 	if deadline.IsZero() {
 		return ""
 	}
-	return deadline.UTC().Format(time.RFC3339Nano)
+	return domain.NewStoredTime(deadline)
 }
 
 func parseLifecycleWakeDeadline(value string) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, nil
 	}
-	deadline, err := time.Parse(time.RFC3339Nano, value)
+	deadline, err := domain.ParseStoredTime(value)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("decode lifecycle wake deadline: %w", err)
 	}
 	return deadline.UTC(), nil
+}
+
+// normalizeStoredTimestamps rewrites every stored timestamp into the
+// fixed-width, order-preserving encoding. It is keyed by value rather than by
+// primary key so it works for every table in storedTimestampColumns without
+// knowing its key, and it is idempotent: values that already carry the correct
+// encoding produce no UPDATE at all. It runs inside the migration transaction,
+// so a replica that loses the fencing race sees the finished result or nothing.
+func (s *Store) normalizeStoredTimestamps(ctx context.Context, db queryExecutor) error {
+	for _, target := range storedTimestampColumns {
+		if err := s.normalizeStoredTimestampColumn(ctx, db, target.table, target.column); err != nil {
+			return fmt.Errorf("normalize %s.%s timestamps: %w", target.table, target.column, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) normalizeStoredTimestampColumn(ctx context.Context, db queryExecutor, table, column string) error {
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT `+column+` FROM `+table+` WHERE `+column+` <> ''`)
+	if err != nil {
+		return err
+	}
+	type rewrite struct {
+		from string
+		to   domain.StoredTime
+	}
+	var rewrites []rewrite
+	for rows.Next() {
+		var stored string
+		if err := rows.Scan(&stored); err != nil {
+			rows.Close()
+			return err
+		}
+		normalized, changed, err := domain.NormalizeStoredTime(stored)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		if changed {
+			rewrites = append(rewrites, rewrite{from: stored, to: normalized})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, value := range rewrites {
+		if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET `+column+` = ? WHERE `+column+` = ?`, value.to, value.from); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// normalizeUserEmails moves workspace e-mail identity off the database's
+// lower() semantics and onto domain.NormalizeEmail. It rewrites stored
+// addresses into the canonical form, refuses to continue if two users in one
+// workspace would collide once normalized, and replaces the expression index
+// with a plain-column unique index so SQLite, dqlite and PostgreSQL enforce the
+// same identity.
+func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error {
+	rows, err := db.QueryContext(ctx, `SELECT id, workspace_id, email FROM users WHERE email <> '' ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("read user emails: %w", err)
+	}
+	type rewrite struct {
+		id    string
+		email string
+	}
+	var rewrites []rewrite
+	owners := make(map[string]string)
+	for rows.Next() {
+		var id, workspace, email string
+		if err := rows.Scan(&id, &workspace, &email); err != nil {
+			rows.Close()
+			return fmt.Errorf("read user emails: %w", err)
+		}
+		normalized := domain.NormalizeEmail(email)
+		key := workspace + "\x00" + normalized
+		if existing, taken := owners[key]; taken {
+			rows.Close()
+			return fmt.Errorf("normalize user emails: users %q and %q in workspace %q share the address %q once normalized", existing, id, workspace, normalized)
+		}
+		owners[key] = id
+		if normalized != email {
+			rewrites = append(rewrites, rewrite{id: id, email: normalized})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("read user emails: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, value := range rewrites {
+		if _, err := db.ExecContext(ctx, `UPDATE users SET email = ? WHERE id = ?`, value.email, value.id); err != nil {
+			return fmt.Errorf("normalize user email %q: %w", value.id, err)
+		}
+	}
+	// The plain-column index is the portable identity: every backend compares the
+	// same canonical bytes. The expression index stays as a backstop that catches
+	// an ASCII case variant written by a path that skipped the normalizer; it
+	// cannot be the primary guard because SQLite's lower() folds ASCII only.
+	if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS users_workspace_email_normalized ON users(workspace_id, email) WHERE email <> ''`); err != nil {
+		return fmt.Errorf("index normalized user emails: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) outboxColumns(ctx context.Context, db queryExecutor) (map[string]bool, error) {
@@ -1295,12 +1648,9 @@ func (s *Store) CreateWorkspace(ctx context.Context, value domain.Workspace, eve
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspaces(id, domain, name, description, discoverability, icon_url) VALUES (?, ?, ?, ?, ?, ?)`, value.ID, value.Domain, value.Name, value.Description, value.Discoverability, value.IconURL); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1326,15 +1676,32 @@ func (s *Store) withDefaultChannels(ctx context.Context, db queryExecutor, value
 	return value, nil
 }
 
-func (s *Store) SetWorkspaceName(ctx context.Context, id domain.WorkspaceID, name string, event events.Event) (domain.Workspace, error) {
+// workspaceColumn is the closed set of single-column workspace settings.
+// SetWorkspaceName, SetWorkspaceDescription, SetWorkspaceDiscoverability and
+// SetWorkspaceIcon were four byte-for-byte identical 26-line bodies differing
+// only in this fragment, and all four re-read the row after COMMIT on s.db, so a
+// concurrent setter's value could be returned to the caller that just wrote a
+// different one. Collapsing them fixes the lost read once instead of four times.
+type workspaceColumn string
+
+const (
+	workspaceColumnName            workspaceColumn = "name"
+	workspaceColumnDescription     workspaceColumn = "description"
+	workspaceColumnDiscoverability workspaceColumn = "discoverability"
+	workspaceColumnIcon            workspaceColumn = "icon_url"
+)
+
+const selectWorkspaceStatement = `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`
+
+func (s *Store) setWorkspaceColumn(ctx context.Context, id domain.WorkspaceID, column workspaceColumn, value any, event events.Event) (domain.Workspace, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Workspace{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET name = ? WHERE id = ?`, name, id)
+	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET `+string(column)+` = ? WHERE id = ?`, value, id)
 	if err != nil {
-		return domain.Workspace{}, err
+		return domain.Workspace{}, classify(err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
@@ -1343,107 +1710,46 @@ func (s *Store) SetWorkspaceName(ctx context.Context, id domain.WorkspaceID, nam
 	if changed != 1 {
 		return domain.Workspace{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.Workspace{}, err
+	}
+	return s.commitWorkspace(ctx, tx, id)
+}
+
+// commitWorkspace reads the row back inside the transaction and only then
+// commits, so the returned value is the value this call wrote.
+func (s *Store) commitWorkspace(ctx context.Context, tx *sql.Tx, id domain.WorkspaceID) (domain.Workspace, error) {
+	var value domain.Workspace
+	if err := tx.QueryRowContext(ctx, selectWorkspaceStatement, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
+		return domain.Workspace{}, translateNotFound(err)
+	}
+	value, err := s.withDefaultChannels(ctx, tx, value)
+	if err != nil {
 		return domain.Workspace{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.Workspace{}, err
 	}
-	var value domain.Workspace
-	if err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
-		return domain.Workspace{}, err
-	}
-	return s.withDefaultChannels(ctx, s.db, value)
+	return value, nil
+}
+
+func (s *Store) SetWorkspaceName(ctx context.Context, id domain.WorkspaceID, name string, event events.Event) (domain.Workspace, error) {
+	return s.setWorkspaceColumn(ctx, id, workspaceColumnName, name, event)
 }
 
 func (s *Store) SetWorkspaceDescription(ctx context.Context, id domain.WorkspaceID, description string, event events.Event) (domain.Workspace, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET description = ? WHERE id = ?`, description, id)
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	if changed != 1 {
-		return domain.Workspace{}, store.ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-		return domain.Workspace{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Workspace{}, err
-	}
-	var value domain.Workspace
-	if err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
-		return domain.Workspace{}, err
-	}
-	return s.withDefaultChannels(ctx, s.db, value)
+	return s.setWorkspaceColumn(ctx, id, workspaceColumnDescription, description, event)
 }
 
 func (s *Store) SetWorkspaceDiscoverability(ctx context.Context, id domain.WorkspaceID, discoverability domain.WorkspaceDiscoverability, event events.Event) (domain.Workspace, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.Workspace{}, err
+	if !discoverability.Valid() {
+		return domain.Workspace{}, store.ErrInvalidArgument
 	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET discoverability = ? WHERE id = ?`, discoverability, id)
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	if changed != 1 {
-		return domain.Workspace{}, store.ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-		return domain.Workspace{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Workspace{}, err
-	}
-	var value domain.Workspace
-	if err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
-		return domain.Workspace{}, err
-	}
-	return s.withDefaultChannels(ctx, s.db, value)
+	return s.setWorkspaceColumn(ctx, id, workspaceColumnDiscoverability, discoverability, event)
 }
 
 func (s *Store) SetWorkspaceIcon(ctx context.Context, id domain.WorkspaceID, iconURL string, event events.Event) (domain.Workspace, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE workspaces SET icon_url = ? WHERE id = ?`, iconURL, id)
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return domain.Workspace{}, err
-	}
-	if changed != 1 {
-		return domain.Workspace{}, store.ErrNotFound
-	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-		return domain.Workspace{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Workspace{}, err
-	}
-	var value domain.Workspace
-	if err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
-		return domain.Workspace{}, err
-	}
-	return s.withDefaultChannels(ctx, s.db, value)
+	return s.setWorkspaceColumn(ctx, id, workspaceColumnIcon, iconURL, event)
 }
 
 func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.WorkspaceID, channels []domain.ConversationID, event events.Event) (domain.Workspace, error) {
@@ -1456,7 +1762,14 @@ func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.Works
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, id).Scan(&exists); err != nil {
 		return domain.Workspace{}, translateNotFound(err)
 	}
+	seen := make(map[domain.ConversationID]struct{}, len(channels))
 	for _, channel := range channels {
+		// A repeated channel violates the primary key, which used to surface as a
+		// raw driver error; reject it as invalid input instead.
+		if _, repeated := seen[channel]; repeated {
+			return domain.Workspace{}, store.ErrInvalidArgument
+		}
+		seen[channel] = struct{}{}
 		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ? AND workspace_id = ? AND is_private = 0 AND is_direct = 0 AND is_group_direct = 0`, channel, id).Scan(&exists); err != nil {
 			return domain.Workspace{}, translateNotFound(err)
 		}
@@ -1466,20 +1779,13 @@ func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.Works
 	}
 	for _, channel := range channels {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_default_channels(workspace_id, conversation_id) VALUES (?, ?)`, id, channel); err != nil {
-			return domain.Workspace{}, err
+			return domain.Workspace{}, classify(err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.Workspace{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return domain.Workspace{}, err
-	}
-	var value domain.Workspace
-	if err := s.db.QueryRowContext(ctx, `SELECT id, domain, name, description, discoverability, icon_url FROM workspaces WHERE id = ?`, id).Scan(&value.ID, &value.Domain, &value.Name, &value.Description, &value.Discoverability, &value.IconURL); err != nil {
-		return domain.Workspace{}, err
-	}
-	return s.withDefaultChannels(ctx, s.db, value)
+	return s.commitWorkspace(ctx, tx, id)
 }
 
 func (s *Store) GetWorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceMembership, error) {
@@ -1514,8 +1820,9 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workspaces WHERE id = ?`, user.WorkspaceID).Scan(&workspaceExists); err != nil {
 		return translateNotFound(err)
 	}
+	user.Email = domain.NormalizeEmail(user.Email)
 	var existing string
-	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE workspace_id = ? AND lower(email) = lower(?) AND deleted = 0`, user.WorkspaceID, user.Email).Scan(&existing); err == nil {
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE workspace_id = ? AND email = ? AND deleted = 0`, user.WorkspaceID, user.Email).Scan(&existing); err == nil {
 		return store.ErrAlreadyExists
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -1524,18 +1831,12 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 		user.Presence = domain.PresenceAuto
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name, real_name, presence) VALUES (?, ?, ?, ?, ?, ?)`, user.ID, user.WorkspaceID, user.Email, user.Name, user.RealName, user.Presence); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active) VALUES (?, ?, ?, 1)`, membership.WorkspaceID, membership.UserID, membership.Role); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1544,7 +1845,7 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 func (s *Store) FindUserByEmail(ctx context.Context, workspace domain.WorkspaceID, email string) (domain.User, error) {
 	var value domain.User
 	var deleted int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE workspace_id = ? AND lower(email) = lower(?) AND deleted = 0 LIMIT 1`, workspace, strings.TrimSpace(email)).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.Name, &value.RealName, &value.Profile.DisplayName, &value.Profile.StatusText, &value.Profile.StatusEmoji, &value.Profile.Image24, &value.Profile.Image32, &value.Profile.Image48, &value.Profile.Image72, &value.Profile.Image192, &value.Profile.Image512, &value.Profile.Image1024, &deleted, &value.Presence)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence FROM users WHERE workspace_id = ? AND email = ? AND deleted = 0 LIMIT 1`, workspace, domain.NormalizeEmail(email)).Scan(&value.ID, &value.WorkspaceID, &value.Email, &value.Name, &value.RealName, &value.Profile.DisplayName, &value.Profile.StatusText, &value.Profile.StatusEmoji, &value.Profile.Image24, &value.Profile.Image32, &value.Profile.Image48, &value.Profile.Image72, &value.Profile.Image192, &value.Profile.Image512, &value.Profile.Image1024, &deleted, &value.Presence)
 	value.Deleted = deleted != 0
 	return value, translateNotFound(err)
 }
@@ -1566,7 +1867,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 	if changed != 1 {
 		return domain.User{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.User{}, err
 	}
 	var user domain.User
@@ -1601,7 +1902,7 @@ func (s *Store) SetUserPresence(ctx context.Context, workspaceID domain.Workspac
 	if changed != 1 {
 		return domain.User{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.User{}, err
 	}
 	var user domain.User
@@ -1633,7 +1934,7 @@ func (s *Store) SetUserExpiration(ctx context.Context, workspaceID domain.Worksp
 	} else if _, err := tx.ExecContext(ctx, `INSERT INTO user_expirations(user_id, workspace_id, expiration_ts) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET workspace_id = excluded.workspace_id, expiration_ts = excluded.expiration_ts`, userID, workspaceID, expiration.UTC().Unix()); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1663,11 +1964,11 @@ func (s *Store) SetUserDeleted(ctx context.Context, workspaceID domain.Workspace
 		if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
+		if _, err := tx.ExecContext(ctx, revokeSessionsStatement+` WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1710,7 +2011,7 @@ func (s *Store) AssignUser(ctx context.Context, workspaceID domain.WorkspaceID, 
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1736,7 +2037,7 @@ func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.Workspa
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1780,7 +2081,7 @@ func (s *Store) SetDoNotDisturb(ctx context.Context, value domain.DoNotDisturb, 
 	if _, err := tx.ExecContext(ctx, `INSERT INTO do_not_disturb(workspace_id, user_id, enabled, snooze_until, next_start_at, next_end_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET enabled = excluded.enabled, snooze_until = excluded.snooze_until, next_start_at = excluded.next_start_at, next_end_at = excluded.next_end_at`, value.WorkspaceID, value.UserID, boolInt(value.Enabled), unixSeconds(value.SnoozeUntil), unixSeconds(value.NextStartAt), unixSeconds(value.NextEndAt)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2094,7 +2395,7 @@ func (s *Store) SeedSession(ctx context.Context, token string, record domain.Ses
 	if record.Revoked {
 		revoked = 1
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), record.ExpiresAt.UTC().Format(time.RFC3339Nano), revoked, record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), domain.NewStoredTime(record.ExpiresAt), revoked, record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
 	return err
 }
 
@@ -2102,7 +2403,7 @@ func (s *Store) CreateSession(ctx context.Context, token string, record domain.S
 	if strings.TrimSpace(token) == "" || record.WorkspaceID == "" || record.UserID == "" || record.ExpiresAt.IsZero() || !record.ExpiresAt.After(time.Now().UTC()) || len(domain.NormalizeScopes(record.Scopes)) == 0 {
 		return errors.New("invalid session")
 	}
-	result, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), record.ExpiresAt.UTC().Format(time.RFC3339Nano), boolInt(record.Revoked), record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
+	result, err := s.db.ExecContext(ctx, `INSERT INTO sessions(session_hash, workspace_id, user_id, scopes, expires_at, revoked, oidc_provider, oidc_id_token, oidc_subject, oidc_sid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(session_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, strings.Join(domain.NormalizeScopes(record.Scopes), " "), domain.NewStoredTime(record.ExpiresAt), boolInt(record.Revoked), record.OIDCProvider, record.OIDCIDToken, record.OIDCSubject, record.OIDCSID)
 	if err != nil {
 		return err
 	}
@@ -2124,7 +2425,7 @@ func (s *Store) LookupSession(ctx context.Context, token string) (domain.Session
 	if err != nil {
 		return domain.SessionRecord{}, translateNotFound(err)
 	}
-	record.ExpiresAt, err = time.Parse(time.RFC3339Nano, expires)
+	record.ExpiresAt, err = domain.ParseStoredTime(expires)
 	if err != nil {
 		return domain.SessionRecord{}, err
 	}
@@ -2133,11 +2434,28 @@ func (s *Store) LookupSession(ctx context.Context, token string) (domain.Session
 	return record, nil
 }
 
+// GetAuthMethod reports the stored enablement of an authorization provider. A
+// provider with no row has no stored decision, so it reports store.ErrNotFound —
+// the contract every other absent-row read in this repository already has. It
+// used to synthesise Enabled: true, which meant a provider no administrator had
+// ever configured read as enabled and an unwritten SetAuthMethod read as a
+// permission. The value returned alongside the sentinel is disabled so a caller
+// that ignores the error still fails closed.
 func (s *Store) GetAuthMethod(ctx context.Context, workspace domain.WorkspaceID, provider string) (domain.AuthMethod, error) {
 	var enabled int
 	err := s.db.QueryRowContext(ctx, `SELECT enabled FROM auth_methods WHERE workspace_id = ? AND provider = ?`, workspace, provider).Scan(&enabled)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
+			// Absence means "no administrative override", not "disabled". This
+			// table records an administrator's decision to turn a provider OFF;
+			// whether a provider exists at all is decided by the operator's
+			// startup configuration (issuer, client id), so a provider with no
+			// row is reachable only if the operator configured it.
+			//
+			// Do not invert this to fail closed. A new deployment has no rows,
+			// so absence-means-disabled disables every provider, and the
+			// administrator who would re-enable them cannot sign in either.
+			// There is no bootstrap path out of that state.
 			return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: true}, nil
 		}
 		return domain.AuthMethod{}, err
@@ -2167,14 +2485,25 @@ func (s *Store) CreateExternalIdentity(ctx context.Context, value domain.Externa
 		return errors.New("invalid external identity")
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO external_identities(workspace_id, provider, subject, user_id) VALUES (?, ?, ?, ?)`, value.WorkspaceID, value.Provider, value.Subject, value.UserID)
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
-	return err
+	return classify(err)
 }
 
+// revokeSessionsStatement is the only way a session is revoked. Revocation
+// clears oidc_id_token in the same statement: a revoked session must retain no
+// provider credential, and the identity token left behind by the previous
+// UPDATE was a signed bearer assertion for the user that outlived the session it
+// belonged to. Every revocation path shares the fragment so a new one cannot
+// forget the credential.
+const revokeSessionsStatement = `UPDATE sessions SET revoked = 1, oidc_id_token = ''`
+
+// deleteExpiredSessionsStatement drops sessions whose expiry has passed. It runs
+// on the same schedule as the oidc_logout_tokens sweep in RevokeOIDCSessions,
+// which is the only maintenance schedule this table has; an expired session is
+// unusable, so retaining its provider metadata serves nothing.
+const deleteExpiredSessionsStatement = `DELETE FROM sessions WHERE expires_at <> '' AND expires_at <= ?`
+
 func (s *Store) RevokeSession(ctx context.Context, token string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE sessions SET revoked = 1 WHERE session_hash = ?`, domain.HashToken(token))
+	result, err := s.db.ExecContext(ctx, revokeSessionsStatement+` WHERE session_hash = ?`, domain.HashToken(token))
 	if err != nil {
 		return err
 	}
@@ -2201,13 +2530,17 @@ func (s *Store) RevokeOIDCSessions(ctx context.Context, workspaceID domain.Works
 	if _, err := tx.ExecContext(ctx, `DELETE FROM oidc_logout_tokens WHERE expires_at <= ?`, now); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO oidc_logout_tokens(workspace_id, provider, token_id, expires_at) VALUES (?, ?, ?, ?)`, workspaceID, provider, tokenID, expiresAt.UTC().Unix()); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrConflict
-		}
+	if _, err := tx.ExecContext(ctx, deleteExpiredSessionsStatement, domain.NewStoredTime(time.Now().UTC())); err != nil {
 		return err
 	}
-	statement := `UPDATE sessions SET revoked = 1 WHERE workspace_id = ? AND oidc_provider = ? AND revoked = 0`
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oidc_logout_tokens(workspace_id, provider, token_id, expires_at) VALUES (?, ?, ?, ?)`, workspaceID, provider, tokenID, expiresAt.UTC().Unix()); err != nil {
+		// A replayed logout token is a state conflict, not a duplicate resource.
+		if classified := classify(err); errors.Is(classified, store.ErrAlreadyExists) {
+			return store.ErrConflict
+		}
+		return classify(err)
+	}
+	statement := revokeSessionsStatement + ` WHERE workspace_id = ? AND oidc_provider = ? AND revoked = 0`
 	arguments := []any{workspaceID, provider}
 	if sid != "" {
 		statement += ` AND oidc_sid = ?`
@@ -2226,7 +2559,7 @@ func (s *Store) RevokeOIDCSessions(ctx context.Context, workspaceID domain.Works
 		return err
 	}
 	if changed > 0 {
-		if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		if err := insertOutbox(ctx, tx, event); err != nil {
 			return err
 		}
 	}
@@ -2239,7 +2572,7 @@ func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.Works
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE sessions SET revoked = 1 WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID)
+	result, err := tx.ExecContext(ctx, revokeSessionsStatement+` WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID)
 	if err != nil {
 		return err
 	}
@@ -2250,7 +2583,7 @@ func (s *Store) RevokeUserSessions(ctx context.Context, workspaceID domain.Works
 	if changed == 0 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2337,7 +2670,7 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 			return store.ErrNotFound
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2354,17 +2687,17 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 		private = 1
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, is_private) VALUES (?, ?, ?, ?)`, conversation.ID, conversation.WorkspaceID, conversation.Name, private); err != nil {
-		return err
+		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, conversation.ID, conversation.WorkspaceID); err != nil {
-		return err
+		return classify(err)
 	}
 	if conversation.IsPrivate {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?)`, conversation.ID, creator); err != nil {
-			return err
+			return classify(err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2387,7 +2720,7 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	if changed != 1 {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`, event.ID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano), conversation); err != nil {
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
 	var value domain.Conversation
@@ -2419,7 +2752,7 @@ func (s *Store) SetConversationTopic(ctx context.Context, conversation domain.Co
 	if changed != 1 {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`, event.ID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano), conversation); err != nil {
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
 	var value domain.Conversation
@@ -2451,7 +2784,7 @@ func (s *Store) SetConversationPurpose(ctx context.Context, conversation domain.
 	if changed != 1 {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`, event.ID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano), conversation); err != nil {
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
 	var value domain.Conversation
@@ -2487,7 +2820,7 @@ func (s *Store) SetConversationArchived(ctx context.Context, conversation domain
 	if changed != 1 {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`, event.ID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano), conversation); err != nil {
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
 	var value domain.Conversation
@@ -2546,7 +2879,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2575,7 +2908,7 @@ func (s *Store) SetConversationAccessGroups(ctx context.Context, workspace domai
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2616,12 +2949,9 @@ func (s *Store) CreateInviteRequest(ctx context.Context, value domain.InviteRequ
 		return store.ErrAlreadyExists
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO invite_requests(id, workspace_id, email, requested_by, channel_ids, custom_message, real_name, resend, restricted, ultra_restricted, guest_expiration_at, status, created_at, reviewed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, value.ID, value.WorkspaceID, value.Email, value.RequestedBy, string(channelIDs), value.CustomMessage, value.RealName, boolInt(value.Resend), boolInt(value.Restricted), boolInt(value.UltraRestricted), unixSeconds(value.GuestExpirationAt), value.Status, value.CreatedAt.UTC().Unix()); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "constraint") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2670,7 +3000,7 @@ func (s *Store) SetInviteRequestStatus(ctx context.Context, workspace domain.Wor
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2751,7 +3081,7 @@ func (s *Store) SetAppApproval(ctx context.Context, workspace domain.WorkspaceID
 		}
 		return store.ErrInvalidAppApproval
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2833,10 +3163,7 @@ func (s *Store) CreateIncomingWebhook(ctx context.Context, value domain.Incoming
 		return store.ErrInvalidAppApproval
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO incoming_webhooks(id, workspace_id, app_id, conversation_id, user_id, secret_hash, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.AppID, value.ConversationID, value.UserID, value.SecretHash, boolInt(value.Enabled), value.CreatedAt.UTC().UnixNano())
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
-	return err
+	return classify(err)
 }
 
 func (s *Store) LookupIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret string) (domain.IncomingWebhook, error) {
@@ -2874,7 +3201,7 @@ func (s *Store) SetIncomingWebhookEnabled(ctx context.Context, workspaceID domai
 		}
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox(id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2894,12 +3221,9 @@ func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.App
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO app_permission_requests(id, workspace_id, requester_id, target_user_id, scopes, trigger_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.RequesterID, value.TargetUserID, string(scopes), value.TriggerID, value.CreatedAt.UTC().Unix()); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2915,12 +3239,9 @@ func (s *Store) CreateView(ctx context.Context, value domain.View, event events.
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO views(id, workspace_id, user_id, type, external_id, payload, hash, root_view_id, previous_view_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.Type, value.ExternalID, value.Payload, value.Hash, value.RootViewID, value.PreviousViewID, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano()); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -2976,10 +3297,7 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 	}
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return domain.View{}, store.ErrAlreadyExists
-		}
-		return domain.View{}, err
+		return domain.View{}, classify(err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
@@ -2991,7 +3309,7 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 		}
 		return domain.View{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.View{}, err
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, value.WorkspaceID, value.ID).Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.Hash, &value.RootViewID, &value.PreviousViewID, new(int64), new(int64)); err != nil {
@@ -3050,7 +3368,7 @@ func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, 
 	if err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3071,12 +3389,9 @@ func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event eve
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO dialogs(id, workspace_id, user_id, payload, created_at) VALUES (?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.Payload, value.CreatedAt.UTC().UnixNano()); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3099,10 +3414,7 @@ func (s *Store) CreateBot(ctx context.Context, value domain.Bot) error {
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO bots(id, workspace_id, app_id, user_id, name, image_36, image_48, image_72, deleted, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.AppID, value.UserID, value.Name, value.Image36, value.Image48, value.Image72, boolInt(value.Deleted), value.UpdatedAt.UTC().Unix())
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
 	return nil
 }
@@ -3129,12 +3441,9 @@ func (s *Store) CreateUserMigration(ctx context.Context, value domain.UserMigrat
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO user_migrations(workspace_id, old_id, global_id) VALUES (?, ?, ?)`, value.WorkspaceID, value.OldID, value.GlobalID); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3185,7 +3494,7 @@ func (s *Store) SetConversationTeams(ctx context.Context, workspace domain.Works
 		}
 		seen[team] = struct{}{}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3242,7 +3551,7 @@ func (s *Store) DisconnectConversationTeams(ctx context.Context, workspace domai
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -3317,10 +3626,7 @@ func (s *Store) CreateOAuthClient(ctx context.Context, value domain.OAuthClient)
 		return errors.New("invalid oauth client")
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO oauth_clients(id, secret_hash, app_id) VALUES (?, ?, ?)`, value.ID, value.SecretHash, value.AppID)
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
-	return err
+	return classify(err)
 }
 
 func (s *Store) GetOAuthClient(ctx context.Context, id string) (domain.OAuthClient, error) {
@@ -3332,6 +3638,14 @@ func (s *Store) GetOAuthClient(ctx context.Context, id string) (domain.OAuthClie
 	return value, nil
 }
 
+// CreateOAuthCode stores the authorization code as a digest with a bounded
+// lifetime. The code itself never reaches a column: every other credential in
+// this schema — session, token, application token, incoming webhook secret,
+// OpenID refresh token — is stored as domain.HashToken of itself, and the
+// authorization code was the one exception, so a database copy was enough to
+// redeem an outstanding grant. The expiry is derived here rather than accepted
+// from the caller so no caller can issue a code that outlives
+// store.OAuthCodeLifetime.
 func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) error {
 	if value.Code == "" || value.ClientID == "" || value.WorkspaceID == "" || value.UserID == "" {
 		return errors.New("invalid oauth code")
@@ -3340,11 +3654,8 @@ func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) err
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, value.Code, value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.RedirectURI, value.CodeChallenge, value.CodeChallengeMethod)
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
-	return err
+	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(value.Code), value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.RedirectURI, value.CodeChallenge, value.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano())
+	return classify(err)
 }
 
 func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, redirect, accessToken string, token domain.OAuthToken) (domain.OAuthToken, error) {
@@ -3353,13 +3664,29 @@ func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, r
 		return domain.OAuthToken{}, err
 	}
 	defer tx.Rollback()
+	// The client secret digest is compared in Go with hmac.Equal rather than in
+	// a WHERE clause. A database equality test is not constant time — the engine
+	// may compare byte by byte, short circuit, and reveal through timing how
+	// much of the digest matched — and it also hands the secret to the query log
+	// and the statement cache.
 	var appID domain.AppID
-	if err := tx.QueryRowContext(ctx, `SELECT app_id FROM oauth_clients WHERE id = ? AND secret_hash = ?`, clientID, domain.HashToken(secret)).Scan(&appID); err != nil {
+	var storedSecretHash string
+	if err := tx.QueryRowContext(ctx, `SELECT app_id, secret_hash FROM oauth_clients WHERE id = ?`, clientID).Scan(&appID, &storedSecretHash); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
+	}
+	if !hmac.Equal([]byte(storedSecretHash), []byte(domain.HashToken(secret))) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	codeHash := domain.HashToken(code)
+	now := time.Now().UTC()
+	// An expired code is unredeemable, and clearing the expired rows on the
+	// redemption path is the only schedule this table has.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE expires_at <= ?`, now.UnixNano()); err != nil {
+		return domain.OAuthToken{}, err
 	}
 	var grant domain.OAuthCode
 	var scopes string
-	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, code, clientID, redirect).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.RedirectURI, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ? AND expires_at > ?`, codeHash, clientID, redirect, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.RedirectURI, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	if err := json.Unmarshal([]byte(scopes), &grant.Scopes); err != nil {
@@ -3369,7 +3696,7 @@ func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, r
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	token.CodeVerifier = ""
-	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, code, clientID, redirect)
+	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, codeHash, clientID, redirect)
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
@@ -3404,10 +3731,7 @@ func (s *Store) CreateOpenIDRefreshToken(ctx context.Context, value domain.OpenI
 		return err
 	}
 	_, err = s.db.ExecContext(ctx, `INSERT INTO openid_refresh_tokens(token_hash, client_id, workspace_id, user_id, scopes, expires_at) VALUES (?, ?, ?, ?, ?, ?)`, value.TokenHash, value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.ExpiresAt.UTC().Unix())
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
-	return err
+	return classify(err)
 }
 
 func (s *Store) ExchangeOpenIDRefreshToken(ctx context.Context, clientID, oldToken, accessToken, refreshToken string, token domain.OpenIDToken) (domain.OpenIDToken, error) {
@@ -3445,6 +3769,15 @@ func (s *Store) ExchangeOpenIDRefreshToken(ctx context.Context, clientID, oldTok
 	if _, err := tx.ExecContext(ctx, `INSERT INTO openid_refresh_tokens(token_hash, client_id, workspace_id, user_id, scopes, expires_at) VALUES (?, ?, ?, ?, ?, ?)`, domain.HashToken(refreshToken), value.ClientID, value.WorkspaceID, value.UserID, string(newScopes), time.Now().UTC().Add(30*24*time.Hour).Unix()); err != nil {
 		return domain.OpenIDToken{}, err
 	}
+	// The minted access token has to be persisted in the same transaction as the
+	// rotation. It was not, so the token this method returned authenticated
+	// nothing: openid.connect.userInfo resolves the bearer through LookupToken,
+	// which reads this table, and every refreshed token was rejected. Committing
+	// it separately would leave a rotated refresh token whose access token does
+	// not exist, so the insert belongs here, mirroring ExchangeOAuthCode.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, scopes, revoked) VALUES (?, ?, ?, ?, 0)`, domain.HashToken(accessToken), value.WorkspaceID, value.UserID, strings.Join(domain.NormalizeScopes(value.Scopes), " ")); err != nil {
+		return domain.OpenIDToken{}, classify(err)
+	}
 	token.AccessToken = accessToken
 	token.RefreshToken = refreshToken
 	token.ClientID = value.ClientID
@@ -3462,10 +3795,7 @@ func (s *Store) CreateRTMConnection(ctx context.Context, value domain.RTMConnect
 		return errors.New("invalid RTM connection")
 	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO rtm_connections(id, workspace_id, user_id, expires_at) VALUES (?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.ExpiresAt.UTC().UnixNano())
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
-	return err
+	return classify(err)
 }
 
 func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTMConnection, error) {
@@ -3519,11 +3849,8 @@ func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.Soc
 		return store.ErrSocketModeConnectionLimit
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO socket_mode_connections(id, app_id, expires_at) VALUES (?, ?, ?)`, value.ID, value.AppID, value.ExpiresAt.UTC().UnixNano())
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "unique") {
-		return store.ErrAlreadyExists
-	}
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	return tx.Commit()
 }
@@ -3575,7 +3902,10 @@ func (s *Store) RenewSocketModeConnection(ctx context.Context, id string, expire
 	if !expiresAt.After(time.Now().UTC()) {
 		return errors.New("invalid Socket Mode connection renewal")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_connections SET expires_at = ? WHERE id = ? AND consumed_at > 0`, expiresAt.UTC().UnixNano(), id)
+	// An already-expired connection must not be resurrected: its slot has been
+	// released, so a replacement may already have been admitted and reviving this
+	// one would put the app over the concurrent-connection limit.
+	result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_connections SET expires_at = ? WHERE id = ? AND consumed_at > 0 AND expires_at > ?`, expiresAt.UTC().UnixNano(), id, s.now().UnixNano())
 	if err != nil {
 		return err
 	}
@@ -3685,16 +4015,28 @@ func (s *Store) ClaimSocketModeResponses(ctx context.Context, appID domain.AppID
 	return claimed, nil
 }
 
+// AckSocketModeResponses acknowledges a batch atomically. It used to issue one
+// statement per envelope against s.db with no transaction, so a batch whose
+// third envelope had an expired lease committed the first two and then returned
+// ErrConflict — a partial effect the signature does not admit to, and one the
+// caller cannot distinguish from a batch that did nothing.
 func (s *Store) AckSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse) error {
 	if strings.TrimSpace(owner) == "" || len(values) == 0 {
 		return errors.New("invalid Socket Mode response acknowledgement")
 	}
-	now := time.Now().UTC().UnixNano()
 	for _, value := range values {
 		if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" {
 			return errors.New("invalid Socket Mode response key")
 		}
-		result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_responses SET acknowledged_at = ?, lease_owner = '', lease_expires_at = 0 WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`, now, value.AppID, value.EnvelopeID, owner, now)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := s.now().UnixNano()
+	for _, value := range values {
+		result, err := tx.ExecContext(ctx, `UPDATE socket_mode_responses SET acknowledged_at = ?, lease_owner = '', lease_expires_at = 0 WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`, now, value.AppID, value.EnvelopeID, owner, now)
 		if err != nil {
 			return err
 		}
@@ -3706,14 +4048,14 @@ func (s *Store) AckSocketModeResponses(ctx context.Context, owner string, values
 			continue
 		}
 		var acknowledgedAt int64
-		if err := s.db.QueryRowContext(ctx, `SELECT acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&acknowledgedAt); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&acknowledgedAt); err != nil {
 			return translateNotFound(err)
 		}
 		if acknowledgedAt == 0 {
 			return store.ErrConflict
 		}
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) RenewSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, lease time.Duration) error {
@@ -3751,6 +4093,8 @@ func (s *Store) RenewSocketModeResponses(ctx context.Context, owner string, valu
 	return tx.Commit()
 }
 
+// ReleaseSocketModeResponses releases a batch atomically, for the same reason
+// AckSocketModeResponses does.
 func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
 	if strings.TrimSpace(owner) == "" || len(values) == 0 || retryAt.IsZero() {
 		return errors.New("invalid Socket Mode response release")
@@ -3759,7 +4103,14 @@ func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, va
 		if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" {
 			return errors.New("invalid Socket Mode response key")
 		}
-		result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_responses SET lease_owner = '', lease_expires_at = ? WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ?`, retryAt.UTC().UnixNano(), value.AppID, value.EnvelopeID, owner)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, value := range values {
+		result, err := tx.ExecContext(ctx, `UPDATE socket_mode_responses SET lease_owner = '', lease_expires_at = ? WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ?`, retryAt.UTC().UnixNano(), value.AppID, value.EnvelopeID, owner)
 		if err != nil {
 			return err
 		}
@@ -3771,7 +4122,7 @@ func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, va
 			continue
 		}
 		var acknowledgedAt int64
-		if err := s.db.QueryRowContext(ctx, `SELECT acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&acknowledgedAt); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, value.AppID, value.EnvelopeID).Scan(&acknowledgedAt); err != nil {
 			return translateNotFound(err)
 		}
 		if acknowledgedAt != 0 {
@@ -3779,7 +4130,7 @@ func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, va
 		}
 		return store.ErrConflict
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (s *Store) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
@@ -3826,7 +4177,7 @@ func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.
 	if changed != 1 {
 		return domain.Conversation{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`, event.ID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano), conversation); err != nil {
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return domain.Conversation{}, err
 	}
 	var value domain.Conversation
@@ -3842,13 +4193,13 @@ func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.
 }
 
 func (s *Store) GetConversationPrefs(ctx context.Context, conversation domain.ConversationID) (domain.ConversationPrefs, error) {
-	if _, err := s.GetConversation(ctx, conversation); err != nil {
-		return domain.ConversationPrefs{}, err
-	}
+	// One statement instead of a GetConversation round trip followed by a second
+	// read: the pair could observe two different database states, and the join
+	// answers both questions at once.
 	var canThreadTypes, canThreadUsers, whoCanPostTypes, whoCanPostUsers string
-	err := s.db.QueryRowContext(ctx, `SELECT can_thread_types, can_thread_users, who_can_post_types, who_can_post_users FROM conversation_prefs WHERE conversation_id = ?`, conversation).Scan(&canThreadTypes, &canThreadUsers, &whoCanPostTypes, &whoCanPostUsers)
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(p.can_thread_types, '[]'), COALESCE(p.can_thread_users, '[]'), COALESCE(p.who_can_post_types, '[]'), COALESCE(p.who_can_post_users, '[]') FROM conversations c LEFT JOIN conversation_prefs p ON p.conversation_id = c.id WHERE c.id = ?`, conversation).Scan(&canThreadTypes, &canThreadUsers, &whoCanPostTypes, &whoCanPostUsers)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.ConversationPrefs{ConversationID: conversation, CanThread: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{}, Users: []domain.UserID{}}, WhoCanPost: domain.ConversationPreferenceList{Types: []domain.ConversationPreferenceType{}, Users: []domain.UserID{}}}, nil
+		return domain.ConversationPrefs{}, store.ErrNotFound
 	}
 	if err != nil {
 		return domain.ConversationPrefs{}, err
@@ -3897,10 +4248,17 @@ func (s *Store) SetConversationPrefs(ctx context.Context, conversation domain.Co
 		return domain.ConversationPrefs{}, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_prefs(conversation_id, can_thread_types, can_thread_users, who_can_post_types, who_can_post_users) VALUES (?, ?, ?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET can_thread_types = excluded.can_thread_types, can_thread_users = excluded.can_thread_users, who_can_post_types = excluded.who_can_post_types, who_can_post_users = excluded.who_can_post_users`, conversation, canTypes, canUsers, postTypes, postUsers); err != nil {
-		return domain.ConversationPrefs{}, err
+	// Prove the conversation exists inside the transaction that writes its
+	// preferences; the existence check used to run on s.db beforehand, so the
+	// conversation could be deleted in between.
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE id = ?`, conversation).Scan(&exists); err != nil {
+		return domain.ConversationPrefs{}, translateNotFound(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_prefs(conversation_id, can_thread_types, can_thread_users, who_can_post_types, who_can_post_users) VALUES (?, ?, ?, ?, ?) ON CONFLICT(conversation_id) DO UPDATE SET can_thread_types = excluded.can_thread_types, can_thread_users = excluded.can_thread_users, who_can_post_types = excluded.who_can_post_types, who_can_post_users = excluded.who_can_post_users`, conversation, canTypes, canUsers, postTypes, postUsers); err != nil {
+		return domain.ConversationPrefs{}, classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.ConversationPrefs{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -3960,12 +4318,9 @@ func (s *Store) AddEmoji(ctx context.Context, value domain.CustomEmoji, event ev
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO custom_emoji(workspace_id, name, url, alias_for) VALUES (?, ?, ?, ?)`, value.WorkspaceID, value.Name, value.URL, value.AliasFor); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "constraint") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4008,7 +4363,7 @@ func (s *Store) RemoveEmoji(ctx context.Context, workspace domain.WorkspaceID, n
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4035,29 +4390,34 @@ func (s *Store) RenameEmoji(ctx context.Context, workspace domain.WorkspaceID, o
 		}
 		return store.ErrAlreadyExists
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (s *Store) AddConversationMember(ctx context.Context, conversation domain.ConversationID, user domain.UserID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// The privacy check has to happen inside the transaction that writes the
+	// membership. Reading it on s.db first left a window in which
+	// conversations.setPrivate could commit between the check and the insert, so a
+	// non-member was added to a channel that had become private — exactly what the
+	// check exists to prevent. InviteConversationMembers already does it this way.
 	var private int
-	if err := s.db.QueryRowContext(ctx, `SELECT is_private FROM conversations WHERE id = ?`, conversation).Scan(&private); errors.Is(err, sql.ErrNoRows) {
+	if err := tx.QueryRowContext(ctx, `SELECT is_private FROM conversations WHERE id = ?`, conversation).Scan(&private); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
 	} else if err != nil {
 		return err
 	} else if private != 0 {
 		return store.ErrNotFound
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation, user)
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	count, err := result.RowsAffected()
 	if err != nil {
@@ -4066,7 +4426,7 @@ func (s *Store) AddConversationMember(ctx context.Context, conversation domain.C
 	if count == 0 {
 		return nil
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4102,7 +4462,7 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 			return store.ErrNotFound
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4125,7 +4485,7 @@ func (s *Store) RemoveConversationMember(ctx context.Context, conversation domai
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`, event.ID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano), conversation); err != nil {
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4141,7 +4501,7 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 	if err != nil {
 		return domain.ReadCursor{}, err
 	}
-	cursor.UpdatedAt, err = time.Parse(time.RFC3339Nano, updated)
+	cursor.UpdatedAt, err = domain.ParseStoredTime(updated)
 	return cursor, err
 }
 
@@ -4151,10 +4511,10 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, cursor.UpdatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, domain.NewStoredTime(cursor.UpdatedAt)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4249,8 +4609,12 @@ func (s *Store) SearchConversations(ctx context.Context, workspace domain.Worksp
 	if query == "" {
 		return domain.ConversationPage{}, errors.New("conversation search query is required")
 	}
-	sqlQuery := `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE workspace_id = ? AND (lower(name) LIKE ? OR lower(topic) LIKE ? OR lower(purpose) LIKE ?)`
-	pattern := "%" + query + "%"
+	// escapeLikeTerm plus an explicit ESCAPE clause: without them "%" matched
+	// every conversation in the workspace, "_" matched any single character, and
+	// a backslash was a literal on SQLite but the default escape character on
+	// PostgreSQL, so one query returned three different result sets.
+	sqlQuery := `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE workspace_id = ? AND (lower(name) LIKE ? ESCAPE '\' OR lower(topic) LIKE ? ESCAPE '\' OR lower(purpose) LIKE ? ESCAPE '\')`
+	pattern := "%" + escapeLikeTerm(query) + "%"
 	args := []any{workspace, pattern, pattern, pattern}
 	if after != "" {
 		sqlQuery += ` AND id > ?`
@@ -4288,7 +4652,7 @@ func (s *Store) SearchConversations(ctx context.Context, workspace domain.Worksp
 }
 
 func (s *Store) unreadCount(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (int, error) {
-	lastRead := ""
+	var lastRead domain.StoredTime
 	cursor, err := s.GetReadCursor(ctx, workspace, user, conversation)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return 0, err
@@ -4298,7 +4662,7 @@ func (s *Store) unreadCount(ctx context.Context, workspace domain.WorkspaceID, u
 		if parseErr != nil {
 			return 0, parseErr
 		}
-		lastRead = parsed.UTC().Format(time.RFC3339Nano)
+		lastRead = domain.NewStoredTime(parsed)
 	}
 	var count int
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE workspace_id = ? AND conversation = ? AND deleted = 0 AND created_at > ?`, workspace, conversation, lastRead).Scan(&count); err != nil {
@@ -4317,6 +4681,9 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 }
 
 func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	// A message may not be stored at a finer resolution than its own timestamp
+	// can express, or a read cursor built from that timestamp can never cover it.
+	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err
@@ -4338,7 +4705,7 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 	}
 	defer tx.Rollback()
 	if idempotencyKey != "" {
-		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`, message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, time.Now().UTC().Format(time.RFC3339Nano))
+		result, err := tx.ExecContext(ctx, `INSERT INTO idempotency (workspace_id, user_id, idempotency_key, message_id, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, idempotency_key) DO NOTHING`, message.WorkspaceID, message.AuthorID, idempotencyKey, message.ID, domain.NewStoredTime(time.Now()))
 		if err != nil {
 			return err
 		}
@@ -4350,11 +4717,14 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 			return store.ErrIdempotencyConflict
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, attachments, message.ThreadTimestamp, message.CreatedAt.UTC().Format(time.RFC3339Nano), unfurls); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, attachments, message.ThreadTimestamp, domain.NewStoredTime(message.CreatedAt), unfurls); err != nil {
 		_ = tx.Rollback()
-		return err
+		// A duplicate identifier is ErrAlreadyExists and a missing conversation,
+		// author or workspace is ErrNotFound; neither may reach the caller as a raw
+		// driver error naming the constraint.
+		return classify(err)
 	}
-	if _, err = tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
@@ -4366,14 +4736,14 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	var deleted int
 	var stored string
 	var blocks, attachments, unfurls string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, createdAt.UTC().Format(time.RFC3339Nano)).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &attachments, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(createdAt)).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &attachments, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message.CreatedAt, err = time.Parse(time.RFC3339Nano, stored)
+	message.CreatedAt, err = domain.ParseStoredTime(stored)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -4423,7 +4793,7 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4435,7 +4805,7 @@ func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO reactions(message_id, name, user_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id, name, user_id) DO NOTHING`, reaction.Message, reaction.Name, reaction.UserID, reaction.CreatedAt.UTC().Format(time.RFC3339Nano))
+	result, err := tx.ExecContext(ctx, `INSERT INTO reactions(message_id, name, user_id, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(message_id, name, user_id) DO NOTHING`, reaction.Message, reaction.Name, reaction.UserID, domain.NewStoredTime(reaction.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -4446,7 +4816,7 @@ func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event
 	if count != 1 {
 		return store.ErrAlreadyExists
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4469,7 +4839,7 @@ func (s *Store) RemoveReaction(ctx context.Context, reaction domain.Reaction, ev
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4508,7 +4878,7 @@ func (s *Store) ListReactions(ctx context.Context, message domain.MessageID, req
 		if err := rows.Scan(&reaction.Message, &reaction.Name, &reaction.UserID, &created); err != nil {
 			return nil, "", false, err
 		}
-		reaction.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		reaction.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -4565,12 +4935,12 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 			return domain.UserReactionPage{}, err
 		}
 		item.Message.Deleted = deleted != 0
-		item.Message.CreatedAt, err = time.Parse(time.RFC3339Nano, messageCreated)
+		item.Message.CreatedAt, err = domain.ParseStoredTime(messageCreated)
 		if err != nil {
 			return domain.UserReactionPage{}, err
 		}
 		item.Reaction.Message = item.Message.ID
-		item.Reaction.CreatedAt, err = time.Parse(time.RFC3339Nano, reactionCreated)
+		item.Reaction.CreatedAt, err = domain.ParseStoredTime(reactionCreated)
 		if err != nil {
 			return domain.UserReactionPage{}, err
 		}
@@ -4591,7 +4961,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 }
 
 func userReactionCursorKey(value domain.UserReaction) string {
-	return value.Message.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
+	return string(domain.NewStoredTime(value.Message.CreatedAt)) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
 }
 
 func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) error {
@@ -4600,7 +4970,7 @@ func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) 
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO pins(message_id, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT(message_id, user_id) DO NOTHING`, pin.Message, pin.UserID, pin.CreatedAt.UTC().Format(time.RFC3339Nano))
+	result, err := tx.ExecContext(ctx, `INSERT INTO pins(message_id, user_id, created_at) VALUES (?, ?, ?) ON CONFLICT(message_id, user_id) DO NOTHING`, pin.Message, pin.UserID, domain.NewStoredTime(pin.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -4611,7 +4981,7 @@ func (s *Store) AddPin(ctx context.Context, pin domain.Pin, event events.Event) 
 	if count != 1 {
 		return store.ErrAlreadyExists
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4634,7 +5004,7 @@ func (s *Store) RemovePin(ctx context.Context, pin domain.Pin, event events.Even
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4673,7 +5043,7 @@ func (s *Store) ListPins(ctx context.Context, conversation domain.ConversationID
 		if err := rows.Scan(&pin.Message, &pin.UserID, &created); err != nil {
 			return nil, "", false, err
 		}
-		pin.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		pin.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -4703,7 +5073,7 @@ func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Even
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, star.CreatedAt.UTC().Format(time.RFC3339Nano))
+	result, err := tx.ExecContext(ctx, `INSERT INTO stars(user_id, message_id, created_at) VALUES (?, ?, ?) ON CONFLICT(user_id, message_id) DO NOTHING`, star.UserID, star.Message.ID, domain.NewStoredTime(star.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -4714,7 +5084,7 @@ func (s *Store) AddStar(ctx context.Context, star domain.Star, event events.Even
 	if count != 1 {
 		return store.ErrAlreadyExists
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4737,7 +5107,7 @@ func (s *Store) RemoveStar(ctx context.Context, star domain.Star, event events.E
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -4780,11 +5150,11 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 		star.UserID = user
 		star.Conversation = star.Message.Conversation
 		star.Message.Deleted = deleted != 0
-		star.CreatedAt, err = time.Parse(time.RFC3339Nano, starCreated)
+		star.CreatedAt, err = domain.ParseStoredTime(starCreated)
 		if err != nil {
 			return nil, "", false, err
 		}
-		star.Message.CreatedAt, err = time.Parse(time.RFC3339Nano, messageCreated)
+		star.Message.CreatedAt, err = domain.ParseStoredTime(messageCreated)
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -4799,7 +5169,7 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	}
 	var next domain.Cursor
 	if hasMore {
-		next, err = domain.NewListCursor(values[len(values)-1].CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(values[len(values)-1].Message.ID))
+		next, err = domain.NewListCursor(string(domain.NewStoredTime(values[len(values)-1].CreatedAt)) + "\x00" + string(values[len(values)-1].Message.ID))
 		if err != nil {
 			return nil, "", false, err
 		}
@@ -4822,13 +5192,7 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark domain.Bookmark, ev
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO bookmarks (id, workspace_id, conversation_id, title, type, link, emoji, entity_id, access_level, parent_id, created_at, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, bookmark.ID, bookmark.WorkspaceID, bookmark.Conversation, bookmark.Title, bookmark.Type, bookmark.Link, bookmark.Emoji, bookmark.EntityID, bookmark.AccessLevel, bookmark.ParentID, bookmark.CreatedAt.UTC().Unix(), bookmark.UpdatedAt.UTC().Unix(), bookmark.UpdatedBy)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
-			return store.ErrNotFound
-		}
-		return err
+		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -4925,13 +5289,7 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
-			return store.ErrNotFound
-		}
-		return err
+		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -5008,10 +5366,7 @@ func (s *Store) SetCanvasAccess(ctx context.Context, access domain.CanvasAccess,
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO canvas_access (canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?) ON CONFLICT(canvas_id, entity_type, entity_id) DO UPDATE SET access_level = excluded.access_level`, access.CanvasID, access.EntityType, access.EntityID, access.Access)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
-			return store.ErrNotFound
-		}
-		return err
+		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -5042,6 +5397,82 @@ func (s *Store) DeleteCanvasAccess(ctx context.Context, access domain.CanvasAcce
 	return tx.Commit()
 }
 
+// accessScope names the three tables an access resolution needs. Lists and
+// canvases model access identically — an owner column on the document and
+// (entity_type, entity_id, access_level) grants beside it — so the resolution is
+// written once. The fields are only ever set from the two package-level values
+// below, so no caller-supplied string reaches the statement.
+type accessScope struct {
+	documentTable string
+	accessTable   string
+	keyColumn     string
+}
+
+var (
+	listAccessScope   = accessScope{documentTable: "lists", accessTable: "list_access", keyColumn: "list_id"}
+	canvasAccessScope = accessScope{documentTable: "canvases", accessTable: "canvas_access", keyColumn: "canvas_id"}
+)
+
+// resolveAccess reports the highest ranked grant a user holds on one document.
+// Ownership counts as an owner grant, a grant recorded for the user counts
+// directly, and a grant recorded for a channel counts when the user is a member
+// of that channel in the document's workspace. Anything else is
+// store.ErrNotFound, including a document that does not exist and a user who is
+// not a live member of its workspace, so a caller cannot mistake "no grant" for
+// an empty grant.
+func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string, userID domain.UserID) (string, string, string, error) {
+	var owner domain.UserID
+	if err := s.db.QueryRowContext(ctx, `SELECT d.owner_id FROM `+scope.documentTable+` d WHERE d.id = ? AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)`, id, userID).Scan(&owner); err != nil {
+		return "", "", "", translateNotFound(err)
+	}
+	bestType, bestID, bestLevel := "", "", ""
+	if owner == userID {
+		bestType, bestID, bestLevel = "user", string(userID), store.AccessOwner
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT a.entity_type, a.entity_id, a.access_level FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+` WHERE a.`+scope.keyColumn+` = ? AND ((a.entity_type = 'user' AND a.entity_id = ?) OR (a.entity_type = 'channel' AND EXISTS (SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))`, id, string(userID), userID)
+	if err != nil {
+		return "", "", "", err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var entityType, entityID, level string
+		if err := rows.Scan(&entityType, &entityID, &level); err != nil {
+			return "", "", "", err
+		}
+		if store.AccessRank(level) > store.AccessRank(bestLevel) {
+			bestType, bestID, bestLevel = entityType, entityID, level
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", "", err
+	}
+	if bestLevel == "" {
+		return "", "", "", store.ErrNotFound
+	}
+	return bestType, bestID, bestLevel, nil
+}
+
+// GetListAccess resolves the effective access one user has to one list. The
+// grants written by SetListAccess had no reader, so nothing could enforce them
+// and every workspace member could read and delete every other member's list.
+func (s *Store) GetListAccess(ctx context.Context, listID domain.ListID, userID domain.UserID) (domain.ListAccess, error) {
+	entityType, entityID, level, err := s.resolveAccess(ctx, listAccessScope, string(listID), userID)
+	if err != nil {
+		return domain.ListAccess{}, err
+	}
+	return domain.ListAccess{ListID: listID, EntityType: entityType, EntityID: entityID, Access: level}, nil
+}
+
+// GetCanvasAccess resolves the effective access one user has to one canvas, by
+// the same rules as GetListAccess.
+func (s *Store) GetCanvasAccess(ctx context.Context, canvasID domain.CanvasID, userID domain.UserID) (domain.CanvasAccess, error) {
+	entityType, entityID, level, err := s.resolveAccess(ctx, canvasAccessScope, string(canvasID), userID)
+	if err != nil {
+		return domain.CanvasAccess{}, err
+	}
+	return domain.CanvasAccess{CanvasID: canvasID, EntityType: entityType, EntityID: entityID, Access: level}, nil
+}
+
 func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -5049,12 +5480,9 @@ func (s *Store) CreateReminder(ctx context.Context, reminder domain.Reminder, ev
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO reminders(id, workspace_id, creator_id, user_id, text, due_at, complete_at, recurring) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.User, reminder.Text, reminder.Time.Unix(), unixSeconds(reminder.CompleteAt), boolInt(reminder.Recurring)); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5141,7 +5569,7 @@ func (s *Store) updateReminderCompletion(ctx context.Context, workspace domain.W
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5164,7 +5592,7 @@ func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5177,12 +5605,9 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.Blocks, value.Attachments, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5272,7 +5697,7 @@ func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.Wor
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5385,12 +5810,9 @@ func (s *Store) CreateUserGroup(ctx context.Context, value domain.UserGroup, eve
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO user_groups(id, workspace_id, name, handle, description, creator_id, updated_by, created_at, updated_at, deleted_at, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, value.ID, value.WorkspaceID, value.Name, value.Handle, value.Description, value.Creator, value.UpdatedBy, value.CreatedAt.Unix(), value.UpdatedAt.Unix(), boolInt(value.Enabled))
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5533,7 +5955,7 @@ func (s *Store) SetUserGroupChannels(ctx context.Context, workspace domain.Works
 	if _, err := tx.ExecContext(ctx, `UPDATE user_groups SET updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, actor, time.Now().UTC().Unix(), id, workspace); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5547,7 +5969,7 @@ func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, eve
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE user_groups SET name = ?, handle = ?, description = ?, updated_by = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.Handle, value.Description, value.UpdatedBy, value.UpdatedAt.Unix(), value.ID, value.WorkspaceID)
 	if err != nil {
-		return err
+		return classify(err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
@@ -5556,7 +5978,7 @@ func (s *Store) UpdateUserGroup(ctx context.Context, value domain.UserGroup, eve
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5584,7 +6006,7 @@ func (s *Store) SetUserGroupEnabled(ctx context.Context, workspace domain.Worksp
 		}
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5614,7 +6036,7 @@ func (s *Store) SetUserGroupUsers(ctx context.Context, workspace domain.Workspac
 	if _, err := tx.ExecContext(ctx, `UPDATE user_groups SET updated_by = ?, updated_at = ? WHERE id = ?`, actor, time.Now().UTC().Unix(), id); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5628,17 +6050,14 @@ func (s *Store) CreateCall(ctx context.Context, value domain.Call, event events.
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO calls(id, workspace_id, external_unique_id, external_display_id, join_url, desktop_app_join_url, title, created_by, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.ExternalUniqueID, value.ExternalDisplayID, value.JoinURL, value.DesktopAppJoinURL, value.Title, value.CreatedBy, value.StartedAt.Unix())
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
 	for _, userID := range value.Participants {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO call_participants(call_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0`, value.ID, userID, value.WorkspaceID); err != nil {
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5693,7 +6112,7 @@ func (s *Store) UpdateCall(ctx context.Context, value domain.Call, event events.
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5717,7 +6136,7 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5744,7 +6163,7 @@ func (s *Store) SetCallParticipants(ctx context.Context, workspace domain.Worksp
 			return err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5756,18 +6175,18 @@ func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.E
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt)); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 func (s *Store) CreateExternalUpload(ctx context.Context, value domain.ExternalUpload) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.FileID, value.Size, value.Status, value.CreatedAt.UTC().Format(time.RFC3339Nano), value.ExpiresAt.UTC().Format(time.RFC3339Nano))
-	return err
+	_, err := s.db.ExecContext(ctx, `INSERT INTO external_uploads(id, workspace_id, uploader_id, name, title, mime_type, blob_key, file_id, size, status, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Uploader, value.Name, value.Title, value.MIMEType, value.BlobKey, value.FileID, value.Size, value.Status, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.ExpiresAt))
+	return classify(err)
 }
 
 func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadID) (domain.ExternalUpload, error) {
@@ -5785,7 +6204,7 @@ func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadI
 		if text == "" {
 			continue
 		}
-		parsed, parseErr := time.Parse(time.RFC3339Nano, text)
+		parsed, parseErr := domain.ParseStoredTime(text)
 		if parseErr != nil {
 			return domain.ExternalUpload{}, fmt.Errorf("parse external upload %s: %w", field, parseErr)
 		}
@@ -5795,7 +6214,7 @@ func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadI
 }
 
 func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.ExternalUploadID, uploadedAt time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE external_uploads SET status = ?, uploaded_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadUploaded, uploadedAt.UTC().Format(time.RFC3339Nano), id, domain.ExternalUploadPending, time.Now().UTC().Format(time.RFC3339Nano))
+	result, err := s.db.ExecContext(ctx, `UPDATE external_uploads SET status = ?, uploaded_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadUploaded, domain.NewStoredTime(uploadedAt), id, domain.ExternalUploadPending, domain.NewStoredTime(time.Now()))
 	if err != nil {
 		return err
 	}
@@ -5835,7 +6254,7 @@ func (s *Store) DeleteFileComment(ctx context.Context, workspace domain.Workspac
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5852,7 +6271,7 @@ func (s *Store) GetFile(ctx context.Context, id domain.FileID) (domain.File, err
 	if err != nil {
 		return domain.File{}, err
 	}
-	file.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+	file.CreatedAt, err = domain.ParseStoredTime(created)
 	file.Deleted = deleted != 0
 	if err == nil {
 		file.SharedChannels, err = s.listFileShares(ctx, file.WorkspaceID, file.ID)
@@ -5880,7 +6299,7 @@ func (s *Store) DeleteFile(ctx context.Context, id domain.FileID, event events.E
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5894,10 +6313,7 @@ func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceI
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE files SET public_token = ? WHERE id = ? AND workspace_id = ? AND deleted = 0`, token, id, workspace)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
@@ -5906,7 +6322,7 @@ func (s *Store) ShareFilePublic(ctx context.Context, workspace domain.WorkspaceI
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5929,7 +6345,7 @@ func (s *Store) RevokeFilePublic(ctx context.Context, workspace domain.Workspace
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5947,7 +6363,7 @@ func (s *Store) GetPublicFile(ctx context.Context, token string) (domain.File, e
 		return domain.File{}, err
 	}
 	file.Deleted = deleted != 0
-	file.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+	file.CreatedAt, err = domain.ParseStoredTime(created)
 	return file, err
 }
 
@@ -5980,7 +6396,7 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken); err != nil {
 			return domain.FilePage{}, err
 		}
-		file.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		file.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return domain.FilePage{}, err
 		}
@@ -6008,50 +6424,69 @@ func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.Workspa
 	if visit == nil {
 		return errors.New("blob reference visitor is required")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT blob_key FROM files WHERE workspace_id = ? AND deleted = 0`, workspace)
+	// Collect first, then visit. The previous shape kept the files result set open
+	// across the users query and across every visitor call, so blob garbage
+	// collection pinned two pooled connections for the duration of blob-store I/O.
+	// The in-memory repository already collects before visiting.
+	references, err := s.collectBlobReferences(ctx, workspace)
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var reference string
-		if err := rows.Scan(&reference); err != nil {
-			return err
-		}
-		if reference == "" {
-			return errors.New("database contains an empty blob reference")
-		}
+	for _, reference := range references {
 		if err := visit(reference); err != nil {
 			return err
 		}
 	}
+	return nil
+}
+
+func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.WorkspaceID) ([]string, error) {
+	references := make([]string, 0)
+	rows, err := s.db.QueryContext(ctx, `SELECT blob_key FROM files WHERE workspace_id = ? AND deleted = 0`, workspace)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if reference == "" {
+			rows.Close()
+			return nil, errors.New("database contains an empty blob reference")
+		}
+		references = append(references, reference)
+	}
 	if err := rows.Err(); err != nil {
-		return err
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
 	}
 	rows, err = s.db.QueryContext(ctx, `SELECT id, image_24 FROM users WHERE workspace_id = ? AND deleted = 0 AND image_24 <> ''`, workspace)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 	prefix := "/users/" + string(workspace) + "/"
 	for rows.Next() {
 		var userID, imageURL string
 		if err := rows.Scan(&userID, &imageURL); err != nil {
-			return err
+			return nil, err
 		}
 		if !strings.HasPrefix(imageURL, prefix) {
-			return fmt.Errorf("user %q has an invalid photo URL", userID)
+			return nil, fmt.Errorf("user %q has an invalid photo URL", userID)
 		}
 		photo := strings.TrimPrefix(imageURL, prefix)
 		parts := strings.Split(photo, "/photo/")
 		if len(parts) != 2 || parts[0] != userID || parts[1] == "" || strings.Contains(parts[1], "/") {
-			return fmt.Errorf("user %q has an invalid photo URL", userID)
+			return nil, fmt.Errorf("user %q has an invalid photo URL", userID)
 		}
-		if err := visit(string(workspace) + "/users/" + userID + "/" + parts[1]); err != nil {
-			return err
-		}
+		references = append(references, string(workspace)+"/users/"+userID+"/"+parts[1])
 	}
-	return rows.Err()
+	return references, rows.Err()
 }
 
 func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, event events.Event) error {
@@ -6062,12 +6497,9 @@ func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, even
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO remote_files(id, workspace_id, external_id, title, file_type, external_url, preview_image, indexable_contents, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, value.ID, value.WorkspaceID, value.ExternalID, value.Title, value.FileType, value.ExternalURL, value.PreviewImage, value.IndexableContents, value.CreatedAt.UTC().Unix())
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "constraint") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6193,7 +6625,7 @@ func (s *Store) RemoveRemoteFile(ctx context.Context, workspace domain.Workspace
 	if changed != 1 {
 		return store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6229,7 +6661,7 @@ func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.Worksp
 			return domain.RemoteFile{}, err
 		}
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.RemoteFile{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -6255,7 +6687,7 @@ func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.Workspace
 	if changed != 1 {
 		return domain.RemoteFile{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.RemoteFile{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -6277,7 +6709,7 @@ func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Mes
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+	message.CreatedAt, err = domain.ParseStoredTime(created)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -6302,6 +6734,23 @@ func (s *Store) GetIdempotentMessage(ctx context.Context, workspace domain.Works
 	return s.GetMessage(ctx, id)
 }
 
+// internalTopics carry repository-internal payloads — a blob storage key — that
+// exist only so a dedicated cleanup worker can claim them by topic. They must not
+// be claimed by the general outbox worker and must not appear in any client-facing
+// replay: user.photo_blob_delete was excluded from neither, so the general worker
+// consumed and acknowledged it (the blob was then never deleted) and the internal
+// storage key was delivered to third-party Events API subscribers.
+func internalTopicPredicate(column string) (string, []any) {
+	topics := store.InternalTopics()
+	placeholders := make([]string, len(topics))
+	args := make([]any, 0, len(topics))
+	for index, topic := range topics {
+		placeholders[index] = "?"
+		args = append(args, topic)
+	}
+	return " AND " + column + " NOT IN (" + strings.Join(placeholders, ", ") + ")", args
+}
+
 func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]events.Record, error) {
 	return s.claimEvents(ctx, workspace, "", owner, limit, lease)
 }
@@ -6322,14 +6771,15 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 		return nil, err
 	}
 	defer tx.Rollback()
-	now := time.Now().UTC()
-	nowText := now.Format(time.RFC3339Nano)
-	expiresText := now.Add(lease).Format(time.RFC3339Nano)
+	now := s.now()
+	nowText := domain.NewStoredTime(now)
+	expiresText := domain.NewStoredTime(now.Add(lease))
 	query := `SELECT sequence, id, workspace_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0`
 	args := []any{workspace}
 	if topic == "" {
-		query += ` AND topic <> ?`
-		args = append(args, events.FileBlobDeleteTopic)
+		predicate, excluded := internalTopicPredicate("topic")
+		query += predicate
+		args = append(args, excluded...)
 	} else {
 		query += ` AND topic = ?`
 		args = append(args, topic)
@@ -6369,7 +6819,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 		if err != nil || count != 1 {
 			return nil, store.ErrLeaseConflict
 		}
-		item.event.CreatedAt, err = time.Parse(time.RFC3339Nano, item.created)
+		item.event.CreatedAt, err = domain.ParseStoredTime(item.created)
 		if err != nil {
 			return nil, err
 		}
@@ -6390,7 +6840,7 @@ func (s *Store) AckEvents(ctx context.Context, owner string, sequences []uint64)
 		return err
 	}
 	defer tx.Rollback()
-	nowText := time.Now().UTC().Format(time.RFC3339Nano)
+	nowText := domain.NewStoredTime(s.now())
 	for _, sequence := range sequences {
 		updated, err := tx.ExecContext(ctx, `UPDATE outbox SET delivered = 1, lease_owner = '', lease_until = '', next_attempt_at = '' WHERE sequence = ? AND delivered = 0 AND lease_owner = ? AND lease_until > ?`, sequence, owner, nowText)
 		if err != nil {
@@ -6413,9 +6863,9 @@ func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint6
 		return err
 	}
 	defer tx.Rollback()
-	now := time.Now().UTC()
-	nowText := now.Format(time.RFC3339Nano)
-	expiresText := now.Add(lease).Format(time.RFC3339Nano)
+	now := s.now()
+	nowText := domain.NewStoredTime(now)
+	expiresText := domain.NewStoredTime(now.Add(lease))
 	for _, sequence := range sequences {
 		updated, err := tx.ExecContext(ctx, `UPDATE outbox SET lease_until = ? WHERE sequence = ? AND delivered = 0 AND lease_owner = ? AND lease_until > ?`, expiresText, sequence, owner, nowText)
 		if err != nil {
@@ -6430,7 +6880,7 @@ func (s *Store) RenewEvents(ctx context.Context, owner string, sequences []uint6
 }
 
 func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uint64, retryAt time.Time) error {
-	if owner == "" || len(sequences) == 0 || !retryAt.After(time.Now().UTC()) {
+	if owner == "" || len(sequences) == 0 || !retryAt.After(s.now()) {
 		return errors.New("owner, event sequences, and a future retry time are required")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -6438,8 +6888,8 @@ func (s *Store) ReleaseEvents(ctx context.Context, owner string, sequences []uin
 		return err
 	}
 	defer tx.Rollback()
-	nowText := time.Now().UTC().Format(time.RFC3339Nano)
-	retryText := retryAt.UTC().Format(time.RFC3339Nano)
+	nowText := domain.NewStoredTime(s.now())
+	retryText := domain.NewStoredTime(retryAt)
 	for _, sequence := range sequences {
 		updated, err := tx.ExecContext(ctx, `UPDATE outbox SET lease_owner = '', lease_until = '', next_attempt_at = ? WHERE sequence = ? AND delivered = 0 AND lease_owner = ? AND lease_until > ?`, retryText, sequence, owner, nowText)
 		if err != nil {
@@ -6457,7 +6907,10 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 	if limit <= 0 {
 		return nil, errors.New("event limit must be positive")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ? AND topic <> ? ORDER BY sequence LIMIT ?`, workspace, after, events.FileBlobDeleteTopic, limit)
+	predicate, excluded := internalTopicPredicate("topic")
+	args := append([]any{workspace, after}, excluded...)
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ?`+predicate+` ORDER BY sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -6470,7 +6923,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 		if err := rows.Scan(&sequence, &event.ID, &event.WorkspaceID, &event.ActorID, &event.Topic, &event.Payload, &created); err != nil {
 			return nil, err
 		}
-		event.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		event.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return nil, err
 		}
@@ -6483,7 +6936,10 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	if appID == "" || limit <= 0 {
 		return nil, errors.New("app ID and positive event limit are required")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ? AND o.topic <> ? ORDER BY o.sequence LIMIT ?`, appID, after, events.FileBlobDeleteTopic, limit)
+	predicate, excluded := internalTopicPredicate("o.topic")
+	args := append([]any{appID, after}, excluded...)
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -6495,7 +6951,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 		if err := rows.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &created); err != nil {
 			return nil, err
 		}
-		record.Event.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		record.Event.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return nil, err
 		}
@@ -6516,7 +6972,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 			return domain.MessagePage{}, err
 		}
 		query += ` AND (created_at > ? OR (created_at = ? AND id > ?))`
-		created := createdAt.UTC().Format(time.RFC3339Nano)
+		created := domain.NewStoredTime(createdAt)
 		args = append(args, created, created, id)
 	}
 	query += ` ORDER BY created_at, id LIMIT ?`
@@ -6534,7 +6990,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &attachments, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
-		value.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		value.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
@@ -6583,7 +7039,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
-		created := createdAt.UTC().Format(time.RFC3339Nano)
+		created := domain.NewStoredTime(createdAt)
 		querySQL += ` AND (m.created_at > ? OR (m.created_at = ? AND m.id > ?))`
 		args = append(args, created, created, id)
 	}
@@ -6602,7 +7058,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &attachments, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
-		message.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		message.CreatedAt, err = domain.ParseStoredTime(created)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
@@ -6631,25 +7087,17 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	return page, nil
 }
 
-func insertListOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
-	_, err := tx.ExecContext(ctx, `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.CreatedAt.UTC().Format(time.RFC3339Nano))
-	return err
-}
-
 func (s *Store) CreateList(ctx context.Context, value domain.List, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.CreatedAt.UTC().Format(time.RFC3339Nano), value.UpdatedAt.UTC().Format(time.RFC3339Nano))
+	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6664,11 +7112,11 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 		return domain.List{}, translateNotFound(err)
 	}
 	value.TodoMode = todoMode != 0
-	value.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	value.CreatedAt, err = domain.ParseStoredTime(createdAt)
 	if err != nil {
 		return domain.List{}, err
 	}
-	value.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+	value.UpdatedAt, err = domain.ParseStoredTime(updatedAt)
 	if err != nil {
 		return domain.List{}, err
 	}
@@ -6681,7 +7129,7 @@ func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.UpdatedAt.UTC().Format(time.RFC3339Nano), value.ID, value.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -6691,7 +7139,7 @@ func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.
 		}
 		return store.ErrNotFound
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6709,14 +7157,11 @@ func (s *Store) CreateListItem(ctx context.Context, value domain.ListItem, event
 			return translateNotFound(err)
 		}
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, value.CreatedAt.UTC().Format(time.RFC3339Nano), value.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(value.Archived))
+	_, err = tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived))
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
-			return store.ErrAlreadyExists
-		}
-		return err
+		return classify(err)
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6730,11 +7175,11 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 		return domain.ListItem{}, err
 	}
 	var err error
-	value.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	value.CreatedAt, err = domain.ParseStoredTime(createdAt)
 	if err != nil {
 		return domain.ListItem{}, err
 	}
-	value.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt)
+	value.UpdatedAt, err = domain.ParseStoredTime(updatedAt)
 	if err != nil {
 		return domain.ListItem{}, err
 	}
@@ -6801,7 +7246,7 @@ func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ? WHERE id = ? AND list_id = ? AND workspace_id = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, value.UpdatedAt.UTC().Format(time.RFC3339Nano), boolInt(value.Archived), value.ID, value.ListID, value.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ? WHERE id = ? AND list_id = ? AND workspace_id = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.ID, value.ListID, value.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -6811,7 +7256,7 @@ func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event
 		}
 		return store.ErrNotFound
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6843,7 +7288,7 @@ func (s *Store) DeleteListItems(ctx context.Context, workspace domain.WorkspaceI
 			return store.ErrNotFound
 		}
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6856,9 +7301,9 @@ func (s *Store) SetListAccess(ctx context.Context, value domain.ListAccess, even
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO list_access(list_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?) ON CONFLICT(list_id, entity_type, entity_id) DO UPDATE SET access_level = excluded.access_level`, value.ListID, value.EntityType, value.EntityID, value.Access); err != nil {
-		return translateNotFound(err)
+		return classify(err)
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6881,7 +7326,7 @@ func (s *Store) DeleteListAccess(ctx context.Context, value domain.ListAccess, e
 	if count != 1 {
 		return store.ErrNotFound
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6893,10 +7338,10 @@ func (s *Store) CreateListDownload(ctx context.Context, value domain.ListDownloa
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO list_downloads(id, list_id, workspace_id, status, url, include_archived, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.WorkspaceID, value.Status, value.URL, boolInt(value.IncludeArchived), value.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_downloads(id, list_id, workspace_id, status, url, include_archived, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.WorkspaceID, value.Status, value.URL, boolInt(value.IncludeArchived), domain.NewStoredTime(value.CreatedAt)); err != nil {
 		return err
 	}
-	if err := insertListOutbox(ctx, tx, event); err != nil {
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -6911,7 +7356,7 @@ func (s *Store) GetListDownload(ctx context.Context, workspace domain.WorkspaceI
 		return domain.ListDownload{}, translateNotFound(err)
 	}
 	value.IncludeArchived = includeArchived != 0
-	value.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt)
+	value.CreatedAt, err = domain.ParseStoredTime(createdAt)
 	if err != nil {
 		return domain.ListDownload{}, err
 	}
@@ -6933,14 +7378,14 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 		return domain.MessagePage{}, err
 	}
 	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
-	created := createdAt.UTC().Format(time.RFC3339Nano)
+	created := domain.NewStoredTime(createdAt)
 	args := []any{conversation, created, string(timestamp)}
 	if request.Cursor != "" {
 		cursorTime, id, cursorRoot, err := domain.DecodeMessageCursorWithRoot(request.Cursor)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
-		cursorCreated := cursorTime.UTC().Format(time.RFC3339Nano)
+		cursorCreated := domain.NewStoredTime(cursorTime)
 		if cursorRoot {
 			query += ` AND (thread_timestamp <> '' OR (thread_timestamp = '' AND (created_at > ? OR (created_at = ? AND id > ?))))`
 		} else {
@@ -6964,7 +7409,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &attachments, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
-		value.CreatedAt, err = time.Parse(time.RFC3339Nano, stored)
+		value.CreatedAt, err = domain.ParseStoredTime(stored)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
@@ -6997,6 +7442,58 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 func translateNotFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
+	}
+	return err
+}
+
+// classify maps a driver-level constraint violation onto the repository's
+// sentinel errors. Without it a foreign-key or primary-key violation escaped as
+// a raw driver error, the transport's fall-through turned that into a retryable
+// codes.Unavailable carrying the table and constraint name, and well-behaved
+// clients retried a permanently failing request forever. It also removes the
+// per-call-site string matching that only ever recognized "unique".
+func classify(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.ErrNotFound
+	}
+	var typed *sqlite.Error
+	if errors.As(err, &typed) {
+		switch typed.Code() {
+		case sqlite3.SQLITE_CONSTRAINT_UNIQUE, sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY:
+			return store.ErrAlreadyExists
+		case sqlite3.SQLITE_CONSTRAINT_FOREIGNKEY:
+			return store.ErrNotFound
+		case sqlite3.SQLITE_CONSTRAINT_NOTNULL, sqlite3.SQLITE_CONSTRAINT_CHECK:
+			return store.ErrInvalidArgument
+		}
+	}
+	// pgx reports the SQLSTATE through this method; matching the interface keeps
+	// the shared repository free of a PostgreSQL driver import.
+	var state interface{ SQLState() string }
+	if errors.As(err, &state) {
+		switch state.SQLState() {
+		case "23505":
+			return store.ErrAlreadyExists
+		case "23503":
+			return store.ErrNotFound
+		case "23502", "23514":
+			return store.ErrInvalidArgument
+		}
+	}
+	// dqlite forwards constraint failures without a typed error, and SQLite
+	// reports some of them with the primary code only, so the message stays as a
+	// last resort rather than as the only signal.
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "unique"), strings.Contains(message, "primary key"):
+		return store.ErrAlreadyExists
+	case strings.Contains(message, "foreign key"):
+		return store.ErrNotFound
+	case strings.Contains(message, "not null"), strings.Contains(message, "check constraint"):
+		return store.ErrInvalidArgument
 	}
 	return err
 }
@@ -7040,7 +7537,7 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 	defer tx.Rollback()
 	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
 	seenFiles := make(map[domain.FileID]struct{}, len(files))
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := domain.NewStoredTime(time.Now())
 	for index, completion := range completions {
 		if _, exists := seenUploads[completion.ID]; exists {
 			return store.ErrInvalidArgument
@@ -7050,7 +7547,7 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 		}
 		seenUploads[completion.ID] = struct{}{}
 		seenFiles[files[index].ID] = struct{}{}
-		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, files[index].ID, files[index].CreatedAt.UTC().Format(time.RFC3339Nano), completion.ID, domain.ExternalUploadUploaded, now)
+		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, files[index].ID, domain.NewStoredTime(files[index].CreatedAt), completion.ID, domain.ExternalUploadUploaded, now)
 		if err != nil {
 			return err
 		}
@@ -7062,15 +7559,15 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 			return store.ErrConflict
 		}
 		file := files[index]
-		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, file.CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt)); err != nil {
+			return classify(err)
 		}
 		for _, channel := range channels {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id) VALUES (?, ?)`, file.ID, channel); err != nil {
-				return err
+				return classify(err)
 			}
 		}
-		if _, err := tx.ExecContext(ctx, insertOutboxStatement, emitted[index].ID, emitted[index].WorkspaceID, emitted[index].Topic, emitted[index].Payload, emitted[index].CreatedAt.UTC().Format(time.RFC3339Nano)); err != nil {
+		if err := insertOutbox(ctx, tx, emitted[index]); err != nil {
 			return err
 		}
 	}

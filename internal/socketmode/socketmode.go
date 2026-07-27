@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +21,20 @@ import (
 const (
 	connectionLifetime = 30 * time.Second
 	maxEnvelopeBytes   = 1 << 20
+	// Slack's Socket Mode contract keeps a connection alive with ping/pong. A
+	// peer that disappears without a TCP FIN is otherwise undetectable, and the
+	// connection plus its reader goroutine and its connection-limit slot stay
+	// pinned until the operating system gives up on the socket.
+	pingPeriod = 10 * time.Second
+	// readTimeout allows one missed ping before the peer is declared gone.
+	readTimeout = 2 * pingPeriod
+	// writeTimeout bounds every write, so a peer that stops reading cannot
+	// block the handler once the send buffer fills.
+	writeTimeout = 10 * time.Second
+	// envelopeTimeout bounds how long delivery waits for an app to acknowledge
+	// an envelope. Waiting forever stalls the app's whole event stream with no
+	// error anywhere.
+	envelopeTimeout = 30 * time.Second
 )
 
 var ErrInvalidAppID = errors.New("Socket Mode app ID is required")
@@ -119,6 +135,18 @@ type Handler struct {
 	Cursors   CursorStore
 	Responses ResponseSink
 	Upgrader  websocket.Upgrader
+	// Logger records connection-level failures that are handled rather than
+	// returned to a caller: a released connection slot that could not be
+	// released, and a durable record that can never be delivered to an app.
+	// Both are invisible without it.
+	Logger *slog.Logger
+}
+
+func (h Handler) logger() *slog.Logger {
+	if h.Logger != nil {
+		return h.Logger
+	}
+	return slog.Default()
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -145,7 +173,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		if releaseErr := h.Store.ReleaseSocketModeConnection(context.Background(), connection.ID); releaseErr != nil {
-			return
+			h.logger().Error("Socket Mode connection slot was not released", "connection", connection.ID, "app", connection.AppID, "error", releaseErr)
 		}
 	}()
 	upgrader := h.Upgrader
@@ -155,47 +183,86 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 	conn.SetReadLimit(maxEnvelopeBytes)
+	if err := conn.SetReadDeadline(time.Now().Add(readTimeout)); err != nil {
+		return
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(readTimeout))
+	})
+	writeJSON := func(value any) error {
+		if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+			return err
+		}
+		return conn.WriteJSON(value)
+	}
+	closeWith := func(code int, reason string) {
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(writeTimeout))
+	}
 	var cursor uint64
 	if h.Cursors != nil {
 		cursor, err = h.Cursors.GetSocketModeCursor(r.Context(), connection.AppID)
 		if err != nil {
-			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "cursor store unavailable"), time.Now().Add(time.Second))
+			closeWith(websocket.CloseInternalServerErr, "cursor store unavailable")
 			return
 		}
 	}
 	connectionCount, err := h.Store.CountSocketModeConnections(r.Context(), connection.AppID)
 	if err != nil {
-		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "connection state unavailable"), time.Now().Add(time.Second))
+		closeWith(websocket.CloseInternalServerErr, "connection state unavailable")
 		return
 	}
-	if err := conn.WriteJSON(map[string]any{"type": "hello", "num_connections": connectionCount, "debug_info": map[string]string{"host": string(connection.AppID)}}); err != nil {
+	// debug_info.host identifies the host serving the connection. Reporting the
+	// app ID there makes SDK diagnostics and reconnect logs describe the client
+	// instead of the replica the client is talking to.
+	if err := writeJSON(map[string]any{"type": "hello", "num_connections": connectionCount, "debug_info": map[string]string{"host": servingHost(r)}}); err != nil {
 		return
 	}
+	// done is closed before the connection is closed, so the reader goroutine
+	// is woken whether it is blocked in ReadMessage or blocked handing a
+	// pipelined frame to this loop. Without it a client that pipelines frames
+	// leaks the goroutine, the connection and its buffers for the process
+	// lifetime.
+	done := make(chan struct{})
+	defer close(done)
 	readErrors := make(chan error, 1)
 	readMessages := make(chan []byte, 1)
 	go func() {
 		for {
 			messageType, payload, readErr := conn.ReadMessage()
 			if readErr != nil {
-				readErrors <- readErr
+				select {
+				case readErrors <- readErr:
+				case <-done:
+				}
 				return
 			}
 			if messageType != websocket.TextMessage {
-				readErrors <- errors.New("Socket Mode requires text messages")
+				select {
+				case readErrors <- errors.New("Socket Mode requires text messages"):
+				case <-done:
+				}
 				return
 			}
-			readMessages <- payload
+			select {
+			case readMessages <- payload:
+			case <-done:
+				return
+			}
 		}
 	}()
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	leaseTicker := time.NewTicker(connectionLifetime / 3)
 	defer leaseTicker.Stop()
+	pingTicker := time.NewTicker(pingPeriod)
+	defer pingTicker.Stop()
 	pending := make(map[string]uint64, 1)
+	var pendingSince time.Time
 	for {
 		select {
 		case err := <-readErrors:
-			_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseProtocolError, err.Error()), time.Now().Add(time.Second))
+			closeWith(websocket.CloseProtocolError, err.Error())
 			return
 		case payload := <-readMessages:
 			var envelope struct {
@@ -203,52 +270,58 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Payload    json.RawMessage `json:"payload"`
 			}
 			if err := json.Unmarshal(payload, &envelope); err != nil || strings.TrimSpace(envelope.EnvelopeID) == "" {
-				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseProtocolError, "envelope_id is required"), time.Now().Add(time.Second))
+				closeWith(websocket.CloseProtocolError, "envelope_id is required")
 				return
 			}
 			if h.Events == nil {
-				if err := conn.WriteJSON(map[string]string{"envelope_id": envelope.EnvelopeID}); err != nil {
+				if err := writeJSON(map[string]string{"envelope_id": envelope.EnvelopeID}); err != nil {
 					return
 				}
 				continue
 			}
 			sequence, exists := pending[envelope.EnvelopeID]
 			if !exists {
-				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseProtocolError, "unknown envelope_id"), time.Now().Add(time.Second))
+				closeWith(websocket.CloseProtocolError, "unknown envelope_id")
 				return
 			}
 			if len(envelope.Payload) != 0 {
 				var responsePayload map[string]json.RawMessage
 				if json.Unmarshal(envelope.Payload, &responsePayload) != nil || responsePayload == nil {
-					_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseProtocolError, "response payload must be a JSON object"), time.Now().Add(time.Second))
+					closeWith(websocket.CloseProtocolError, "response payload must be a JSON object")
 					return
 				}
 				if h.Responses == nil {
-					_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "response payload routing is unavailable"), time.Now().Add(time.Second))
+					closeWith(websocket.ClosePolicyViolation, "response payload routing is unavailable")
 					return
 				}
 				if err := h.Responses.HandleSocketModeResponse(r.Context(), connection.AppID, envelope.EnvelopeID, envelope.Payload); err != nil {
-					_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "response payload routing failed"), time.Now().Add(time.Second))
+					closeWith(websocket.CloseInternalServerErr, "response payload routing failed")
 					return
 				}
 			}
 			delete(pending, envelope.EnvelopeID)
-			if sequence > cursor {
-				if h.Cursors != nil {
-					if err := h.Cursors.SetSocketModeCursor(r.Context(), connection.AppID, sequence); err != nil {
-						_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "cursor store unavailable"), time.Now().Add(time.Second))
-						return
-					}
-				}
-				cursor = sequence
+			if err := h.advanceCursor(r.Context(), connection.AppID, sequence, &cursor); err != nil {
+				closeWith(websocket.CloseInternalServerErr, "cursor store unavailable")
+				return
 			}
 		case <-ticker.C:
-			if h.Events == nil || len(pending) != 0 {
+			if h.Events == nil {
 				continue
+			}
+			if len(pending) != 0 {
+				if time.Since(pendingSince) < envelopeTimeout {
+					continue
+				}
+				// The app never answered. The cursor has not advanced, so
+				// closing hands the envelope to the next connection instead of
+				// stalling this app's stream with no error anywhere.
+				h.logger().Warn("Socket Mode envelope was not acknowledged", "app", connection.AppID, "timeout", envelopeTimeout)
+				closeWith(websocket.CloseTryAgainLater, "envelope was not acknowledged")
+				return
 			}
 			records, err := h.Events.ListAppEventsAfter(r.Context(), connection.AppID, cursor, 1)
 			if err != nil {
-				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "event source unavailable"), time.Now().Add(time.Second))
+				closeWith(websocket.CloseInternalServerErr, "event source unavailable")
 				return
 			}
 			if len(records) == 0 {
@@ -257,36 +330,74 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			record := records[0]
 			encoded, err := encodeEvent(record)
 			if err != nil {
-				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "event payload is invalid"), time.Now().Add(time.Second))
+				// An internal worker record, or a payload written before the
+				// typed payload contract, can never be delivered to an app.
+				// Closing here would leave the cursor in place and reconnect
+				// into the same record forever, so it is skipped durably and
+				// reported instead.
+				if errors.Is(err, events.ErrPayloadInternal) || errors.Is(err, events.ErrPayloadMalformed) || errors.Is(err, events.ErrPayloadRecipientScoped) {
+					h.logger().Warn("Socket Mode skipped an undeliverable event", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
+					if cursorErr := h.advanceCursor(r.Context(), connection.AppID, record.Sequence, &cursor); cursorErr != nil {
+						closeWith(websocket.CloseInternalServerErr, "cursor store unavailable")
+						return
+					}
+					continue
+				}
+				closeWith(websocket.CloseInternalServerErr, "event payload is invalid")
 				return
 			}
-			if err := conn.WriteJSON(encoded); err != nil {
+			if err := writeJSON(encoded); err != nil {
 				return
 			}
 			pending[string(record.Event.ID)] = record.Sequence
+			pendingSince = time.Now()
+		case <-pingTicker.C:
+			if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+				return
+			}
+			if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeTimeout)); err != nil {
+				return
+			}
 		case <-leaseTicker.C:
 			if err := h.Store.RenewSocketModeConnection(r.Context(), connection.ID, time.Now().UTC().Add(connectionLifetime)); err != nil {
-				_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, "connection lease unavailable"), time.Now().Add(time.Second))
+				closeWith(websocket.CloseInternalServerErr, "connection lease unavailable")
 				return
 			}
 		}
 	}
 }
 
+func servingHost(r *http.Request) string {
+	if name, err := os.Hostname(); err == nil && strings.TrimSpace(name) != "" {
+		return name
+	}
+	return r.Host
+}
+
+func (h Handler) advanceCursor(ctx context.Context, appID domain.AppID, sequence uint64, cursor *uint64) error {
+	if sequence <= *cursor {
+		return nil
+	}
+	if h.Cursors != nil {
+		if err := h.Cursors.SetSocketModeCursor(ctx, appID, sequence); err != nil {
+			return err
+		}
+	}
+	*cursor = sequence
+	return nil
+}
+
+// encodeEvent renders a durable record as a Socket Mode envelope. The payload
+// is read through events.Broadcastable, so neither an internal worker record nor
+// a record addressed to a single user can be sent to an app, and a payload that
+// is not self-describing is refused with a sentinel the caller can act on.
 func encodeEvent(record events.Record) (map[string]any, error) {
 	if strings.TrimSpace(string(record.Event.ID)) == "" {
-		return nil, errors.New("Socket Mode event ID is required")
+		return nil, fmt.Errorf("%w: Socket Mode event ID is required", events.ErrPayloadMalformed)
 	}
-	var payload map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(record.Event.Payload), &payload); err != nil {
-		return nil, fmt.Errorf("Socket Mode event payload is not JSON: %w", err)
+	delivered, err := events.Broadcastable(record.Event)
+	if err != nil {
+		return nil, err
 	}
-	if payload == nil {
-		return nil, errors.New("Socket Mode event payload must be a JSON object")
-	}
-	var eventType string
-	if err := json.Unmarshal(payload["type"], &eventType); err != nil || strings.TrimSpace(eventType) == "" {
-		return nil, errors.New("Socket Mode event payload requires a non-empty type")
-	}
-	return map[string]any{"envelope_id": string(record.Event.ID), "payload": payload, "type": "events_api", "accepts_response_payload": true}, nil
+	return map[string]any{"envelope_id": string(record.Event.ID), "payload": delivered.Object, "type": "events_api", "accepts_response_payload": true}, nil
 }

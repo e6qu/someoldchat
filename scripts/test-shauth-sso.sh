@@ -31,7 +31,10 @@ provider_project=someoldchat-shauth-provider
 primary_pid=
 witness_pid=
 
-GOWORK=off GOCACHE="$root/.cache/go-build" go build -trimpath -o "$work_dir/sameoldchat" ./cmd/server
+# `./cmd/server` resolved against the caller's working directory, so the script
+# only worked from the repository root even though $root exists precisely to make
+# it location-independent.
+GOWORK=off GOCACHE="$root/.cache/go-build" go build -C "$root" -trimpath -o "$work_dir/sameoldchat" ./cmd/server
 release_revision="sha256:$(openssl dgst -sha256 -r "$work_dir/sameoldchat" | awk '{print $1}')"
 
 ports=$(node - <<'NODE'
@@ -70,8 +73,12 @@ primary_client_secret=$(openssl rand -hex 32)
 witness_client_secret=$(openssl rand -hex 32)
 primary_api_token=$(openssl rand -hex 32)
 witness_api_token=$(openssl rand -hex 32)
-primary_session_token=$(openssl rand -hex 32)
-witness_session_token=$(openssl rand -hex 32)
+# No -session-token here. This suite exercises real single sign-on, and a static
+# browser session shared by every holder cannot coexist with a configured
+# identity provider: possession of the value yields an authenticated session and
+# its CSRF token together, in the same workspace SSO signs users in to. The
+# server now refuses that combination at startup, which is how this omission was
+# found — the qualification harness had been configuring both.
 primary_state_key=$(openssl rand -hex 48)
 witness_state_key=$(openssl rand -hex 48)
 
@@ -152,8 +159,15 @@ cleanup() {
 		fi
 	done
 	if test "$status" -ne 0; then
+		# Written as an explicit `if` rather than `test -f X && tail X`. The
+		# latter is safe only because POSIX suppresses `set -e` for a non-final
+		# member of an AND-OR list, which is exactly the kind of rule a reader
+		# has to look up before trusting that the teardown below still runs.
+		# Verified in sh, dash, and bash: both forms reach the teardown.
 		for log_file in "$work_dir/primary.log" "$work_dir/witness.log"; do
-			test -f "$log_file" && tail -n 120 "$log_file" >&2
+			if test -f "$log_file"; then
+				tail -n 120 "$log_file" >&2
+			fi
 		done
 		provider_compose logs --no-color --tail=120 shauth hydra postgres >&2 || true
 	fi
@@ -189,7 +203,7 @@ provider_compose exec -T postgres createdb -U shauth sameoldchat_witness
 "$work_dir/sameoldchat" \
 	-addr ":${primary_port}" -chat-mode local -store postgresql \
 	-db "postgres://shauth:${postgres_password}@127.0.0.1:${postgres_port}/sameoldchat_primary?sslmode=disable" \
-	-api-token "$primary_api_token" -session-token "$primary_session_token" \
+	-api-token "$primary_api_token" \
 	-bootstrap-admin-email primary-bootstrap@localhost.test \
 	-auth-workspace Tdev -auth-lookup-user Udev -auth-public-url "$primary_origin" -auth-state-key-hex "$primary_state_key" \
 	-oidc-issuer "$provider_origin" -oidc-client-id someoldchat-primary -oidc-client-secret "$primary_client_secret" \
@@ -199,7 +213,7 @@ primary_pid=$!
 "$work_dir/sameoldchat" \
 	-addr ":${witness_port}" -chat-mode local -store postgresql \
 	-db "postgres://shauth:${postgres_password}@127.0.0.1:${postgres_port}/sameoldchat_witness?sslmode=disable" \
-	-api-token "$witness_api_token" -session-token "$witness_session_token" \
+	-api-token "$witness_api_token" \
 	-bootstrap-admin-email witness-bootstrap@localhost.test \
 	-auth-workspace Tdev -auth-lookup-user Udev -auth-public-url "$witness_origin" -auth-state-key-hex "$witness_state_key" \
 	-oidc-issuer "$provider_origin" -oidc-client-id someoldchat-witness -oidc-client-secret "$witness_client_secret" \
@@ -216,9 +230,30 @@ for process_id in "$primary_pid" "$witness_pid"; do
 	fi
 done
 
+# The provider's validator credential must not authenticate anything here. The
+# Web API signals a rejected credential the way the pinned contract and every
+# official SDK expect — HTTP 200 with {"ok":false,"error":"invalid_auth"} —
+# because a 4xx makes an SDK retry a request that can never succeed. Asserting
+# the status alone therefore said nothing about whether the credential was
+# accepted; the envelope is what carries the refusal.
 for origin in "$primary_origin" "$witness_origin"; do
-	status=$(curl --silent --output /dev/null --write-out '%{http_code}' --header "Authorization: Bearer ${validator_token}" "$origin/api/auth.test")
-	test "$status" = 401
+	body=$(curl --silent --header "Authorization: Bearer ${validator_token}" "$origin/api/auth.test")
+	case "$body" in
+	*'"ok":false'*) ;;
+	*)
+		printf 'the Shauth validator credential was accepted by %s/api/auth.test: %s\n' "$origin" "$body" >&2
+		exit 1
+		;;
+	esac
+	case "$body" in
+	*'"error":"invalid_auth"'* | *'"error":"not_authed"'*) ;;
+	*)
+		printf '%s/api/auth.test refused the validator credential without naming an authentication failure: %s\n' "$origin" "$body" >&2
+		exit 1
+		;;
+	esac
+	# The browser entry point still redirects an unauthenticated visitor into the
+	# configured provider rather than answering with a bare status.
 	status=$(curl --silent --output /dev/null --write-out '%{http_code}' --header "Authorization: Basic $(printf 'shauth-validator:%s' "$validator_token" | openssl base64 -A)" "$origin/app")
 	test "$status" = 303
 done

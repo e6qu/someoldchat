@@ -3,6 +3,16 @@ version: v2
 modules:
   - path: proto
 
+# The http and chat processes of the separate-chat and separate-chat-replicated
+# targets (modules.json) carry independent replica counts, so a rollout always
+# runs mixed versions of this contract for a while. WIRE_JSON rejects the changes
+# that corrupt requests across that skew — renumbering or deleting a field,
+# changing its type or cardinality, renaming a message, service or RPC — while
+# still allowing additive evolution.
+breaking:
+  use:
+    - WIRE_JSON
+
 lint:
   use:
     - STANDARD

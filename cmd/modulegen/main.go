@@ -37,7 +37,9 @@ type target struct {
 
 func main() {
 	manifestPath := flag.String("manifest", "modules.json", "module manifest")
-	outPath := flag.String("out", "bindings.go", "generated Go file")
+	// The default used to be "bindings.go", which only ever created a stray
+	// untracked file at the repository root; every real caller passes this path.
+	outPath := flag.String("out", "internal/generated/bindings.go", "generated Go file")
 	check := flag.Bool("check", false, "verify the existing output instead of writing it")
 	flag.Parse()
 	if err := generate(*manifestPath, *outPath, *check); err != nil {

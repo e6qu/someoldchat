@@ -25,22 +25,21 @@ the file metadata and ticket transition commit together. The upload URL is an
 opaque bearer capability, so operators must protect the application endpoint
 and avoid logging request URLs.
 
-The current implementation accepts one completed file per request. Channel
-sharing, initial comments, and Block Kit publication associated with external
-completion are not silently inferred; callers must use the existing message
-and file-sharing operations until those fields have an explicit implementation.
-The current implementation accepts one completed file per request. A completion
-can include channel identifiers, an initial comment, and Block Kit blocks. The
-channel relation is committed with the file metadata. The comment and blocks
-are published as an idempotent message for each shared channel; the message
-does not contain a fabricated file attachment reference.
-The current implementation accepts one or more completed files per request. A
-completion can include channel identifiers, an initial comment, and Block Kit
-blocks. The channel relation is committed with every file's metadata. The
-comment or blocks are published once as an idempotent message for each shared
-channel; when both are supplied, the initial comment takes precedence as in
-the Slack method contract. The message does not contain a fabricated file
-attachment reference.
+The same applies to the two token-bearing public read paths the server mints:
+`GET /files/public/{token}` serves a public file download and
+`GET /users/{workspace}/{user}/photo/{token}` serves a user avatar. Both are
+unauthenticated capability URLs — possession of the token is the authorization —
+so a CDN, WAF, or access-log configuration in front of the application must treat
+the whole path as a secret and must not log it. The server-minted upload target
+`POST /internal/files/external/{upload}` is the same class of URL.
+
+`files.completeUploadExternal` accepts either a single `upload_id` or a `files`
+array of several completions in one request. A completion can include channel
+identifiers, an initial comment, Block Kit blocks, and a `thread_ts`. The channel
+relation is committed with every file's metadata. The comment or blocks are
+published once as an idempotent message for each shared channel; when both are
+supplied, the initial comment takes precedence as in the Slack method contract.
+The message does not contain a fabricated file attachment reference.
 
 If publication is interrupted after completion, retrying the same completion
 request reads the durable channel relation and retries only the missing
@@ -49,8 +48,9 @@ durable channel relation by supplying a different channel list.
 
 ## Process boundary
 
-In the monolith, the HTTP handler calls the local chat service directly. In
-distributed mode, the same service methods cross the generated gRPC boundary.
+In local composition the HTTP handler calls the chat service directly. In
+distributed composition the same service methods cross the generated gRPC
+boundary.
 Byte transfer uses a client-streaming gRPC method and does not load the object
 into application memory.
 

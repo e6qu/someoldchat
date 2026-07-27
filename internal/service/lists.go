@@ -12,6 +12,78 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
+// documentAccess ranks the access one grant confers on a list or a canvas.
+//
+// Lists and canvases are the same access model written twice: SetListAccess and
+// SetCanvasAccess both persist the strings "read", "write" and "owner" against a
+// user or a channel, and both surfaces authorized on workspace membership alone,
+// so every member of the workspace could read, edit and delete every other
+// member's document. Both are now authorized through one ordered scale, so the
+// two surfaces cannot drift apart again.
+type documentAccess int
+
+const (
+	documentAccessNone documentAccess = iota
+	documentAccessRead
+	documentAccessWrite
+	documentAccessOwner
+)
+
+// documentAccessLevel ranks a persisted grant. An unrecognized value ranks as no
+// access, so a grant written by a future version — or a corrupt row — fails
+// closed rather than being read as full access.
+func documentAccessLevel(value string) documentAccess {
+	switch value {
+	case "read":
+		return documentAccessRead
+	case "write":
+		return documentAccessWrite
+	case "owner":
+		return documentAccessOwner
+	default:
+		return documentAccessNone
+	}
+}
+
+// requireDocumentAccess is the single authorization primitive for a list or a
+// canvas. resolve reads the effective grant from the store, which returns the
+// highest-ranked grant that applies — ownership, a grant on the user, or a grant
+// on a channel the user belongs to — and store.ErrNotFound when none does.
+//
+// An insufficient grant is reported as store.ErrNotFound, the same answer a
+// document that does not exist gets. A caller who holds no grant learns neither
+// that the document exists nor who owns it, and no new error class has to cross
+// the transport boundary for the refusal to keep its meaning.
+func (m Messages) requireDocumentAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, required documentAccess, resolve func(context.Context, domain.UserID) (string, error)) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	granted, err := resolve(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if documentAccessLevel(granted) < required {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+// requireListAccess authorizes one operation on one list.
+func (m Messages) requireListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, required documentAccess) error {
+	return m.requireDocumentAccess(ctx, workspaceID, userID, required, func(ctx context.Context, actor domain.UserID) (string, error) {
+		grant, err := m.Store.GetListAccess(ctx, listID, actor)
+		return grant.Access, err
+	})
+}
+
+// requireCanvasAccess authorizes one operation on one canvas.
+func (m Messages) requireCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, canvasID domain.CanvasID, required documentAccess) error {
+	return m.requireDocumentAccess(ctx, workspaceID, userID, required, func(ctx context.Context, actor domain.UserID) (string, error) {
+		grant, err := m.Store.GetCanvasAccess(ctx, canvasID, actor)
+		return grant.Access, err
+	})
+}
+
 func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, descriptionBlocks, schema string, copyFrom domain.ListID, includeCopiedRecords, todoMode bool) (domain.List, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.List{}, err
@@ -38,6 +110,11 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	now := time.Now().UTC()
 	value := domain.List{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Name: name, DescriptionBlocks: descriptionBlocks, Schema: schema, TodoMode: todoMode, CreatedAt: now, UpdatedAt: now}
 	if copyFrom != "" {
+		// Copying reads the source list's description and schema, and optionally
+		// every record in it, so it needs read access to the source.
+		if err := m.requireListAccess(ctx, workspaceID, userID, copyFrom, documentAccessRead); err != nil {
+			return domain.List{}, err
+		}
 		copied, err := m.Store.GetList(ctx, workspaceID, copyFrom)
 		if err != nil {
 			return domain.List{}, err
@@ -45,7 +122,7 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 		value.DescriptionBlocks = copied.DescriptionBlocks
 		value.Schema = copied.Schema
 	}
-	event, err := listEvent(workspaceID, userID, "list.created", string(id))
+	event, err := listEvent(workspaceID, userID, "list.created", events.String("list_id", string(id)))
 	if err != nil {
 		return domain.List{}, err
 	}
@@ -64,7 +141,7 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 				if err != nil {
 					return domain.List{}, err
 				}
-				created, err := listEvent(workspaceID, userID, "list.item.created", string(itemID))
+				created, err := listEvent(workspaceID, userID, "list.item.created", events.String("list_item_id", string(itemID)), events.String("list_id", string(id)))
 				if err != nil {
 					return domain.List{}, err
 				}
@@ -82,7 +159,7 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 }
 
 func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name, descriptionBlocks string, todoMode, todoModeSet bool) (domain.List, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
 		return domain.List{}, err
 	}
 	value, err := m.Store.GetList(ctx, workspaceID, id)
@@ -102,7 +179,7 @@ func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID
 		value.TodoMode = todoMode
 	}
 	value.UpdatedAt = time.Now().UTC()
-	event, err := listEvent(workspaceID, userID, "list.updated", string(id))
+	event, err := listEvent(workspaceID, userID, "list.updated", events.String("list_id", string(id)))
 	if err != nil {
 		return domain.List{}, err
 	}
@@ -113,7 +190,7 @@ func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID
 }
 
 func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, parentItemID domain.ListItemID, fields string) (domain.ListItem, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return domain.ListItem{}, err
 	}
 	if _, err := m.Store.GetList(ctx, workspaceID, listID); err != nil {
@@ -129,7 +206,7 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 	}
 	now := time.Now().UTC()
 	value := domain.ListItem{ID: id, ListID: listID, ParentItemID: parentItemID, WorkspaceID: workspaceID, Fields: fields, CreatedBy: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now}
-	event, err := listEvent(workspaceID, userID, "list.item.created", string(id))
+	event, err := listEvent(workspaceID, userID, "list.item.created", events.String("list_item_id", string(id)), events.String("list_id", string(listID)))
 	if err != nil {
 		return domain.ListItem{}, err
 	}
@@ -140,21 +217,21 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) GetListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID) (domain.ListItem, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessRead); err != nil {
 		return domain.ListItem{}, err
 	}
 	return m.Store.GetListItem(ctx, workspaceID, listID, itemID)
 }
 
 func (m Messages) ListItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, request domain.PageRequest, archived bool) (domain.ListItemPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessRead); err != nil {
 		return domain.ListItemPage{}, err
 	}
 	return m.Store.ListItems(ctx, workspaceID, listID, request, archived)
 }
 
 func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemID domain.ListItemID, fields string, archived bool) (domain.ListItem, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return domain.ListItem{}, err
 	}
 	value, err := m.Store.GetListItem(ctx, workspaceID, listID, itemID)
@@ -168,7 +245,7 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	value.Archived = archived
 	value.UpdatedBy = userID
 	value.UpdatedAt = time.Now().UTC()
-	event, err := listEvent(workspaceID, userID, "list.item.updated", string(itemID))
+	event, err := listEvent(workspaceID, userID, "list.item.updated", events.String("list_item_id", string(itemID)), events.String("list_id", string(listID)))
 	if err != nil {
 		return domain.ListItem{}, err
 	}
@@ -179,7 +256,7 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, cells string) ([]domain.ListItem, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return nil, err
 	}
 	var input []map[string]json.RawMessage
@@ -247,7 +324,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 		item.Fields = string(encoded)
 		item.UpdatedBy = userID
 		item.UpdatedAt = time.Now().UTC()
-		event, err := listEvent(workspaceID, userID, "list.item.updated", string(itemID))
+		event, err := listEvent(workspaceID, userID, "list.item.updated", events.String("list_item_id", string(itemID)), events.String("list_id", string(listID)))
 		if err != nil {
 			return nil, err
 		}
@@ -260,13 +337,13 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) DeleteListItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, itemIDs []domain.ListItemID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessWrite); err != nil {
 		return err
 	}
 	if len(itemIDs) == 0 {
 		return ErrInvalidList
 	}
-	event, err := listEvent(workspaceID, userID, "list.items.deleted", string(listID))
+	event, err := listEvent(workspaceID, userID, "list.items.deleted", events.String("list_id", string(listID)), events.Strings("list_item_ids", listItemIDStrings(itemIDs)))
 	if err != nil {
 		return err
 	}
@@ -274,7 +351,9 @@ func (m Messages) DeleteListItems(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) SetListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	// Granting access is the strongest operation on a list: write access must not
+	// be enough to hand the list to anyone else.
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessOwner); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetList(ctx, workspaceID, listID); err != nil {
@@ -304,7 +383,7 @@ func (m Messages) SetListAccess(ctx context.Context, workspaceID domain.Workspac
 		}
 	}
 	for _, target := range channelIDs {
-		event, err := listEvent(workspaceID, userID, "list.access.set", string(listID)+"|channel|"+string(target))
+		event, err := listEvent(workspaceID, userID, "list.access.set", events.String("list_id", string(listID)), events.String("entity_type", "channel"), events.String("entity_id", string(target)), events.String("access", access))
 		if err != nil {
 			return err
 		}
@@ -313,7 +392,7 @@ func (m Messages) SetListAccess(ctx context.Context, workspaceID domain.Workspac
 		}
 	}
 	for _, target := range userIDs {
-		event, err := listEvent(workspaceID, userID, "list.access.set", string(listID)+"|user|"+string(target))
+		event, err := listEvent(workspaceID, userID, "list.access.set", events.String("list_id", string(listID)), events.String("entity_type", "user"), events.String("entity_id", string(target)), events.String("access", access))
 		if err != nil {
 			return err
 		}
@@ -325,7 +404,7 @@ func (m Messages) SetListAccess(ctx context.Context, workspaceID domain.Workspac
 }
 
 func (m Messages) DeleteListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessOwner); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetList(ctx, workspaceID, listID); err != nil {
@@ -335,7 +414,7 @@ func (m Messages) DeleteListAccess(ctx context.Context, workspaceID domain.Works
 		return ErrInvalidList
 	}
 	for _, target := range channelIDs {
-		event, err := listEvent(workspaceID, userID, "list.access.deleted", string(listID)+"|channel|"+string(target))
+		event, err := listEvent(workspaceID, userID, "list.access.deleted", events.String("list_id", string(listID)), events.String("entity_type", "channel"), events.String("entity_id", string(target)))
 		if err != nil {
 			return err
 		}
@@ -344,7 +423,7 @@ func (m Messages) DeleteListAccess(ctx context.Context, workspaceID domain.Works
 		}
 	}
 	for _, target := range userIDs {
-		event, err := listEvent(workspaceID, userID, "list.access.deleted", string(listID)+"|user|"+string(target))
+		event, err := listEvent(workspaceID, userID, "list.access.deleted", events.String("list_id", string(listID)), events.String("entity_type", "user"), events.String("entity_id", string(target)))
 		if err != nil {
 			return err
 		}
@@ -356,7 +435,7 @@ func (m Messages) DeleteListAccess(ctx context.Context, workspaceID domain.Works
 }
 
 func (m Messages) StartListDownload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, includeArchived bool) (domain.ListDownload, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireListAccess(ctx, workspaceID, userID, listID, documentAccessRead); err != nil {
 		return domain.ListDownload{}, err
 	}
 	if _, err := m.Store.GetList(ctx, workspaceID, listID); err != nil {
@@ -368,7 +447,7 @@ func (m Messages) StartListDownload(ctx context.Context, workspaceID domain.Work
 	}
 	now := time.Now().UTC()
 	value := domain.ListDownload{ID: id, ListID: listID, WorkspaceID: workspaceID, Status: "COMPLETED", URL: fmt.Sprintf("/internal/slack-lists/download.csv?list_id=%s&job_id=%s", listID, id), IncludeArchived: includeArchived, CreatedAt: now}
-	event, err := listEvent(workspaceID, userID, "list.download.started", string(id))
+	event, err := listEvent(workspaceID, userID, "list.download.started", events.String("list_download_id", string(id)), events.String("list_id", string(listID)))
 	if err != nil {
 		return domain.ListDownload{}, err
 	}
@@ -382,7 +461,17 @@ func (m Messages) GetListDownload(ctx context.Context, workspaceID domain.Worksp
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.ListDownload{}, err
 	}
-	return m.Store.GetListDownload(ctx, workspaceID, id)
+	value, err := m.Store.GetListDownload(ctx, workspaceID, id)
+	if err != nil {
+		return domain.ListDownload{}, err
+	}
+	// A download job carries the exported list's contents, so reading the job is
+	// a read of the list. Checking the job's own identifier only would let a
+	// second member collect an export of a list they cannot open.
+	if err := m.requireListAccess(ctx, workspaceID, userID, value.ListID, documentAccessRead); err != nil {
+		return domain.ListDownload{}, err
+	}
+	return value, nil
 }
 
 func validateListAccess(access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
@@ -407,10 +496,14 @@ func normalizeJSONArray(value, defaultValue string) (string, error) {
 	return string(encoded), err
 }
 
-func listEvent(workspaceID domain.WorkspaceID, actorID domain.UserID, topic, payload string) (events.Event, error) {
-	id, err := domain.NewEventID()
-	if err != nil {
-		return events.Event{}, err
+func listEvent(workspaceID domain.WorkspaceID, actorID domain.UserID, topic string, fields ...events.Field) (events.Event, error) {
+	return newEvent(workspaceID, actorID, events.NewPayload(topic, fields...), time.Now().UTC())
+}
+
+func listItemIDStrings(values []domain.ListItemID) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		result = append(result, string(value))
 	}
-	return events.Event{ID: id, WorkspaceID: workspaceID, ActorID: actorID, Topic: topic, Payload: payload, CreatedAt: time.Now().UTC()}, nil
+	return result
 }

@@ -1,16 +1,29 @@
+# Exact versions, not ranges. specs/dependency-policy.md forbids wildcard ranges,
+# and the two modules previously pinned mutually unsatisfiable AWS provider
+# majors (">= 5.0, < 6.0" here against ">= 5.0, < 7.0" in terraform/ecs-runtime),
+# so a root module consuming both could not `terraform init` at all.
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = "1.13.5"
   required_providers {
-    aws     = { source = "hashicorp/aws", version = ">= 5.0, < 6.0" }
-    archive = { source = "hashicorp/archive", version = ">= 2.4, < 2.8" }
+    aws     = { source = "hashicorp/aws", version = "6.55.0" }
+    archive = { source = "hashicorp/archive", version = "2.7.1" }
   }
 }
+
+data "aws_partition" "current" {}
+data "aws_caller_identity" "current" {}
+data "aws_region" "current" {}
 
 resource "aws_ecs_cluster" "this" {
   name = var.name
   setting {
-    name  = "containerInsights"
-    value = "enabled"
+    name = "containerInsights"
+    # Container Insights bills per ingested metric continuously, independent of
+    # task count, so a module whose stated purpose is a near-zero idle baseline
+    # must let an operator turn it off. It stays on by default because
+    # aws_cloudwatch_dashboard.scale_zero reads ECS/ContainerInsights metrics;
+    # the task-count widgets go blank when it is disabled.
+    value = var.container_insights ? "enabled" : "disabled"
   }
 }
 
@@ -76,18 +89,38 @@ resource "aws_iam_role_policy_attachment" "activator_vpc" {
 resource "aws_iam_role_policy" "activator" {
   role = aws_iam_role.activator.id
   policy = jsonencode({ Version = "2012-10-17", Statement = [
-    { Effect = "Allow", Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], Resource = "*" },
+    # Scoped to this deployment's own log group. It used to be Resource = "*",
+    # which let a compromised activator write into any log group in the account.
+    # Note that aws_iam_role_policy_attachment.activator_vpc attaches the
+    # AWS-managed VPC access policy, which still grants account-wide log writes;
+    # replacing it with a scoped elastic-network-interface policy is recorded as
+    # a follow-up in README.md rather than guessed at here.
+    { Effect = "Allow", Action = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"], Resource = "${aws_cloudwatch_log_group.activator.arn}:*" },
     { Effect = "Allow", Action = ["ecs:RunTask"], Resource = aws_ecs_task_definition.application.arn, Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } } },
-    { Effect = "Allow", Action = ["ecs:DescribeTasks", "ecs:ListTasks", "ecs:StopTask"], Resource = "*", Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } } },
-    { Effect = "Allow", Action = ["dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Scan", "dynamodb:TransactWriteItems"], Resource = aws_dynamodb_table.state.arn },
-    { Effect = "Allow", Action = ["iam:PassRole"], Resource = [aws_iam_role.execution.arn, var.application_task_role_arn] }
+    { Effect = "Allow", Action = ["ecs:ListTasks"], Resource = "*", Condition = { ArnEquals = { "ecs:cluster" = aws_ecs_cluster.this.arn } } },
+    # DescribeTasks and StopTask are scoped to this cluster's task ARNs. An
+    # ArnEquals condition on a key the request context does not carry evaluates
+    # false and denies, so the cluster condition is kept only on ListTasks,
+    # where ECS documents `ecs:cluster`.
+    { Effect = "Allow", Action = ["ecs:DescribeTasks", "ecs:StopTask"], Resource = "arn:${data.aws_partition.current.partition}:ecs:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:task/${aws_ecs_cluster.this.name}/*" },
+    { Effect = "Allow", Action = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:DeleteItem", "dynamodb:Scan", "dynamodb:TransactWriteItems"], Resource = aws_dynamodb_table.state.arn },
+    # Without the PassedToService condition this role could hand the task role —
+    # which holds the object-storage and secret access — to any service that
+    # accepts a passed role, which is a privilege-escalation primitive.
+    { Effect = "Allow", Action = ["iam:PassRole"], Resource = [aws_iam_role.execution.arn, var.application_task_role_arn], Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } } }
   ] })
 }
 
+# Holds the wake lock, the scale-down lock, the idle-window marker, and every
+# in-flight request and WebSocket lease. Because the name embeds var.name, a
+# rename would otherwise replace the table in one apply and destroy every lock
+# and lease at once, after which both activators believe nothing is held and can
+# start a second wake and a simultaneous scale-down.
 resource "aws_dynamodb_table" "state" {
-  name         = "${var.name}-activator"
-  billing_mode = "PAY_PER_REQUEST"
-  hash_key     = "id"
+  name                        = "${var.name}-activator"
+  billing_mode                = "PAY_PER_REQUEST"
+  hash_key                    = "id"
+  deletion_protection_enabled = true
   attribute {
     name = "id"
     type = "S"
@@ -96,12 +129,20 @@ resource "aws_dynamodb_table" "state" {
     attribute_name = "expires"
     enabled        = true
   }
+  point_in_time_recovery {
+    enabled = true
+  }
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 data "archive_file" "activator" {
   type        = "zip"
   source_file = "${path.module}/activator.py"
-  output_path = "${path.module}/.activator.zip"
+  # Written under .terraform so `make clean` and the module .gitignore already
+  # cover it; it used to land next to the source as .activator.zip.
+  output_path = "${path.module}/.terraform/tmp/activator.zip"
 }
 resource "aws_lambda_function" "activator" {
   function_name                  = var.name
@@ -112,12 +153,34 @@ resource "aws_lambda_function" "activator" {
   source_code_hash               = data.archive_file.activator.output_base64sha256
   memory_size                    = var.lambda_memory_mb
   timeout                        = var.request_timeout_seconds
-  reserved_concurrent_executions = 50
+  reserved_concurrent_executions = var.lambda_reserved_concurrency
   vpc_config {
     subnet_ids         = var.lambda_subnet_ids
     security_group_ids = var.lambda_security_group_ids
   }
-  environment { variables = { CLUSTER = aws_ecs_cluster.this.name, TASK_DEFINITION = aws_ecs_task_definition.application.arn, SUBNETS = join(",", var.private_subnet_ids), SECURITY_GROUPS = join(",", concat([aws_security_group.application.id], var.application_security_group_ids)), PORT = tostring(var.application_port), REPLICAS = tostring(var.application_replicas), STARTUP_TIMEOUT = tostring(var.startup_timeout_seconds), REQUEST_TIMEOUT = tostring(var.request_timeout_seconds), STATE_TABLE = aws_dynamodb_table.state.name } }
+  environment { variables = { CLUSTER = aws_ecs_cluster.this.name, TASK_DEFINITION = aws_ecs_task_definition.application.arn, SUBNETS = join(",", var.private_subnet_ids), SECURITY_GROUPS = join(",", concat([aws_security_group.application.id], var.application_security_group_ids)), PORT = tostring(var.application_port), REPLICAS = tostring(var.application_replicas), STARTUP_TIMEOUT = tostring(var.startup_timeout_seconds), REQUEST_TIMEOUT = tostring(var.request_timeout_seconds), STATE_TABLE = aws_dynamodb_table.state.name, IDLE_AFTER = tostring(var.idle_after_seconds), MAX_BODY_BYTES = tostring(var.request_max_body_bytes) } }
+}
+
+# The request that restarts the idle window can never be the invocation that
+# observes it elapsed, so scale-down needs an invocation with no request in
+# flight. Without this the activator stopped every task in each request's
+# `finally`, which meant no idle window and a cold start per page load.
+resource "aws_cloudwatch_event_rule" "activator_idle_sweep" {
+  name                = "${var.name}-activator-idle-sweep"
+  description         = "Stops application tasks once the configured idle window has elapsed"
+  schedule_expression = "rate(${var.idle_sweep_minutes} ${var.idle_sweep_minutes == 1 ? "minute" : "minutes"})"
+}
+resource "aws_cloudwatch_event_target" "activator_idle_sweep" {
+  rule  = aws_cloudwatch_event_rule.activator_idle_sweep.name
+  arn   = aws_lambda_function.activator.arn
+  input = jsonencode({ sameoldchat_maintenance = true })
+}
+resource "aws_lambda_permission" "activator_idle_sweep" {
+  statement_id  = "AllowIdleSweep"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.activator.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.activator_idle_sweep.arn
 }
 
 resource "aws_apigatewayv2_api" "edge" {
@@ -137,10 +200,35 @@ resource "aws_apigatewayv2_route" "edge" {
   route_key = "$default"
   target    = "integrations/${aws_apigatewayv2_integration.edge.id}"
 }
+# The unauthenticated public front door of a scale-to-zero deployment, where
+# each request can trigger ecs:RunTask. With only the account-level default an
+# anonymous flood drove Lambda invocations and Fargate task starts without
+# bound, and no request log existed to reconstruct it afterwards.
 resource "aws_apigatewayv2_stage" "edge" {
   api_id      = aws_apigatewayv2_api.edge.id
   name        = "$default"
   auto_deploy = true
+  default_route_settings {
+    throttling_burst_limit = var.edge_throttling_burst_limit
+    throttling_rate_limit  = var.edge_throttling_rate_limit
+  }
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.edge_access.arn
+    format = jsonencode({
+      requestId        = "$context.requestId"
+      requestTime      = "$context.requestTime"
+      httpMethod       = "$context.httpMethod"
+      path             = "$context.path"
+      status           = "$context.status"
+      protocol         = "$context.protocol"
+      responseLength   = "$context.responseLength"
+      integrationError = "$context.integrationErrorMessage"
+    })
+  }
+}
+resource "aws_cloudwatch_log_group" "edge_access" {
+  name              = "/aws/apigateway/${var.name}/access"
+  retention_in_days = var.log_retention_days
 }
 resource "aws_lambda_permission" "api" {
   statement_id  = "AllowHttpApi"
@@ -341,8 +429,8 @@ resource "aws_ecs_task_definition" "websocket_edge" {
   family                   = "${var.name}-websocket-edge"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = 512
-  memory                   = 1024
+  cpu                      = var.websocket_edge_cpu
+  memory                   = var.websocket_edge_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = var.websocket_edge_task_role_arn
   runtime_platform {
@@ -353,17 +441,28 @@ resource "aws_ecs_task_definition" "websocket_edge" {
     name      = "${var.name}-websocket-edge"
     image     = var.websocket_edge_image
     essential = true
+    # scripts/check-task-definition-flags.sh (make task-flags-check) resolves the
+    # annotation below and fails when this list names a flag the binary does not
+    # define, or omits one it requires. Every entry here must stay a literal so
+    # the check can read it: `-subnets`, `-security-groups`, and `-replicas`
+    # survived here for a whole release after the binary stopped accepting them,
+    # and no gate could see it.
+    # flag-contract: cmd/ecs-ws-activator
     command = [
       "-listen", ":${var.websocket_edge_port}",
       "-cluster", aws_ecs_cluster.this.name,
       "-service", aws_ecs_service.websocket_application.name,
       "-family", aws_ecs_task_definition.websocket_application.family,
       "-port", tostring(var.websocket_application_port),
-      "-subnets", join(",", var.private_subnet_ids),
-      "-security-groups", aws_security_group.websocket_application.id,
       "-state-table", aws_dynamodb_table.state.name,
-      "-replicas", tostring(var.websocket_application_replicas),
       "-startup-timeout", "${var.websocket_startup_timeout_seconds}s",
+      "-idle-timeout", "${var.websocket_idle_timeout_seconds}s",
+      "-lease-ttl", "${var.websocket_lease_ttl_seconds}s",
+      # The edge no longer changes DesiredCount itself; it reports arrival and
+      # idleness to the separately deployed lifecycle activator, which owns the
+      # drain, snapshot, verify, and stop sequence.
+      "-activator-url", var.websocket_lifecycle_activator_url,
+      "-activator-token", var.websocket_lifecycle_activator_token,
       "-allowed-origin", var.websocket_allowed_origin,
     ]
     portMappings = [{ containerPort = var.websocket_edge_port, protocol = "tcp" }]
@@ -379,14 +478,23 @@ resource "aws_ecs_task_definition" "websocket_edge" {
 }
 
 resource "aws_ecs_service" "websocket_edge" {
-  name                               = "${var.name}-websocket-edge"
-  cluster                            = aws_ecs_cluster.this.id
-  task_definition                    = aws_ecs_task_definition.websocket_edge.arn
-  desired_count                      = var.websocket_edge_replicas
-  launch_type                        = "FARGATE"
-  platform_version                   = "1.4.0"
-  deployment_minimum_healthy_percent = 50
+  name             = "${var.name}-websocket-edge"
+  cluster          = aws_ecs_cluster.this.id
+  task_definition  = aws_ecs_task_definition.websocket_edge.arn
+  desired_count    = var.websocket_edge_replicas
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+  # The edge holds the client end of every proxied WebSocket, so ECS must never
+  # be allowed to terminate a task before its replacement is healthy: at 50 with
+  # two replicas, half of all connected clients were disconnected on every image
+  # update, and a bad image had no rollback.
+  deployment_minimum_healthy_percent = 100
   deployment_maximum_percent         = 200
+  health_check_grace_period_seconds  = var.websocket_startup_timeout_seconds
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
   network_configuration {
     subnets          = var.websocket_edge_subnet_ids
     security_groups  = [aws_security_group.websocket_edge.id]
@@ -406,6 +514,7 @@ resource "aws_lb" "websocket" {
   subnets                          = var.websocket_nlb_subnet_ids
   security_groups                  = [aws_security_group.websocket_nlb.id]
   enable_cross_zone_load_balancing = true
+  enable_deletion_protection       = var.websocket_nlb_deletion_protection
 }
 resource "aws_lb_target_group" "websocket_edge" {
   name        = substr("${var.name}-ws-edge", 0, 32)
@@ -413,9 +522,13 @@ resource "aws_lb_target_group" "websocket_edge" {
   protocol    = "TCP"
   target_type = "ip"
   vpc_id      = var.vpc_id
+  # cmd/ecs-ws-activator serves GET /healthz. A TCP probe kept a wedged task
+  # healthy, so ECS never replaced it and the unhealthy-target alarm never fired.
   health_check {
-    protocol = "TCP"
+    protocol = "HTTP"
     port     = "traffic-port"
+    path     = "/healthz"
+    matcher  = "200"
   }
 }
 resource "aws_lb_listener" "websocket" {

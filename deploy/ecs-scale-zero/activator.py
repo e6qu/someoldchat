@@ -28,7 +28,14 @@ STARTUP_TIMEOUT = int(os.environ["STARTUP_TIMEOUT"])
 REQUEST_TIMEOUT = int(os.environ["REQUEST_TIMEOUT"])
 STATE = dynamodb.Table(os.environ["STATE_TABLE"])
 STATE_CLIENT = dynamodb.meta.client
+IDLE_AFTER = int(os.environ["IDLE_AFTER"])
+MAX_BODY_BYTES = int(os.environ["MAX_BODY_BYTES"])
 SCALE_DOWN_LOCK = "scale-down"
+LAST_REQUEST = "last-request"
+# Response headers whose value is per-hop or recomputed by API Gateway. Set-Cookie
+# is excluded from the header map because duplicates cannot survive a mapping;
+# it is returned through the payload format 2.0 `cookies` list instead.
+HOP_BY_HOP_RESPONSE_HEADERS = {"connection", "content-length", "transfer-encoding", "set-cookie"}
 
 
 def response(status, body, retry_after=None):
@@ -136,10 +143,40 @@ def lease(name):
 
 
 def release(name):
+    # The lease key is an unguessable per-invocation UUID, so possession of the
+    # key is itself the ownership proof and no owner condition is needed. A
+    # delete that finds nothing is the already-expired case, which is benign.
     STATE.delete_item(Key={"id": name})
 
 
+def note_request():
+    """Starts (or restarts) the idle window at the current instant.
+
+    The row's own `expires` attribute is the end of the window, so an absent or
+    expired row means the window has elapsed. Time-to-live removal is eventually
+    consistent, so `expires` is always compared explicitly rather than relied on.
+    """
+    at = int(time.time())
+    STATE.put_item(Item={"id": LAST_REQUEST, "at": at, "expires": at + IDLE_AFTER})
+
+
+def within_idle_window(now):
+    item = STATE.get_item(Key={"id": LAST_REQUEST}, ConsistentRead=True).get("Item")
+    if not item:
+        return False
+    return int(item.get("expires", 0)) > now
+
+
 def stop_if_idle():
+    """Stops application tasks only once the configured idle window has elapsed.
+
+    This used to run in every request's `finally` and stopped every task as soon
+    as no other lease was held, so there was no idle window at all and each
+    non-overlapping request paid a full Fargate cold start. The idle window is
+    now enforced here and the scheduled maintenance invocation is what actually
+    reaches the stop, because the request that starts the window can never also
+    be the invocation that closes it.
+    """
     now = int(time.time())
     lock_owner = "scale-down:" + str(uuid.uuid4())
     try:
@@ -153,6 +190,8 @@ def stop_if_idle():
             return
         raise ActivationError("unable to acquire scale-down lock") from error
     try:
+        if within_idle_window(int(time.time())):
+            return
         leases = []
         scan = {"ConsistentRead": True, "FilterExpression": "begins_with(id, :prefix) AND expires > :now", "ExpressionAttributeValues": {":prefix": "lease:", ":now": int(time.time())}}
         while True:
@@ -170,7 +209,23 @@ def stop_if_idle():
         STATE.delete_item(Key={"id": SCALE_DOWN_LOCK}, ConditionExpression="owner = :owner", ExpressionAttributeValues={":owner": lock_owner})
 
 
+def maintenance():
+    """Closes the idle window without a request in flight.
+
+    A scheduled invocation is the only thing that can observe an elapsed idle
+    window, so `aws_cloudwatch_event_rule.activator_idle_sweep` drives this.
+    """
+    try:
+        stop_if_idle()
+    except (ActivationError, ClientError) as error:
+        print(json.dumps({"maintenance_error": str(error)}))
+        return {"stopped": False}
+    return {"stopped": True}
+
+
 def handler(event, _context):
+    if (event or {}).get("sameoldchat_maintenance"):
+        return maintenance()
     lease_id = "lease:" + str(uuid.uuid4())
     wake_owner = lease_id
     request_deadline = time.time() + REQUEST_TIMEOUT
@@ -203,16 +258,49 @@ def handler(event, _context):
             body = base64.b64decode(body)
         else:
             body = body.encode()
+        # The Go activator rejects an oversized body with 413 before it reaches
+        # the application (internal/activator/handler.go:137). This path had no
+        # cap at all, so the two activators enforced different contracts.
+        if len(body) > MAX_BODY_BYTES:
+            return response(413, "request body too large\n")
+        # An absent method must never be inferred: defaulting to GET turned a
+        # mutating call into a read and answered it as a success.
+        method = event.get("requestContext", {}).get("http", {}).get("method")
+        if not method:
+            raise ActivationError("request event carries no HTTP method")
         remaining = request_deadline - time.time()
         if remaining <= 1:
             return response(503, "application startup consumed the request deadline\n", retry_after=1)
-        result = http.request(event.get("requestContext", {}).get("http", {}).get("method", "GET"), target, body=body, headers=headers, timeout=urllib3.Timeout(connect=min(2.0, remaining), read=remaining), retries=False, preload_content=True)
+        result = http.request(method, target, body=body, headers=headers, timeout=urllib3.Timeout(connect=min(2.0, remaining), read=remaining), retries=False, preload_content=True)
         response_body = base64.b64encode(result.data).decode()
-        response_headers = {k: v for k, v in dict(result.headers).items() if k.lower() not in {"connection", "content-length", "transfer-encoding"}}
-        return {"statusCode": result.status, "headers": response_headers, "body": response_body, "isBase64Encoded": True}
+        # dict() over a urllib3 HTTPHeaderDict comma-joins repeated keys, which
+        # is correct for Vary or Cache-Control but destroys Set-Cookie: an
+        # Expires attribute contains a comma, so a joined pair cannot be split
+        # again and the browser kept at most one cookie. Payload format 2.0 has
+        # a dedicated cookies list for exactly this.
+        response_headers = {k: v for k, v in dict(result.headers).items() if k.lower() not in HOP_BY_HOP_RESPONSE_HEADERS}
+        payload = {"statusCode": result.status, "headers": response_headers, "body": response_body, "isBase64Encoded": True}
+        cookies = result.headers.getlist("Set-Cookie")
+        if cookies:
+            payload["cookies"] = cookies
+        return payload
     except (ActivationError, ClientError, urllib3.exceptions.HTTPError, ValueError) as error:
         print(json.dumps({"error": str(error)}))
         return response(503, "activator could not serve the request\n", retry_after=1)
     finally:
-        release(lease_id)
-        stop_if_idle()
+        # `finally` runs after the return value has been computed, so an
+        # exception escaping here discarded a completed 200 and failed the
+        # Lambda, which API Gateway reports as 500/502. AGENTS.md:48-50 forbids
+        # turning a handled error into an HTTP 500. Every lease and lock carries
+        # an `expires` attribute, so a skipped cleanup step is reclaimed by the
+        # next expiry instead of leaking, which is why swallowing is safe here
+        # and is not hiding a broken primary path.
+        #
+        # Scale-down is deliberately absent here: the request that restarts the
+        # idle window can never be the invocation that observes it elapsed, so
+        # attempting it would only take the scale-down lock and return.
+        for step in (note_request, lambda: release(lease_id)):
+            try:
+                step()
+            except Exception as error:  # noqa: BLE001
+                print(json.dumps({"cleanup_error": str(error)}))

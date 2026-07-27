@@ -1,19 +1,42 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint generated-check fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check rebase-audit bench profile check clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet workflow-check container-check module-docs-check task-flags-check dependency-check vuln-check contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
 GOWORK := off
 export GOWORK
-PROTOC_GEN_GO_VERSION := $(shell go list -m -f '{{.Version}}' google.golang.org/protobuf)
+PROTO_GEN_DIR := internal/modules/chat/transport/grpc/gen
+# Recursively expanded so `go list` runs only when proto-tools needs it; `:=`
+# executed it for every target including `clean`, which then failed or silently
+# produced an empty version on a machine without a warm module cache.
+PROTOC_GEN_GO_VERSION = $(shell GOCACHE=$(GOCACHE) go list -m -f '{{.Version}}' google.golang.org/protobuf)
+PROTOC_GEN_GO_GRPC_VERSION := 1.6.2
+# buf is pinned and built here for the same reason as the protoc plugins: it
+# selects the lint and breaking-change rule set, so a different buf silently
+# changes what `proto-lint` and `proto-breaking` accept. It used to be taken from
+# PATH, which meant the local gate and the CI gate could disagree.
+BUF_VERSION := 1.71.0
+# tests/dependency-admission cross-checks these against
+# specs/dependency-admission.yaml, so a pinned tool cannot drift from its
+# recorded publication time, checksum, provenance, and license.
+GOVULNCHECK_VERSION := 1.6.0
+
+BUF := $(PROTO_BIN)/buf
 
 proto-tools:
 	mkdir -p $(PROTO_BIN)
 	if test "$$($(PROTO_BIN)/protoc-gen-go --version 2>/dev/null)" != "protoc-gen-go $(PROTOC_GEN_GO_VERSION)"; then GOCACHE=$(GOCACHE) go build -trimpath -o $(PROTO_BIN)/protoc-gen-go google.golang.org/protobuf/cmd/protoc-gen-go; fi
-	if test "$$($(PROTO_BIN)/protoc-gen-go-grpc --version 2>/dev/null)" != "protoc-gen-go-grpc 1.6.2"; then GOBIN=$(PROTO_BIN) GOCACHE=$(GOCACHE) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2; fi
+	if test "$$($(PROTO_BIN)/protoc-gen-go-grpc --version 2>/dev/null)" != "protoc-gen-go-grpc $(PROTOC_GEN_GO_GRPC_VERSION)"; then GOBIN=$(PROTO_BIN) GOCACHE=$(GOCACHE) go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v$(PROTOC_GEN_GO_GRPC_VERSION); fi
+	if test "$$($(BUF) --version 2>/dev/null)" != "$(BUF_VERSION)"; then GOBIN=$(PROTO_BIN) GOCACHE=$(GOCACHE) go install github.com/bufbuild/buf/cmd/buf@v$(BUF_VERSION); fi
 
-all: check build
+all: check build build-static
 
-build:
+# The generated composition bindings are an input to every build. Without this
+# rule, editing modules.json and running `make build` produced binaries linked
+# against the previous bindings.go with no warning, and only `make check` noticed.
+internal/generated/bindings.go: modules.json
+	GOCACHE=$(GOCACHE) go run ./cmd/modulegen -manifest modules.json -out internal/generated/bindings.go
+
+build: internal/generated/bindings.go
 	GOCACHE=$(GOCACHE) go build -trimpath -o bin/sameoldchat ./cmd/server
 	GOCACHE=$(GOCACHE) go build -trimpath -o bin/sameoldchat-chatd ./cmd/chatd
 	GOCACHE=$(GOCACHE) go build -trimpath -o bin/sameoldchat-activator ./cmd/activator
@@ -22,7 +45,7 @@ build:
 	GOCACHE=$(GOCACHE) go build -trimpath -o bin/sameoldchat-socketmode-worker ./cmd/socketmode-worker
 	GOCACHE=$(GOCACHE) go build -trimpath -o bin/sameoldchat-blobgc ./cmd/blobgc
 
-build-static:
+build-static: internal/generated/bindings.go
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -trimpath -o bin/sameoldchat-static ./cmd/server
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -trimpath -o bin/sameoldchat-chatd-static ./cmd/chatd
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -trimpath -o bin/sameoldchat-activator-static ./cmd/activator
@@ -31,7 +54,7 @@ build-static:
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -trimpath -o bin/sameoldchat-socketmode-worker-static ./cmd/socketmode-worker
 	GOCACHE=$(GOCACHE) CGO_ENABLED=0 go build -trimpath -o bin/sameoldchat-blobgc-static ./cmd/blobgc
 
-build-dqlite:
+build-dqlite: internal/generated/bindings.go
 	GOCACHE=$(GOCACHE) go build -tags dqlite -trimpath -o bin/sameoldchat-dqlite ./cmd/server
 	GOCACHE=$(GOCACHE) go build -tags dqlite -trimpath -o bin/sameoldchat-chatd-dqlite ./cmd/chatd
 	GOCACHE=$(GOCACHE) go build -tags dqlite -trimpath -o bin/sameoldchat-blobgc-dqlite ./cmd/blobgc
@@ -40,7 +63,7 @@ test-dqlite:
 	GOCACHE=$(GOCACHE) go test -p 1 -tags dqlite ./...
 
 test-postgres:
-	test -n "$(SAMEOLDCHAT_POSTGRES_DSN)"
+	@test -n "$(SAMEOLDCHAT_POSTGRES_DSN)" || { echo 'SAMEOLDCHAT_POSTGRES_DSN is required' >&2; exit 1; }
 	GOCACHE=$(GOCACHE) go test -tags postgres ./tests/persistence-qualification ./internal/store/postgres ./internal/web
 
 test:
@@ -52,6 +75,9 @@ test-race:
 test-load:
 	GOCACHE=$(GOCACHE) go test ./tests/load -count=1
 
+# Not part of any gate: the bounded load suite already runs under `check-full`,
+# and running it under the race detector is a targeted investigation step for a
+# suspected data race in the load paths.
 test-load-race:
 	GOCACHE=$(GOCACHE) go test -race ./tests/load -count=1
 
@@ -80,23 +106,92 @@ generate:
 	PATH=$(PROTO_BIN):$(PATH) BUF_CACHE_DIR=$(CURDIR)/.cache/buf GOCACHE=$(GOCACHE) go generate ./...
 
 generate-proto: proto-tools
-	PATH=$(PROTO_BIN):$(PATH) BUF_CACHE_DIR=$(CURDIR)/.cache/buf buf generate
+	PATH=$(PROTO_BIN):$(PATH) BUF_CACHE_DIR=$(CURDIR)/.cache/buf $(BUF) generate
 
-proto-lint:
-	BUF_CACHE_DIR=$(CURDIR)/.cache/buf buf lint
+proto-lint: proto-tools
+	BUF_CACHE_DIR=$(CURDIR)/.cache/buf $(BUF) lint
 
-generated-check:
+# The http and chat processes of the distributed targets run at independent
+# replica counts (modules.json), so every rollout serves mixed versions of the
+# gRPC contract and wire skew is guaranteed, not hypothetical. buf.yaml selects
+# WIRE_JSON, which rejects the changes that corrupt requests across that skew
+# while still allowing additive evolution. Nothing enforced it: `proto-lint`
+# checks style, and cmd/contractcheck ratchets the Slack HTTP ledger, not the
+# protobuf wire format.
+#
+# BASE_REF follows the contract-ratchet convention so one workflow expression
+# drives both gates.
+proto-breaking: proto-tools
+	@test -n "$(BASE_REF)" || { echo 'BASE_REF is required' >&2; exit 1; }
+	BUF_CACHE_DIR=$(CURDIR)/.cache/buf $(BUF) breaking --against ".git#ref=$(BASE_REF)"
+
+# Regenerates into a throwaway directory and compares recursively, so the check
+# is read-only and detects a file the generator would add as well as generated
+# output orphaned by a deleted proto. `git diff` saw neither: it ignores
+# untracked files and it reported a clean tree while the generator was writing
+# into the working copy.
+generated-check: proto-tools
 	GOCACHE=$(GOCACHE) go run ./cmd/modulegen -manifest modules.json -out internal/generated/bindings.go -check
-	$(MAKE) generate-proto
-	git diff --exit-code -- internal/modules/chat/transport/grpc/gen
+	@set -eu; \
+	scratch="$$(mktemp -d)"; \
+	trap 'rm -rf "$$scratch"' EXIT INT TERM; \
+	PATH=$(PROTO_BIN):$(PATH) BUF_CACHE_DIR=$(CURDIR)/.cache/buf $(BUF) generate -o "$$scratch"; \
+	if ! diff -ru "$$scratch/$(PROTO_GEN_DIR)" "$(PROTO_GEN_DIR)"; then \
+		echo 'generated protobuf output does not match $(PROTO_GEN_DIR); run make generate-proto' >&2; \
+		exit 1; \
+	fi
 
+# `gofmt -l` reports formatting differences on stdout but writes parse errors to
+# stderr and exits 2, so the previous `test -z "$(... | xargs gofmt -l)"` passed
+# on Go that does not even parse: the substitution captured stdout only and the
+# pipeline's exit status was discarded. Both streams are captured and both the
+# report and the exit status are checked. `-z`/`xargs -0` keeps paths containing
+# spaces intact.
 fmt-check:
-	test -z "$$(git ls-files -- '*.go' | xargs gofmt -l)"
+	@set -eu; \
+	report="$$(mktemp)"; \
+	trap 'rm -f "$$report"' EXIT INT TERM; \
+	if ! git ls-files -z -- '*.go' | xargs -0 gofmt -l -e >"$$report" 2>&1; then \
+		echo 'gofmt failed:' >&2; \
+		cat "$$report" >&2; \
+		exit 1; \
+	fi; \
+	if test -s "$$report"; then \
+		echo 'gofmt reported unformatted or unparsable files:' >&2; \
+		cat "$$report" >&2; \
+		exit 1; \
+	fi
 
-workflow-check: dependency-check
+vet:
+	GOCACHE=$(GOCACHE) go vet ./...
+
+# specs/dependency-policy.md requires govulncheck for Go source as a mandatory
+# control on every dependency-changing change; no workflow ran it.
+vuln-check:
+	GOCACHE=$(GOCACHE) go run golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION) ./...
+
+# Pin syntax for workflow actions, container images, apt packages, Terraform
+# versions and providers, and pinned generators is enforced by the
+# dependency-admission inventory verifier, which is what specs/dependency-policy.md
+# attributes to this target. It previously had no recipe at all and was a bare
+# alias, so the rules the policy described existed nowhere.
+workflow-check:
+	GOCACHE=$(GOCACHE) go run ./tests/dependency-admission
 
 container-check: dependency-check
 	./scripts/check-container-publication.sh
+
+# Terraform validate never reads a README and terraform plan needs credentials,
+# so a module example that omits a required variable was invisible to every gate.
+module-docs-check:
+	./scripts/check-terraform-module-docs.sh
+
+# `terraform validate` treats a container command as an opaque list of strings and
+# no Go test reads a .tf file, so deploy/ecs-scale-zero passed three flags
+# cmd/ecs-ws-activator had stopped accepting and omitted three it requires. The
+# deployed task would have exited 2 on every start with every gate green.
+task-flags-check:
+	GOCACHE=$(GOCACHE) ./scripts/check-task-definition-flags.sh
 
 dependency-check:
 	GOTOOLCHAIN=local GOCACHE=$(GOCACHE) go list -mod=readonly all >/dev/null
@@ -110,12 +205,12 @@ compatibility-report:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -report
 
 contract-ratchet:
-	test -n "$(BASE_REF)"
+	@test -n "$(BASE_REF)" || { echo 'BASE_REF is required' >&2; exit 1; }
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -ratchet-base "$(BASE_REF)"
 
 rebase-audit:
-	test -n "$(PARENT)"
-	test -n "$(BRANCH)"
+	@test -n "$(PARENT)" || { echo 'PARENT is required' >&2; exit 1; }
+	@test -n "$(BRANCH)" || { echo 'BRANCH is required' >&2; exit 1; }
 	GOCACHE=$(GOCACHE) go run ./cmd/rebaseaudit -parent "$(PARENT)" -branch "$(BRANCH)" -target "$(or $(TARGET),HEAD)"
 
 BENCH ?= .
@@ -152,13 +247,18 @@ browser-qualification:
 	npm test --prefix tests/browser
 
 shauth-sso-qualification:
-	test -n "$(SHAUTH_SOURCE_DIR)"
+	@test -n "$(SHAUTH_SOURCE_DIR)" || { echo 'SHAUTH_SOURCE_DIR is required' >&2; exit 1; }
 	./scripts/test-shauth-sso.sh
 
-check: fmt-check workflow-check container-check dependency-check contract-check sdk-inventory-check proto-lint generated-check test
+check: fmt-check vet workflow-check container-check module-docs-check task-flags-check dependency-check contract-check sdk-inventory-check proto-lint generated-check test
+
+# Everything the pull-request workflow gates on, so a green local run and a
+# green CI run mean the same thing.
+check-full: check vuln-check test-race test-load test-transport-load test-fuzz build-static
 
 clean:
-	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform terraform/ecs-runtime/.terraform
+	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform terraform/ecs-runtime/.terraform \
+		deploy/ecs-scale-zero/.activator.zip deploy/ecs-scale-zero/__pycache__
 
 run:
 	GOCACHE=$(GOCACHE) go run ./cmd/server -chat-mode local -store memory -api-token xoxb-dev -session-token dev-session

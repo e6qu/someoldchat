@@ -103,9 +103,14 @@ func verify() error {
 		Swagger string                     `json:"swagger"`
 		Paths   map[string]json.RawMessage `json:"paths"`
 	}
-	body, _ := os.ReadFile(sources[0].Path)
+	// The error used to be discarded, so an I/O failure here surfaced as
+	// "unexpected end of JSON input" and sent the operator to the wrong cause.
+	body, err := os.ReadFile(sources[0].Path)
+	if err != nil {
+		return fmt.Errorf("read %s: %w", sources[0].Path, err)
+	}
 	if err := json.Unmarshal(body, &openapi); err != nil {
-		return err
+		return fmt.Errorf("decode %s: %w", sources[0].Path, err)
 	}
 	if openapi.Swagger != "2.0" {
 		return fmt.Errorf("OpenAPI version = %q", openapi.Swagger)

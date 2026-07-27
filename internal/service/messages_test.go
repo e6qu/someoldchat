@@ -19,6 +19,25 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+// seedWorkspaceAdmin promotes a seeded user to workspace administrator.
+//
+// memory.Store.SeedUser creates a MEMBER membership, and every administrative
+// method now requires requireWorkspaceAdmin, so a fixture that drives an
+// administrative operation has to state the authority it claims. These fixtures
+// previously passed a plain member and succeeded, which documented the defect
+// rather than the contract: a member could rename the workspace, approve an app
+// or set any user's role.
+func seedWorkspaceAdmin(t *testing.T, s *memory.Store, workspaceID domain.WorkspaceID, userID domain.UserID) {
+	t.Helper()
+	event, err := events.New(domain.EventID("evt_seed_admin_"+string(userID)), workspaceID, "", events.NewPayload("workspace.role_changed", events.String("user_id", string(userID)), events.String("role", string(domain.WorkspaceRoleAdmin))), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("build role event: %v", err)
+	}
+	if err := s.SetWorkspaceRole(context.Background(), workspaceID, userID, domain.WorkspaceRoleAdmin, event); err != nil {
+		t.Fatalf("promote %s to workspace administrator: %v", userID, err)
+	}
+}
+
 func TestPostMessageRejectsForeignUser(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
@@ -91,12 +110,99 @@ func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *test
 	}
 }
 
+// Every event this package emits has to be deliverable by every consumer of
+// the durable journal. The producers used to store bare identifiers, which no
+// consumer can decode, so this asserts the contract at the boundary the
+// consumers actually use rather than on a hand-written payload.
+func TestEmittedEventsAreDeliverableToEveryConsumer(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	ctx := context.Background()
+	messages := Messages{Store: s}
+	message, err := messages.Post(ctx, "T1", "U1", "C1", "hello", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := domain.NewMessageTimestamp(message.CreatedAt)
+	if _, err := messages.Update(ctx, "T1", "U1", "C1", timestamp, "hello again"); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.AddReaction(ctx, "T1", "U1", "C1", timestamp, "tada"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.MarkRead(ctx, "T1", "U1", "C1", timestamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.PostEphemeral(ctx, "T1", "U1", "C1", "U1", "just for you"); err != nil {
+		t.Fatal(err)
+	}
+	records, err := s.ListEventsAfter(ctx, "T1", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) < 5 {
+		t.Fatalf("records=%d, want the events of every call above", len(records))
+	}
+	sawMessageCreated := false
+	for _, record := range records {
+		delivered, err := events.Deliverable(record.Event)
+		if err != nil {
+			t.Fatalf("topic %q payload %q is not deliverable: %v", record.Event.Topic, record.Event.Payload, err)
+		}
+		if delivered.Type != record.Event.Topic {
+			t.Fatalf("topic %q payload type %q", record.Event.Topic, delivered.Type)
+		}
+		if events.RecipientScoped(record.Event.Topic) {
+			// The record is addressed to one user, so no audience consumer may
+			// receive it: its payload carries that user's message text.
+			if _, err := events.SlackEventBody(record, "A1"); !errors.Is(err, events.ErrPayloadRecipientScoped) {
+				t.Fatalf("topic %q was offered to an audience consumer: %v", record.Event.Topic, err)
+			}
+			if recipient, ok := delivered.Field("user_id"); !ok || recipient != "U1" {
+				t.Fatalf("topic %q recipient=%q ok=%v", record.Event.Topic, recipient, ok)
+			}
+			continue
+		}
+		if _, err := events.SlackEventBody(record, "A1"); err != nil {
+			t.Fatalf("topic %q cannot be delivered as a Slack event: %v", record.Event.Topic, err)
+		}
+		if strings.Contains(record.Event.Payload, "just for you") {
+			t.Fatalf("topic %q carries ephemeral message text: %s", record.Event.Topic, record.Event.Payload)
+		}
+		if record.Event.Topic != "message.created" {
+			continue
+		}
+		sawMessageCreated = true
+		if value, ok := delivered.Field("message_id"); !ok || value != string(message.ID) {
+			t.Fatalf("message.created message_id=%q ok=%v", value, ok)
+		}
+		if value, ok := delivered.Field("channel_id"); !ok || value != "C1" {
+			t.Fatalf("message.created channel_id=%q ok=%v", value, ok)
+		}
+		if strings.Contains(record.Event.Payload, "hello") {
+			t.Fatalf("message.created payload carries the message text: %s", record.Event.Payload)
+		}
+	}
+	if !sawMessageCreated {
+		t.Fatal("no message.created record was emitted")
+	}
+}
+
 func TestIntegrationLogsRequireAuthoritativeActorEvents(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
 	ctx := context.Background()
-	if err := s.SetAppApproval(ctx, "T1", "A1", "R1", domain.AppApprovalApproved, time.Now().UTC(), events.Event{ID: "EAPP1", WorkspaceID: "T1", ActorID: "U1", Topic: "app.approved", Payload: "A1", CreatedAt: time.Now().UTC()}); err != nil {
+	// The approval event is built the way the service builds it: an app
+	// identifier is a payload field, never the whole payload.
+	approval, err := events.New("EAPP1", "T1", "U1", events.NewPayload("app.approved", events.String("app_id", "A1")), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAppApproval(ctx, "T1", "A1", "R1", domain.AppApprovalApproved, time.Now().UTC(), approval); err != nil {
 		t.Fatal(err)
 	}
 	value, err := (Messages{Store: s}).IntegrationLogs(ctx, "T1", "U1", "A1", "added", "", "", 10, 1)
@@ -151,6 +257,7 @@ func TestAdminCreateUserNormalizesAndPersistsMembership(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "owner"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	ctx := context.Background()
 	user, err := (Messages{Store: s}).AdminCreateUser(ctx, "T1", "U1", " Alice@Example.COM ", "Alice Example", domain.WorkspaceRoleAdmin)
 	if err != nil {
@@ -386,6 +493,7 @@ func TestConversationTeamsAreDurableAndDisconnectable(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "one"})
 	s.SeedWorkspace(domain.Workspace{ID: "T2", Name: "two"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
 	messages := Messages{Store: s}
 	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1", "T2"}, false); err != nil {
@@ -409,6 +517,7 @@ func TestResetUserSessionsRevokesEveryTargetSession(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	ctx := context.Background()
 	if err := s.SeedSession(ctx, "target-one", domain.SessionRecord{WorkspaceID: "T1", UserID: "U2", ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
@@ -438,6 +547,7 @@ func TestAdminConversationMutationsDoNotRequireConversationMembership(t *testing
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "old"})
 	messages := Messages{Store: s}
 	value, err := messages.AdminRenameConversation(context.Background(), "T1", "U1", "C1", "new")
@@ -455,6 +565,7 @@ func TestAdminConversationInviteDoesNotRequireActorMembership(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "channel"})
 	if _, err := (Messages{Store: s}).AdminInviteConversationMembers(context.Background(), "T1", "U1", "C1", []domain.UserID{"U2", "U2"}); err != nil {
 		t.Fatal(err)
@@ -469,6 +580,7 @@ func TestAdminConversationConversionEnforcesConversationType(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "public"})
 	messages := Messages{Store: s}
 	value, err := messages.AdminConvertConversationToPrivate(context.Background(), "T1", "U1", "C1")
@@ -485,6 +597,7 @@ func TestAdminConversationPrefsAreTypedNormalizedAndDurable(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	messages := Messages{Store: s}
 	value, err := messages.AdminSetConversationPrefs(context.Background(), "T1", "U1", "C1", domain.ConversationPrefs{
@@ -542,6 +655,7 @@ func TestConversationAccessGroupsNormalizeAndPersist(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
 	messages := Messages{Store: s}
 	group, err := messages.CreateUserGroup(context.Background(), "T1", "U1", "Engineering", "engineering", "")
@@ -568,6 +682,7 @@ func TestInviteRequestApprovalIsDurableAndBounded(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	now := time.Now().UTC()
 	if err := s.CreateInviteRequest(context.Background(), domain.InviteRequest{ID: "IR1", WorkspaceID: "T1", Email: "one@example.com", RequestedBy: "U1", Status: domain.InviteRequestPending, CreatedAt: now}, events.Event{ID: "EIR1", WorkspaceID: "T1", Topic: "invite_request.created", Payload: "IR1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -590,6 +705,7 @@ func TestAdminInviteUserNormalizesAndPersistsAllInviteState(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	expiration := time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)
 	if err := (Messages{Store: s}).AdminInviteUser(context.Background(), "T1", "U1", " Alice@Example.COM ", []domain.ConversationID{"C1", "C1"}, "Welcome", "Alice Example", true, true, false, expiration); err != nil {
@@ -610,6 +726,7 @@ func TestAdminAssignUserReactivatesAtomicallyWithChannels(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	if err := s.SetUserDeleted(context.Background(), "T1", "U2", true, events.Event{ID: "EDEL", WorkspaceID: "T1", Topic: "user.removed", Payload: "U2", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
@@ -672,6 +789,7 @@ func TestAdminAppApprovalIsDurableAndBounded(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	messages := Messages{Store: s}
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -698,6 +816,7 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	messages := Messages{Store: s}
 	ctx := context.Background()
 	if err := messages.AdminAddEmoji(ctx, "T1", "U1", " Wave ", "https://cdn.example/wave.png"); err != nil {
@@ -726,6 +845,7 @@ func TestAdminConversationSearchIsBoundedAndWorkspaceScoped(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "engineering"})
 	page, err := (Messages{Store: s}).AdminSearchConversations(context.Background(), "T1", "U1", "gene", domain.PageRequest{Limit: 1})
@@ -765,6 +885,7 @@ func TestAdminWorkspaceNameMutationIsDurable(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "old"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	value, err := (Messages{Store: s}).AdminSetWorkspaceName(context.Background(), "T1", "U1", " New   Name ")
 	if err != nil || value.Name != "New Name" {
 		t.Fatalf("value=%+v err=%v", value, err)
@@ -779,6 +900,7 @@ func TestAdminWorkspaceDescriptionMutationIsDurable(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "old"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	value, err := (Messages{Store: s}).AdminSetWorkspaceDescription(context.Background(), "T1", "U1", " A   useful workspace ")
 	if err != nil || value.Description != "A useful workspace" {
 		t.Fatalf("value=%+v err=%v", value, err)
@@ -793,6 +915,7 @@ func TestAdminWorkspaceDiscoverabilityIsTypedAndDurable(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	messages := Messages{Store: s}
 	value, err := messages.AdminSetWorkspaceDiscoverability(context.Background(), "T1", "U1", domain.WorkspaceDiscoverabilityInviteOnly)
 	if err != nil || value.Discoverability != domain.WorkspaceDiscoverabilityInviteOnly {
@@ -811,6 +934,7 @@ func TestAdminWorkspaceIconRequiresAbsoluteHTTPURL(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	messages := Messages{Store: s}
 	value, err := messages.AdminSetWorkspaceIcon(context.Background(), "T1", "U1", " https://cdn.example/icon.png ")
 	if err != nil || value.IconURL != "https://cdn.example/icon.png" {
@@ -825,6 +949,7 @@ func TestAdminWorkspaceDefaultChannelsNormalizeAndValidate(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	messages := Messages{Store: s}
 	value, err := messages.AdminSetWorkspaceDefaultChannels(context.Background(), "T1", "U1", []domain.ConversationID{" C1 ", "C1"})
@@ -841,10 +966,13 @@ func TestAdminTeamUsersFiltersRolesAndPaginates(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	// The actor is the administrator the listing is expected to return: reading the
+	// administrators of a workspace is itself an administrative read, and promoting
+	// a second user to supply the actor would change the result being asserted.
 	if err := s.SetWorkspaceRole(context.Background(), "T1", "U1", domain.WorkspaceRoleAdmin, events.Event{ID: "evt_role", WorkspaceID: "T1", Topic: "test", CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := (Messages{Store: s}).AdminTeamUsers(context.Background(), "T1", "U2", domain.WorkspaceRoleAdmin, domain.PageRequest{Limit: 10})
+	page, err := (Messages{Store: s}).AdminTeamUsers(context.Background(), "T1", "U1", domain.WorkspaceRoleAdmin, domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Users) != 1 || page.Users[0].ID != "U1" {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}

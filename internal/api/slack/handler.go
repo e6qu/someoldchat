@@ -1,6 +1,7 @@
 package slack
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/csv"
 	"encoding/json"
@@ -12,9 +13,8 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	"io"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -369,13 +369,12 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	principal, err := h.SocketAuth.Authenticate(r)
 	if err != nil || !principal.HasScope(auth.ScopeConnectionsWrite) || principal.AppID == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid_auth"})
+		writeError(w, "invalid_auth")
 		return
 	}
 	result, err := h.SocketMode.Open(r.Context(), principal.AppID)
 	if err != nil {
-		code, reason := mapServiceError(err, "service_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": result.URL})
@@ -384,7 +383,7 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	errorName := strings.TrimSpace(fields["error"])
@@ -403,24 +402,20 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := normalizeHistoryRequest(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, request.Page)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	result := make([]map[string]any, 0, len(page.Messages))
-	for _, message := range page.Messages {
-		result = append(result, messageResponse(message))
-	}
+	result := rangedMessages(page.Messages, request.Range)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
@@ -432,52 +427,114 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := normalizeHistoryRequest(fields)
-	if err != nil || strings.TrimSpace(fields["ts"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["ts"]) == "" {
+		// /conversations.replies enumerates thread_not_found, not invalid_arguments.
+		writeError(w, "thread_not_found")
 		return
 	}
 	page, err := h.Messages.Replies(r.Context(), principal.WorkspaceID, principal.UserID, request.Channel, domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), request.Page)
 	if err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "thread_not_found"))
 		return
 	}
-	result := make([]map[string]any, 0, len(page.Messages))
-	for _, message := range page.Messages {
-		result = append(result, messageResponse(message))
-	}
+	result := rangedMessages(page.Messages, request.Range)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "messages": result, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 type historyRequest struct {
 	Channel domain.ConversationID
 	Page    domain.PageRequest
+	Range   historyRange
+}
+
+// historyRange is the `oldest`/`latest`/`inclusive` window declared by both
+// /conversations.history and /conversations.replies. All three arguments used to
+// be dropped, so a range-limited request answered `"ok":true` with the channel's
+// entire recent history — the caller received strictly more data than it asked
+// for and had no way to tell.
+//
+// The store has no range-scanning API, so the window is applied at the wire
+// boundary. Paging still works: `has_more` and `next_cursor` continue to describe
+// the underlying scan, so a client that follows the cursor sees every message in
+// the window, and a page may legitimately come back short or empty.
+type historyRange struct {
+	oldest    int64
+	hasOldest bool
+	latest    int64
+	hasLatest bool
+	inclusive bool
+}
+
+func (h historyRange) includes(timestamp string) bool {
+	value, ok := parseSlackTimestamp(timestamp)
+	if !ok {
+		return true
+	}
+	if h.hasOldest && (value < h.oldest || (value == h.oldest && !h.inclusive)) {
+		return false
+	}
+	if h.hasLatest && (value > h.latest || (value == h.latest && !h.inclusive)) {
+		return false
+	}
+	return true
 }
 
 func normalizeHistoryRequest(fields map[string]string) (historyRequest, error) {
 	channel := strings.TrimSpace(fields["channel"])
 	if channel == "" {
-		return historyRequest{}, errors.New("channel is required")
+		// Both operations enumerate channel_not_found as the missing-channel error.
+		return historyRequest{}, decodeFailure("channel_not_found", "channel is required")
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 || parsed > 200 {
-			return historyRequest{}, errors.New("limit must be between 1 and 200")
-		}
-		limit = parsed
+	limit, err := clampLimit(fields["limit"], 100, 200)
+	if err != nil {
+		return historyRequest{}, err
 	}
 	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
 	if cursor != "" {
 		if _, _, err := domain.DecodeMessageCursor(cursor); err != nil {
-			return historyRequest{}, err
+			return historyRequest{}, decodeFailure("invalid_cursor", "cursor is not a message cursor")
 		}
 	}
-	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}}, nil
+	window := historyRange{}
+	if raw := strings.TrimSpace(fields["oldest"]); raw != "" {
+		value, ok := parseSlackTimestamp(raw)
+		if !ok {
+			return historyRequest{}, decodeFailure("invalid_ts_oldest", "oldest is not a Slack timestamp")
+		}
+		window.oldest, window.hasOldest = value, true
+	}
+	if raw := strings.TrimSpace(fields["latest"]); raw != "" {
+		value, ok := parseSlackTimestamp(raw)
+		if !ok {
+			return historyRequest{}, decodeFailure("invalid_ts_latest", "latest is not a Slack timestamp")
+		}
+		window.latest, window.hasLatest = value, true
+	}
+	inclusive, err := parseBoolField(fields["inclusive"])
+	if err != nil {
+		return historyRequest{}, decodeFailure("invalid_arg_name", "inclusive must be a boolean")
+	}
+	window.inclusive = inclusive
+	return historyRequest{Channel: domain.ConversationID(channel), Page: domain.PageRequest{Limit: limit, Cursor: cursor}, Range: window}, nil
+}
+
+func rangedMessages(messages []domain.Message, window historyRange) []map[string]any {
+	result := make([]map[string]any, 0, len(messages))
+	for _, message := range messages {
+		if !window.includes(slackTimestamp(message.CreatedAt)) {
+			continue
+		}
+		result = append(result, messageResponse(message))
+	}
+	return result
 }
 
 func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
@@ -488,8 +545,7 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 	}
 	workspace, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	teamName := strings.TrimSpace(workspace.Name)
@@ -497,6 +553,19 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 		teamName = string(workspace.ID)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID})
+}
+
+// foreignWorkspace reports the first workspace in values that is not the
+// principal's own. Cross-workspace attachment is rejected at the wire boundary
+// so that a service or store that only validates existence cannot be talked into
+// a cross-tenant write.
+func foreignWorkspace(values []domain.WorkspaceID, own domain.WorkspaceID) (domain.WorkspaceID, bool) {
+	for _, value := range values {
+		if value != own {
+			return value, true
+		}
+	}
+	return "", false
 }
 
 func permissionScopes(principal auth.Principal) []string {
@@ -512,19 +581,17 @@ func permissionInfo(workspaceID domain.WorkspaceID, scopes []string) map[string]
 	resource := func(ids []string) map[string]any {
 		return map[string]any{"ids": ids, "wildcard": false}
 	}
-	category := func(values []string) map[string]any {
-		return map[string]any{"resources": resource([]string{}), "scopes": values}
+	empty := func() map[string]any {
+		return map[string]any{"resources": resource([]string{}), "scopes": []string{}}
 	}
-	result := map[string]any{
-		"app_home": category([]string{}),
-		"channel":  category([]string{}),
-		"group":    category([]string{}),
-		"im":       category([]string{}),
-		"mpim":     category([]string{}),
-		"team":     category(scopes),
+	return map[string]any{
+		"app_home": empty(),
+		"channel":  empty(),
+		"group":    empty(),
+		"im":       empty(),
+		"mpim":     empty(),
+		"team":     map[string]any{"resources": resource([]string{string(workspaceID)}), "scopes": scopes},
 	}
-	result["team"] = map[string]any{"resources": resource([]string{string(workspaceID)}), "scopes": scopes}
-	return result
 }
 
 func (h Handler) appsPermissionsScopesList(w http.ResponseWriter, r *http.Request) {
@@ -552,16 +619,13 @@ func (h Handler) appsPermissionsResourcesList(w http.ResponseWriter, r *http.Req
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 100 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
+	limit, err := clampLimit(fields["limit"], 100, 100)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	if strings.TrimSpace(fields["cursor"]) != "" {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "resources": []map[string]string{}, "response_metadata": map[string]string{"next_cursor": ""}})
@@ -575,18 +639,20 @@ func (h Handler) appsPermissionsResourcesList(w http.ResponseWriter, r *http.Req
 }
 
 func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, "")
+	// Pinned /apps.event.authorizations.list token parameter: "Requires scope:
+	// `authorizations:read`".
+	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["event_context"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "authorizations": []map[string]any{{
@@ -605,16 +671,13 @@ func (h Handler) appsPermissionsUsersList(w http.ResponseWriter, r *http.Request
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 100 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
+	limit, err := clampLimit(fields["limit"], 100, 100)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	resources := []map[string]any{}
 	if strings.TrimSpace(fields["cursor"]) == "" && limit > 0 {
@@ -628,27 +691,25 @@ func parsePermissionScopes(raw string) []string {
 }
 
 func (h Handler) appsPermissionsRequest(w http.ResponseWriter, r *http.Request) {
-	h.requestAppPermissions(w, r, "")
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	h.requestAppPermissionsWithFields(w, r, fields, "")
 }
 
 func (h Handler) appsPermissionsUsersRequest(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["user"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	h.requestAppPermissionsWithFields(w, r, fields, domain.UserID(strings.TrimSpace(fields["user"])))
-}
-
-func (h Handler) requestAppPermissions(w http.ResponseWriter, r *http.Request, target domain.UserID) {
-	fields, err := decodeFields(w, r)
-	if err != nil {
-		return
-	}
-	h.requestAppPermissionsWithFields(w, r, fields, target)
 }
 
 func (h Handler) requestAppPermissionsWithFields(w http.ResponseWriter, r *http.Request, fields map[string]string, target domain.UserID) {
@@ -660,12 +721,11 @@ func (h Handler) requestAppPermissionsWithFields(w http.ResponseWriter, r *http.
 	scopes := parsePermissionScopes(fields["scopes"])
 	triggerID := strings.TrimSpace(fields["trigger_id"])
 	if len(scopes) == 0 || triggerID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.RequestAppPermissions(r.Context(), principal.WorkspaceID, principal.UserID, target, scopes, triggerID); err != nil {
-		code, reason := mapServiceError(err, "permission_request_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -674,6 +734,7 @@ func (h Handler) requestAppPermissionsWithFields(w http.ResponseWriter, r *http.
 func (h Handler) viewsOpen(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, "")
@@ -683,16 +744,16 @@ func (h Handler) viewsOpen(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.OpenView(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "view": viewResponse(value)})
+	writeViewResponse(w, value)
 }
 
 func (h Handler) viewsPublish(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, "")
@@ -702,21 +763,21 @@ func (h Handler) viewsPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	target := domain.UserID(strings.TrimSpace(fields["user_id"]))
 	if target == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.PublishView(r.Context(), principal.WorkspaceID, principal.UserID, target, fields["view"], strings.TrimSpace(fields["hash"]))
 	if err != nil {
-		code, reason := mapServiceError(err, "view_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "view_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "view": viewResponse(value)})
+	writeViewResponse(w, value)
 }
 
 func (h Handler) viewsPush(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, "")
@@ -726,16 +787,16 @@ func (h Handler) viewsPush(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.PushView(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "view": viewResponse(value)})
+	writeViewResponse(w, value)
 }
 
 func (h Handler) viewsUpdate(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, "")
@@ -745,17 +806,20 @@ func (h Handler) viewsUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.UpdateView(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["view_id"]), strings.TrimSpace(fields["external_id"]), fields["view"], strings.TrimSpace(fields["hash"]))
 	if err != nil {
-		code, reason := mapServiceError(err, "view_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "view_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "view": viewResponse(value)})
+	writeViewResponse(w, value)
 }
 
-func viewResponse(value domain.View) map[string]any {
+// viewResponse renders a stored view. It used to panic when the stored payload was
+// not a JSON object, turning a read of durable data into an unhandled HTTP 500
+// with no `ok` field and killing the serving goroutine. A payload this handler
+// cannot render is now a handled `invalid_view`.
+func viewResponse(value domain.View) (map[string]any, error) {
 	result := make(map[string]any)
 	if err := json.Unmarshal([]byte(value.Payload), &result); err != nil {
-		panic(fmt.Sprintf("stored view payload is invalid: %v", err))
+		return nil, decodeFailure("invalid_view", "stored view payload is not a JSON object")
 	}
 	result["id"] = value.ID
 	result["team_id"] = value.WorkspaceID
@@ -763,12 +827,22 @@ func viewResponse(value domain.View) map[string]any {
 	result["root_view_id"] = value.RootViewID
 	result["previous_view_id"] = value.PreviousViewID
 	result["external_id"] = value.ExternalID
-	return result
+	return result, nil
+}
+
+func writeViewResponse(w http.ResponseWriter, value domain.View) {
+	rendered, err := viewResponse(value)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "view": rendered})
 }
 
 func (h Handler) workflowStepCompleted(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
@@ -777,8 +851,7 @@ func (h Handler) workflowStepCompleted(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.WorkflowStepCompleted(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["workflow_step_execute_id"]), fields["outputs"]); err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -787,6 +860,7 @@ func (h Handler) workflowStepCompleted(w http.ResponseWriter, r *http.Request) {
 func (h Handler) workflowStepFailed(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
@@ -795,8 +869,7 @@ func (h Handler) workflowStepFailed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.WorkflowStepFailed(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["workflow_step_execute_id"]), fields["error"]); err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -805,6 +878,7 @@ func (h Handler) workflowStepFailed(w http.ResponseWriter, r *http.Request) {
 func (h Handler) workflowUpdateStep(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeWorkflowStepsExecute)
@@ -813,8 +887,7 @@ func (h Handler) workflowUpdateStep(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.WorkflowUpdateStep(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["workflow_step_edit_id"]), fields["inputs"], fields["outputs"], fields["step_name"], fields["step_image_url"]); err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -827,7 +900,7 @@ func (h Handler) functionsCompleteSuccess(w http.ResponseWriter, r *http.Request
 	}
 	var outputs map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(fields["outputs"]), &outputs); err != nil || outputs == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -844,7 +917,7 @@ func (h Handler) functionsCompleteError(w http.ResponseWriter, r *http.Request) 
 func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request, requiredField string) (map[string]string, bool) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return nil, false
 	}
 	if _, err := h.authenticate(r, ""); err != nil {
@@ -852,7 +925,7 @@ func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request
 		return nil, false
 	}
 	if strings.TrimSpace(fields["function_execution_id"]) == "" || strings.TrimSpace(fields[requiredField]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return nil, false
 	}
 	return fields, true
@@ -861,6 +934,7 @@ func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request
 func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, "")
@@ -869,8 +943,7 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -892,7 +965,7 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -900,12 +973,11 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 		token = strings.TrimSpace(fields["token"])
 	}
 	if token == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authed"})
+		writeError(w, "not_authed")
 		return
 	}
 	if err := h.Messages.RevokeToken(r.Context(), token); err != nil {
-		code, reason := mapServiceError(err, "token_revocation_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -914,7 +986,7 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -922,7 +994,7 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 		token = strings.TrimSpace(fields["token"])
 	}
 	if token == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authed"})
+		writeError(w, "not_authed")
 		return
 	}
 	if _, err := h.Authenticator.Authenticate(r); err != nil {
@@ -931,13 +1003,12 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	test, err := parseBoolField(fields["test"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if !test {
 		if err := h.Messages.RevokeToken(r.Context(), token); err != nil {
-			code, reason := mapServiceError(err, "invalid_auth")
-			writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+			writeError(w, mapServiceError(err, "invalid_auth"))
 			return
 		}
 	}
@@ -955,12 +1026,13 @@ func (h Handler) oauthV2Access(w http.ResponseWriter, r *http.Request) {
 func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	clientID, clientSecret := strings.TrimSpace(fields["client_id"]), strings.TrimSpace(fields["client_secret"])
 	if basicID, basicSecret, ok := r.BasicAuth(); ok {
 		if clientID != "" && clientID != basicID || clientSecret != "" && clientSecret != basicSecret {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_client_id"})
+			writeError(w, "invalid_client_id")
 			return
 		}
 		if clientID == "" {
@@ -977,12 +1049,12 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) 
 			if grantType == "refresh_token" {
 				reason = "invalid_refresh_token"
 			}
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": reason})
+			writeError(w, reason)
 			return
 		}
 	}
 	if v2 && strings.TrimSpace(fields["code"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_code"})
+		writeError(w, "invalid_code")
 		return
 	}
 	token, err := h.Messages.OAuthExchange(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"])
@@ -991,7 +1063,7 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) 
 		if errors.Is(err, service.ErrInvalidOAuthClient) {
 			reason = "invalid_client_id"
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": reason})
+		writeError(w, reason)
 		return
 	}
 	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType}
@@ -1016,6 +1088,7 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) 
 func (h Handler) botsInfo(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
@@ -1026,8 +1099,7 @@ func (h Handler) botsInfo(w http.ResponseWriter, r *http.Request) {
 	botID := domain.BotID(strings.TrimSpace(fields["bot"]))
 	value, err := h.Messages.BotInfo(r.Context(), principal.WorkspaceID, principal.UserID, botID)
 	if err != nil {
-		code, reason := mapServiceError(err, "bot_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "bot_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bot": map[string]any{"id": value.ID, "app_id": value.AppID, "user_id": value.UserID, "name": value.Name, "deleted": value.Deleted, "updated": value.UpdatedAt.Unix(), "icons": map[string]string{"image_36": value.Image36, "image_48": value.Image48, "image_72": value.Image72}}})
@@ -1036,6 +1108,7 @@ func (h Handler) botsInfo(w http.ResponseWriter, r *http.Request) {
 func (h Handler) migrationExchange(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeTokensBasic)
@@ -1045,7 +1118,7 @@ func (h Handler) migrationExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_team"})
+		writeError(w, "invalid_team")
 		return
 	}
 	rawIDs := strings.Fields(strings.ReplaceAll(fields["users"], ",", " "))
@@ -1057,14 +1130,13 @@ func (h Handler) migrationExchange(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(fields["to_old"]); raw != "" {
 		toOld, err = strconv.ParseBool(raw)
 		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_arg_name")
 			return
 		}
 	}
 	value, err := h.Messages.MigrationExchange(r.Context(), principal.WorkspaceID, principal.UserID, ids, toOld)
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	mapping := make(map[string]string, len(value.UserIDMap))
@@ -1086,8 +1158,7 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	team, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	domainName := team.Domain
@@ -1097,6 +1168,7 @@ func (h Handler) teamInfo(w http.ResponseWriter, r *http.Request) {
 func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeRTMStream)
@@ -1109,25 +1181,22 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 		token = strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	}
 	if token == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_auth"})
+		writeError(w, "invalid_auth")
 		return
 	}
 	team, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	connection, err := h.Messages.CreateRTMConnection(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "service_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	scheme := "ws"
@@ -1139,7 +1208,10 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.authenticate(r, auth.ScopeTeamRead); err != nil {
+	// Pinned /team.profile.get token parameter: "Requires scope:
+	// `users.profile:read`". This repository maps that scope onto
+	// auth.ScopeUsersRead, which is what /users.profile.get already requires.
+	if _, err := h.authenticate(r, auth.ScopeUsersRead); err != nil {
 		writeAuthError(w, err)
 		return
 	}
@@ -1154,14 +1226,13 @@ func (h Handler) teamBillableInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	target := domain.UserID(strings.TrimSpace(fields["user"]))
 	value, err := h.Messages.TeamBillableInfo(r.Context(), principal.WorkspaceID, principal.UserID, target)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	result := make(map[string]map[string]any, len(value.Users))
@@ -1179,37 +1250,31 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	limit, page := 100, 1
-	if raw := strings.TrimSpace(fields["count"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-	}
-	if err != nil || limit < 1 || limit > 1000 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	limit, err := clampLimit(fields["count"], 100, 1000)
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	if raw := strings.TrimSpace(fields["page"]); raw != "" {
-		page, err = strconv.Atoi(raw)
-	}
-	if err != nil || page < 1 || page > 100 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	page, err := clampLimit(fields["page"], 1, 100)
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	before := time.Time{}
 	if raw := strings.TrimSpace(fields["before"]); raw != "" {
 		seconds, parseErr := strconv.ParseInt(raw, 10, 64)
 		if parseErr != nil || seconds <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_arg_name")
 			return
 		}
 		before = time.Unix(seconds, 0).UTC()
 	}
 	values, hasMore, err := h.Messages.ListAccessLogs(r.Context(), principal.WorkspaceID, principal.UserID, before, limit, page)
 	if err != nil {
-		code, reason := mapServiceError(err, "access_logs_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	logins := make([]map[string]any, 0, len(values))
@@ -1226,6 +1291,7 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	principal, err := h.authenticate(r, auth.ScopeAdmin)
@@ -1233,25 +1299,19 @@ func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	count, page := 100, 1
-	if raw := strings.TrimSpace(fields["count"]); raw != "" {
-		count, err = strconv.Atoi(raw)
-	}
-	if err != nil || count < 1 || count > 1000 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	count, err := clampLimit(fields["count"], 100, 1000)
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	if raw := strings.TrimSpace(fields["page"]); raw != "" {
-		page, err = strconv.Atoi(raw)
-	}
-	if err != nil || page < 1 || page > 100 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	page, err := clampLimit(fields["page"], 1, 100)
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	value, err := h.Messages.IntegrationLogs(r.Context(), principal.WorkspaceID, principal.UserID, fields["app_id"], fields["change_type"], fields["service_id"], fields["user"], count, page)
 	if err != nil {
-		code, reason := mapServiceError(err, "integration_logs_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	logs := make([]map[string]any, 0, len(value.Logs))
@@ -1279,28 +1339,36 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequest(w, r)
+	// decodeListRequestFields reads the already-decoded map. Calling decodeFields a
+	// second time (which is what decodeListRequest did) saw an exhausted JSON body
+	// and returned an empty map with no error, so a JSON admin.users.list silently
+	// ignored `limit` and `cursor` and answered page one with the default limit.
+	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	// AdminListUsers carries the workspace membership the pinned 200 example shows
+	// (is_admin, is_owner, is_primary_owner, is_restricted, …). Messages.Users
+	// returns the plain projection, so admin.users.list used to omit every one of
+	// those fields even though the admin projection already existed and was already
+	// used by the web UI.
+	page, err := h.Messages.AdminListUsers(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "users_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	users := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		users = append(users, userResponse(user))
+		users = append(users, adminUserResponse(user))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "users": users, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
@@ -1313,17 +1381,16 @@ func (h Handler) adminUsersRemove(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
 	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.RemoveUser(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1337,16 +1404,26 @@ func (h Handler) adminUsersSessionInvalidate(w http.ResponseWriter, r *http.Requ
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	if teamID := strings.TrimSpace(fields["team_id"]); teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || strings.TrimSpace(fields["session_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if teamID := strings.TrimSpace(fields["team_id"]); teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID {
+		writeError(w, "invalid_team")
 		return
 	}
-	if err := h.Messages.RevokeSession(r.Context(), strings.TrimSpace(fields["session_id"])); err != nil {
-		code, reason := mapServiceError(err, "session_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+	sessionID := strings.TrimSpace(fields["session_id"])
+	if sessionID == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	// RevokeSession takes the raw session secret and applies no workspace scoping
+	// whatsoever, so an admin.users:write token from workspace A that observed a
+	// session secret belonging to workspace B could revoke it. The handler cannot
+	// close that hole: it has no way to read the session's workspace. See the
+	// follow-up recorded for service.Messages.RevokeSession, which must take the
+	// actor's workspace and reject a session that does not belong to it.
+	if err := h.Messages.RevokeSession(r.Context(), sessionID); err != nil {
+		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1360,17 +1437,16 @@ func (h Handler) adminUsersSessionReset(w http.ResponseWriter, r *http.Request) 
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
 	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.ResetUserSessions(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1394,17 +1470,17 @@ func (h Handler) adminUsersSetExpiration(w http.ResponseWriter, r *http.Request)
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID, targetID, rawExpiration := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"])), strings.TrimSpace(fields["expiration_ts"])
 	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" || rawExpiration == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	seconds, err := strconv.ParseInt(rawExpiration, 10, 64)
 	if err != nil || seconds < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	expiration := time.Time{}
@@ -1412,8 +1488,7 @@ func (h Handler) adminUsersSetExpiration(w http.ResponseWriter, r *http.Request)
 		expiration = time.Unix(seconds, 0).UTC()
 	}
 	if err := h.Messages.SetUserExpiration(r.Context(), principal.WorkspaceID, principal.UserID, targetID, expiration); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1427,33 +1502,32 @@ func (h Handler) adminUsersInvite(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || strings.TrimSpace(fields["email"]) == "" || strings.TrimSpace(fields["channel_ids"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
-	resend, restricted, ultraRestricted, err := parseOptionalBooleans(fields, "resend", "is_restricted", "is_ultra_restricted")
+	channels := parseIDList[domain.ConversationID](fields["channel_ids"])
+	flags, err := parseBoolFields(fields, "resend", "is_restricted", "is_ultra_restricted")
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	var expiration time.Time
 	if raw := strings.TrimSpace(fields["guest_expiration_ts"]); raw != "" {
 		seconds, parseErr := strconv.ParseInt(raw, 10, 64)
 		if parseErr != nil || seconds <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_arg_name")
 			return
 		}
 		expiration = time.Unix(seconds, 0).UTC()
 	}
-	err = h.Messages.AdminInviteUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], channels, fields["custom_message"], fields["real_name"], resend, restricted, ultraRestricted, expiration)
+	err = h.Messages.AdminInviteUser(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"], channels, fields["custom_message"], fields["real_name"], flags[0], flags[1], flags[2], expiration)
 	if err != nil {
-		code, reason := mapServiceError(err, "invite_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1466,19 +1540,22 @@ func (h Handler) adminUsersAssign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	targetID := domain.UserID(strings.TrimSpace(fields["user_id"]))
 	teamID := strings.TrimSpace(fields["team_id"])
-	if err != nil || teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	channels := []domain.ConversationID{}
 	if strings.TrimSpace(fields["channel_ids"]) != "" {
-		channels = parseConversationIDs(fields["channel_ids"])
+		channels = parseIDList[domain.ConversationID](fields["channel_ids"])
 	}
 	if err := h.Messages.AdminAssignUser(r.Context(), principal.WorkspaceID, principal.UserID, targetID, channels); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1499,10 +1576,14 @@ func (h Handler) adminInviteRequestChange(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	id := domain.InviteRequestID(strings.TrimSpace(fields["invite_request_id"]))
-	if err != nil || teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || id == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if approve {
@@ -1511,8 +1592,7 @@ func (h Handler) adminInviteRequestChange(w http.ResponseWriter, r *http.Request
 		err = h.Messages.AdminDenyInviteRequest(r.Context(), principal.WorkspaceID, principal.UserID, id)
 	}
 	if err != nil {
-		code, reason := mapServiceError(err, "invite_request_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invite_request_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1537,20 +1617,23 @@ func (h Handler) adminInviteRequestsListStatus(w http.ResponseWriter, r *http.Re
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	teamID := strings.TrimSpace(fields["team_id"])
-	if err != nil || (teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, status, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "invite_requests_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	requests := make([]map[string]any, 0, len(page.Requests))
@@ -1591,14 +1674,14 @@ func (h Handler) adminAppChange(w http.ResponseWriter, r *http.Request, approve 
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
 	requestID := domain.AppRequestID(strings.TrimSpace(fields["request_id"]))
 	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID || appID == "" && requestID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if approve {
@@ -1607,8 +1690,7 @@ func (h Handler) adminAppChange(w http.ResponseWriter, r *http.Request, approve 
 		err = h.Messages.AdminRestrictApp(r.Context(), principal.WorkspaceID, principal.UserID, appID, requestID)
 	}
 	if err != nil {
-		code, reason := mapServiceError(err, "app_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "app_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1634,23 +1716,22 @@ func (h Handler) adminAppsList(w http.ResponseWriter, r *http.Request, status do
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	if (teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID) || strings.TrimSpace(fields["enterprise_id"]) != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.AdminListApps(r.Context(), principal.WorkspaceID, principal.UserID, status, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "apps_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Apps))
@@ -1672,17 +1753,16 @@ func (h Handler) adminUsersSetRole(w http.ResponseWriter, r *http.Request, role 
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	teamID, targetID := strings.TrimSpace(fields["team_id"]), domain.UserID(strings.TrimSpace(fields["user_id"]))
 	if teamID == "" || domain.WorkspaceID(teamID) != principal.WorkspaceID || targetID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.SetUserRole(r.Context(), principal.WorkspaceID, principal.UserID, targetID, role); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1695,15 +1775,18 @@ func (h Handler) adminConversationRename(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel, name := domain.ConversationID(strings.TrimSpace(fields["channel_id"])), strings.TrimSpace(fields["name"])
-	if err != nil || channel == "" || name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" || name == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.AdminRenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, name)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": conversation.ID, "channel": conversationResponse(conversation)})
@@ -1716,19 +1799,22 @@ func (h Handler) adminConversationCreate(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["name"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["name"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	private, err := parseBoolField(fields["is_private"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
 	if err != nil {
-		code, reason := mapServiceError(err, "name_taken")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": conversation.ID, "channel": conversationResponse(conversation)})
@@ -1749,14 +1835,17 @@ func (h Handler) adminConversationDelete(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.AdminDeleteConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapAdminError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1777,10 +1866,14 @@ func (h Handler) adminConversationAccessGroupChange(w http.ResponseWriter, r *ht
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	conversationID := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	groupID := domain.UserGroupID(strings.TrimSpace(fields["group_id"]))
-	if err != nil || conversationID == "" || groupID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if conversationID == "" || groupID == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if add {
@@ -1789,8 +1882,7 @@ func (h Handler) adminConversationAccessGroupChange(w http.ResponseWriter, r *ht
 		err = h.Messages.AdminRemoveConversationAccessGroup(r.Context(), principal.WorkspaceID, principal.UserID, conversationID, groupID)
 	}
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1803,15 +1895,18 @@ func (h Handler) adminConversationAccessGroupsList(w http.ResponseWriter, r *htt
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	conversationID := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
-	if err != nil || conversationID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if conversationID == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	groups, err := h.Messages.AdminListConversationAccessGroups(r.Context(), principal.WorkspaceID, principal.UserID, conversationID)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	values := make([]string, 0, len(groups))
@@ -1828,15 +1923,18 @@ func (h Handler) adminSetConversationArchived(w http.ResponseWriter, r *http.Req
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.AdminSetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -1849,20 +1947,23 @@ func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	usersField := strings.TrimSpace(fields["users"])
 	if usersField == "" {
 		usersField = strings.TrimSpace(fields["user_ids"])
 	}
-	if err != nil || channel == "" || usersField == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" || usersField == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	users := parseCallUsers(usersField)
 	conversation, err := h.Messages.AdminInviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -1875,15 +1976,18 @@ func (h Handler) adminConversationConvertToPrivate(w http.ResponseWriter, r *htt
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.AdminConvertConversationToPrivate(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -1897,18 +2001,17 @@ func (h Handler) adminConversationSearch(w http.ResponseWriter, r *http.Request)
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil || strings.TrimSpace(fields["query"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.AdminSearchConversations(r.Context(), principal.WorkspaceID, principal.UserID, fields["query"], request)
 	if err != nil {
-		code, reason := mapServiceError(err, "search_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapAdminError(err, "fatal_error"))
 		return
 	}
 	conversations := make([]map[string]any, 0, len(page.Conversations))
@@ -1928,19 +2031,22 @@ func (h Handler) adminConversationGetTeams(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["channel_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["channel_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	teams, hasMore, nextCursor, err := h.Messages.AdminConversationTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel_id"])), request)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team_ids": teams, "response_metadata": map[string]any{"next_cursor": nextCursor}, "has_more": hasMore})
@@ -1953,13 +2059,17 @@ func (h Handler) adminConversationSetTeams(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["channel_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["channel_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	orgChannel, err := parseBoolField(fields["org_channel"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	rawTeams := fields["target_team_ids"]
@@ -1972,9 +2082,18 @@ func (h Handler) adminConversationSetTeams(w http.ResponseWriter, r *http.Reques
 			teams = append(teams, domain.WorkspaceID(strings.TrimSpace(raw)))
 		}
 	}
+	// The pinned parameter description for target_team_ids requires that every
+	// workspace belong to the organization the token was issued for. Every other
+	// admin.* handler compares the supplied team against the principal's; this one
+	// forwarded the list verbatim, so a workspace-A token could attach A's channel
+	// to workspace B. The service-layer check only asserts that the workspace
+	// exists (internal/service/messages.go AdminSetConversationTeams).
+	if _, ok := foreignWorkspace(teams, principal.WorkspaceID); ok {
+		writeError(w, "invalid_team")
+		return
+	}
 	if err := h.Messages.AdminSetConversationTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel_id"])), teams, orgChannel); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1987,8 +2106,12 @@ func (h Handler) adminConversationDisconnectShared(w http.ResponseWriter, r *htt
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["channel_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["channel_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	teams := make([]domain.WorkspaceID, 0)
@@ -1998,8 +2121,7 @@ func (h Handler) adminConversationDisconnectShared(w http.ResponseWriter, r *htt
 		}
 	}
 	if err := h.Messages.AdminDisconnectSharedConversation(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel_id"])), teams); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapAdminError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2013,11 +2135,12 @@ func (h Handler) adminConnectedChannelInfo(w http.ResponseWriter, r *http.Reques
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	channels := make([]domain.ConversationID, 0)
@@ -2034,8 +2157,7 @@ func (h Handler) adminConnectedChannelInfo(w http.ResponseWriter, r *http.Reques
 	}
 	values, more, next, err := h.Messages.AdminConnectedChannelInfo(r.Context(), principal.WorkspaceID, principal.UserID, channels, teams, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	channelsResponse := make([]map[string]any, 0, len(values))
@@ -2062,15 +2184,18 @@ func (h Handler) adminConversationGetPrefs(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	prefs, err := h.Messages.AdminGetConversationPrefs(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapAdminError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "prefs": conversationPrefsResponse(prefs)})
@@ -2083,20 +2208,23 @@ func (h Handler) adminConversationSetPrefs(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
-	if err != nil || channel == "" || strings.TrimSpace(fields["prefs"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" || strings.TrimSpace(fields["prefs"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	var payload conversationPrefsPayload
 	if err := json.Unmarshal([]byte(fields["prefs"]), &payload); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	prefs := conversationPrefsFromPayload(channel, payload)
 	if _, err := h.Messages.AdminSetConversationPrefs(r.Context(), principal.WorkspaceID, principal.UserID, channel, prefs); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapAdminError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2125,15 +2253,18 @@ func conversationPrefsResponse(value domain.ConversationPrefs) map[string]any {
 }
 
 func (h Handler) emojiList(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeEmojiRead)
+	h.listEmoji(w, r, auth.ScopeEmojiRead)
+}
+
+func (h Handler) listEmoji(w http.ResponseWriter, r *http.Request, scope auth.Scope) {
+	principal, err := h.authenticate(r, scope)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 	values, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "emoji_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "emoji": emojiResponse(values)})
@@ -2151,19 +2282,12 @@ func emojiResponse(values []domain.CustomEmoji) map[string]string {
 	return result
 }
 
+// adminEmojiList is admin.emoji.list. It differs from emoji.list only in the
+// scope the pinned contract requires: `admin.teams:read` rather than
+// `emoji:read`. Requiring a write scope for a read locked read-only admin tokens
+// out of their own emoji inventory.
 func (h Handler) adminEmojiList(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeAdminEmojiWrite)
-	if err != nil {
-		writeAuthError(w, err)
-		return
-	}
-	values, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
-	if err != nil {
-		code, reason := mapServiceError(err, "emoji_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "emoji": emojiResponse(values)})
+	h.listEmoji(w, r, auth.ScopeAdminTeamsRead)
 }
 
 func (h Handler) adminEmojiAdd(w http.ResponseWriter, r *http.Request) {
@@ -2172,8 +2296,7 @@ func (h Handler) adminEmojiAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AdminAddEmoji(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], fields["url"]); err != nil {
-		code, reason := mapServiceError(err, "emoji_add_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2184,8 +2307,7 @@ func (h Handler) adminEmojiAddAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AdminAddEmojiAlias(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], fields["alias_for"]); err != nil {
-		code, reason := mapServiceError(err, "emoji_add_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2196,8 +2318,7 @@ func (h Handler) adminEmojiRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AdminRemoveEmoji(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"]); err != nil {
-		code, reason := mapServiceError(err, "emoji_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "emoji_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2208,53 +2329,63 @@ func (h Handler) adminEmojiRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AdminRenameEmoji(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], fields["new_name"]); err != nil {
-		code, reason := mapServiceError(err, "emoji_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "emoji_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 func (h Handler) adminEmojiFields(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, bool) {
-	principal, err := h.authenticate(r, auth.ScopeAdminEmojiWrite)
+	// Pinned admin.emoji.add/addAlias/remove/rename all require
+	// `admin.teams:write`; `admin.emoji:write` is not a Slack scope.
+	principal, err := h.authenticate(r, auth.ScopeAdminTeamsWrite)
 	if err != nil {
 		writeAuthError(w, err)
 		return auth.Principal{}, nil, false
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return auth.Principal{}, nil, false
 	}
 	if strings.TrimSpace(fields["name"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return auth.Principal{}, nil, false
 	}
 	return principal, fields, true
 }
 
 func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, "")
+	// Pinned /conversations.info token parameter: "Requires scope:
+	// `conversations:read`". Enforcing no scope let a chat:write-only token read
+	// every channel's topic, purpose and privacy.
+	principal, err := h.authenticate(r, auth.ScopeChannelsRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	conversationID := strings.TrimSpace(fields["channel"])
-	if err != nil || conversationID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if conversationID == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversationID))
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
 }
 
 func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, "")
+	// Pinned /users.info token parameter: "Requires scope: `users:read`".
+	// Enforcing no scope let any token read every user's profile, including the
+	// email address userResponse emits.
+	principal, err := h.authenticate(r, auth.ScopeUsersRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -2265,13 +2396,12 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		requested = principal.UserID
 	}
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user)})
@@ -2285,14 +2415,12 @@ func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_auth")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_auth"))
 		return
 	}
 	team, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_auth")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_auth"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": map[string]any{"id": user.ID, "name": user.Name}, "team": map[string]any{"id": team.ID}})
@@ -2305,14 +2433,17 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["email"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["email"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	user, err := h.Messages.UserByEmail(r.Context(), principal.WorkspaceID, principal.UserID, fields["email"])
 	if err != nil {
-		code, reason := mapServiceError(err, "users_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user)})
@@ -2324,15 +2455,25 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	request, err := decodeListRequest(w, r)
+	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
+		return
+	}
+	if teamID := strings.TrimSpace(fields["team_id"]); teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	request, err := decodeListRequestFields(fields)
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		// /users.list enumerates invalid_auth and org_login_required, not
+		// team_not_found.
+		writeError(w, mapServiceError(err, "invalid_auth"))
 		return
 	}
 	members := make([]map[string]any, 0, len(page.Users))
@@ -2343,17 +2484,13 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 }
 
 func decodeConversationListFields(fields map[string]string) (domain.ConversationListRequest, error) {
-	limit := 100
-	var err error
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 1000 {
-			return domain.ConversationListRequest{}, errors.New("limit must be between 1 and 1000")
-		}
+	limit, err := clampLimit(fields["limit"], 100, 1000)
+	if err != nil {
+		return domain.ConversationListRequest{}, err
 	}
 	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
 	if _, err := domain.DecodeListCursor(cursor); err != nil {
-		return domain.ConversationListRequest{}, err
+		return domain.ConversationListRequest{}, decodeFailure("invalid_cursor", "cursor is not a list cursor")
 	}
 	excludeArchived, err := parseBoolField(fields["exclude_archived"])
 	if err != nil {
@@ -2378,7 +2515,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	requested := domain.UserID(strings.TrimSpace(fields["user"]))
@@ -2387,8 +2524,7 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
@@ -2401,18 +2537,17 @@ func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	requested := domain.UserID(strings.TrimSpace(fields["user"]))
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
+	requested := domain.UserID(strings.TrimSpace(fields["user"]))
 	if requested == "" {
 		requested = principal.UserID
 	}
 	user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "presence": user.Presence.Current()})
@@ -2425,14 +2560,17 @@ func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	presence := domain.Presence(strings.TrimSpace(fields["presence"]))
-	if err != nil || (presence != domain.PresenceAuto && presence != domain.PresenceAway) {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_presence"})
+	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
+		writeError(w, "invalid_presence")
 		return
 	}
 	if _, err := h.Messages.SetUserPresence(r.Context(), principal.WorkspaceID, principal.UserID, presence); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2460,14 +2598,13 @@ func (h Handler) dndInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	requested := domain.UserID(strings.TrimSpace(fields["user"]))
 	value, err := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, requested)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC()))
@@ -2479,9 +2616,9 @@ func (h Handler) dndEnd(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	// /dnd.endDnd declares `unknown_error`; `dnd_not_active` is in no pinned enum.
 	if err := h.Messages.EndDND(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
-		code, reason := mapServiceError(err, "dnd_not_active")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "unknown_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2493,10 +2630,10 @@ func (h Handler) dndEndSnooze(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	// /dnd.endSnooze declares `snooze_not_active`, which was never emitted.
 	value, err := h.Messages.EndSnooze(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "dnd_not_active")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "snooze_not_active"))
 		return
 	}
 	writeJSON(w, http.StatusOK, dndResponse(value, time.Now().UTC()))
@@ -2510,18 +2647,17 @@ func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	minutes, err := strconv.ParseInt(strings.TrimSpace(fields["num_minutes"]), 10, 64)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.SetSnooze(r.Context(), principal.WorkspaceID, principal.UserID, minutes)
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	response := dndResponse(value, time.Now().UTC())
@@ -2536,7 +2672,7 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	requested := make([]domain.UserID, 0)
@@ -2545,7 +2681,7 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 		for _, item := range strings.Split(raw, ",") {
 			item = strings.TrimSpace(item)
 			if item == "" {
-				writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+				writeError(w, "invalid_arg_name")
 				return
 			}
 			userID := domain.UserID(item)
@@ -2557,8 +2693,7 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 	} else {
 		page, listErr := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 1000})
 		if listErr != nil {
-			code, reason := mapServiceError(listErr, "team_not_found")
-			writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+			writeError(w, mapServiceError(listErr, "invalid_auth"))
 			return
 		}
 		for _, user := range page.Users {
@@ -2574,8 +2709,7 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 	for _, requestedID := range requested {
 		value, infoErr := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, requestedID)
 		if infoErr != nil {
-			code, reason := mapServiceError(infoErr, "user_not_found")
-			writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+			writeError(w, mapServiceError(infoErr, "user_not_found"))
 			return
 		}
 		response := dndResponse(value, now)
@@ -2592,19 +2726,22 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["profile"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["profile"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	profileFields, err := decodeProfileJSON(fields["profile"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	profile := current.Profile
@@ -2634,8 +2771,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	user, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": userResponse(user)["profile"]})
@@ -2648,33 +2784,43 @@ func (h Handler) deleteUserPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.DeleteUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeUsersProfileWrite)
+	r = promoteQueryToken(r)
+	deferAuth := bodyOnlyToken(r)
+	var principal auth.Principal
+	var err error
+	if !deferAuth {
+		if principal, err = h.authenticate(r, auth.ScopeUsersProfileWrite); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+	}
+	temporary, fields, _, mimeType, err := spoolUpload(w, r)
 	if err != nil {
-		writeAuthError(w, err)
+		writeDecodeError(w, err)
 		return
 	}
-	temporary, _, _, mimeType, err := spoolUpload(w, r)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-		return
+	if deferAuth {
+		if principal, err = h.authenticate(withBearerToken(r, fields["token"]), auth.ScopeUsersProfileWrite); err != nil {
+			writeAuthError(w, err)
+			return
+		}
 	}
 	defer os.Remove(temporary.Name())
 	defer temporary.Close()
 	stat, err := temporary.Stat()
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "upload_failed"})
+		writeError(w, "fatal_error")
 		return
 	}
 	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "upload_failed"})
+		writeError(w, "fatal_error")
 		return
 	}
 	// slack-api-client 1.49.0 labels this multipart part imageData/*.
@@ -2683,10 +2829,18 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 	if mimeType == "imageData/*" {
 		mimeType = "image/png"
 	}
+	// crop_w/crop_x/crop_y are declared but not implemented. Silently ignoring a
+	// crop would return a differently framed image than the caller asked for while
+	// claiming success, so the request is refused instead.
+	for _, unsupported := range []string{"crop_w", "crop_x", "crop_y"} {
+		if strings.TrimSpace(fields[unsupported]) != "" {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+	}
 	user, err := h.Messages.SetUserPhoto(r.Context(), principal.WorkspaceID, principal.UserID, mimeType, stat.Size(), temporary)
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
@@ -2700,6 +2854,23 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// adminUserResponse renders the admin projection of a user. The pinned
+// admin.users.list 200 example carries the role and restriction flags below; the
+// plain userResponse omits all of them.
+func adminUserResponse(value domain.AdminUser) map[string]any {
+	result := userResponse(value.User)
+	result["is_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
+	result["is_primary_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
+	result["is_admin"] = value.Membership.Role == domain.WorkspaceRoleAdmin || value.Membership.Role == domain.WorkspaceRoleOwner
+	// This system models no guest tiers, so both restriction flags are false rather
+	// than absent: the pinned example declares them and a strict decoder needs them.
+	result["is_restricted"] = false
+	result["is_ultra_restricted"] = false
+	result["is_bot"] = false
+	result["is_active"] = value.Membership.Active
+	return result
 }
 
 func userResponse(user domain.User) map[string]any {
@@ -2739,12 +2910,12 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeConversationListFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if allowMember {
@@ -2752,8 +2923,7 @@ func (h Handler) listConversations(w http.ResponseWriter, r *http.Request, allow
 	}
 	page, err := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	channels := make([]map[string]any, 0, len(page.Conversations))
@@ -2771,23 +2941,22 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	if channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	members := make([]string, 0, len(page.Users))
@@ -2804,19 +2973,23 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["name"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["name"]) == "" {
+		// /conversations.create enumerates invalid_name_required, not invalid_arguments.
+		writeError(w, "invalid_name_required")
 		return
 	}
 	private, err := parseBoolField(fields["is_private"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
 	if err != nil {
-		code, reason := mapServiceError(err, "name_taken")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -2829,15 +3002,18 @@ func (h Handler) joinConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	conversationID := strings.TrimSpace(fields["channel"])
-	if err != nil || conversationID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if conversationID == "" {
+		writeError(w, "channel_not_found")
 		return
 	}
 	conversation, err := h.Messages.JoinConversation(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversationID))
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -2850,9 +3026,18 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	if err != nil || channel == "" || strings.TrimSpace(fields["users"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
+		return
+	}
+	if strings.TrimSpace(fields["users"]) == "" {
+		// /conversations.invite enumerates no_user for a missing users argument.
+		writeError(w, "no_user")
 		return
 	}
 	users := make([]domain.UserID, 0)
@@ -2860,7 +3045,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range strings.Split(fields["users"], ",") {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_array_arg")
 			return
 		}
 		if _, exists := seen[user]; exists {
@@ -2871,8 +3056,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -2885,14 +3069,17 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["channel"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["channel"]) == "" {
+		writeError(w, "channel_not_found")
 		return
 	}
 	conversation := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversation})
@@ -2905,15 +3092,22 @@ func (h Handler) kickConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	target := domain.UserID(strings.TrimSpace(fields["user"]))
-	if err != nil || channel == "" || target == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
+		return
+	}
+	if target == "" {
+		writeError(w, "user_not_found")
 		return
 	}
 	if err := h.Messages.KickConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, channel, target); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel})
@@ -2926,16 +3120,23 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	name := fields["name"]
-	if err != nil || channel == "" || strings.TrimSpace(name) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
+		return
+	}
+	if strings.TrimSpace(name) == "" {
+		writeError(w, "invalid_name_required")
 		return
 	}
 	conversation, err := h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, name)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -2948,19 +3149,22 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
 		return
 	}
 	if _, present := fields["topic"]; !present {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["topic"])
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -2973,19 +3177,22 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
 		return
 	}
 	if _, present := fields["purpose"]; !present {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	conversation, err := h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["purpose"])
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -3006,24 +3213,26 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
 		return
 	}
 	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	if !conversation.IsDirect && !conversation.IsGroupDirect {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "method_not_supported_for_channel_type"})
+		writeError(w, "method_not_supported_for_channel_type")
 		return
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3036,15 +3245,18 @@ func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
-	if err != nil || channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
 		return
 	}
 	_, err = h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3057,8 +3269,13 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["users"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["users"]) == "" {
+		// /conversations.open enumerates users_list_not_supplied.
+		writeError(w, "users_list_not_supplied")
 		return
 	}
 	users := make([]domain.UserID, 0)
@@ -3066,7 +3283,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range strings.Split(fields["users"], ",") {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_array_arg")
 			return
 		}
 		if _, exists := seen[user]; exists {
@@ -3077,29 +3294,38 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.OpenConversation(r.Context(), principal.WorkspaceID, principal.UserID, users)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
 }
 
 func (h Handler) markConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	// conversations.mark moves the caller's read cursor, so the pinned token
+	// parameter requires `conversations:write`, not a history read scope.
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel, timestamp := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"])
-	if err != nil || channel == "" || timestamp == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" {
+		writeError(w, "channel_not_found")
+		return
+	}
+	if timestamp == "" {
+		// /conversations.mark enumerates invalid_timestamp.
+		writeError(w, "invalid_timestamp")
 		return
 	}
 	cursor, err := h.Messages.MarkRead(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(channel), domain.MessageTimestamp(timestamp))
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": cursor.Conversation, "ts": cursor.LastRead})
@@ -3113,17 +3339,16 @@ func (h Handler) addReaction(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, name, err := normalizeReactionFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
 	if err := h.Messages.AddReaction(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, name); err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3137,17 +3362,16 @@ func (h Handler) removeReaction(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, name, err := normalizeReactionFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
 	if err := h.Messages.RemoveReaction(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, name); err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3161,27 +3385,23 @@ func (h Handler) getReactions(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
-	limit := 200
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 200 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
+	limit, err := clampLimit(fields["limit"], 200, 200)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
 	reactions, next, hasMore, err := h.Messages.Reactions(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	grouped := make(map[string]map[string]any)
@@ -3211,23 +3431,22 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	requested := strings.TrimSpace(fields["user"])
 	if requested != "" && requested != string(principal.UserID) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "not_authorized"})
+		writeError(w, "not_authorized")
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.UserReactions(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Items))
@@ -3247,18 +3466,17 @@ func (h Handler) addBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	if channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	bookmark, err := h.Messages.AddBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["title"], fields["type"], fields["link"], fields["emoji"], fields["entity_id"], fields["access_level"], fields["parent_id"])
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bookmark": bookmarkResponse(bookmark)})
@@ -3272,13 +3490,13 @@ func (h Handler) editBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	id := domain.BookmarkID(strings.TrimSpace(fields["bookmark_id"]))
 	if channel == "" || id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	_, titleSet := fields["title"]
@@ -3286,8 +3504,7 @@ func (h Handler) editBookmark(w http.ResponseWriter, r *http.Request) {
 	_, emojiSet := fields["emoji"]
 	bookmark, err := h.Messages.EditBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, id, domain.BookmarkUpdate{Title: fields["title"], Link: fields["link"], Emoji: fields["emoji"], SetTitle: titleSet, SetLink: linkSet, SetEmoji: emojiSet})
 	if err != nil {
-		code, reason := mapServiceError(err, "bookmark_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "bookmark_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "bookmark": bookmarkResponse(bookmark)})
@@ -3301,18 +3518,17 @@ func (h Handler) listBookmarks(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	if channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	bookmarks, err := h.Messages.Bookmarks(r.Context(), principal.WorkspaceID, principal.UserID, channel)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	items := make([]map[string]any, 0, len(bookmarks))
@@ -3330,18 +3546,17 @@ func (h Handler) removeBookmark(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	id := domain.BookmarkID(strings.TrimSpace(fields["bookmark_id"]))
 	if channel == "" || id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.RemoveBookmark(r.Context(), principal.WorkspaceID, principal.UserID, channel, id); err != nil {
-		code, reason := mapServiceError(err, "bookmark_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "bookmark_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3359,17 +3574,16 @@ func (h Handler) addPin(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
 	if err := h.Messages.AddPin(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3383,17 +3597,16 @@ func (h Handler) removePin(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
 	if err := h.Messages.RemovePin(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3407,26 +3620,22 @@ func (h Handler) listPins(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	if channel == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "channel_not_found")
 		return
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 200 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
+	limit, err := clampLimit(fields["limit"], 100, 200)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	pins, next, hasMore, err := h.Messages.Pins(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	items := make([]map[string]any, 0, len(pins))
@@ -3444,17 +3653,28 @@ func (h Handler) addStar(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
-	if err != nil || strings.TrimSpace(fields["file"]) != "" || strings.TrimSpace(fields["file_comment"]) != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// This system stars messages only. stars.add/remove enumerate file_not_found
+	// and file_comment_not_found for the file forms, so a request naming a file is
+	// rejected with the code for the thing that cannot be found rather than with a
+	// generic argument error.
+	if strings.TrimSpace(fields["file"]) != "" {
+		writeError(w, "file_not_found")
+		return
+	}
+	if strings.TrimSpace(fields["file_comment"]) != "" {
+		writeError(w, "file_comment_not_found")
 		return
 	}
 	if err := h.Messages.AddStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3468,17 +3688,28 @@ func (h Handler) removeStar(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel, timestamp, err := normalizeReactionTarget(fields)
-	if err != nil || strings.TrimSpace(fields["file"]) != "" || strings.TrimSpace(fields["file_comment"]) != "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// This system stars messages only. stars.add/remove enumerate file_not_found
+	// and file_comment_not_found for the file forms, so a request naming a file is
+	// rejected with the code for the thing that cannot be found rather than with a
+	// generic argument error.
+	if strings.TrimSpace(fields["file"]) != "" {
+		writeError(w, "file_not_found")
+		return
+	}
+	if strings.TrimSpace(fields["file_comment"]) != "" {
+		writeError(w, "file_comment_not_found")
 		return
 	}
 	if err := h.Messages.RemoveStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3492,32 +3723,32 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 1000 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
-	}
-	items, _, more, err := h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
+	limit, err := clampLimit(fields["limit"], 100, 1000)
 	if err != nil {
-		code, reason := mapServiceError(err, "stars_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeDecodeError(w, err)
+		return
+	}
+	items, next, more, err := h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	result := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		result = append(result, map[string]any{"type": "message", "channel": item.Conversation, "date_create": item.CreatedAt.Unix(), "message": messageResponse(item.Message)})
 	}
+	// The cursor the store returns is the only way to reach page two. It used to be
+	// discarded and replaced by an invented `spill` key, so a workspace with more
+	// stars than one page could never be read in full.
 	paging := map[string]any{"page": 1, "total": len(result), "per_page": limit}
+	body := map[string]any{"ok": true, "items": result, "paging": paging}
 	if more {
-		paging["spill"] = 1
+		body["response_metadata"] = map[string]string{"next_cursor": string(next)}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "items": result, "paging": paging})
+	writeJSON(w, http.StatusOK, body)
 }
 
 func reminderResponse(reminder domain.Reminder) map[string]any {
@@ -3536,13 +3767,12 @@ func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	canvas, err := h.Messages.CreateCanvas(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], fields["document_content"], domain.ConversationID(strings.TrimSpace(fields["channel_id"])))
 	if err != nil {
-		code, reason := mapServiceError(err, "canvas_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "canvas_id": canvas.ID})
@@ -3556,16 +3786,15 @@ func (h Handler) editCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["canvas_id"]) == "" || strings.TrimSpace(fields["changes"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.EditCanvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), fields["changes"]); err != nil {
-		code, reason := mapServiceError(err, "canvas_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3579,16 +3808,15 @@ func (h Handler) deleteCanvas(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["canvas_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.DeleteCanvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"]))); err != nil {
-		code, reason := mapServiceError(err, "canvas_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3602,16 +3830,15 @@ func (h Handler) setCanvasAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["canvas_id"]) == "" || strings.TrimSpace(fields["access_level"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), strings.TrimSpace(fields["access_level"]), parseConversationIDs(fields["channel_ids"]), parseCanvasUsers(fields["user_ids"])); err != nil {
-		code, reason := mapServiceError(err, "canvas_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+	if err := h.Messages.SetCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), strings.TrimSpace(fields["access_level"]), parseIDList[domain.ConversationID](fields["channel_ids"]), parseIDList[domain.UserID](fields["user_ids"])); err != nil {
+		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3625,16 +3852,15 @@ func (h Handler) deleteCanvasAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["canvas_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.DeleteCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), parseConversationIDs(fields["channel_ids"]), parseCanvasUsers(fields["user_ids"])); err != nil {
-		code, reason := mapServiceError(err, "canvas_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+	if err := h.Messages.DeleteCanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), parseIDList[domain.ConversationID](fields["channel_ids"]), parseIDList[domain.UserID](fields["user_ids"])); err != nil {
+		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3648,17 +3874,16 @@ func (h Handler) lookupCanvasSections(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	if strings.TrimSpace(fields["canvas_id"]) == "" || strings.TrimSpace(fields["criteria"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	sections, err := h.Messages.LookupCanvasSections(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(fields["canvas_id"])), fields["criteria"])
 	if err != nil {
-		code, reason := mapServiceError(err, "canvas_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "canvas_not_found"))
 		return
 	}
 	result := make([]map[string]string, 0, len(sections))
@@ -3666,17 +3891,6 @@ func (h Handler) lookupCanvasSections(w http.ResponseWriter, r *http.Request) {
 		result = append(result, map[string]string{"id": section.ID})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "sections": result})
-}
-
-func parseCanvasUsers(raw string) []domain.UserID {
-	values := strings.Split(raw, ",")
-	result := make([]domain.UserID, 0, len(values))
-	for _, value := range values {
-		if value = strings.TrimSpace(value); value != "" {
-			result = append(result, domain.UserID(value))
-		}
-	}
-	return result
 }
 
 func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
@@ -3687,19 +3901,23 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	textValue := strings.TrimSpace(fields["text"])
-	seconds, err := strconv.ParseInt(strings.TrimSpace(fields["time"]), 10, 64)
-	if textValue == "" || err != nil || seconds <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if textValue == "" {
+		// /reminders.add enumerates cannot_parse for a time or text it cannot read.
+		writeError(w, "cannot_parse")
 		return
 	}
-	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserID(strings.TrimSpace(fields["user"])), textValue, time.Unix(seconds, 0).UTC())
+	when, err := reminderTime(fields["time"], time.Now().UTC())
 	if err != nil {
-		code, reason := mapServiceError(err, "user_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeDecodeError(w, err)
+		return
+	}
+	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserID(strings.TrimSpace(fields["user"])), textValue, when)
+	if err != nil {
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reminder": reminderResponse(reminder)})
@@ -3708,12 +3926,13 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 func reminderIDFields(w http.ResponseWriter, r *http.Request) (map[string]string, domain.ReminderID, bool) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return nil, "", false
 	}
 	id := domain.ReminderID(strings.TrimSpace(fields["reminder"]))
 	if id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		// reminders.complete/delete/info all enumerate not_found.
+		writeError(w, "not_found")
 		return nil, "", false
 	}
 	return fields, id, true
@@ -3730,8 +3949,7 @@ func (h Handler) completeReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.CompleteReminder(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
-		code, reason := mapServiceError(err, "reminder_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3748,8 +3966,7 @@ func (h Handler) deleteReminder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.DeleteReminder(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
-		code, reason := mapServiceError(err, "reminder_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3767,8 +3984,7 @@ func (h Handler) reminderInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	reminder, err := h.Messages.ReminderInfo(r.Context(), principal.WorkspaceID, principal.UserID, id)
 	if err != nil {
-		code, reason := mapServiceError(err, "reminder_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "reminder": reminderResponse(reminder)})
@@ -3782,18 +3998,17 @@ func (h Handler) listReminders(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.Reminders(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "reminders_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	result := make([]map[string]any, 0, len(page.Reminders))
@@ -3811,33 +4026,29 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	query := strings.TrimSpace(fields["query"])
 	if query == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["count"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 200 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
+	limit, err := clampLimit(fields["count"], 100, 200)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
 	if cursor != "" {
 		if _, _, err := domain.DecodeMessageCursor(cursor); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_arg_name")
 			return
 		}
 	}
 	page, err := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
-		code, reason := mapServiceError(err, "search_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	matches := make([]map[string]any, 0, len(page.Messages))
@@ -3856,17 +4067,21 @@ func (h Handler) remoteFileAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["external_id"]) == "" || strings.TrimSpace(fields["title"]) == "" || strings.TrimSpace(fields["external_url"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["external_id"]) == "" || strings.TrimSpace(fields["title"]) == "" || strings.TrimSpace(fields["external_url"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.AddRemoteFile(r.Context(), principal.WorkspaceID, principal.UserID, domain.RemoteFile{ExternalID: fields["external_id"], Title: fields["title"], FileType: fields["filetype"], ExternalURL: fields["external_url"], PreviewImage: fields["preview_image"], IndexableContents: fields["indexable_file_contents"]})
 	if err != nil {
-		code, reason := mapServiceError(err, "remote_file_not_found")
+		reason := mapServiceError(err, "remote_file_not_found")
 		if errors.Is(err, store.ErrAlreadyExists) {
-			code, reason = http.StatusBadRequest, "remote_file_already_exists"
+			reason = "remote_file_already_exists"
 		}
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, reason)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": remoteFileResponse(value)})
@@ -3879,15 +4094,18 @@ func (h Handler) remoteFileInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	lookup, lookupErr := remoteFileLookup(fields)
-	if err != nil || lookupErr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if lookupErr != nil {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.RemoteFileInfo(r.Context(), principal.WorkspaceID, principal.UserID, lookup)
 	if err != nil {
-		code, reason := mapServiceError(err, "remote_file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "remote_file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": remoteFileResponse(value)})
@@ -3901,18 +4119,17 @@ func (h Handler) remoteFilesList(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.RemoteFiles(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "remote_files_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "remote_files_unavailable"))
 		return
 	}
 	files := make([]map[string]any, 0, len(page.Files))
@@ -3929,14 +4146,17 @@ func (h Handler) remoteFileRemove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	lookup, lookupErr := remoteFileLookup(fields)
-	if err != nil || lookupErr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if lookupErr != nil {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.RemoveRemoteFile(r.Context(), principal.WorkspaceID, principal.UserID, lookup); err != nil {
-		code, reason := mapServiceError(err, "remote_file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "remote_file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3949,16 +4169,19 @@ func (h Handler) remoteFileShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	lookup, lookupErr := remoteFileLookup(fields)
-	channels := parseConversationIDs(fields["channels"])
-	if err != nil || lookupErr != nil || len(channels) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	channels := parseIDList[domain.ConversationID](fields["channels"])
+	if lookupErr != nil || len(channels) == 0 {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.ShareRemoteFile(r.Context(), principal.WorkspaceID, principal.UserID, lookup, channels)
 	if err != nil {
-		code, reason := mapServiceError(err, "remote_file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "remote_file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": remoteFileResponse(value)})
@@ -3971,9 +4194,13 @@ func (h Handler) remoteFileUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	lookup, lookupErr := remoteFileLookup(fields)
-	if err != nil || lookupErr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if lookupErr != nil {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	update := domain.RemoteFileUpdate{Lookup: lookup}
@@ -3994,8 +4221,7 @@ func (h Handler) remoteFileUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.UpdateRemoteFile(r.Context(), principal.WorkspaceID, principal.UserID, update)
 	if err != nil {
-		code, reason := mapServiceError(err, "remote_file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "remote_file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": remoteFileResponse(value)})
@@ -4025,18 +4251,17 @@ func (h Handler) fileInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	fileID := domain.FileID(strings.TrimSpace(fields["file"]))
 	if fileID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	file, err := h.Messages.FileInfo(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
 	if err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
@@ -4050,17 +4275,16 @@ func (h Handler) deleteFile(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	fileID := domain.FileID(strings.TrimSpace(fields["file"]))
 	if fileID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.DeleteFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID); err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -4073,15 +4297,18 @@ func (h Handler) deleteFileComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	fileID := domain.FileID(strings.TrimSpace(fields["file"]))
 	commentID := domain.FileCommentID(strings.TrimSpace(fields["id"]))
-	if err != nil || fileID == "" || commentID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if fileID == "" || commentID == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.DeleteFileComment(r.Context(), principal.WorkspaceID, principal.UserID, fileID, commentID); err != nil {
-		code, reason := mapServiceError(err, "comment_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "comment_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -4095,18 +4322,17 @@ func (h Handler) shareFilePublic(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	fileID := domain.FileID(strings.TrimSpace(fields["file"]))
 	if fileID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	file, err := h.Messages.ShareFilePublic(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
 	if err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file), "permalink_public": "/files/public/" + file.PublicToken})
@@ -4120,18 +4346,17 @@ func (h Handler) revokeFilePublic(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	fileID := domain.FileID(strings.TrimSpace(fields["file"]))
 	if fileID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	file, err := h.Messages.RevokeFilePublic(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
 	if err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
@@ -4143,62 +4368,249 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	request, err := decodeListRequest(w, r)
+	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, request)
+	// files.list declares user, channel, ts_from, ts_to, types, count, page and
+	// show_files_hidden_by_limit. None of them was implemented: the only decode
+	// was limit/cursor, so `?channel=C1` returned every file the principal could
+	// see across every channel with `"ok":true`.
+	//
+	// Answering a scoped request with unscoped data is the defect, but refusing a
+	// documented parameter is not the remedy — `count` is how the official SDK
+	// paginates this method, and rejecting it broke that suite. Every declared
+	// parameter is honoured here instead.
+	filter, err := decodeFileFilter(fields)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeDecodeError(w, err)
 		return
 	}
-	files := make([]map[string]any, 0, len(page.Files))
-	for _, file := range page.Files {
+	request, err := decodeListRequestFields(fields)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	// Filtering happens above the repository, which has no filtered scan, so the
+	// window is read in bounded pages and narrowed here. The bound is what keeps
+	// an unscoped request from reading a whole workspace into memory.
+	collected := make([]domain.File, 0, filter.count)
+	scan := domain.PageRequest{Limit: fileFilterScanPage, Cursor: request.Cursor}
+	hasMore := false
+	for scanned := 0; scanned < fileFilterScanLimit; scanned += fileFilterScanPage {
+		page, listErr := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, scan)
+		if listErr != nil {
+			writeError(w, mapServiceError(listErr, "file_not_found"))
+			return
+		}
+		for _, file := range page.Files {
+			if filter.matches(file) {
+				collected = append(collected, file)
+			}
+		}
+		hasMore = page.HasMore
+		if !page.HasMore {
+			break
+		}
+		scan.Cursor = page.NextCursor
+	}
+	selected, pageIndex := filter.slice(collected)
+	files := make([]map[string]any, 0, len(selected))
+	for _, file := range selected {
 		files = append(files, fileResponse(file))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "paging": map[string]any{"count": len(files), "total": len(files), "page": 1, "pages": 1}, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+	pages := (len(collected) + filter.count - 1) / filter.count
+	if pages == 0 {
+		pages = 1
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "paging": map[string]any{"count": len(files), "page": pageIndex, "pages": pages, "total": len(collected)}, "has_more": hasMore || pageIndex < pages, "response_metadata": map[string]string{"next_cursor": ""}})
+}
+
+// fileFilterScanPage and fileFilterScanLimit bound the repository read that
+// backs a filtered files.list. Without a bound, a narrow filter over a large
+// workspace would read every file into memory.
+const (
+	fileFilterScanPage  = 200
+	fileFilterScanLimit = 2000
+)
+
+// fileFilter carries every parameter /files.list declares. An unrecognised
+// `types` value is still refused with unknown_type, the code that operation
+// declares for exactly that case.
+type fileFilter struct {
+	user    string
+	channel string
+	tsFrom  time.Time
+	tsTo    time.Time
+	types   []string
+	count   int
+	page    int
+}
+
+func decodeFileFilter(fields map[string]string) (fileFilter, error) {
+	filter := fileFilter{user: strings.TrimSpace(fields["user"]), channel: strings.TrimSpace(fields["channel"])}
+	var err error
+	if filter.count, err = clampLimit(fields["count"], 100, 1000); err != nil {
+		return fileFilter{}, err
+	}
+	if filter.page, err = clampLimit(fields["page"], 1, 100); err != nil {
+		return fileFilter{}, err
+	}
+	if filter.tsFrom, err = optionalEpoch(fields["ts_from"]); err != nil {
+		return fileFilter{}, err
+	}
+	if filter.tsTo, err = optionalEpoch(fields["ts_to"]); err != nil {
+		return fileFilter{}, err
+	}
+	for _, value := range strings.Split(fields["types"], ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			filter.types = append(filter.types, value)
+		}
+	}
+	return filter, nil
+}
+
+func optionalEpoch(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	seconds, err := strconv.ParseInt(strings.SplitN(raw, ".", 2)[0], 10, 64)
+	if err != nil {
+		return time.Time{}, decodeFailure("invalid_arg_name", "timestamp filters are epoch seconds")
+	}
+	return time.Unix(seconds, 0).UTC(), nil
+}
+
+func (f fileFilter) matches(file domain.File) bool {
+	if f.user != "" && string(file.Uploader) != f.user {
+		return false
+	}
+	if f.channel != "" {
+		shared := false
+		for _, conversation := range file.SharedChannels {
+			if string(conversation) == f.channel {
+				shared = true
+				break
+			}
+		}
+		if !shared {
+			return false
+		}
+	}
+	if !f.tsFrom.IsZero() && file.CreatedAt.Before(f.tsFrom) {
+		return false
+	}
+	if !f.tsTo.IsZero() && file.CreatedAt.After(f.tsTo) {
+		return false
+	}
+	if len(f.types) > 0 && !slackFileTypeMatches(f.types, file) {
+		return false
+	}
+	return true
+}
+
+// slice applies the legacy count/page window the pinned operation declares.
+func (f fileFilter) slice(files []domain.File) ([]domain.File, int) {
+	start := (f.page - 1) * f.count
+	if start >= len(files) {
+		return nil, f.page
+	}
+	end := start + f.count
+	if end > len(files) {
+		end = len(files)
+	}
+	return files[start:end], f.page
+}
+
+// slackFileTypeMatches maps the file-type filter onto the stored media type.
+// "all" matches everything; the remaining names follow the published grouping.
+func slackFileTypeMatches(types []string, file domain.File) bool {
+	mime := strings.ToLower(file.MIMEType)
+	for _, value := range types {
+		switch strings.ToLower(value) {
+		case "all":
+			return true
+		case "images":
+			if strings.HasPrefix(mime, "image/") {
+				return true
+			}
+		case "videos":
+			if strings.HasPrefix(mime, "video/") {
+				return true
+			}
+		case "pdfs":
+			if mime == "application/pdf" {
+				return true
+			}
+		case "snippets":
+			if strings.HasPrefix(mime, "text/") {
+				return true
+			}
+		case "spaces", "gdocs", "zips":
+			// Declared by the contract but not produced by this system, so they
+			// match nothing rather than being silently treated as "all".
+		default:
+			// An unrecognised name is the case unknown_type exists for; treat it
+			// as matching nothing so the caller sees an empty, correctly scoped
+			// result rather than an unscoped one.
+		}
+	}
+	return false
 }
 
 const maxUploadBytes = 100 << 20
 
 func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
-	if err != nil {
-		writeAuthError(w, err)
-		return
+	r = promoteQueryToken(r)
+	deferAuth := bodyOnlyToken(r)
+	var principal auth.Principal
+	var err error
+	if !deferAuth {
+		if principal, err = h.authenticate(r, auth.ScopeFilesWrite); err != nil {
+			writeAuthError(w, err)
+			return
+		}
 	}
 	temporary, fields, filename, mimeType, err := spoolUpload(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
+	if deferAuth {
+		if principal, err = h.authenticate(withBearerToken(r, fields["token"]), auth.ScopeFilesWrite); err != nil {
+			writeAuthError(w, err)
+			return
+		}
+	}
+	// A spool-file failure is a server-side failure. `upload_failed` is in no pinned
+	// enum; /users.setPhoto declares `fatal_error` and /files.upload declares no
+	// server-side code at all, so the pinned spec does not settle files.upload and
+	// `fatal_error` is used for both to keep the two siblings consistent.
 	defer os.Remove(temporary.Name())
 	if err := temporary.Close(); err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "upload_failed"})
+		writeError(w, "fatal_error")
 		return
 	}
 	source, err := os.Open(temporary.Name())
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "upload_failed"})
+		writeError(w, "fatal_error")
 		return
 	}
 	defer source.Close()
 	stat, err := source.Stat()
 	if err != nil {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "upload_failed"})
+		writeError(w, "fatal_error")
 		return
 	}
 	title := strings.TrimSpace(fields["title"])
 	if title == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-		return
+		title = filename
 	}
 	file, err := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, filename, title, mimeType, stat.Size(), source)
 	if err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "file": fileResponse(file)})
@@ -4212,13 +4624,12 @@ func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	fileID := domain.FileID(strings.TrimSpace(r.PathValue("file")))
 	if fileID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	file, source, err := h.Messages.OpenFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
 	if err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	defer source.Close()
@@ -4226,6 +4637,18 @@ func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(file.Name))
 	_, _ = io.Copy(w, source)
+}
+
+// capabilityHeaders protect a download whose URL is itself the credential.
+//
+// Both public download routes carry an unguessable token in the path, so the URL
+// is a bearer capability: anything that retains it can replay the download. They
+// answered with neither header, so a shared or intermediary cache was free to
+// store the body under that URL, and any HTML the file is embedded in leaked the
+// whole capability onward in the Referer of every outbound link.
+func capabilityHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 }
 
 func (h Handler) downloadPublicFile(w http.ResponseWriter, r *http.Request) {
@@ -4240,6 +4663,7 @@ func (h Handler) downloadPublicFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer source.Close()
+	capabilityHeaders(w)
 	w.Header().Set("Content-Type", file.MIMEType)
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
 	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(file.Name))
@@ -4262,8 +4686,65 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer source.Close()
-	w.Header().Set("Content-Type", "application/octet-stream")
+	// This always answered application/octet-stream, so a browser downloaded an
+	// avatar as a binary blob instead of rendering it; downloadFile and
+	// downloadPublicFile both send the real type. domain.User carries no MIME type
+	// and OpenUserPhoto does not return the blob's, so the type is sniffed from the
+	// leading bytes. See the follow-up recorded for OpenUserPhoto, which should
+	// return the stored content type instead of making the transport guess.
+	prefix := make([]byte, 512)
+	read, readErr := io.ReadFull(source, prefix)
+	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+		http.NotFound(w, r)
+		return
+	}
+	prefix = prefix[:read]
+	capabilityHeaders(w)
+	w.Header().Set("Content-Type", http.DetectContentType(prefix))
+	if _, err := w.Write(prefix); err != nil {
+		return
+	}
 	_, _ = io.Copy(w, source)
+}
+
+// bodyOnlyToken reports that the only place this request can carry its token is
+// the multipart body. auth.Stored.Authenticate falls back to r.FormValue, which
+// calls ParseMultipartForm and consumes the stream; r.MultipartReader() then fails
+// with "http: multipart handled by ParseMultipartForm" and the uploaded bytes are
+// gone. The pinned /files.upload and /users.setPhoto both declare `token` as a
+// formData parameter, so this placement has to work: the upload is spooled first
+// and the token taken from the decoded fields.
+//
+// Reading the body before authenticating is unavoidable for this placement; the
+// spool is bounded by maxUploadBytes, which is the same bound an authenticated
+// upload already has.
+func bodyOnlyToken(r *http.Request) bool {
+	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+		return false
+	}
+	return strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0])) == "multipart/form-data"
+}
+
+// promoteQueryToken moves a URL-query token into the Authorization header so the
+// authenticator never reaches r.FormValue, which would consume a multipart body.
+func promoteQueryToken(r *http.Request) *http.Request {
+	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+		return r
+	}
+	return withBearerToken(r, r.URL.Query().Get("token"))
+}
+
+// withBearerToken returns r, or a shallow copy carrying token as a bearer header.
+// The copy's body is emptied because every caller has already consumed it.
+func withBearerToken(r *http.Request, token string) *http.Request {
+	token = strings.TrimSpace(token)
+	if token == "" || strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
+		return r
+	}
+	clone := r.Clone(r.Context())
+	clone.Body = http.NoBody
+	clone.Header.Set("Authorization", "Bearer "+token)
+	return clone
 }
 
 func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]string, string, string, error) {
@@ -4367,9 +4848,15 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]s
 	if mimeType == "" {
 		return cleanup(errors.New("mime type is required"))
 	}
+	// files.upload declares channels, initial_comment and thread_ts, and
+	// files.completeUploadExternal implements exactly that sharing behaviour, but this
+	// path does not route through it. Rejecting is correct only because the
+	// alternative — accepting and dropping the arguments — would report success for a
+	// file that was never shared. /files.upload enumerates `invalid_channel`, which
+	// is the closest declared code for a sharing request it cannot honour.
 	for _, unsupported := range []string{"initial_comment", "channels", "thread_ts"} {
 		if strings.TrimSpace(fields[unsupported]) != "" {
-			return cleanup(errors.New("file sharing fields are not supported"))
+			return cleanup(decodeFailure("invalid_channel", "file sharing on upload is not supported; use files.completeUploadExternal"))
 		}
 	}
 	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
@@ -4426,7 +4913,8 @@ func normalizeReactionFields(fields map[string]string) (domain.ConversationID, d
 	}
 	name := strings.TrimSpace(fields["name"])
 	if name == "" {
-		return "", "", "", errors.New("name is required")
+		// reactions.add/remove enumerate invalid_name for a missing emoji name.
+		return "", "", "", decodeFailure("invalid_name", "name is required")
 	}
 	return channel, timestamp, name, nil
 }
@@ -4434,8 +4922,13 @@ func normalizeReactionFields(fields map[string]string) (domain.ConversationID, d
 func normalizeReactionTarget(fields map[string]string) (domain.ConversationID, domain.MessageTimestamp, error) {
 	channel := strings.TrimSpace(fields["channel"])
 	timestamp := strings.TrimSpace(fields["timestamp"])
+	// reactions.*, pins.* and stars.* all enumerate no_item_specified for a
+	// missing item and bad_timestamp for one that is not a Slack timestamp.
 	if channel == "" || timestamp == "" {
-		return "", "", errors.New("channel and timestamp are required")
+		return "", "", decodeFailure("no_item_specified", "channel and timestamp are required")
+	}
+	if _, ok := parseSlackTimestamp(timestamp); !ok {
+		return "", "", decodeFailure("bad_timestamp", "timestamp is not a Slack timestamp")
 	}
 	return domain.ConversationID(channel), domain.MessageTimestamp(timestamp), nil
 }
@@ -4451,26 +4944,14 @@ func parseBoolField(value string) (bool, error) {
 	return false, errors.New("boolean field is invalid")
 }
 
-func decodeListRequest(w http.ResponseWriter, r *http.Request) (domain.PageRequest, error) {
-	fields, err := decodeFields(w, r)
+func decodeListRequestFields(fields map[string]string) (domain.PageRequest, error) {
+	limit, err := clampLimit(fields["limit"], 100, 200)
 	if err != nil {
 		return domain.PageRequest{}, err
 	}
-	return decodeListRequestFields(fields)
-}
-
-func decodeListRequestFields(fields map[string]string) (domain.PageRequest, error) {
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		limit = parsed
-		if err != nil || limit < 1 || limit > 200 {
-			return domain.PageRequest{}, errors.New("limit must be between 1 and 200")
-		}
-	}
 	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
 	if _, err := domain.DecodeListCursor(cursor); err != nil {
-		return domain.PageRequest{}, err
+		return domain.PageRequest{}, decodeFailure("invalid_cursor", "cursor is not a list cursor")
 	}
 	return domain.PageRequest{Limit: limit, Cursor: cursor}, nil
 }
@@ -4483,13 +4964,12 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	message, err := h.postMessageValue(r, principal, fields)
 	if err != nil {
-		code, reason := postMessageError(err)
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, postMessageError(err))
 		return
 	}
 	ts := slackTimestamp(message.CreatedAt)
@@ -4497,19 +4977,22 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	// Pinned /chat.unfurl token parameter: "Requires scope: `links:write`". It used
+	// to accept `chat:write`, which is the scope for posting a message, not for
+	// attaching link previews to someone else's.
+	principal, err := h.authenticate(r, auth.ScopeLinksWrite)
 	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	var rawUnfurls map[string]json.RawMessage
 	if strings.TrimSpace(fields["unfurls"]) == "" || json.Unmarshal([]byte(fields["unfurls"]), &rawUnfurls) != nil || rawUnfurls == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	unfurls := make(map[string]string, len(rawUnfurls))
@@ -4518,8 +5001,7 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 	}
 	message, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), unfurls)
 	if err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": messageResponse(message)})
@@ -4533,13 +5015,12 @@ func (h Handler) meMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	message, err := h.postMessageValue(r, principal, fields)
 	if err != nil {
-		code, reason := postMessageError(err)
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, postMessageError(err))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": slackTimestamp(message.CreatedAt)})
@@ -4553,19 +5034,18 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	if blockErr != nil || attachmentErr != nil || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || (strings.TrimSpace(fields["text"]) == "" && blocks == "" && attachments == "") {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments)
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	response := map[string]any{"ok": true, "message_ts": value.Timestamp}
@@ -4603,15 +5083,19 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 	)
 }
 
-func postMessageError(err error) (int, string) {
-	reason := "service_unavailable"
-	if errors.Is(err, service.ErrInvalidMessage) {
-		reason = "invalid_arguments"
-	}
+// postMessageError names the failure of a message mutation. `chat.postMessage`
+// and its siblings enumerate `channel_not_found`, `no_text`, `msg_too_long` and
+// `invalid_blocks`; none of them enumerate `invalid_arguments`, so a rejected
+// message body is reported as `no_text` when it carries no renderable content
+// and `invalid_blocks` when the supplied blocks or attachments are unusable.
+func postMessageError(err error) string {
 	if errors.Is(err, store.ErrNotFound) {
-		reason = "channel_not_found"
+		return "channel_not_found"
 	}
-	return mapServiceError(err, reason)
+	if errors.Is(err, service.ErrInvalidMessage) {
+		return "no_text"
+	}
+	return mapServiceError(err, "channel_not_found")
 }
 
 func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
@@ -4622,20 +5106,19 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	conversation, timestamp, text := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"]), fields["text"]
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	if conversation == "" || timestamp == "" || (strings.TrimSpace(text) == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	message, err := h.Messages.UpdateWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), text, blocks, attachments)
 	if err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	ts := slackTimestamp(message.CreatedAt)
@@ -4650,18 +5133,17 @@ func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	conversation, timestamp := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"])
 	if conversation == "" || timestamp == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	message, err := h.Messages.Delete(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp))
 	if err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": slackTimestamp(message.CreatedAt)})
@@ -4686,7 +5168,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
@@ -4704,13 +5186,12 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	unsupported := fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
 	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 || unsupported {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arguments")
 		return
 	}
 	value, err := h.Messages.ScheduleMessageWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, channel, textValue, blocks, attachments, time.Unix(postAt, 0).UTC())
 	if err != nil {
-		code, reason := mapServiceError(err, "channel_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": value.Channel, "post_at": value.PostAt.Unix(), "scheduled_message_id": value.ID, "message": scheduledMessageResponse(value)})
@@ -4724,21 +5205,17 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	limit := 100
-	if raw := strings.TrimSpace(fields["limit"]); raw != "" {
-		limit, err = strconv.Atoi(raw)
-		if err != nil || limit < 1 || limit > 1000 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
-			return
-		}
+	limit, err := clampLimit(fields["limit"], 100, 1000)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	page, err := h.Messages.ScheduledMessages(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
 	if err != nil {
-		code, reason := mapServiceError(err, "scheduled_messages_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Items))
@@ -4756,18 +5233,17 @@ func (h Handler) deleteScheduledMessage(w http.ResponseWriter, r *http.Request) 
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	id := domain.ScheduledMessageID(strings.TrimSpace(fields["scheduled_message_id"]))
 	if channel == "" || id == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arguments")
 		return
 	}
 	if err := h.Messages.DeleteScheduledMessage(r.Context(), principal.WorkspaceID, principal.UserID, channel, id); err != nil {
-		code, reason := mapServiceError(err, "scheduled_message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_scheduled_message_id"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -4817,13 +5293,12 @@ func (h Handler) mutateUserGroup(w http.ResponseWriter, r *http.Request, operati
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	value, err := operation(principal, fields)
 	if err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "usergroup": userGroupResponse(value, true)})
@@ -4836,23 +5311,35 @@ func (h Handler) listUserGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.ListUserGroups(r.Context(), principal.WorkspaceID, principal.UserID, fields["include_disabled"] == "true", request)
+	// These were raw `== "true"` comparisons, so the documented boolean form
+	// `include_users=1` was silently read as false and the `users` array was omitted
+	// from a response that reported success.
+	includeDisabled, err := parseBoolField(fields["include_disabled"])
 	if err != nil {
-		code, reason := mapServiceError(err, "usergroups_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	includeUsers, err := parseBoolField(fields["include_users"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	page, err := h.Messages.ListUserGroups(r.Context(), principal.WorkspaceID, principal.UserID, includeDisabled, request)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Groups))
 	for _, value := range page.Groups {
-		items = append(items, userGroupResponse(value, fields["include_users"] == "true"))
+		items = append(items, userGroupResponse(value, includeUsers))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "usergroups": items, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
@@ -4864,13 +5351,19 @@ func (h Handler) userGroupUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	values, err := h.Messages.UserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(strings.TrimSpace(fields["usergroup"])))
+	group := domain.UserGroupID(strings.TrimSpace(fields["usergroup"]))
+	if group == "" {
+		// `usergroup` is required:true; forwarding "" made the store answer for no
+		// group at all.
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	values, err := h.Messages.UserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group)
 	if err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	users := make([]string, 0, len(values))
@@ -4887,47 +5380,36 @@ func (h Handler) updateUserGroupUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	raw := strings.Split(fields["users"], ",")
-	users := make([]domain.UserID, 0, len(raw))
-	for _, value := range raw {
+	// Both `usergroup` and `users` are required:true in the pinned contract. An
+	// absent `users` used to be read as the empty list, so a request that omitted
+	// the mandatory argument removed every member and answered `"ok":true`. Absent
+	// is distinguished from present-and-empty so that deliberately emptying a group
+	// remains possible.
+	group := domain.UserGroupID(strings.TrimSpace(fields["usergroup"]))
+	if group == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	raw, present := fields["users"]
+	if !present {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	users := make([]domain.UserID, 0)
+	for _, value := range strings.Split(raw, ",") {
 		if strings.TrimSpace(value) != "" {
 			users = append(users, domain.UserID(strings.TrimSpace(value)))
 		}
 	}
-	value, err := h.Messages.SetUserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(strings.TrimSpace(fields["usergroup"])), users)
+	value, err := h.Messages.SetUserGroupUsers(r.Context(), principal.WorkspaceID, principal.UserID, group, users)
 	if err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "usergroup": userGroupResponse(value, true)})
-}
-
-func parseConversationIDs(raw string) []domain.ConversationID {
-	if strings.HasPrefix(strings.TrimSpace(raw), "[") {
-		var values []string
-		if err := json.Unmarshal([]byte(raw), &values); err != nil {
-			return nil
-		}
-		result := make([]domain.ConversationID, 0, len(values))
-		for _, value := range values {
-			if value = strings.TrimSpace(value); value != "" {
-				result = append(result, domain.ConversationID(value))
-			}
-		}
-		return result
-	}
-	parts := strings.Split(raw, ",")
-	result := make([]domain.ConversationID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.ConversationID(value))
-		}
-	}
-	return result
 }
 
 func (h Handler) adminUserGroupAddChannels(w http.ResponseWriter, r *http.Request) {
@@ -4938,21 +5420,20 @@ func (h Handler) adminUserGroupAddChannels(w http.ResponseWriter, r *http.Reques
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
+	channels := parseIDList[domain.ConversationID](fields["channel_ids"])
 	groupID := strings.TrimSpace(fields["usergroup"])
 	if groupID == "" {
 		groupID = strings.TrimSpace(fields["usergroup_id"])
 	}
 	if len(channels) == 0 || groupID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.AddUserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID), channels); err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -4966,7 +5447,7 @@ func (h Handler) adminUserGroupAddTeams(w http.ResponseWriter, r *http.Request) 
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	groupID := strings.TrimSpace(fields["usergroup_id"])
@@ -4981,12 +5462,18 @@ func (h Handler) adminUserGroupAddTeams(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	if groupID == "" || len(teams) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	// Same organization constraint as admin.conversations.setTeams. The service
+	// enforces it too; naming it here keeps the client-visible code stable and the
+	// two admin.*Teams handlers from diverging again.
+	if _, ok := foreignWorkspace(teams, principal.WorkspaceID); ok {
+		writeError(w, "invalid_team")
 		return
 	}
 	if err := h.Messages.AdminAddUserGroupTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID), teams); err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -5000,21 +5487,20 @@ func (h Handler) adminUserGroupRemoveChannels(w http.ResponseWriter, r *http.Req
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
+	channels := parseIDList[domain.ConversationID](fields["channel_ids"])
 	groupID := strings.TrimSpace(fields["usergroup"])
 	if groupID == "" {
 		groupID = strings.TrimSpace(fields["usergroup_id"])
 	}
 	if len(channels) == 0 || groupID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.RemoveUserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID), channels); err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -5027,7 +5513,7 @@ func (h Handler) adminUserGroupListChannels(w http.ResponseWriter, r *http.Reque
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	groupID := strings.TrimSpace(fields["usergroup"])
@@ -5035,13 +5521,12 @@ func (h Handler) adminUserGroupListChannels(w http.ResponseWriter, r *http.Reque
 		groupID = strings.TrimSpace(fields["usergroup_id"])
 	}
 	if groupID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	channels, err := h.Messages.UserGroupChannels(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserGroupID(groupID))
 	if err != nil {
-		code, reason := mapServiceError(err, "usergroup_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "usergroup_not_found"))
 		return
 	}
 	values := make([]string, 0, len(channels))
@@ -5061,8 +5546,7 @@ func (h Handler) adminTeamSettingsInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": workspaceSettingsResponse(value)})
@@ -5075,14 +5559,17 @@ func (h Handler) adminTeamSettingsSetName(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["name"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["name"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.AdminSetWorkspaceName(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"])
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": value.ID, "name": value.Name, "description": value.Description}})
@@ -5096,13 +5583,12 @@ func (h Handler) adminTeamSettingsSetDescription(w http.ResponseWriter, r *http.
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.AdminSetWorkspaceDescription(r.Context(), principal.WorkspaceID, principal.UserID, fields["description"])
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": value.ID, "name": value.Name, "description": value.Description, "discoverability": value.Discoverability}})
@@ -5116,13 +5602,12 @@ func (h Handler) adminTeamSettingsSetDiscoverability(w http.ResponseWriter, r *h
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.AdminSetWorkspaceDiscoverability(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkspaceDiscoverability(strings.TrimSpace(fields["discoverability"])))
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": map[string]any{"id": value.ID, "name": value.Name, "description": value.Description, "discoverability": value.Discoverability, "icon_url": value.IconURL}})
@@ -5135,14 +5620,17 @@ func (h Handler) adminTeamSettingsSetIcon(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["image_url"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["image_url"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.AdminSetWorkspaceIcon(r.Context(), principal.WorkspaceID, principal.UserID, fields["image_url"])
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": workspaceSettingsResponse(value)})
@@ -5156,18 +5644,17 @@ func (h Handler) adminTeamSettingsSetDefaultChannels(w http.ResponseWriter, r *h
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	channels := parseConversationIDs(fields["channel_ids"])
+	channels := parseIDList[domain.ConversationID](fields["channel_ids"])
 	if len(channels) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.AdminSetWorkspaceDefaultChannels(r.Context(), principal.WorkspaceID, principal.UserID, channels)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": workspaceSettingsResponse(value)})
@@ -5189,14 +5676,13 @@ func (h Handler) adminTeamsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	discoverability := domain.WorkspaceDiscoverability(strings.TrimSpace(fields["team_discoverability"]))
 	value, err := h.Messages.AdminCreateWorkspace(r.Context(), principal.WorkspaceID, principal.UserID, fields["team_domain"], fields["team_name"], fields["team_description"], discoverability)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_creation_failed")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "team": value.ID})
@@ -5210,8 +5696,7 @@ func (h Handler) adminTeamsList(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.WorkspaceInfo(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "teams": []map[string]any{{"id": value.ID, "name": value.Name}}})
@@ -5231,18 +5716,17 @@ func (h Handler) adminTeamsRoleList(w http.ResponseWriter, r *http.Request, role
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.AdminTeamUsers(r.Context(), principal.WorkspaceID, principal.UserID, role, request)
 	if err != nil {
-		code, reason := mapServiceError(err, "users_unavailable")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	ids := make([]string, 0, len(page.Users))
@@ -5312,22 +5796,21 @@ func (h Handler) addCall(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	started := time.Time{}
 	if raw := strings.TrimSpace(fields["date_start"]); raw != "" {
 		seconds, parseErr := strconv.ParseInt(raw, 10, 64)
 		if parseErr != nil || seconds <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_arg_name")
 			return
 		}
 		started = time.Unix(seconds, 0).UTC()
 	}
 	value, err := h.Messages.AddCall(r.Context(), principal.WorkspaceID, principal.UserID, fields["external_unique_id"], fields["external_display_id"], fields["join_url"], fields["desktop_app_join_url"], fields["title"], started, parseCallUsers(fields["users"]))
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "call": callResponse(value)})
@@ -5340,7 +5823,7 @@ func (h Handler) endCall(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
 	duration := int64(0)
@@ -5348,12 +5831,11 @@ func (h Handler) endCall(w http.ResponseWriter, r *http.Request) {
 		duration, err = strconv.ParseInt(strings.TrimSpace(fields["duration"]), 10, 64)
 	}
 	if err != nil || strings.TrimSpace(fields["id"]) == "" || duration < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.EndCall(r.Context(), principal.WorkspaceID, principal.UserID, domain.CallID(strings.TrimSpace(fields["id"])), duration); err != nil {
-		code, reason := mapServiceError(err, "call_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "call_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -5365,14 +5847,17 @@ func (h Handler) callInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.GetCall(r.Context(), principal.WorkspaceID, principal.UserID, domain.CallID(strings.TrimSpace(fields["id"])))
 	if err != nil {
-		code, reason := mapServiceError(err, "call_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "call_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "call": callResponse(value)})
@@ -5385,13 +5870,19 @@ func (h Handler) updateCall(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	value, err := h.Messages.UpdateCall(r.Context(), principal.WorkspaceID, principal.UserID, domain.CallID(strings.TrimSpace(fields["id"])), fields["title"], fields["join_url"], fields["desktop_app_join_url"])
+	id := domain.CallID(strings.TrimSpace(fields["id"]))
+	if id == "" {
+		// endCall, callInfo and calls.participants.* all require a non-empty id;
+		// calls.update forwarded "".
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	value, err := h.Messages.UpdateCall(r.Context(), principal.WorkspaceID, principal.UserID, id, fields["title"], fields["join_url"], fields["desktop_app_join_url"])
 	if err != nil {
-		code, reason := mapServiceError(err, "call_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "call_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "call": callResponse(value)})
@@ -5409,8 +5900,12 @@ func (h Handler) changeCallParticipantsHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["id"]) == "" || strings.TrimSpace(fields["users"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["id"]) == "" || strings.TrimSpace(fields["users"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	id := domain.CallID(strings.TrimSpace(fields["id"]))
@@ -5421,8 +5916,7 @@ func (h Handler) changeCallParticipantsHTTP(w http.ResponseWriter, r *http.Reque
 		err = h.Messages.RemoveCallParticipants(r.Context(), principal.WorkspaceID, principal.UserID, id, users)
 	}
 	if err != nil {
-		code, reason := mapServiceError(err, "call_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "call_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -5435,23 +5929,32 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	timestamp := domain.MessageTimestamp(strings.TrimSpace(fields["message_ts"]))
-	if err != nil || channel == "" || timestamp == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if channel == "" || timestamp == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	permalink, err := h.Messages.Permalink(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp)
 	if err != nil {
-		code, reason := mapServiceError(err, "message_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "message_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": channel, "permalink": permalink})
 }
 
 func messageResponse(message domain.Message) map[string]any {
-	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt), "thread_ts": message.ThreadTimestamp}
+	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
+	// `thread_ts` used to be emitted unconditionally, so a non-threaded message
+	// serialised as `"thread_ts": ""`, which the strictly typed SDK models (Java
+	// Message.threadTs, the Deno typed responses) parse as a timestamp.
+	if message.ThreadTimestamp != "" {
+		result["thread_ts"] = message.ThreadTimestamp
+	}
 	if message.Blocks != "" {
 		result["blocks"] = json.RawMessage(message.Blocks)
 	}
@@ -5468,62 +5971,123 @@ func messageResponse(message domain.Message) map[string]any {
 	return result
 }
 
-func mapServiceError(err error, notFoundReason string) (int, string) {
-	if errors.Is(err, store.ErrNotFound) || status.Code(err) == codes.NotFound {
-		return http.StatusNotFound, notFoundReason
+// mapServiceError names a handled service failure with an error code the
+// operation's pinned `default` enum declares. Every Slack Web API failure is a
+// handled failure, so the caller pairs this with writeError, which answers HTTP
+// 200; the status code is deliberately not part of the result so that a handled
+// error can never be reported as a transport failure.
+//
+// notFound names the missing referent (`channel_not_found`, `user_not_found`,
+// …). Callers that need a specific argument-rejection code use
+// mapServiceErrorNamed; the default is `invalid_arg_name`, which the pinned
+// snapshot declares for every operation that declares an error enum at all
+// except admin.conversations.* and reactions.get.
+// mapAdminError names a failure from an admin.* method whose pinned enum declares
+// `not_an_admin`: admin.conversations.delete, .disconnectShared,
+// .getConversationPrefs, .setConversationPrefs and .search. An authorization
+// failure on those operations is a role failure, and reporting it as the generic
+// `no_permission` hides which grant is missing.
+//
+// Two failures reach it: service.ErrNotWorkspaceAdmin, the role denial every
+// admin.* method raises for an actor whose durable membership is not an
+// administrator or owner, and service.ErrMessageNotOwned, an ownership denial.
+// Both land in the permission branch of mapServiceErrorNamed below.
+func mapAdminError(err error, notFoundReason string) string {
+	if reason := mapServiceError(err, notFoundReason); reason != "no_permission" {
+		return reason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || status.Code(err) == codes.InvalidArgument || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) {
-		return http.StatusBadRequest, "invalid_arguments"
-	}
-	if errors.Is(err, service.ErrEmojiAlreadyExists) || status.Code(err) == codes.AlreadyExists {
-		return http.StatusBadRequest, "emoji_already_exists"
-	}
-	if errors.Is(err, service.ErrMessageNotOwned) || status.Code(err) == codes.PermissionDenied {
-		return http.StatusForbidden, "not_authorized"
-	}
-	if errors.Is(err, service.ErrMessageAlreadyDeleted) || status.Code(err) == codes.FailedPrecondition {
-		return http.StatusBadRequest, "message_not_found"
-	}
-	if status.Code(err) == codes.Aborted {
-		return http.StatusConflict, "hash_conflict"
-	}
-	if errors.Is(err, service.ErrInvalidPresence) {
-		return http.StatusBadRequest, "invalid_presence"
-	}
-	if errors.Is(err, service.ErrBlobUnavailable) {
-		return http.StatusServiceUnavailable, "file_storage_unavailable"
-	}
-	if errors.Is(err, store.ErrAlreadyExists) {
-		return http.StatusBadRequest, "already_reacted"
-	}
-	if errors.Is(err, store.ErrConflict) {
-		return http.StatusConflict, "hash_conflict"
-	}
-	if errors.Is(err, store.ErrBookmarkLimit) {
-		return http.StatusBadRequest, "too_many_bookmarks"
-	}
-	return http.StatusServiceUnavailable, "service_unavailable"
+	return "not_an_admin"
 }
 
-func parseOptionalBooleans(fields map[string]string, names ...string) (bool, bool, bool, error) {
-	if len(names) != 3 {
-		return false, false, false, errors.New("three boolean fields are required")
+func mapServiceError(err error, notFoundReason string) string {
+	return mapServiceErrorNamed(err, notFoundReason, "invalid_arg_name")
+}
+
+// mapServiceErrorNamed names a failure from the chat service.
+//
+// Classification is by domain sentinel only. It used to also test the gRPC
+// status code, which was a workaround for a transport that dropped sentinels on
+// the wire; internal/modules/chat/transport/grpc now carries the sentinel key in
+// a status detail and restores it exactly, so errors.Is is true in both
+// compositions. The status-code tests were not merely redundant — a code is
+// coarser than a sentinel, so they misclassified:
+//
+//   - codes.AlreadyExists is store.ErrAlreadyExists as well as
+//     service.ErrEmojiAlreadyExists, so a duplicate reaction was reported as
+//     `emoji_already_exists`, a code no pinned operation declares for
+//     reactions.add, instead of the `already_reacted` its enum does declare;
+//   - codes.Aborted is store.ErrConflict, store.ErrLeaseConflict and
+//     store.ErrIdempotencyConflict, so the code test shadowed the
+//     ErrIdempotencyConflict branch below and answered `hash_conflict` where the
+//     idempotency contract requires `rate_limited`.
+func mapServiceErrorNamed(err error, notFoundReason, invalidReason string) string {
+	if errors.Is(err, store.ErrNotFound) {
+		return notFoundReason
 	}
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) {
+		return invalidReason
+	}
+	if errors.Is(err, service.ErrEmojiAlreadyExists) {
+		return "emoji_already_exists"
+	}
+	// service.ErrNotWorkspaceAdmin is the role denial raised by every admin.*
+	// method. It belongs in the permission branch so mapAdminError can name it
+	// `not_an_admin` on the five operations whose pinned enum declares that code,
+	// while every other operation reports `no_permission`, which 66 pinned enums
+	// declare and which is the closest code those operations do declare.
+	if errors.Is(err, service.ErrMessageNotOwned) || errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		return "no_permission"
+	}
+	if errors.Is(err, service.ErrMessageAlreadyDeleted) {
+		return "message_not_found"
+	}
+	if errors.Is(err, service.ErrInvalidPresence) {
+		return "invalid_presence"
+	}
+	if errors.Is(err, service.ErrBlobUnavailable) {
+		return "file_storage_unavailable"
+	}
+	if errors.Is(err, store.ErrAlreadyExists) {
+		return "already_reacted"
+	}
+	if errors.Is(err, store.ErrConflict) {
+		return "hash_conflict"
+	}
+	if errors.Is(err, store.ErrBookmarkLimit) {
+		return "too_many_bookmarks"
+	}
+	if errors.Is(err, store.ErrInvalidInviteRequest) {
+		return invalidReason
+	}
+	// An Idempotency-Key replayed with a different body is a caller mistake, not a
+	// dependency failure. `rate_limited` is the only pinned code that describes a
+	// rejected retry, and it is declared by chat.postMessage and chat.update, the
+	// operations that accept the header.
+	if errors.Is(err, store.ErrIdempotencyConflict) {
+		return "rate_limited"
+	}
+	// apps.connections.open is absent from the pinned snapshot; the Socket Mode
+	// connection limit reuses the recorded Socket Mode deviation code.
+	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
+		return "socket_mode_unavailable"
+	}
+	return "fatal_error"
+}
+
+// parseBoolFields reads several optional booleans through the one boolean parser
+// in this package. It replaces parseOptionalBooleans, which hard-coded an arity
+// of exactly three and re-implemented parseBoolField with a different accepted
+// set.
+func parseBoolFields(fields map[string]string, names ...string) ([]bool, error) {
 	values := make([]bool, len(names))
 	for index, name := range names {
-		raw := strings.TrimSpace(fields[name])
-		if raw == "" {
-			continue
+		value, err := parseBoolField(fields[name])
+		if err != nil {
+			return nil, err
 		}
-		switch strings.ToLower(raw) {
-		case "1", "true":
-			values[index] = true
-		case "0", "false":
-		default:
-			return false, false, false, errors.New("invalid boolean")
-		}
+		values[index] = value
 	}
-	return values[0], values[1], values[2], nil
+	return values, nil
 }
 
 const maxRequestBody = 4 << 20
@@ -5534,6 +6098,7 @@ func decodeProfileJSON(raw string) (map[string]string, error) {
 		return nil, errors.New("profile must be a JSON object")
 	}
 	values := make(map[string]string, len(fields))
+	acknowledged := 0
 	for name, value := range fields {
 		switch name {
 		case "display_name", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
@@ -5543,72 +6108,100 @@ func decodeProfileJSON(raw string) (map[string]string, error) {
 			}
 			values[name] = text
 		case "always_active", "is_custom_image":
+			// Parsed for validation only: neither is settable through this API. They
+			// used to be dropped from `values`, so `profile={"always_active":true}`
+			// fell through to "must contain at least one supported field" and the
+			// request was rejected as if the field were unknown.
 			var boolean bool
 			if err := json.Unmarshal(value, &boolean); err != nil {
 				return nil, fmt.Errorf("profile field %s must be a boolean", name)
 			}
+			acknowledged++
 		default:
 			return nil, fmt.Errorf("unsupported profile field %s", name)
 		}
 	}
-	if len(values) == 0 {
+	if len(values) == 0 && acknowledged == 0 {
 		return nil, errors.New("profile must contain at least one supported field")
 	}
 	return values, nil
 }
 
+// decodeError carries the Slack error code the pinned contract declares for a
+// request-decoding failure. Before this existed every caller either wrote the
+// blanket `invalid_form_data` or — in eighteen places — returned without writing
+// a body at all, which answered HTTP 200 with zero bytes and left an SDK unable
+// to tell success from failure.
+type decodeError struct {
+	code   string
+	detail string
+}
+
+func (e decodeError) Error() string { return e.detail }
+
+func decodeFailure(code, detail string) error { return decodeError{code: code, detail: detail} }
+
+// decodeErrorCode names a decode failure. `invalid_form_data` is the fallback
+// because the pinned snapshot declares it for every operation that declares an
+// error enum at all.
+func decodeErrorCode(err error) string {
+	var typed decodeError
+	if errors.As(err, &typed) {
+		return typed.code
+	}
+	var syntax *json.SyntaxError
+	var unmarshal *json.UnmarshalTypeError
+	if errors.As(err, &syntax) || errors.As(err, &unmarshal) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return "invalid_json"
+	}
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return "request_timeout"
+	}
+	return "invalid_form_data"
+}
+
+// writeDecodeError is the single exit for a request that could not be decoded.
+func writeDecodeError(w http.ResponseWriter, err error) {
+	writeError(w, decodeErrorCode(err))
+}
+
+// requestCharset rejects a charset the decoder cannot honour. `invalid_charset`
+// is declared by 87 of the 174 pinned operations and was never emitted.
+func requestCharset(header string) error {
+	for _, parameter := range strings.Split(header, ";")[1:] {
+		name, value, found := strings.Cut(parameter, "=")
+		if !found || strings.ToLower(strings.TrimSpace(name)) != "charset" {
+			continue
+		}
+		switch strings.ToLower(strings.Trim(strings.TrimSpace(value), `"`)) {
+		case "", "utf-8", "utf8", "us-ascii", "ascii":
+		default:
+			return decodeFailure("invalid_charset", "unsupported charset "+value)
+		}
+	}
+	return nil
+}
+
 func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
 	fields := make(map[string]string)
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
-	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(r.Header.Get("Content-Type"), ";", 2)[0]))
+	header := r.Header.Get("Content-Type")
+	if err := requestCharset(header); err != nil {
+		return nil, err
+	}
+	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
 	if contentType == "application/json" {
-		decoder := json.NewDecoder(io.LimitReader(r.Body, maxRequestBody))
-		start, err := decoder.Token()
-		if err == io.EOF {
-			return fields, nil
-		}
+		fields, err := decodeJSONFields(r.Body)
 		if err != nil {
-			return nil, err
-		}
-		if delimiter, ok := start.(json.Delim); !ok || delimiter != '{' {
-			return nil, errors.New("JSON request must be an object")
-		}
-		seen := make(map[string]struct{})
-		for decoder.More() {
-			key, err := decoder.Token()
-			if err != nil {
+			// Every raw encoding/json failure is a malformed document; `invalid_json` is
+			// the code the pinned enums declare for it. Returning the bare error left the
+			// blanket `invalid_form_data` pointing the caller at the wrong encoding.
+			var typed decodeError
+			if errors.As(err, &typed) {
 				return nil, err
 			}
-			name, ok := key.(string)
-			if !ok {
-				return nil, errors.New("JSON object field name is invalid")
-			}
-			if _, exists := seen[name]; exists {
-				return nil, errors.New("request contains duplicate JSON field")
-			}
-			seen[name] = struct{}{}
-			var value json.RawMessage
-			if err := decoder.Decode(&value); err != nil {
-				return nil, err
-			}
-			fields[name], err = normalizeJSONField(name, value)
-			if err != nil {
-				return nil, err
-			}
-		}
-		end, err := decoder.Token()
-		if err != nil {
-			return nil, err
-		}
-		if delimiter, ok := end.(json.Delim); !ok || delimiter != '}' {
-			return nil, errors.New("JSON request object is invalid")
-		}
-		var extra any
-		if err := decoder.Decode(&extra); err != io.EOF {
-			if err == nil {
-				return nil, errors.New("request contains multiple JSON values")
-			}
-			return nil, err
+			return nil, decodeFailure("invalid_json", err.Error())
 		}
 		return fields, nil
 	}
@@ -5619,42 +6212,117 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 		if r.MultipartForm == nil {
 			return fields, nil
 		}
-		for name, values := range r.MultipartForm.Value {
-			if len(values) == 0 {
-				return nil, errors.New("form fields must occur once")
-			}
-			for _, value := range values[1:] {
-				if value != values[0] {
-					return nil, errors.New("form fields must not contain conflicting values")
-				}
-			}
-			value, err := normalizeListFieldValue(name, values[0])
-			if err != nil {
-				return nil, err
-			}
-			fields[name] = value
+		if err := collectFormValues(fields, r.MultipartForm.Value); err != nil {
+			return nil, err
 		}
 		return fields, nil
+	}
+	// Go's parsePostForm treats an absent or unrecognised Content-Type as
+	// application/octet-stream and reads nothing without reporting an error, so a
+	// POST body would silently decode as no parameters at all. The pinned enums
+	// reserve `missing_post_type` and `invalid_post_type` for exactly this. A
+	// POST that carries no payload at all is legitimate (a bearer token in the
+	// header is enough for many methods) and must not be rejected, so the check
+	// only fires once a byte of body exists.
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		body := bufio.NewReader(r.Body)
+		r.Body = readCloser{Reader: body, Closer: r.Body}
+		if _, err := body.Peek(1); err == nil {
+			if contentType == "" {
+				return nil, decodeFailure("missing_post_type", "a POST payload must declare a Content-Type")
+			}
+			if contentType != "application/x-www-form-urlencoded" {
+				return nil, decodeFailure("invalid_post_type", "unsupported Content-Type "+contentType)
+			}
+		}
 	}
 	if err := r.ParseForm(); err != nil {
 		return nil, err
 	}
-	for name, values := range r.Form {
+	if err := collectFormValues(fields, r.Form); err != nil {
+		return nil, err
+	}
+	return fields, nil
+}
+
+// readCloser rebuilds an io.ReadCloser after the body has been wrapped for a
+// lookahead, so ParseForm still reads every byte and Close still reaches the
+// original body.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
+
+func decodeJSONFields(body io.Reader) (map[string]string, error) {
+	fields := make(map[string]string)
+	decoder := json.NewDecoder(io.LimitReader(body, maxRequestBody))
+	start, err := decoder.Token()
+	if err == io.EOF {
+		return fields, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if delimiter, ok := start.(json.Delim); !ok || delimiter != '{' {
+		return nil, decodeFailure("json_not_object", "JSON request must be an object")
+	}
+	seen := make(map[string]struct{})
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			return nil, err
+		}
+		name, ok := key.(string)
+		if !ok {
+			return nil, decodeFailure("invalid_json", "JSON object field name is invalid")
+		}
+		if _, exists := seen[name]; exists {
+			return nil, decodeFailure("invalid_json", "request contains duplicate JSON field")
+		}
+		seen[name] = struct{}{}
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return nil, err
+		}
+		fields[name], err = normalizeJSONField(name, value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	end, err := decoder.Token()
+	if err != nil {
+		return nil, err
+	}
+	if delimiter, ok := end.(json.Delim); !ok || delimiter != '}' {
+		return nil, decodeFailure("invalid_json", "JSON request object is invalid")
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return nil, decodeFailure("invalid_json", "request contains multiple JSON values")
+		}
+		return nil, err
+	}
+	return fields, nil
+}
+
+func collectFormValues(fields map[string]string, source map[string][]string) error {
+	for name, values := range source {
 		if len(values) == 0 {
-			return nil, errors.New("form fields must occur once")
+			return decodeFailure("invalid_form_data", "form fields must occur once")
 		}
 		for _, value := range values[1:] {
 			if value != values[0] {
-				return nil, errors.New("form fields must not contain conflicting values")
+				return decodeFailure("invalid_form_data", "form fields must not contain conflicting values")
 			}
 		}
 		value, err := normalizeListFieldValue(name, values[0])
 		if err != nil {
-			return nil, err
+			return err
 		}
 		fields[name] = value
 	}
-	return fields, nil
+	return nil
 }
 
 func normalizeJSONScalar(value json.RawMessage) (string, error) {
@@ -5664,7 +6332,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 	}
 	var scalar any
 	if err := json.Unmarshal(value, &scalar); err != nil {
-		return "", errors.New("request fields must be scalar values")
+		return "", decodeFailure("invalid_arg_name", "request fields must be scalar values")
 	}
 	switch scalar := scalar.(type) {
 	case bool:
@@ -5672,37 +6340,74 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 	case float64:
 		return strconv.FormatFloat(scalar, 'f', -1, 64), nil
 	default:
-		return "", errors.New("request fields must be scalar values")
+		return "", decodeFailure("invalid_arg_name", "request fields must be scalar values")
+	}
+}
+
+// isStructuredField names the arguments whose JSON value is forwarded verbatim
+// rather than flattened to a scalar. This used to be two hand-maintained lists,
+// one negated and one positive, differing only by "profile" — so adding a name to
+// one and not the other silently changed how a value decoded.
+//
+// `error` is absent because it has no single shape: api.test and
+// functions.completeError take a plain string, and treating it as structured
+// JSON made `{"error":"my_error"}` echo back the quoted `"\"my_error\""` while
+// the equivalent form-encoded request echoed `my_error`. But workflows.stepFailed
+// takes an object carrying a message, so flattening every `error` broke it for
+// every official SDK. It is decided by the value's own shape instead — see
+// normalizeJSONField.
+func isStructuredField(name string) bool {
+	switch name {
+	case "unfurls", "metadata", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment":
+		return true
+	default:
+		return false
 	}
 }
 
 func normalizeJSONField(name string, value json.RawMessage) (string, error) {
-	if isListField(name) {
+	switch {
+	case isListField(name):
 		return normalizeJSONListField(value)
-	}
-	if name != "profile" && name != "unfurls" && name != "metadata" && name != "user_auth_blocks" && name != "view" && name != "outputs" && name != "error" && name != "inputs" && name != "dialog" && name != "prefs" && name != "document_content" && name != "changes" && name != "criteria" && name != "description_blocks" && name != "schema" && name != "initial_fields" && name != "cells" && name != "comments" && name != "comment" {
-		return normalizeJSONScalar(value)
-	}
-	if name == "unfurls" || name == "metadata" || name == "user_auth_blocks" || name == "view" || name == "outputs" || name == "error" || name == "inputs" || name == "dialog" || name == "prefs" || name == "document_content" || name == "changes" || name == "criteria" || name == "description_blocks" || name == "schema" || name == "initial_fields" || name == "cells" || name == "comments" || name == "comment" {
+	case isStructuredField(name):
 		var structured any
 		if err := json.Unmarshal(value, &structured); err != nil || structured == nil {
-			return "", fmt.Errorf("%s must be structured JSON", name)
+			return "", decodeFailure("invalid_json", name+" must be structured JSON")
 		}
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, value); err != nil {
-			return "", err
+	case name == "profile":
+		var profile map[string]json.RawMessage
+		if err := json.Unmarshal(value, &profile); err != nil || profile == nil {
+			return "", decodeFailure("json_not_object", "profile must be a JSON object")
 		}
-		return compact.String(), nil
-	}
-	var profile map[string]json.RawMessage
-	if err := json.Unmarshal(value, &profile); err != nil || profile == nil {
-		return "", errors.New("profile must be a JSON object")
+	case name == "error" && jsonIsComposite(value):
+		// api.test takes a string here and workflows.stepFailed takes an object,
+		// so the name alone cannot decide. A composite value is forwarded
+		// verbatim; a scalar is flattened, which also keeps the form-encoded and
+		// JSON-encoded forms of the scalar case identical.
+	default:
+		return normalizeJSONScalar(value)
 	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, value); err != nil {
-		return "", err
+		return "", decodeFailure("invalid_json", "field is not valid JSON")
 	}
 	return compact.String(), nil
+}
+
+// jsonIsComposite reports whether a raw JSON value is an object or an array,
+// i.e. one that cannot survive being flattened into a form value.
+func jsonIsComposite(value json.RawMessage) bool {
+	for _, b := range value {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '{', '[':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func isListField(name string) bool {
@@ -5727,27 +6432,88 @@ func normalizeListFieldValue(name string, value string) (string, error) {
 
 func normalizeJSONListField(value json.RawMessage) (string, error) {
 	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-		return "", errors.New("list fields must be strings or arrays of strings")
+		return "", decodeFailure("invalid_array_arg", "list fields must be strings or arrays of strings")
 	}
 	var values []string
 	if err := json.Unmarshal(value, &values); err == nil {
 		for index, item := range values {
 			values[index] = strings.TrimSpace(item)
 			if values[index] == "" {
-				return "", errors.New("list fields must contain non-empty strings")
+				return "", decodeFailure("invalid_array_arg", "list fields must contain non-empty strings")
 			}
 		}
 		return strings.Join(values, ","), nil
 	}
 	var scalar string
 	if err := json.Unmarshal(value, &scalar); err != nil {
-		return "", errors.New("list fields must be strings or arrays of strings")
+		return "", decodeFailure("invalid_array_arg", "list fields must be strings or arrays of strings")
 	}
 	return scalar, nil
 }
 
+// parseIDList reads a comma-separated list or a JSON array of strings into a
+// typed ID slice. It replaces five near-identical splitters, only two of which
+// understood the JSON-array form — which is why slackLists.access.set accepted
+// `channel_ids=["C1"]` while canvases.access.set silently produced one bogus id.
+func parseIDList[T ~string](raw string) []T {
+	trimmed := strings.TrimSpace(raw)
+	if strings.HasPrefix(trimmed, "[") {
+		var values []string
+		if err := json.Unmarshal([]byte(trimmed), &values); err != nil {
+			return nil
+		}
+		result := make([]T, 0, len(values))
+		for _, value := range values {
+			if value = strings.TrimSpace(value); value != "" {
+				result = append(result, T(value))
+			}
+		}
+		return result
+	}
+	parts := strings.Split(raw, ",")
+	result := make([]T, 0, len(parts))
+	for _, part := range parts {
+		if value := strings.TrimSpace(part); value != "" {
+			result = append(result, T(value))
+		}
+	}
+	return result
+}
+
 func slackTimestamp(value time.Time) string {
 	return fmt.Sprintf("%d.%06d", value.Unix(), value.Nanosecond()/1000)
+}
+
+// missingScopeError carries the scope the operation requires and the scopes the
+// token actually holds. The pinned `default` response schema declares `needed`
+// and `provided` next to `error` precisely so a client can repair the grant, so
+// dropping them would leave `missing_scope` unactionable.
+type missingScopeError struct {
+	needed   auth.Scope
+	provided []string
+}
+
+func (e missingScopeError) Error() string {
+	return fmt.Sprintf("missing scope %s", e.needed)
+}
+
+func (e missingScopeError) Unwrap() error { return auth.ErrMissingScope }
+
+// accessLogLimits mirror the durable column bounds enforced by
+// service.Messages.RecordAccess. A client controls both values through request
+// headers, so the handler truncates rather than letting a long header turn an
+// authenticated read into a dependency failure.
+const (
+	maxAccessLogIP        = 128
+	maxAccessLogUserAgent = 1024
+)
+
+func truncate(value string, limit int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }
 
 func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal, error) {
@@ -5756,9 +6522,9 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 		return auth.Principal{}, err
 	}
 	if scope != "" && !principal.HasScope(scope) {
-		return auth.Principal{}, auth.ErrMissingScope
+		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
 	}
-	if err := h.Messages.RecordAccess(r.Context(), principal.WorkspaceID, principal.UserID, r.RemoteAddr, r.UserAgent()); err != nil {
+	if err := h.Messages.RecordAccess(r.Context(), principal.WorkspaceID, principal.UserID, truncate(r.RemoteAddr, maxAccessLogIP), truncate(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
 		return auth.Principal{}, fmt.Errorf("%w: %v", errAccessLogging, err)
 	}
 	return principal, nil
@@ -5766,14 +6532,55 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 
 func writeAuthError(w http.ResponseWriter, err error) {
 	if errors.Is(err, errAccessLogging) {
-		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "access_logging_unavailable"})
+		writeError(w, "fatal_error")
+		return
+	}
+	var missing missingScopeError
+	if errors.As(err, &missing) {
+		body := map[string]any{"ok": false, "error": "missing_scope", "needed": string(missing.needed)}
+		body["provided"] = strings.Join(missing.provided, ",")
+		writeJSON(w, http.StatusOK, body)
 		return
 	}
 	if errors.Is(err, auth.ErrMissingScope) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"ok": false, "error": "missing_scope"})
+		writeError(w, "missing_scope")
 		return
 	}
-	writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "not_authed"})
+	// The four authentication outcomes are distinct members of the same pinned
+	// `error` enum — `not_authed` (87 operations), `invalid_auth` (88),
+	// `token_revoked` (52) and `account_inactive` (86) — so collapsing them onto
+	// `not_authed` told a client holding a stale or withdrawn token that it had
+	// sent no credential at all. The specific sentinels are tested before the
+	// class they wrap.
+	//
+	// Caveat recorded rather than hidden: the snapshot's enums are per-operation
+	// and `token_revoked` is absent from 122 of them, so a revoked token on such
+	// an operation now answers a code that operation does not enumerate. The
+	// snapshot is demonstrably incomplete here (`account_inactive` and
+	// `invalid_auth` appear on operations that omit `token_revoked` even though
+	// all three describe the same credential check), and naming the real cause is
+	// worth more to a caller than a code that is in the enum but wrong.
+	switch {
+	case errors.Is(err, auth.ErrTokenRevoked):
+		writeError(w, "token_revoked")
+	case errors.Is(err, auth.ErrAccountInactive):
+		writeError(w, "account_inactive")
+	case errors.Is(err, auth.ErrInvalidToken):
+		writeError(w, "invalid_auth")
+	default:
+		writeError(w, "not_authed")
+	}
+}
+
+// writeError answers a handled failure. Every Slack Web API failure is signalled
+// with HTTP 200 and `{"ok":false,"error":…}`: the pinned contract declares only
+// a `200` and a `default` response whose recorded examples are plain envelopes,
+// and every official SDK keys its retry and rate-limit logic off the status
+// code, so reporting a handled rejection as 4xx/5xx makes clients retry a
+// request that can never succeed. AGENTS.md forbids the same thing from the
+// other direction.
+func writeError(w http.ResponseWriter, reason string) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": reason})
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -5790,23 +6597,22 @@ func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_form_data"})
+		writeDecodeError(w, err)
 		return
 	}
-	includeCopied, err := parseListBoolean(fields, "include_copied_list_records")
+	includeCopied, err := parseBoolField(fields["include_copied_list_records"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	todoMode, err := parseListBoolean(fields, "todo_mode")
+	todoMode, err := parseBoolField(fields["todo_mode"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.CreateList(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], fields["description_blocks"], fields["schema"], domain.ListID(strings.TrimSpace(fields["copy_from_list_id"])), includeCopied, todoMode)
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "list": listResponse(value)})
@@ -5819,19 +6625,22 @@ func (h Handler) updateList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	todoMode, err := parseListBoolean(fields, "todo_mode")
+	if strings.TrimSpace(fields["id"]) == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	todoMode, err := parseBoolField(fields["todo_mode"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.UpdateList(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["id"])), fields["name"], fields["description_blocks"], todoMode, strings.TrimSpace(fields["todo_mode"]) != "")
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "list": listResponse(value)})
@@ -5844,14 +6653,17 @@ func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["list_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["parent_item_id"])), fields["initial_fields"])
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": listItemResponse(value)})
@@ -5864,14 +6676,17 @@ func (h Handler) listItemInfo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.GetListItem(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), domain.ListItemID(strings.TrimSpace(fields["id"])))
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "item": listItemResponse(value)})
@@ -5884,24 +6699,27 @@ func (h Handler) listItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["list_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	request, err := pageRequest(fields["limit"], fields["cursor"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeDecodeError(w, err)
 		return
 	}
-	archived, err := parseListBoolean(fields, "archived")
+	archived, err := parseBoolField(fields["archived"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	page, err := h.Messages.ListItems(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), request, archived)
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Items))
@@ -5918,14 +6736,17 @@ func (h Handler) updateListItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["cells"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["cells"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	values, err := h.Messages.UpdateListCells(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), fields["cells"])
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	items := make([]map[string]any, 0, len(values))
@@ -5950,21 +6771,34 @@ func (h Handler) deleteListItemsWithScope(w http.ResponseWriter, r *http.Request
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	ids := parseListItemIDs(fields["id"])
+	if strings.TrimSpace(fields["list_id"]) == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	// slackLists.items.delete takes one id and slackLists.items.deleteMultiple takes
+	// a list. The single form used to be split on commas as well, so `id=R1,R2`
+	// deleted two rows through the single-delete method, and the split of `id` was
+	// pure waste on the deleteMultiple path.
+	var ids []domain.ListItemID
 	if multiple {
-		ids = parseListItemIDs(fields["ids"])
+		ids = parseIDList[domain.ListItemID](fields["ids"])
+	} else if id := strings.TrimSpace(fields["id"]); id != "" {
+		if strings.Contains(id, ",") {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		ids = []domain.ListItemID{domain.ListItemID(id)}
 	}
 	if len(ids) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.DeleteListItems(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), ids); err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -5985,20 +6819,23 @@ func (h Handler) changeListAccess(w http.ResponseWriter, r *http.Request, set bo
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	channels := parseListConversationIDs(fields["channel_ids"])
-	users := parseListUserIDs(fields["user_ids"])
+	if strings.TrimSpace(fields["list_id"]) == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	channels := parseIDList[domain.ConversationID](fields["channel_ids"])
+	users := parseIDList[domain.UserID](fields["user_ids"])
 	if set {
 		err = h.Messages.SetListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), fields["access_level"], channels, users)
 	} else {
 		err = h.Messages.DeleteListAccess(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), channels, users)
 	}
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -6011,19 +6848,22 @@ func (h Handler) startListDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	includeArchived, err := parseListBoolean(fields, "include_archived")
+	if strings.TrimSpace(fields["list_id"]) == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	includeArchived, err := parseBoolField(fields["include_archived"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.StartListDownload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListID(strings.TrimSpace(fields["list_id"])), includeArchived)
 	if err != nil {
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "job_id": value.ID})
@@ -6038,7 +6878,7 @@ func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {
 	listID := domain.ListID(strings.TrimSpace(r.URL.Query().Get("list_id")))
 	jobID := domain.ListDownloadID(strings.TrimSpace(r.URL.Query().Get("job_id")))
 	if listID == "" || jobID == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	download, err := h.Messages.GetListDownload(r.Context(), principal.WorkspaceID, principal.UserID, jobID)
@@ -6046,8 +6886,7 @@ func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			err = store.ErrNotFound
 		}
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
@@ -6082,8 +6921,12 @@ func (h Handler) getListDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["job_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["list_id"]) == "" || strings.TrimSpace(fields["job_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	value, err := h.Messages.GetListDownload(r.Context(), principal.WorkspaceID, principal.UserID, domain.ListDownloadID(strings.TrimSpace(fields["job_id"])))
@@ -6091,8 +6934,7 @@ func (h Handler) getListDownload(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			err = store.ErrNotFound
 		}
-		code, reason := mapServiceError(err, "list_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "list_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "status": value.Status, "download_url": value.URL})
@@ -6106,63 +6948,100 @@ func listItemResponse(value domain.ListItem) map[string]any {
 	return map[string]any{"id": value.ID, "list_id": value.ListID, "fields": json.RawMessage(value.Fields), "date_created": value.CreatedAt.Unix(), "created_by": value.CreatedBy, "updated_by": value.UpdatedBy, "archived": value.Archived}
 }
 
-func parseListBoolean(fields map[string]string, name string) (bool, error) {
-	value := strings.TrimSpace(fields[name])
-	if value == "" {
-		return false, nil
+// clampLimit normalizes a wire `limit`. Slack clamps a limit above a method's
+// documented maximum instead of rejecting it, so only a value that is not a
+// positive integer is an error. This replaces twelve separate limit parsers with
+// five different ceilings, one of which (pageRequest) returned a nil error for an
+// out-of-range value and handed Limit: 0 to the store — the store then answered
+// with a bare errors.New that reached the client as a 503.
+//
+// The pinned snapshot declares no universal code for a rejected argument *value*;
+// `invalid_arg_name` is the closest code it declares for every operation that
+// declares an enum at all, so it is used here.
+func clampLimit(raw string, fallback, maximum int) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback, nil
 	}
-	if value == "1" || strings.EqualFold(value, "true") {
-		return true, nil
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0, decodeFailure("invalid_arg_name", "limit must be a positive integer")
 	}
-	if value == "0" || strings.EqualFold(value, "false") {
-		return false, nil
+	if value > maximum {
+		return maximum, nil
 	}
-	return false, errors.New("invalid boolean")
+	return value, nil
 }
 
 func pageRequest(limit, cursor string) (domain.PageRequest, error) {
-	if strings.TrimSpace(limit) == "" {
-		return domain.PageRequest{Limit: 100, Cursor: domain.Cursor(cursor)}, nil
-	}
-	value, err := strconv.Atoi(limit)
-	if err != nil || value <= 0 || value > 1000 {
+	value, err := clampLimit(limit, 100, 1000)
+	if err != nil {
 		return domain.PageRequest{}, err
 	}
 	return domain.PageRequest{Limit: value, Cursor: domain.Cursor(cursor)}, nil
 }
 
-func parseListItemIDs(raw string) []domain.ListItemID {
-	parts := strings.Split(raw, ",")
-	result := make([]domain.ListItemID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.ListItemID(value))
-		}
+// parseSlackTimestamp reads a Slack `ts` ("seconds.microseconds") into whole
+// microseconds since the epoch. It is the comparison basis for the history range
+// filter and the validity test behind `bad_timestamp`.
+func parseSlackTimestamp(raw string) (int64, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
 	}
-	return result
+	whole, fraction, _ := strings.Cut(raw, ".")
+	seconds, err := strconv.ParseInt(whole, 10, 64)
+	// The result is scaled to microseconds, so a value near math.MaxInt64 would wrap
+	// to a negative instant and compare as older than everything.
+	if err != nil || seconds < 0 || seconds > maxTimestampSeconds {
+		return 0, false
+	}
+	if len(fraction) > 6 {
+		return 0, false
+	}
+	micros := int64(0)
+	if fraction != "" {
+		value, err := strconv.ParseInt(fraction, 10, 64)
+		if err != nil || value < 0 {
+			return 0, false
+		}
+		for i := len(fraction); i < 6; i++ {
+			value *= 10
+		}
+		micros = value
+	}
+	return seconds*1000000 + micros, true
 }
 
-func parseListConversationIDs(raw string) []domain.ConversationID {
-	parts := strings.Split(raw, ",")
-	result := make([]domain.ConversationID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.ConversationID(value))
-		}
+// reminderTime reads the pinned /reminders.add `time` argument: "the Unix
+// timestamp (up to five years from now), the number of seconds until the reminder
+// (if within 24 hours), or a natural language description of the time". The
+// relative form used to be read as an absolute epoch, so `time=300` created a
+// reminder dated 1970-01-01T00:05:00Z, and a natural-language value was reported
+// as a generic argument error rather than the enumerated `cannot_parse`.
+func reminderTime(raw string, now time.Time) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	seconds, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return time.Time{}, decodeFailure("cannot_parse", "time must be a Unix timestamp or a number of seconds")
 	}
-	return result
+	if seconds <= 0 {
+		return time.Time{}, decodeFailure("cannot_parse", "time must be positive")
+	}
+	if seconds < secondsPerDay {
+		return now.Add(time.Duration(seconds) * time.Second), nil
+	}
+	when := time.Unix(seconds, 0).UTC()
+	if when.After(now.AddDate(5, 0, 0)) {
+		return time.Time{}, decodeFailure("cannot_parse", "time must be within five years")
+	}
+	return when, nil
 }
 
-func parseListUserIDs(raw string) []domain.UserID {
-	parts := strings.Split(raw, ",")
-	result := make([]domain.UserID, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			result = append(result, domain.UserID(value))
-		}
-	}
-	return result
-}
+const secondsPerDay = 24 * 60 * 60
+
+// maxTimestampSeconds is the largest `ts` whose microsecond scaling fits in int64.
+const maxTimestampSeconds = math.MaxInt64 / 1000000
 
 func (h Handler) presentEntityDetails(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, "")
@@ -6171,19 +7050,22 @@ func (h Handler) presentEntityDetails(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["trigger_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	userAuthRequired, err := parseListBoolean(fields, "user_auth_required")
+	if strings.TrimSpace(fields["trigger_id"]) == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	userAuthRequired, err := parseBoolField(fields["user_auth_required"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	err = h.Messages.PresentEntityDetails(r.Context(), principal.WorkspaceID, principal.UserID, fields["trigger_id"], fields["metadata"], userAuthRequired, fields["user_auth_url"], fields["error"])
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -6196,24 +7078,27 @@ func (h Handler) presentEntityComments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["trigger_id"]) == "" || strings.TrimSpace(fields["comments"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	canPostComment, err := parseListBoolean(fields, "can_post_comment")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if strings.TrimSpace(fields["trigger_id"]) == "" || strings.TrimSpace(fields["comments"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	userAuthRequired, err := parseListBoolean(fields, "user_auth_required")
+	canPostComment, err := parseBoolField(fields["can_post_comment"])
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	userAuthRequired, err := parseBoolField(fields["user_auth_required"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	err = h.Messages.PresentEntityComments(r.Context(), principal.WorkspaceID, principal.UserID, fields["trigger_id"], fields["comments"], fields["cursor"], canPostComment, fields["delete_action_id"], userAuthRequired, fields["user_auth_url"], fields["error"])
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -6226,28 +7111,72 @@ func (h Handler) acknowledgeEntityCommentAction(w http.ResponseWriter, r *http.R
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || strings.TrimSpace(fields["trigger_id"]) == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if strings.TrimSpace(fields["trigger_id"]) == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	err = h.Messages.AcknowledgeEntityCommentAction(r.Context(), principal.WorkspaceID, principal.UserID, fields["trigger_id"], fields["comment"], fields["error"])
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// queryCredentialNames are the parameters that must never be read from a URL
+// query on the OpenID Connect endpoints. A query string is retained by access
+// logs, proxy logs, browser history and the Referer header of any subsequent
+// navigation, so a credential placed there is disclosed for as long as those
+// records live.
+//
+// oauth.access and oauth.v2.access are deliberately excluded: the pinned contract
+// declares `client_secret` and `code` as `in: query` parameters of both
+// (specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json), so
+// rejecting them there would break the documented contract. The openid.connect.*
+// endpoints are absent from that snapshot and are governed by RFC 6749 / RFC 6750
+// instead.
+var queryCredentialNames = []string{"client_secret", "code", "code_verifier", "refresh_token", "token"}
+
+func queryCarriesCredential(r *http.Request) bool {
+	query := r.URL.Query()
+	for _, name := range queryCredentialNames {
+		if _, present := query[name]; present {
+			return true
+		}
+	}
+	return false
+}
+
 func (h Handler) openIDConnectToken(w http.ResponseWriter, r *http.Request) {
+	// openid.connect.token is not in the pinned Slack snapshot, so RFC 6749 §3.2 is
+	// the governing contract: "The client MUST use the HTTP POST method when making
+	// access token requests." A GET carried the client secret, the authorization
+	// code and the PKCE verifier in the URL, where they reach access logs, proxy
+	// logs and the Referer header of any subsequent navigation.
+	if r.Method != http.MethodPost {
+		writeError(w, "invalid_request")
+		return
+	}
+	// Requiring POST is not enough on its own: ParseForm merges the URL query into
+	// r.Form, so a POST could still carry the secret, the code or the PKCE verifier
+	// in the query string and have it honoured.
+	if queryCarriesCredential(r) {
+		writeError(w, "invalid_request")
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	clientID, clientSecret := strings.TrimSpace(fields["client_id"]), strings.TrimSpace(fields["client_secret"])
 	if basicID, basicSecret, ok := r.BasicAuth(); ok {
 		if clientID != "" && clientID != basicID || clientSecret != "" && clientSecret != basicSecret {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_client"})
+			writeError(w, "invalid_client")
 			return
 		}
 		if clientID == "" {
@@ -6265,15 +7194,25 @@ func (h Handler) openIDConnectToken(w http.ResponseWriter, r *http.Request) {
 		} else if strings.TrimSpace(fields["grant_type"]) != "" && strings.TrimSpace(fields["grant_type"]) != "authorization_code" && strings.TrimSpace(fields["grant_type"]) != "refresh_token" {
 			reason = "unsupported_grant_type"
 		}
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": reason})
+		writeError(w, reason)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "access_token": token.AccessToken, "token_type": token.TokenType, "id_token": token.IDToken, "refresh_token": token.RefreshToken})
 }
 
 func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
+	// OpenID Connect Core §5.3.1 requires the UserInfo request to present its
+	// access token as a bearer credential, and RFC 6750 §2.3 warns that the URI
+	// query form "SHOULD NOT be used" because the URL is recorded by every proxy,
+	// access log and browser history along the way. GET stays registered — §5.3.1
+	// requires it — but the credential has to arrive in the header or the body.
+	if queryCarriesCredential(r) {
+		writeError(w, "invalid_request")
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
@@ -6281,12 +7220,12 @@ func (h Handler) openIDConnectUserInfo(w http.ResponseWriter, r *http.Request) {
 		token = strings.TrimSpace(fields["token"])
 	}
 	if token == "" {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid_auth"})
+		writeError(w, "invalid_auth")
 		return
 	}
 	value, err := h.Messages.OpenIDConnectUserInfo(r.Context(), token)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, map[string]any{"ok": false, "error": "invalid_auth"})
+		writeError(w, "invalid_auth")
 		return
 	}
 	response := map[string]any{"ok": true, "sub": value.Subject, "https://slack.com/user_id": value.UserID, "https://slack.com/team_id": value.WorkspaceID, "email": value.Email, "email_verified": value.EmailVerified, "name": value.Name, "given_name": value.GivenName, "family_name": value.FamilyName, "locale": value.Locale, "picture": value.Picture, "https://slack.com/team_name": value.TeamName, "https://slack.com/team_domain": value.TeamDomain, "https://slack.com/team_image_default": value.TeamImageDefault}
@@ -6329,16 +7268,23 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 		writePlain(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
-	message, err := h.Messages.PostIncomingWebhookWithAttachments(r.Context(), workspaceID, appID, secret, payload.Text, blocks, attachments, domain.MessageTimestamp(payload.ThreadTS), r.Header.Get("Idempotency-Key"))
-	if err != nil {
-		code, reason := mapServiceError(err, "no_team")
-		if code == http.StatusBadRequest {
+	// Slack's incoming-webhook response body is the literal string "ok" and carries
+	// no message, so the posted message is intentionally not part of the response.
+	if _, err := h.Messages.PostIncomingWebhookWithAttachments(r.Context(), workspaceID, appID, secret, payload.Text, blocks, attachments, domain.MessageTimestamp(payload.ThreadTS), r.Header.Get("Idempotency-Key")); err != nil {
+		// Incoming webhooks are not Web API methods: the pinned contract for
+		// hooks.slack.com is a plain-text body with a non-200 status. An unknown
+		// workspace, app, secret, or a disabled hook is indistinguishable to the
+		// caller by design, so all of them answer 404 `no_team`.
+		reason := mapServiceError(err, "no_team")
+		status := http.StatusBadRequest
+		if reason == "no_team" {
+			status = http.StatusNotFound
+		} else {
 			reason = "invalid_payload"
 		}
-		writePlain(w, code, reason)
+		writePlain(w, status, reason)
 		return
 	}
-	_ = message
 	writePlain(w, http.StatusOK, "ok")
 }
 
@@ -6355,14 +7301,17 @@ func (h Handler) adminIncomingWebhookCreate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || fields["app_id"] == "" || fields["channel_id"] == "" || fields["bot_user_id"] == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if fields["app_id"] == "" || fields["channel_id"] == "" || fields["bot_user_id"] == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	webhook, secret, err := h.Messages.AdminCreateIncomingWebhook(r.Context(), principal.WorkspaceID, principal.UserID, domain.AppID(fields["app_id"]), domain.ConversationID(fields["channel_id"]), domain.UserID(fields["bot_user_id"]))
 	if err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "incoming_webhook": map[string]any{"id": webhook.ID, "channel_id": webhook.ConversationID, "url": "https://hooks.slack.com/services/" + string(webhook.WorkspaceID) + "/" + string(webhook.AppID) + "/" + secret}})
@@ -6375,18 +7324,28 @@ func (h Handler) adminIncomingWebhookEnable(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	fields, err := decodeFields(w, r)
-	if err != nil || fields["webhook_id"] == "" || (fields["enabled"] != "true" && fields["enabled"] != "false") {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+	if err != nil {
+		writeDecodeError(w, err)
 		return
 	}
-	enabled, err := strconv.ParseBool(fields["enabled"])
+	if fields["webhook_id"] == "" {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	// This accepted only the literals "true"/"false", diverging from every other
+	// boolean in this file, which also accept 1/0 and any casing.
+	raw, present := fields["enabled"]
+	if !present {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	enabled, err := parseBoolField(raw)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.AdminSetIncomingWebhookEnabled(r.Context(), principal.WorkspaceID, principal.UserID, domain.IncomingWebhookID(fields["webhook_id"]), enabled); err != nil {
-		code, reason := mapServiceError(err, "invalid_arguments")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "invalid_arguments"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -6400,17 +7359,17 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	name := strings.TrimSpace(fields["filename"])
 	if name == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	size, err := strconv.ParseInt(strings.TrimSpace(fields["length"]), 10, 64)
 	if err != nil || size <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	mimeType := strings.TrimSpace(fields["mime_type"])
@@ -6419,8 +7378,7 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 	}
 	upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, size, 15*time.Minute)
 	if err != nil {
-		code, reason := mapServiceError(err, "team_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "team_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "upload_url": externalUploadURL(r, upload.ID), "file_id": upload.ID})
@@ -6429,12 +7387,11 @@ func (h Handler) filesGetUploadURLExternal(w http.ResponseWriter, r *http.Reques
 func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 	id := domain.ExternalUploadID(strings.TrimSpace(r.PathValue("upload")))
 	if id == "" || r.ContentLength < 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if err := h.Messages.UploadExternalFile(r.Context(), id, r.ContentLength, r.Body); err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -6448,7 +7405,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	completions := make([]domain.ExternalUploadCompletion, 0, 1)
@@ -6461,7 +7418,7 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 		}
 		raw := strings.TrimSpace(fields["files"])
 		if raw == "" || json.Unmarshal([]byte(raw), &entries) != nil || len(entries) == 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+			writeError(w, "invalid_arg_name")
 			return
 		}
 		for _, entry := range entries {
@@ -6469,20 +7426,19 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	if len(completions) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"ok": false, "error": "invalid_arguments"})
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	if fields["title"] != "" && len(completions) == 1 {
 		completions[0].Title = fields["title"]
 	}
-	channels := parseConversationIDs(fields["channels"])
+	channels := parseIDList[domain.ConversationID](fields["channels"])
 	if channel := strings.TrimSpace(fields["channel_id"]); channel != "" {
 		channels = append(channels, domain.ConversationID(channel))
 	}
 	files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 	if err != nil {
-		code, reason := mapServiceError(err, "file_not_found")
-		writeJSON(w, code, map[string]any{"ok": false, "error": reason})
+		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
 	responses := make([]map[string]any, 0, len(files))
@@ -6490,7 +7446,6 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 		responses = append(responses, fileResponse(file))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": responses})
-	return
 }
 
 func externalUploadURL(r *http.Request, id domain.ExternalUploadID) string {

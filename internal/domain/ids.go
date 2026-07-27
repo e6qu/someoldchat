@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -40,18 +41,39 @@ func NewMessageTimestamp(value time.Time) MessageTimestamp {
 	return MessageTimestamp(fmt.Sprintf("%d.%06d", value.Unix(), value.Nanosecond()/1000))
 }
 
+// MessageInstant is the creation instant a message may be stored with: the
+// microsecond resolution its own Slack-style timestamp can express.
+//
+// A message's timestamp IS its public identifier, and read cursors, thread roots
+// and pagination all key on it. Storing an instant finer than that identifier
+// makes the two disagree: a message created at .123456789 stores greater than a
+// read cursor built from the very same instant, which truncates to .123456, so
+// the message can never be marked read. The service truncated at its own two
+// creation sites, which hid this from every caller that went through it, but the
+// repository accepted any resolution — and whether the defect appeared at all
+// then depended on the host clock's granularity.
+func MessageInstant(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
+}
+
+// ErrInvalidMessageTimestamp is the single sentinel for a malformed Slack-style
+// message timestamp. The three ad-hoc errors it replaces were indistinguishable
+// from a repository failure, so a caller could not tell a bad request from a
+// broken database. ErrInvalidCursor is the precedent.
+var ErrInvalidMessageTimestamp = errors.New("invalid message timestamp")
+
 func ParseMessageTimestamp(value MessageTimestamp) (time.Time, error) {
 	parts := strings.Split(string(value), ".")
 	if len(parts) != 2 || len(parts[1]) != 6 {
-		return time.Time{}, fmt.Errorf("invalid message timestamp")
+		return time.Time{}, fmt.Errorf("%w %q", ErrInvalidMessageTimestamp, string(value))
 	}
 	seconds, err := strconv.ParseInt(parts[0], 10, 64)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid message timestamp: %w", err)
+		return time.Time{}, fmt.Errorf("%w %q: %w", ErrInvalidMessageTimestamp, string(value), err)
 	}
 	micros, err := strconv.ParseInt(parts[1], 10, 64)
 	if err != nil || micros < 0 || micros > 999999 {
-		return time.Time{}, fmt.Errorf("invalid message timestamp")
+		return time.Time{}, fmt.Errorf("%w %q", ErrInvalidMessageTimestamp, string(value))
 	}
 	return time.Unix(seconds, micros*1000).UTC(), nil
 }

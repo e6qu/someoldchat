@@ -121,6 +121,33 @@ if grep -Eq 'predicate-(type|path):' "$workflow"; then
 	exit 1
 fi
 
+# No container may be built from a commit the repository gates have not run
+# against. Before this check the publication workflow ran only
+# check-container-publication.sh and then pushed an image, while the pull-request
+# workflow never triggered on `push`, so any commit reaching the default branch
+# outside a pull request shipped with no formatting, vet, dependency, contract,
+# or test evidence at all.
+integration="$root/.github/workflows/ci.yml"
+
+expect_count 1 '    needs: [contract, verify]'
+expect_count 1 '    uses: ./.github/workflows/ci.yml'
+expect_count 1 '  cancel-in-progress: false'
+
+for trigger in 'push:' 'branches: [main]' 'workflow_call:'; do
+	if ! grep -Fq -- "$trigger" "$integration"; then
+		echo "ci.yml must declare '$trigger' so the publication path verifies the pushed commit" >&2
+		exit 1
+	fi
+done
+
+integration_make_steps="$(grep -E '^[[:space:]]+run: make ' "$integration" || true)"
+for gate in fmt-check vet workflow-check container-check dependency-check contract-check sdk-inventory-check generated-check proto-lint test; do
+	if ! printf '%s\n' "$integration_make_steps" | grep -Fq -- "$gate"; then
+		echo "ci.yml must run 'make $gate' before a commit can be published" >&2
+		exit 1
+	fi
+done
+
 "$root/scripts/test-extract-buildkit-sbom.sh"
 
 echo 'container publication contract passed'

@@ -120,3 +120,61 @@ func TestCleanupWorkerRenewsLeaseDuringSlowDelete(t *testing.T) {
 		t.Fatal("cleanup worker did not finish")
 	}
 }
+
+// A lost lease means another worker is deleting the same object. The suppression
+// dropped that signal whenever the delete also failed, so the only observable
+// symptom was a generic delete error and "two owners ran the same work" — the
+// condition behind duplicate deletion — was invisible in logs and metrics.
+func TestCleanupWorkerSurfacesLostLeaseAlongsideDeleteFailure(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1"})
+	event := events.Event{ID: "evt_blob_lost", WorkspaceID: "T1", Topic: events.FileBlobDeleteTopic, Payload: "T1/lost", CreatedAt: time.Now().UTC()}
+	if err := store.CreateFile(context.Background(), domain.File{ID: "file_lost", WorkspaceID: "T1", Uploader: "U1", BlobKey: event.Payload, Name: "lost", Title: "lost", MIMEType: "text/plain", Size: 4, CreatedAt: time.Now().UTC()}, events.Event{ID: "evt_file_lost", WorkspaceID: "T1", Topic: "file.created", Payload: "file_lost", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteFile(context.Background(), "file_lost", event); err != nil {
+		t.Fatal(err)
+	}
+	source := &lostLeaseSource{Store: store, lost: errors.New("another owner holds the cleanup lease")}
+	failing := failingDeleteStore{started: make(chan struct{}), err: errors.New("provider rejected the delete")}
+	worker, err := NewCleanupWorker(source, failing, "losing-cleaner", 1, 30*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = worker.RunOnce(context.Background(), "T1")
+	if err == nil {
+		t.Fatal("cleanup reported success while its lease was lost")
+	}
+	if !errors.Is(err, source.lost) {
+		t.Fatalf("error=%v, want the lost lease surfaced alongside the delete failure", err)
+	}
+}
+
+type lostLeaseSource struct {
+	*memory.Store
+	lost error
+}
+
+func (s *lostLeaseSource) RenewEvents(context.Context, string, []uint64, time.Duration) error {
+	return s.lost
+}
+
+type failingDeleteStore struct {
+	started chan struct{}
+	err     error
+}
+
+func (failingDeleteStore) Put(context.Context, string, int64, io.Reader) (Object, error) {
+	return Object{}, errors.New("failing delete test store does not put objects")
+}
+
+func (failingDeleteStore) Open(context.Context, string) (Object, io.ReadCloser, error) {
+	return Object{}, nil, errors.New("failing delete test store does not open objects")
+}
+
+func (s failingDeleteStore) Delete(ctx context.Context, _ string) error {
+	// Wait for the renewal loop to lose the lease, then fail with an error of
+	// this store's own so both signals are present at once.
+	<-ctx.Done()
+	return s.err
+}

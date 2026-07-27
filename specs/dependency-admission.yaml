@@ -254,19 +254,6 @@ entries:
     license: MIT
     purpose: Go toolchain setup in CI
     runtime: false
-  - id: action/bufbuild/buf-setup-action
-    kind: github-action
-    canonical: bufbuild/buf-setup-action
-    source: https://github.com/bufbuild/buf-setup-action
-    version: v1.50.0
-    revision: a47c93e0b1648d5651a065437926377d060baa99
-    published_at: 2025-01-17T19:42:06Z
-    evidence: https://api.github.com/repos/bufbuild/buf-setup-action/commits/a47c93e0b1648d5651a065437926377d060baa99
-    checksum: git:a47c93e0b1648d5651a065437926377d060baa99
-    provenance: github-commit
-    license: Apache-2.0
-    purpose: protocol lint and generation tooling in CI
-    runtime: false
   - id: action/hashicorp/setup-terraform
     kind: github-action
     canonical: hashicorp/setup-terraform
@@ -370,6 +357,166 @@ entries:
     provenance: github-commit
     license: MIT
     purpose: container publication in CI
+    runtime: false
+  - id: container/docker.io/library/golang
+    kind: container-image
+    canonical: docker.io/library/golang
+    source: https://github.com/docker-library/golang
+    version: 1.26.5-bookworm
+    revision: sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+    published_at: 2026-07-14T21:31:25Z
+    evidence: https://hub.docker.com/layers/library/golang/1.26.5-bookworm/images/sha256-1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+    checksum: sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+    provenance: registry-digest
+    license: BSD-3-Clause AND GPL-2.0-or-later
+    purpose: Go toolchain that compiles every shipped binary
+    runtime: false
+  # Distroless images are built with a reproducible zero creation timestamp, so
+  # the image config carries 1970-01-01 rather than a publication time. The
+  # digest is still exact evidence of identity; the quarantine cannot be
+  # evaluated from the artifact itself and is satisfied trivially here.
+  - id: container/gcr.io/distroless/static-debian12
+    kind: container-image
+    canonical: gcr.io/distroless/static-debian12
+    source: https://github.com/GoogleContainerTools/distroless
+    version: nonroot
+    revision: sha256:aef9602f8710ec12bde19d593fed1f76c708531bb7aba205110f1029786ead7b
+    published_at: 1970-01-01T00:00:00Z
+    evidence: https://console.cloud.google.com/gcr/images/distroless/global/static-debian12
+    checksum: sha256:aef9602f8710ec12bde19d593fed1f76c708531bb7aba205110f1029786ead7b
+    provenance: registry-digest
+    license: Apache-2.0
+    purpose: runtime base image for the published container
+    runtime: true
+  - id: container/docker.io/docker/dockerfile
+    kind: container-image
+    canonical: docker.io/docker/dockerfile
+    source: https://github.com/moby/buildkit
+    version: "1"
+    revision: sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+    published_at: 2026-05-13T12:43:10Z
+    evidence: https://hub.docker.com/layers/docker/dockerfile/1/images/sha256-87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+    checksum: sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+    provenance: registry-digest
+    license: Apache-2.0
+    purpose: Dockerfile frontend used by every image build
+    runtime: false
+  - id: container/docker.io/library/postgres
+    kind: container-image
+    canonical: docker.io/library/postgres
+    source: https://github.com/docker-library/postgres
+    version: 18.1
+    revision: sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+    published_at: 2026-02-04T18:21:39Z
+    evidence: https://hub.docker.com/layers/library/postgres/18.1/images/sha256-1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+    checksum: sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f
+    provenance: registry-digest
+    license: PostgreSQL
+    purpose: PostgreSQL qualification service in CI
+    runtime: false
+  - id: terraform-provider/hashicorp/aws
+    kind: terraform-provider
+    canonical: registry.terraform.io/hashicorp/aws
+    source: https://github.com/hashicorp/terraform-provider-aws
+    version: 6.55.0
+    revision: h1:OO+IuvQJSPmWdN8AyyIEvPJbLvDQpgX/zbktoa9KsJE=
+    published_at: 2026-07-15T17:16:30Z
+    evidence: https://registry.terraform.io/v1/providers/hashicorp/aws/6.55.0
+    checksum: h1:OO+IuvQJSPmWdN8AyyIEvPJbLvDQpgX/zbktoa9KsJE=
+    provenance: terraform-registry-lock
+    license: MPL-2.0
+    purpose: AWS deployment modules
+    runtime: false
+  - id: terraform-provider/hashicorp/archive
+    kind: terraform-provider
+    canonical: registry.terraform.io/hashicorp/archive
+    source: https://github.com/hashicorp/terraform-provider-archive
+    version: 2.7.1
+    revision: h1:A7EnRBVm4h9ryO9LwxYnKr4fy7ExPMwD5a1DsY7m1Y0=
+    published_at: 2025-05-13T17:35:45Z
+    evidence: https://registry.terraform.io/v1/providers/hashicorp/archive/2.7.1
+    checksum: h1:A7EnRBVm4h9ryO9LwxYnKr4fy7ExPMwD5a1DsY7m1Y0=
+    provenance: terraform-registry-lock
+    license: MPL-2.0
+    purpose: activator Lambda package assembly
+    runtime: false
+  - id: terraform-provider/hashicorp/random
+    kind: terraform-provider
+    canonical: registry.terraform.io/hashicorp/random
+    source: https://github.com/hashicorp/terraform-provider-random
+    version: 3.9.0
+    revision: h1:99+MYIg/y3gmsZkhAcffwOpMat+liRJ8b+eyCIax6hk=
+    published_at: 2026-05-13T08:43:37Z
+    evidence: https://registry.terraform.io/v1/providers/hashicorp/random/3.9.0
+    checksum: h1:99+MYIg/y3gmsZkhAcffwOpMat+liRJ8b+eyCIax6hk=
+    provenance: terraform-registry-lock
+    license: MPL-2.0
+    purpose: durable secret material for the ECS runtime module
+    runtime: false
+  - id: tool/terraform
+    kind: tool
+    canonical: terraform
+    source: https://github.com/hashicorp/terraform
+    version: 1.13.5
+    revision: 328813676aec7a4e2a491484f91b5e0b67847b6c
+    published_at: 2025-11-05T10:33:17Z
+    evidence: https://api.github.com/repos/hashicorp/terraform/commits/328813676aec7a4e2a491484f91b5e0b67847b6c
+    checksum: git:328813676aec7a4e2a491484f91b5e0b67847b6c
+    provenance: github-commit
+    license: BUSL-1.1
+    purpose: Terraform validation in CI and module apply
+    runtime: false
+  - id: tool/buf
+    kind: tool
+    canonical: buf
+    source: https://github.com/bufbuild/buf
+    version: 1.71.0
+    revision: 509563de095a72cf96fede0654d37e60a446505a
+    published_at: 2026-06-16T16:25:59Z
+    evidence: https://api.github.com/repos/bufbuild/buf/commits/509563de095a72cf96fede0654d37e60a446505a
+    checksum: git:509563de095a72cf96fede0654d37e60a446505a
+    provenance: github-commit
+    license: Apache-2.0
+    purpose: protocol lint, code generation, and wire breaking-change checks
+    runtime: false
+  - id: tool/google.golang.org/grpc/cmd/protoc-gen-go-grpc
+    kind: tool
+    canonical: google.golang.org/grpc/cmd/protoc-gen-go-grpc
+    source: https://github.com/grpc/grpc-go
+    version: 1.6.2
+    revision: 1c63fa5f5492fb6cb4cabf9847999ce469505f49
+    published_at: 2026-05-07T05:07:53Z
+    evidence: https://proxy.golang.org/google.golang.org/grpc/cmd/protoc-gen-go-grpc/@v/v1.6.2.info
+    checksum: h1:rgSNvqscFZ1JgV/4wH5GOsZFSFkR2Eua9As3KIr2LlM=
+    provenance: vcs-tag
+    license: Apache-2.0
+    purpose: gRPC service code generation
+    runtime: false
+  - id: tool/golang.org/x/vuln
+    kind: tool
+    canonical: golang.org/x/vuln
+    source: https://go.googlesource.com/vuln
+    version: 1.6.0
+    revision: 19b0bb6a272792b9afa8a6983c3e9b9a1816947f
+    published_at: 2026-07-09T17:23:02Z
+    evidence: https://proxy.golang.org/golang.org/x/vuln/@v/v1.6.0.info
+    checksum: h1:FeMO9Rm/HwyduOztbvKcOw+zvDEPr4I4aQNSfevFcKY=
+    provenance: vcs-tag
+    license: BSD-3-Clause
+    purpose: govulncheck vulnerability scanning in CI
+    runtime: false
+  - id: source/e6qu/shauth
+    kind: source-checkout
+    canonical: e6qu/shauth
+    source: https://github.com/e6qu/shauth
+    version: 0fda680cba964e5768ed75a9c3e5b7230c418ca6
+    revision: 0fda680cba964e5768ed75a9c3e5b7230c418ca6
+    published_at: 2026-07-21T14:17:40Z
+    evidence: https://api.github.com/repos/e6qu/shauth/commits/0fda680cba964e5768ed75a9c3e5b7230c418ca6
+    checksum: git:0fda680cba964e5768ed75a9c3e5b7230c418ca6
+    provenance: github-commit
+    license: AGPL-3.0-or-later
+    purpose: exact single-sign-on contract executed by the Shauth qualification
     runtime: false
   - id: npm/@playwright/test
     kind: npm-package

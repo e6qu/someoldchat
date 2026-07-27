@@ -23,6 +23,11 @@ var (
 	ErrStaleFence        = errors.New("stale lifecycle fence")
 	ErrWakeInProgress    = errors.New("wake already in progress")
 	ErrStateConflict     = errors.New("lifecycle state compare-and-swap conflict")
+	// ErrAlreadyActive reports that the stack is serving, so no wake election
+	// was held and the caller owns no wake generation. It is a distinct
+	// sentinel because a caller that mistakes it for a won election drives the
+	// running stack into FAILED.
+	ErrAlreadyActive = errors.New("lifecycle stack is already active")
 )
 
 type StateRecord struct {
@@ -91,11 +96,26 @@ func (c *Controller) SetWakeDeadline(fence uint64, deadline time.Time) error {
 	return nil
 }
 
+// BeginWake elects exactly one owner of a new wake generation. Only a nil
+// error grants ownership: an already-active stack yields ErrAlreadyActive with
+// the serving generation, so a caller that lost the race cannot mistake it for
+// a won election and drive the running stack into FAILED.
+//
+// The scheduled wake deadline is preserved across the transition. It is a hint
+// owned by the scheduler, and clearing it here would silently discard the
+// reason this wake was required before the job had a chance to run.
 func (c *Controller) BeginWake() (uint64, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// The election is the one decision that must see other replicas' progress:
+	// a cached view can only ever report the state this replica last wrote, so
+	// without a read-through a replica that lost one race never learns that the
+	// stack came up and answers every later request from a stale expectation.
+	if err := c.reloadLocked(); err != nil {
+		return 0, err
+	}
 	if c.state == StateActive {
-		return c.generation, nil
+		return c.generation, ErrAlreadyActive
 	}
 	if c.state == StateFailed {
 		return 0, ErrRecoveryRequired
@@ -104,12 +124,11 @@ func (c *Controller) BeginWake() (uint64, error) {
 		return 0, ErrWakeInProgress
 	}
 	nextGeneration := c.generation + 1
-	if err := c.persistLocked(StateWaking, nextGeneration, time.Time{}); err != nil {
+	if err := c.persistLocked(StateWaking, nextGeneration, c.wakeDeadline); err != nil {
 		return 0, err
 	}
 	c.generation = nextGeneration
 	c.state = StateWaking
-	c.wakeDeadline = time.Time{}
 	return c.generation, nil
 }
 
@@ -191,11 +210,20 @@ func (c *Controller) CompleteHibernate(fence uint64) error {
 	return c.transition(fence, StateStopping, StateHibernated)
 }
 
+// Fail records an unrecoverable lifecycle attempt. Like every other
+// transition it is conditional on the expected state as well as the fencing
+// generation: only an in-progress attempt can fail. An ACTIVE or HIBERNATED
+// stack is a settled state that no fence holder may knock over.
 func (c *Controller) Fail(fence uint64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if fence != c.generation {
 		return ErrStaleFence
+	}
+	switch c.state {
+	case StateWaking, StateQuiescing, StateSnapshot, StateStopping:
+	default:
+		return ErrInvalidTransition
 	}
 	if err := c.persistLocked(StateFailed, c.generation, c.wakeDeadline); err != nil {
 		return err
@@ -220,14 +248,41 @@ func (c *Controller) transition(fence uint64, from, to State) error {
 	return nil
 }
 
+// persistLocked applies one fenced compare-and-swap against the durable
+// record. The expected value is this controller's cached view, so a losing
+// replica must refresh that view before it can make progress again; otherwise
+// its expectation stays permanently stale and every later transition — wake,
+// activate, fail, hibernate — fails forever against a record that has moved on.
 func (c *Controller) persistLocked(next State, generation uint64, wakeDeadline time.Time) error {
 	if c.store == nil {
 		return nil
 	}
-	return c.store.CompareAndSwap(
+	err := c.store.CompareAndSwap(
 		StateRecord{State: c.state, Generation: c.generation, WakeDeadline: c.wakeDeadline},
 		StateRecord{State: next, Generation: generation, WakeDeadline: wakeDeadline},
 	)
+	if errors.Is(err, ErrStateConflict) {
+		return errors.Join(err, c.reloadLocked())
+	}
+	return err
+}
+
+// reloadLocked adopts the durable record after a lost compare-and-swap so the
+// caller's next attempt is evaluated against reality. A reload failure is
+// surfaced, never swallowed: an unreadable control store is not an empty one.
+func (c *Controller) reloadLocked() error {
+	if c.store == nil {
+		return nil
+	}
+	record, err := c.store.Load()
+	if err != nil {
+		return err
+	}
+	if !validState(record.State) {
+		return errors.New("durable lifecycle state is invalid")
+	}
+	c.state, c.generation, c.wakeDeadline = record.State, record.Generation, record.WakeDeadline
+	return nil
 }
 
 func validState(state State) bool {

@@ -10,6 +10,8 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/postgres"
 )
 
+func TestPostgresQualification(t *testing.T) { runQualification(t, openStore) }
+
 func openStore(t *testing.T, ctx context.Context) (qualificationStore, func()) {
 	t.Helper()
 	dsn := os.Getenv("SAMEOLDCHAT_POSTGRES_DSN")

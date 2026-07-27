@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 )
 
 var ErrNotFound = errors.New("blob not found")
@@ -12,6 +13,10 @@ var ErrUnavailable = errors.New("blob storage is unavailable")
 type Object struct {
 	Key  string
 	Size int64
+	// ModTime is when the provider last wrote the object. Reconciliation needs
+	// it to hold back objects that are too new to be orphans; a provider that
+	// cannot report it leaves the zero value, which is treated as unknown age.
+	ModTime time.Time
 }
 
 type Store interface {
@@ -20,14 +25,9 @@ type Store interface {
 	Delete(context.Context, string) error
 }
 
-// ListStore exposes bounded provider enumeration for reconciliation. Walk must
-// invoke visit in provider order and must stop immediately when visit returns
-// an error.
-type ListStore interface {
-	Store
-	List(context.Context, string) ([]Object, error)
-}
-
+// WalkStore exposes bounded provider enumeration for reconciliation and snapshot
+// manifest scans. Walk must invoke visit in provider order and must stop
+// immediately when visit returns an error.
 type WalkStore interface {
 	Store
 	Walk(context.Context, string, func(Object) error) error

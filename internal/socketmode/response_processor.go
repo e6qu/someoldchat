@@ -71,7 +71,12 @@ func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handl
 		}
 		value := values[0]
 		if err := p.handleWithLease(ctx, value, handle); err != nil {
-			releaseErr := p.Queue.ReleaseSocketModeResponses(ctx, p.Owner, []domain.SocketModeResponse{value}, now.Add(p.RetryDelay).UTC())
+			// The retry deadline is measured from the failure, not from the
+			// clock read that started the batch. With a batch of up to a
+			// thousand responses and a thirty-second HTTP timeout, the
+			// batch-start reading is long past by the time a later response
+			// fails, and the release would make it immediately claimable again.
+			releaseErr := p.Queue.ReleaseSocketModeResponses(ctx, p.Owner, []domain.SocketModeResponse{value}, time.Now().UTC().Add(p.RetryDelay))
 			if releaseErr != nil {
 				return errors.Join(fmt.Errorf("handle Socket Mode response %q: %w", value.EnvelopeID, err), fmt.Errorf("release Socket Mode responses after handler failure: %w", releaseErr))
 			}

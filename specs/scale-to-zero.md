@@ -27,11 +27,11 @@ single-writer service with equivalent fencing guarantees.
 ## State machine
 
 ```text
-ACTIVE ──idle──> QUIESCING ──drained──> SNAPSHOTTING ──verified──> HIBERNATED
-  ▲                   │                       │                         │
-  │                   └────cancel/fail────────┘                         │ request/timer
-  │                                                                    ▼
-  └────────────────────────────ready───────────────────────────────── WAKING
+ACTIVE ─idle─> QUIESCING ─drained─> SNAPSHOTTING ─verified─> STOPPING ─stopped─> HIBERNATED
+  ▲                 │                      │                                          │
+  │                 └───cancel/fail────────┘                                          │ request/timer
+  │                                                                                   ▼
+  └──────────────────────────────────ready───────────────────────────────────────── WAKING
 
 Any unrecoverable transition ──> FAILED
 ```
@@ -59,19 +59,59 @@ The stack MAY hibernate only when:
 3. Web/API instances reject new mutations and drain accepted commands.
 4. Workers finish or release claims; deferred work remains durable.
 5. The application exports the next scheduled deadline to lifecycle metadata.
-6. The persistence adapter establishes a consistent snapshot boundary.
+6. The activator changes `QUIESCING` to `SNAPSHOTTING` and the persistence
+   adapter establishes a consistent snapshot boundary. In both shipped profiles
+   that boundary is a stopped database; see
+   [Snapshot boundary by profile](#snapshot-boundary-by-profile).
 7. It creates and locally verifies the snapshot.
 8. The snapshot is encrypted, uploaded, and verified through an independent
    read/digest check.
 9. A signed immutable manifest is atomically selected as current.
-10. Database nodes, workers, and web/API nodes stop.
+10. No process is stopped earlier than the step that owns it: web/API instances
+    and workers drain and stop at steps 3 and 4, and database processes stop at
+    step 6 and not before.
 11. Active database volumes MAY be released after publication when the
     deployment profile treats the verified object-store snapshot as the sole
     hibernated copy; no volume may be released earlier.
-12. The activator changes `SNAPSHOTTING` to `HIBERNATED`.
+12. The activator changes `SNAPSHOTTING` to `STOPPING`, performs step 11 and
+    stops any remaining process, then changes `STOPPING` to `HIBERNATED`. A
+    restart observing a persisted `STOPPING` phase re-enters `WAKING` like the
+    other interrupted phases.
 
-No database process may stop before a restorable snapshot is verified and
-published. Snapshot failure MUST leave the previously selected manifest intact.
+Snapshot failure MUST leave the previously selected manifest intact.
+
+### Snapshot boundary by profile
+
+The persistence process is stopped **before** the snapshot boundary, inside
+`SNAPSHOTTING`. The ordering is: enter `SNAPSHOTTING`, stop persistence, create
+the snapshot, encrypt and upload it, verify it through an independent
+read/digest check, atomically select the manifest as current, enter `STOPPING`,
+release the active storage, enter `HIBERNATED`.
+
+The two snapshot profiles differ in why:
+
+- **Directory profile** (`directory`, dqlite or a SQLite state directory). The
+  boundary is an archive of the state directory, the filesystem shape dqlite's
+  documented restore procedure requires. A directory being written to has no
+  consistent archive, so a stopped source is mandatory and the snapshotter MUST
+  refuse a source that is not explicitly declared stopped.
+- **File profile** (`file`, one durable state file). A stopped file is the
+  simplest correct boundary, so the same ordering is used. A profile that
+  snapshots a live file MUST establish the boundary some other way — a backup
+  API or a filesystem snapshot — and MUST NOT simply copy the file.
+
+Stopping is not releasing, and the distinction carries the safety argument.
+Stopping a database process is reversible: the data is still on the active
+storage, and an interrupted `QUIESCING` or `SNAPSHOTTING` re-enters `WAKING`,
+starts persistence from that live copy, and restores nothing — which is required,
+because no manifest was published for this fence and every earlier snapshot is
+strictly older than the live data. Releasing the active storage is not
+reversible, so step 11 happens only after the manifest is published, in
+`STOPPING`, and never in `SNAPSHOTTING`. An interrupted `STOPPING` is the one
+case that may restore, and only the manifest published for its own fence.
+
+Snapshot failure therefore leaves the live data intact as well as the previously
+selected manifest.
 
 ## Wake protocol
 
@@ -137,8 +177,10 @@ A manifest MUST include:
 
 ## Failure behavior
 
-- Restore failure MUST select older compatible known-good generations in order
-  as an explicit recovery policy.
+- Restore failure MUST NOT be converted into an implicit fallback. The stack
+  MUST enter `FAILED`; selecting an older compatible known-good generation MUST
+  be an explicit authenticated operator action with its own generation and
+  compatibility checks.
 - A failed generation MUST be quarantined without deletion.
 - Partial dqlite bootstrap MUST be destroyed or fenced before another attempt.
 - The activator MUST never route traffic to a partly restored stack.
@@ -179,8 +221,8 @@ size and infrastructure startup. They MUST NOT be invented before measurement.
 - Client timeout does not cancel wake.
 - Mutation arriving during quiescence is processed once or explicitly rejected.
 - Snapshot upload interruption preserves the prior manifest.
-- Corrupt newest snapshot selects an older compatible generation according to
-  the recovery policy.
+- Corrupt newest snapshot enters `FAILED`, and an explicit operator-selected
+  older generation then restores successfully.
 - Restore under a newer compatible schema runs migration once.
 - Scheduled work wakes early and executes once.
 - Stale-generation processes cannot write after hibernation begins.

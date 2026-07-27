@@ -127,8 +127,12 @@ func DecodeListCursor(cursor Cursor) (string, error) {
 	return value.ID, nil
 }
 
+// NewMessageCursor refuses a message without a creation instant. Decoding
+// rejects a zero CreatedAt, so minting one produced a cursor that always failed
+// on the next page request: pagination dead-ended with InvalidArgument instead of
+// the caller learning at once that the message was incomplete.
 func NewMessageCursor(message Message) (Cursor, error) {
-	if message.ID == "" || !utf8.ValidString(string(message.ID)) {
+	if message.ID == "" || !utf8.ValidString(string(message.ID)) || message.CreatedAt.IsZero() {
 		return "", ErrInvalidCursor
 	}
 	body, err := json.Marshal(messageCursor{CreatedAt: message.CreatedAt.UTC(), ID: message.ID, Root: message.ThreadTimestamp == ""})

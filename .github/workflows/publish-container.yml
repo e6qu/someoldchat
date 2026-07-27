@@ -4,9 +4,16 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
+  # Never cancelled. A run that is interrupted between pushing the architecture
+  # tags and creating the multi-architecture index leaves a release group the
+  # retention job classifies as incomplete and deletes, so a commit would be
+  # published and then silently unpublished.
   group: publish-container-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/e6qu/someoldchat
@@ -24,9 +31,19 @@ jobs:
       - name: Validate immutable tags, OCI image shape, and retention policy
         run: ./scripts/check-container-publication.sh
 
+  # Every repository gate runs against the exact commit being published. Without
+  # this the publication workflow shipped an image whose commit had never had
+  # `fmt-check`, `vet`, `dependency-check`, `contract-check`, or any test run
+  # against it, because `ci.yml` only ever triggered on pull requests.
+  verify:
+    name: Verify the commit under publication
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build (${{ matrix.arch.suffix }})
-    needs: contract
+    needs: [contract, verify]
     runs-on: ${{ matrix.arch.runner }}
     timeout-minutes: 15
     permissions:

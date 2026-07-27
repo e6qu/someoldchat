@@ -28,8 +28,8 @@ type DirectorySnapshotSourceState uint8
 const DirectorySnapshotSourceStopped DirectorySnapshotSourceState = 1
 
 func NewDirectorySnapshotter(manager SnapshotManager, sourcePath, outputPath string, metadata Manifest, sourceState DirectorySnapshotSourceState) (DirectorySnapshotter, error) {
-	if !filepath.IsAbs(manager.Root) || len(manager.EncryptionKey) != 32 || len(manager.SigningKey) < 32 || strings.TrimSpace(manager.KeyID) == "" {
-		return DirectorySnapshotter{}, errors.New("snapshot manager is not configured")
+	if err := manager.Validate(); err != nil {
+		return DirectorySnapshotter{}, fmt.Errorf("snapshot manager is not configured: %w", err)
 	}
 	if sourceState != DirectorySnapshotSourceStopped {
 		return DirectorySnapshotter{}, errors.New("directory snapshot source state must be explicitly stopped")
@@ -52,10 +52,11 @@ func (s DirectorySnapshotter) Create(ctx context.Context, generation uint64) (Ma
 	if err := ensureDirectory(s.SourcePath); err != nil {
 		return Manifest{}, err
 	}
-	if err := os.MkdirAll(s.Manager.Root, 0o700); err != nil {
+	staging := s.Manager.stagingDirectory()
+	if err := os.MkdirAll(staging, 0o700); err != nil {
 		return Manifest{}, err
 	}
-	archiveFile, err := os.CreateTemp(s.Manager.Root, ".directory-snapshot-*")
+	archiveFile, err := os.CreateTemp(staging, ".directory-snapshot-*")
 	if err != nil {
 		return Manifest{}, err
 	}
@@ -83,8 +84,18 @@ func (s DirectorySnapshotter) LastVerified(_ context.Context, maxGeneration uint
 	return s.Manager.LastVerified(maxGeneration)
 }
 
+// LiveState describes the state directory already present at OutputPath without
+// reading any snapshot, so an interrupted hibernation can restart from the
+// newest copy of the data instead of overwriting it with an older archive.
+func (s DirectorySnapshotter) LiveState(_ context.Context, generation uint64) (Manifest, error) {
+	return liveStateManifest(s.BaseMetadata, generation)
+}
+
 func (s DirectorySnapshotter) Restore(ctx context.Context, manifest Manifest) error {
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := ensureRestorable(manifest, s.BaseMetadata); err != nil {
 		return err
 	}
 	parent := filepath.Dir(s.OutputPath)
@@ -114,7 +125,31 @@ func (s DirectorySnapshotter) Restore(ctx context.Context, manifest Manifest) er
 	if err := extractDirectory(ctx, archivePath, temporaryDirectory, s.Manager.MaxBytes); err != nil {
 		return errors.Join(err, os.RemoveAll(temporaryDirectory))
 	}
-	return replaceDirectory(temporaryDirectory, s.OutputPath)
+	// The swap below is atomic with respect to the directory entry only. Without
+	// syncing the extracted tree first, a crash right after a successful restore
+	// can promote a tree of zero-length files that manifest verification already
+	// blessed — a corrupt database with a valid provenance record.
+	if err := syncTree(temporaryDirectory); err != nil {
+		return errors.Join(err, os.RemoveAll(temporaryDirectory))
+	}
+	if err := replaceDirectory(temporaryDirectory, s.OutputPath); err != nil {
+		return err
+	}
+	return syncDirectory(parent)
+}
+
+// syncTree flushes every directory in a freshly extracted tree. Regular files
+// are synced as they are written in extractDirectory.
+func syncTree(root string) error {
+	return filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		return syncDirectory(path)
+	})
 }
 
 func ensureDirectory(path string) error {
@@ -263,6 +298,9 @@ func extractDirectory(ctx context.Context, archivePath, destination string, maxB
 				return err
 			}
 			written, copyErr := io.CopyN(output, reader, header.Size)
+			if copyErr == nil {
+				copyErr = output.Sync()
+			}
 			closeErr := output.Close()
 			if copyErr != nil {
 				return copyErr

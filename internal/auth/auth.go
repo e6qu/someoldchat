@@ -1,11 +1,16 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -44,6 +49,8 @@ const (
 	ScopeListsWrite              Scope = "lists:write"
 	ScopeTeamRead                Scope = "team:read"
 	ScopeEmojiRead               Scope = "emoji:read"
+	ScopeAuthorizationsRead      Scope = "authorizations:read"
+	ScopeLinksWrite              Scope = "links:write"
 	ScopeIdentityBasic           Scope = "identity.basic"
 	ScopeRTMStream               Scope = "rtm:stream"
 	ScopeConnectionsWrite        Scope = "connections:write"
@@ -64,7 +71,6 @@ const (
 	ScopeAdminUsersWrite         Scope = "admin.users:write"
 	ScopeAdminConversationsWrite Scope = "admin.conversations:write"
 	ScopeAdminConversationsRead  Scope = "admin.conversations:read"
-	ScopeAdminEmojiWrite         Scope = "admin.emoji:write"
 	ScopeAdminUserGroupsRead     Scope = "admin.usergroups:read"
 	ScopeAdminUserGroupsWrite    Scope = "admin.usergroups:write"
 	ScopeAdminTeamsRead          Scope = "admin.teams:read"
@@ -111,9 +117,43 @@ type SessionRevoker interface {
 	RevokeSession(context.Context, string) error
 }
 
+// Authentication failures are four distinct outcomes, not one.
+//
+// The pinned Slack contract
+// (specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json) enumerates
+// `not_authed` (87 operations), `invalid_auth` (88), `account_inactive` (86) and
+// `token_revoked` (52) as separate members of the same `error` enum, so a caller
+// is expected to be able to tell "you sent no credential" from "the credential
+// you sent is not one of ours" from "it was withdrawn" from "the identity behind
+// it is gone". Every authenticator here returned one ErrNotAuthenticated, so the
+// transport could only ever answer `not_authed`, and a client holding a stale
+// token was told it had sent none.
+//
+// ErrNotAuthenticated stays as the class every one of them wraps: internal/web
+// keys its login redirect off it (internal/web/handler.go) and so does
+// tests/load/session_test.go, and neither should have to enumerate causes to ask
+// "is this request unauthenticated".
 var (
 	ErrNotAuthenticated = errors.New("not authenticated")
-	ErrMissingScope     = errors.New("missing scope")
+
+	// ErrNoToken is the absence of a credential: no Authorization header, no
+	// `token` field, no session cookie. → `not_authed`.
+	ErrNoToken = fmt.Errorf("%w: no credential was presented", ErrNotAuthenticated)
+
+	// ErrInvalidToken is a credential this deployment cannot validate: unknown,
+	// malformed, or (for a browser session) expired. → `invalid_auth`.
+	ErrInvalidToken = fmt.Errorf("%w: credential is not valid", ErrNotAuthenticated)
+
+	// ErrTokenRevoked is a credential this deployment issued and then withdrew.
+	// → `token_revoked`.
+	ErrTokenRevoked = fmt.Errorf("%w: credential has been revoked", ErrNotAuthenticated)
+
+	// ErrAccountInactive is a valid, unrevoked credential whose identity no longer
+	// exists or carries no authority: a token record with no workspace or user, an
+	// app token with no app, a session with no scopes. → `account_inactive`.
+	ErrAccountInactive = fmt.Errorf("%w: the account behind the credential is not active", ErrNotAuthenticated)
+
+	ErrMissingScope = errors.New("missing scope")
 )
 
 type Static struct {
@@ -162,10 +202,36 @@ func CSRFCookie(value string, maxAge int, domain string) *http.Cookie {
 	return &http.Cookie{Name: CSRFTokenCookieName, Value: value, Domain: strings.TrimSpace(domain), Path: "/", MaxAge: maxAge, Secure: true, SameSite: http.SameSiteLaxMode}
 }
 
+// MaxFormBody bounds a form-encoded request body. A size limit is only a limit
+// if it is installed before anything parses the body: once ParseForm or
+// ParseMultipartForm has run, Go has already buffered up to its own 32 MiB
+// default and spilled the remainder to temporary files, and a MaxBytesReader
+// installed afterwards has nothing left to bound. Every entry point in this
+// package that reads a form field therefore installs the limit first.
+const MaxFormBody = 4 << 20
+
+// maxMultipartCredentialPrefix bounds how much of a multipart body may be
+// buffered while locating the `token` field. The pinned Slack contract declares
+// `token` as a formData field, so a multipart upload has to be able to
+// authenticate from the body, but a caller must not be able to make the server
+// hold a whole file part in memory by placing the credential after it.
+const maxMultipartCredentialPrefix = 1 << 20
+
+// maxCredentialField bounds a single credential form field.
+const maxCredentialField = 4 << 10
+
+// LimitFormBody installs the MaxFormBody cap on the request body. It is safe to
+// call more than once: the innermost limit still wins.
+func LimitFormBody(r *http.Request) {
+	if r != nil && r.Body != nil {
+		r.Body = http.MaxBytesReader(nil, r.Body, MaxFormBody)
+	}
+}
+
 func ValidateCSRF(r *http.Request) error {
 	session, err := r.Cookie(SessionCookieName)
 	if err != nil || strings.TrimSpace(session.Value) == "" {
-		return ErrNotAuthenticated
+		return ErrNoToken
 	}
 	cookie, err := r.Cookie(CSRFTokenCookieName)
 	if err != nil || cookie.Value == "" {
@@ -173,17 +239,163 @@ func ValidateCSRF(r *http.Request) error {
 	}
 	provided := strings.TrimSpace(r.Header.Get(CSRFTokenHeaderName))
 	if provided == "" {
+		// This is the first read of the body on the browser mutation path, so
+		// the cap has to be installed here rather than in the handler that
+		// decodes the form afterwards.
+		LimitFormBody(r)
 		provided = strings.TrimSpace(r.FormValue(CSRFTokenFieldName))
 	}
 	expected := CSRFToken(session.Value)
-	if len(provided) != len(expected) || subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) != 1 || cookie.Value != expected {
+	if !constantTimeEqual(provided, expected) || !constantTimeEqual(cookie.Value, expected) {
 		return errors.New("CSRF token is invalid")
 	}
 	return nil
 }
 
+// constantTimeEqual compares two secrets without leaking their contents through
+// timing. The length check is deliberately outside the constant-time compare:
+// ConstantTimeCompare returns 0 for unequal lengths, and the length of a CSRF
+// token is not secret.
+func constantTimeEqual(provided, expected string) bool {
+	return len(provided) == len(expected) && subtle.ConstantTimeCompare([]byte(provided), []byte(expected)) == 1
+}
+
+func multipartBoundary(r *http.Request) string {
+	mediaType, parameters, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "multipart/form-data") {
+		return ""
+	}
+	return parameters["boundary"]
+}
+
+// requestToken reads the bearer credential from the request.
+//
+// `token` legitimately arrives as a multipart form field on the upload methods,
+// and parsing the form there would consume the stream the handler still needs:
+// ParseMultipartForm sets Request.MultipartForm, after which MultipartReader
+// refuses to run and the upload can never be read. The multipart case is
+// therefore scanned through a bounded, replayable prefix so the body the
+// handler sees is byte-for-byte the body that arrived.
+func requestToken(r *http.Request) string {
+	if token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")); token != "" {
+		return token
+	}
+	if boundary := multipartBoundary(r); boundary != "" && r.Body != nil && r.MultipartForm == nil {
+		return multipartToken(r, boundary)
+	}
+	LimitFormBody(r)
+	return strings.TrimSpace(r.FormValue("token"))
+}
+
+// replayBody re-serves bytes that were consumed while locating the credential,
+// followed by the untouched remainder of the stream.
+type replayBody struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (b replayBody) Close() error { return b.closer.Close() }
+
+func multipartToken(r *http.Request, boundary string) string {
+	body := r.Body
+	var consumed bytes.Buffer
+	reader := multipart.NewReader(io.TeeReader(io.LimitReader(body, maxMultipartCredentialPrefix), &consumed), boundary)
+	token := ""
+	for {
+		part, err := reader.NextPart()
+		if err != nil {
+			break
+		}
+		if part.FormName() != "token" || part.FileName() != "" {
+			_ = part.Close()
+			continue
+		}
+		value, readErr := io.ReadAll(io.LimitReader(part, maxCredentialField+1))
+		_ = part.Close()
+		if readErr == nil && len(value) <= maxCredentialField {
+			token = strings.TrimSpace(string(value))
+		}
+		break
+	}
+	r.Body = replayBody{Reader: io.MultiReader(bytes.NewReader(consumed.Bytes()), body), closer: body}
+	return token
+}
+
+// allScopes is every scope this deployment can grant. It is declared one scope
+// per line because the previous single-line literal is how `admin.emoji:write` —
+// a scope Slack does not define — survived here with no caller for as long as it
+// did: nothing about a 55-element line makes a wrong member visible.
+//
+// Membership is grounded in the pinned contract: each entry is a scope named by
+// some operation's `token` parameter in
+// specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json.
+var allScopes = []Scope{
+	ScopeChatWrite,
+	ScopeChannelsHistory,
+	ScopeUsersRead,
+	ScopeUsersReadEmail,
+	ScopeUsersWrite,
+	ScopeUsersProfileWrite,
+	ScopeChannelsRead,
+	ScopeChannelsManage,
+	ScopeReactionsWrite,
+	ScopeReactionsRead,
+	ScopePinsWrite,
+	ScopePinsRead,
+	ScopeBookmarksRead,
+	ScopeBookmarksWrite,
+	ScopeSearchRead,
+	ScopeFilesWrite,
+	ScopeFilesRead,
+	ScopeRemoteFilesRead,
+	ScopeRemoteFilesWrite,
+	ScopeRemoteFilesShare,
+	ScopeCanvasesRead,
+	ScopeCanvasesWrite,
+	ScopeListsRead,
+	ScopeListsWrite,
+	ScopeTeamRead,
+	ScopeEmojiRead,
+	ScopeAuthorizationsRead,
+	ScopeLinksWrite,
+	ScopeIdentityBasic,
+	ScopeRTMStream,
+	ScopeConnectionsWrite,
+	ScopeDNDRead,
+	ScopeDNDWrite,
+	ScopeStarsRead,
+	ScopeStarsWrite,
+	ScopeRemindersRead,
+	ScopeRemindersWrite,
+	ScopeUserGroupsRead,
+	ScopeUserGroupsWrite,
+	ScopeCallsRead,
+	ScopeCallsWrite,
+	ScopeWorkflowStepsExecute,
+	ScopeTokensBasic,
+	ScopeAdmin,
+	ScopeAdminUsersRead,
+	ScopeAdminUsersWrite,
+	ScopeAdminConversationsRead,
+	ScopeAdminConversationsWrite,
+	ScopeAdminUserGroupsRead,
+	ScopeAdminUserGroupsWrite,
+	ScopeAdminTeamsRead,
+	ScopeAdminTeamsWrite,
+	ScopeAdminInvitesRead,
+	ScopeAdminInvitesWrite,
+	ScopeAdminAppsRead,
+	ScopeAdminAppsWrite,
+}
+
+// AllScopes returns a fresh copy on every call, so a caller that appends to or
+// writes into the result cannot widen the authority of the next caller.
 func AllScopes() []string {
-	return []string{string(ScopeChatWrite), string(ScopeChannelsHistory), string(ScopeUsersRead), string(ScopeUsersReadEmail), string(ScopeUsersWrite), string(ScopeUsersProfileWrite), string(ScopeChannelsRead), string(ScopeChannelsManage), string(ScopeReactionsWrite), string(ScopeReactionsRead), string(ScopePinsWrite), string(ScopePinsRead), string(ScopeBookmarksRead), string(ScopeBookmarksWrite), string(ScopeSearchRead), string(ScopeFilesWrite), string(ScopeFilesRead), string(ScopeRemoteFilesRead), string(ScopeRemoteFilesWrite), string(ScopeRemoteFilesShare), string(ScopeCanvasesRead), string(ScopeCanvasesWrite), string(ScopeListsRead), string(ScopeListsWrite), string(ScopeTeamRead), string(ScopeEmojiRead), string(ScopeIdentityBasic), string(ScopeRTMStream), string(ScopeConnectionsWrite), string(ScopeDNDRead), string(ScopeDNDWrite), string(ScopeStarsRead), string(ScopeStarsWrite), string(ScopeRemindersRead), string(ScopeRemindersWrite), string(ScopeUserGroupsRead), string(ScopeUserGroupsWrite), string(ScopeCallsRead), string(ScopeCallsWrite), string(ScopeWorkflowStepsExecute), string(ScopeTokensBasic), string(ScopeAdmin), string(ScopeAdminUsersRead), string(ScopeAdminUsersWrite), string(ScopeAdminConversationsRead), string(ScopeAdminConversationsWrite), string(ScopeAdminEmojiWrite), string(ScopeAdminUserGroupsRead), string(ScopeAdminUserGroupsWrite), string(ScopeAdminTeamsRead), string(ScopeAdminTeamsWrite), string(ScopeAdminInvitesRead), string(ScopeAdminInvitesWrite), string(ScopeAdminAppsRead), string(ScopeAdminAppsWrite)}
+	values := make([]string, len(allScopes))
+	for index, scope := range allScopes {
+		values[index] = string(scope)
+	}
+	return values
 }
 
 func NewBrowser(store SessionStore) (Browser, error) {
@@ -196,11 +408,23 @@ func NewBrowser(store SessionStore) (Browser, error) {
 func (b Browser) Authenticate(r *http.Request) (Principal, error) {
 	cookie, err := r.Cookie(SessionCookieName)
 	if err != nil || cookie.Value == "" {
-		return Principal{}, ErrNotAuthenticated
+		return Principal{}, ErrNoToken
 	}
 	record, err := b.store.LookupSession(r.Context(), cookie.Value)
-	if err != nil || record.Revoked || !record.ExpiresAt.After(time.Now().UTC()) || record.WorkspaceID == "" || record.UserID == "" {
-		return Principal{}, ErrNotAuthenticated
+	if err != nil {
+		return Principal{}, ErrInvalidToken
+	}
+	if record.Revoked {
+		return Principal{}, ErrTokenRevoked
+	}
+	// An expired session is a credential that can no longer be validated rather
+	// than one that was withdrawn, and the pinned enums declare no expiry code of
+	// their own, so it joins ErrInvalidToken.
+	if !record.ExpiresAt.After(time.Now().UTC()) {
+		return Principal{}, ErrInvalidToken
+	}
+	if record.WorkspaceID == "" || record.UserID == "" {
+		return Principal{}, ErrAccountInactive
 	}
 	scopes := make(map[Scope]struct{}, len(record.Scopes))
 	for _, scope := range record.Scopes {
@@ -209,7 +433,7 @@ func (b Browser) Authenticate(r *http.Request) (Principal, error) {
 		}
 	}
 	if len(scopes) == 0 {
-		return Principal{}, ErrNotAuthenticated
+		return Principal{}, ErrAccountInactive
 	}
 	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, Scopes: scopes}, nil
 }
@@ -229,13 +453,19 @@ func NewAppStored(store AppTokenStore) (AppStored, error) {
 }
 
 func (s AppStored) Authenticate(r *http.Request) (Principal, error) {
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := requestToken(r)
 	if token == "" {
-		token = strings.TrimSpace(r.FormValue("token"))
+		return Principal{}, ErrNoToken
 	}
 	record, err := s.store.LookupAppToken(r.Context(), token)
-	if err != nil || record.Revoked || record.AppID == "" {
-		return Principal{}, ErrNotAuthenticated
+	if err != nil {
+		return Principal{}, ErrInvalidToken
+	}
+	if record.Revoked {
+		return Principal{}, ErrTokenRevoked
+	}
+	if record.AppID == "" {
+		return Principal{}, ErrAccountInactive
 	}
 	scopes := make(map[Scope]struct{}, len(record.Scopes))
 	for _, scope := range record.Scopes {
@@ -244,14 +474,28 @@ func (s AppStored) Authenticate(r *http.Request) (Principal, error) {
 	return Principal{AppID: record.AppID, Scopes: scopes}, nil
 }
 
+// Authenticate resolves a bearer token to its principal.
+//
+// A lookup failure is reported as ErrInvalidToken rather than as a dependency
+// failure: the store contract for an unknown token is an error, and the
+// authenticator cannot tell that apart from an outage without importing the
+// store's sentinels. See the follow-up recorded for TokenStore, which should
+// distinguish "no such token" from "the token store is unreachable" so an outage
+// stops looking like a bad credential.
 func (s Stored) Authenticate(r *http.Request) (Principal, error) {
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := requestToken(r)
 	if token == "" {
-		token = strings.TrimSpace(r.FormValue("token"))
+		return Principal{}, ErrNoToken
 	}
 	record, err := s.store.LookupToken(r.Context(), token)
-	if err != nil || record.Revoked || record.WorkspaceID == "" || record.UserID == "" {
-		return Principal{}, ErrNotAuthenticated
+	if err != nil {
+		return Principal{}, ErrInvalidToken
+	}
+	if record.Revoked {
+		return Principal{}, ErrTokenRevoked
+	}
+	if record.WorkspaceID == "" || record.UserID == "" {
+		return Principal{}, ErrAccountInactive
 	}
 	scopes := make(map[Scope]struct{}, len(record.Scopes))
 	for _, scope := range record.Scopes {
@@ -271,12 +515,12 @@ func NewStatic(token string, principal Principal) (Static, error) {
 }
 
 func (s Static) Authenticate(r *http.Request) (Principal, error) {
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	token := requestToken(r)
 	if token == "" {
-		token = strings.TrimSpace(r.FormValue("token"))
+		return Principal{}, ErrNoToken
 	}
-	if token != s.token {
-		return Principal{}, ErrNotAuthenticated
+	if !constantTimeEqual(token, s.token) {
+		return Principal{}, ErrInvalidToken
 	}
 	return s.principal, nil
 }

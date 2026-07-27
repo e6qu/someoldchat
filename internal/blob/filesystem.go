@@ -15,21 +15,12 @@ type Filesystem struct {
 	maxSize int64
 }
 
-var _ ListStore = Filesystem{}
 var _ WalkStore = Filesystem{}
 
-func (s Filesystem) List(ctx context.Context, prefix string) ([]Object, error) {
-	objects := make([]Object, 0)
-	if err := s.Walk(ctx, prefix, func(object Object) error {
-		objects = append(objects, object)
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return objects, nil
-}
-
-var _ Store = Filesystem{}
+// temporaryBlobPrefix names in-progress uploads. They live inside the enumerated
+// namespace, so Walk must exclude them: an enumerated temporary file matches no
+// reference, and deleting one makes the user's upload fail at its final rename.
+const temporaryBlobPrefix = ".blob-"
 
 func NewFilesystem(root string, maxSize int64) (Filesystem, error) {
 	if strings.TrimSpace(root) == "" || !filepath.IsAbs(root) || maxSize <= 0 {
@@ -52,7 +43,7 @@ func (s Filesystem) Put(ctx context.Context, key string, size int64, source io.R
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return Object{}, err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".blob-*")
+	temporary, err := os.CreateTemp(filepath.Dir(path), temporaryBlobPrefix+"*")
 	if err != nil {
 		return Object{}, err
 	}
@@ -109,7 +100,7 @@ func (s Filesystem) Open(_ context.Context, key string) (Object, io.ReadCloser, 
 		_ = file.Close()
 		return Object{}, nil, errors.New("stored blob exceeds size limit")
 	}
-	return Object{Key: key, Size: info.Size()}, file, nil
+	return Object{Key: key, Size: info.Size(), ModTime: info.ModTime()}, file, nil
 }
 
 func (s Filesystem) Delete(_ context.Context, key string) error {
@@ -156,6 +147,9 @@ func (s Filesystem) Walk(ctx context.Context, prefix string, visit func(Object) 
 		if info.IsDir() {
 			return nil
 		}
+		if strings.HasPrefix(filepath.Base(path), temporaryBlobPrefix) {
+			return nil
+		}
 		relative, err := filepath.Rel(s.root, path)
 		if err != nil {
 			return err
@@ -163,7 +157,7 @@ func (s Filesystem) Walk(ctx context.Context, prefix string, visit func(Object) 
 		if info.Size() < 0 || info.Size() > s.maxSize {
 			return errors.New("stored blob exceeds size limit")
 		}
-		return visit(Object{Key: filepath.ToSlash(relative), Size: info.Size()})
+		return visit(Object{Key: filepath.ToSlash(relative), Size: info.Size(), ModTime: info.ModTime()})
 	})
 }
 

@@ -9,6 +9,53 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 )
 
+// InternalTopic reports whether an outbox topic carries a repository-internal
+// payload — a blob storage key — that exists only for a dedicated cleanup
+// worker. Internal topics must never be claimed by the general outbox worker and
+// must never appear in a client-facing replay, so both repositories consult this
+// one predicate instead of each maintaining its own list.
+func InternalTopic(topic string) bool {
+	return topic == events.FileBlobDeleteTopic || topic == events.UserPhotoBlobDeleteTopic
+}
+
+// InternalTopics is the same set in the form a SQL IN predicate needs.
+func InternalTopics() []string {
+	return []string{events.FileBlobDeleteTopic, events.UserPhotoBlobDeleteTopic}
+}
+
+// OAuthCodeLifetime bounds how long an issued authorization code may be
+// redeemed. RFC 6749 section 4.1.2 requires a short lifetime and recommends a
+// maximum of ten minutes; both repositories derive the expiry from this one
+// constant so a code cannot outlive it on one storage profile and not another.
+const OAuthCodeLifetime = 10 * time.Minute
+
+// The access levels a list or canvas grant can carry. They are the values the
+// service layer already writes through SetListAccess and SetCanvasAccess; naming
+// them here keeps the readers, the writers and the authorization decision that
+// consumes them from drifting apart.
+const (
+	AccessRead  = "read"
+	AccessWrite = "write"
+	AccessOwner = "owner"
+)
+
+// AccessRank orders the access levels so a resolved grant can be compared with
+// the level an operation requires: AccessRank(granted) >= AccessRank(required).
+// An unrecognised level ranks 0, below every real grant, so an unknown string
+// can never satisfy a requirement.
+func AccessRank(level string) int {
+	switch level {
+	case AccessRead:
+		return 1
+	case AccessWrite:
+		return 2
+	case AccessOwner:
+		return 3
+	default:
+		return 0
+	}
+}
+
 var (
 	ErrNotFound                  = errors.New("not found")
 	ErrLeaseConflict             = errors.New("outbox lease conflict")
@@ -31,6 +78,15 @@ type Store interface {
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
+	// GetAuthMethod reports the persisted enablement of one authorization
+	// provider. A provider with no stored decision returns ErrNotFound — the
+	// repository does not invent one. It used to report Enabled: true for a
+	// missing row, which made "no administrator has ever configured this
+	// provider" indistinguishable from "an administrator enabled it" and made
+	// the absence of a decision read as permission granted. The returned value
+	// is disabled in that case as well, so a caller that ignores the error
+	// still fails closed. The default for a provider the deployment itself
+	// configured belongs to the caller that knows the provider configuration.
 	GetAuthMethod(context.Context, domain.WorkspaceID, string) (domain.AuthMethod, error)
 	SetAuthMethod(context.Context, domain.AuthMethod) error
 	GetExternalIdentity(context.Context, domain.WorkspaceID, string, string) (domain.ExternalIdentity, error)
@@ -219,6 +275,9 @@ type Store interface {
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.CanvasID, events.Event) error
 	SetCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
 	DeleteCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
+	// GetCanvasAccess resolves the effective access one user has to one canvas.
+	// See GetListAccess for the resolution rules; canvases follow them exactly.
+	GetCanvasAccess(context.Context, domain.CanvasID, domain.UserID) (domain.CanvasAccess, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	CreateList(context.Context, domain.List, events.Event) error
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
@@ -231,6 +290,21 @@ type Store interface {
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.ListID, []domain.ListItemID, events.Event) error
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error
 	DeleteListAccess(context.Context, domain.ListAccess, events.Event) error
+	// GetListAccess resolves the effective access one user has to one list.
+	// Without a reader the grants written by SetListAccess were unenforceable,
+	// so every workspace member could read and delete every other member's
+	// list. Resolution considers, and returns the highest ranked of:
+	//
+	//   - list ownership, reported as an owner grant on the owning user;
+	//   - a grant recorded directly for the user;
+	//   - a grant recorded for a channel the user is a member of.
+	//
+	// The returned value names the grant that decided the outcome, so a caller
+	// can report why access was allowed. It reports ErrNotFound when the list
+	// does not exist, when the user is not a live member of the list's
+	// workspace, and when no grant applies — absence of a grant is never an
+	// empty grant that compares equal to a real one.
+	GetListAccess(context.Context, domain.ListID, domain.UserID) (domain.ListAccess, error)
 	CreateListDownload(context.Context, domain.ListDownload, events.Event) error
 	GetListDownload(context.Context, domain.WorkspaceID, domain.ListDownloadID) (domain.ListDownload, error)
 }

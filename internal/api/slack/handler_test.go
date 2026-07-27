@@ -21,6 +21,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -123,18 +124,59 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 	}
 }
 
+// defaultTestScopes is the broad grant most tests rely on. It exists as a named
+// value so that a scope-enforcement test can subtract exactly one scope from it,
+// and so testHandlerWithScopes can build a deliberately narrow token.
+func defaultTestScopes() []auth.Scope {
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+}
+
 func testHandlerWithStore() (http.Handler, *memory.Store) {
+	return testHandlerWithScopes(defaultTestScopes()...)
+}
+
+// testHandlerWithScopes seeds the shared fixture but grants the API token only
+// the named scopes. Without it every request in this package arrived holding
+// every scope the system knows about, so a handler that enforced no scope at all
+// was indistinguishable from one that enforced the right one.
+func testHandlerWithScopes(scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	return testFixture(false, scopes...)
+}
+
+// testHandlerWithStoredTokenAuth builds the fixture around auth.Stored, the
+// authenticator that reads the legacy `token` form field. auth.Static ignores the
+// token's placement, so it cannot exercise the multipart-body placement the pinned
+// /files.upload and /users.setPhoto declare.
+func testHandlerWithStoredTokenAuth(scopes ...auth.Scope) (http.Handler, *memory.Store) {
+	return testFixture(true, scopes...)
+}
+
+func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
 	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	// U1 is this fixture's workspace administrator: most tests here exercise
+	// admin.* operations, which now require the actor's ROLE and not merely an
+	// admin.* token scope. U2 stays a member so a denial can be observed.
+	if err := s.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleAdmin); err != nil {
+		panic(err)
+	}
 	if err := s.CreateBot(context.Background(), domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "U2", Name: "testbot", UpdatedAt: time.Now().UTC()}); err != nil {
 		panic(err)
 	}
 	if err := s.CreateUserMigration(context.Background(), domain.UserMigration{WorkspaceID: "T1", OldID: "U1", GlobalID: "W1"}, events.Event{ID: "EM1", WorkspaceID: "T1", Topic: "user.migration_created", Payload: "U1", CreatedAt: time.Now().UTC()}); err != nil {
 		panic(err)
 	}
-	if err := s.SetAppApproval(context.Background(), "T1", "A1", "R1", domain.AppApprovalApproved, time.Now().UTC(), events.Event{ID: "EAPP1", WorkspaceID: "T1", ActorID: "U1", Topic: "app.approved", Payload: "A1", CreatedAt: time.Now().UTC()}); err != nil {
+	// Built through events.New so the fixture carries the same self-describing
+	// payload the service actually emits. Hand-writing `Payload: "A1"` described
+	// an event no producer has ever emitted, which is why integration-log
+	// attribution could pass here while being unreadable in production.
+	approval, err := events.New("EAPP1", "T1", "U1", events.NewPayload("app.approved", events.String("app_id", "A1"), events.String("app_request_id", "R1")), time.Now().UTC())
+	if err != nil {
+		panic(err)
+	}
+	if err := s.SetAppApproval(context.Background(), "T1", "A1", "R1", domain.AppApprovalApproved, time.Now().UTC(), approval); err != nil {
 		panic(err)
 	}
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
@@ -153,9 +195,28 @@ func testHandlerWithStore() (http.Handler, *memory.Store) {
 		panic(err)
 	}
 	s.SeedFileComment(domain.FileComment{ID: "FC1", File: "F1", WorkspaceID: "T1", UserID: "U1", Text: "comment", CreatedAt: time.Now().UTC()})
-	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChatWrite: {}, auth.ScopeChannelsHistory: {}, auth.ScopeRTMStream: {}, auth.ScopeUsersRead: {}, auth.ScopeUsersReadEmail: {}, auth.ScopeUsersWrite: {}, auth.ScopeUsersProfileWrite: {}, auth.ScopeChannelsRead: {}, auth.ScopeChannelsManage: {}, auth.ScopeReactionsWrite: {}, auth.ScopeReactionsRead: {}, auth.ScopePinsWrite: {}, auth.ScopePinsRead: {}, auth.ScopeBookmarksRead: {}, auth.ScopeBookmarksWrite: {}, auth.ScopeSearchRead: {}, auth.ScopeFilesRead: {}, auth.ScopeFilesWrite: {}, auth.ScopeRemoteFilesRead: {}, auth.ScopeRemoteFilesWrite: {}, auth.ScopeRemoteFilesShare: {}, auth.ScopeTeamRead: {}, auth.ScopeEmojiRead: {}, auth.ScopeIdentityBasic: {}, auth.ScopeDNDRead: {}, auth.ScopeDNDWrite: {}, auth.ScopeRemindersRead: {}, auth.ScopeRemindersWrite: {}, auth.ScopeUserGroupsRead: {}, auth.ScopeUserGroupsWrite: {}, auth.ScopeCallsRead: {}, auth.ScopeCallsWrite: {}, auth.ScopeWorkflowStepsExecute: {}, auth.ScopeTokensBasic: {}, auth.ScopeAdmin: {}, auth.ScopeAdminUsersRead: {}, auth.ScopeAdminUsersWrite: {}, auth.ScopeAdminInvitesRead: {}, auth.ScopeAdminInvitesWrite: {}, auth.ScopeAdminConversationsRead: {}, auth.ScopeAdminConversationsWrite: {}, auth.ScopeAdminEmojiWrite: {}, auth.ScopeAdminUserGroupsRead: {}, auth.ScopeAdminUserGroupsWrite: {}, auth.ScopeAdminTeamsRead: {}, auth.ScopeAdminTeamsWrite: {}, auth.ScopeAdminAppsRead: {}, auth.ScopeAdminAppsWrite: {}, auth.ScopeListsRead: {}, auth.ScopeListsWrite: {}}})
-	if err != nil {
-		panic(err)
+	granted := make(map[auth.Scope]struct{}, len(scopes))
+	names := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		granted[scope] = struct{}{}
+		names = append(names, string(scope))
+	}
+	var authenticator auth.Authenticator
+	if stored {
+		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: names}); err != nil {
+			panic(err)
+		}
+		value, err := auth.NewStored(s)
+		if err != nil {
+			panic(err)
+		}
+		authenticator = value
+	} else {
+		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: granted})
+		if err != nil {
+			panic(err)
+		}
+		authenticator = value
 	}
 	h, err := NewHandler(service.Messages{Store: s}, authenticator)
 	if err != nil {
@@ -526,7 +587,11 @@ func TestFunctionsCompleteSuccessHTTPValidatesAndCompletes(t *testing.T) {
 	invalid.Header.Set("Authorization", "Bearer token")
 	invalidResponse := httptest.NewRecorder()
 	handler.ServeHTTP(invalidResponse, invalid)
-	if invalidResponse.Code != http.StatusBadRequest || !strings.Contains(invalidResponse.Body.String(), `"error":"invalid_arguments"`) {
+	// `invalid_arguments` appears in only 4 of the 174 pinned enums, and
+	// functions.completeSuccess is not one of them (it is absent from the snapshot
+	// entirely). `invalid_arg_name` is the code the pinned snapshot declares for a
+	// rejected argument on every operation that declares an enum at all.
+	if invalidResponse.Code != http.StatusOK || !strings.Contains(invalidResponse.Body.String(), `"error":"invalid_arg_name"`) {
 		t.Fatalf("invalid status=%d body=%s", invalidResponse.Code, invalidResponse.Body)
 	}
 }
@@ -581,24 +646,47 @@ func TestMigrationExchangeHTTP(t *testing.T) {
 	}
 }
 
-func TestMapServiceErrorKeepsHandledFailuresNon500AndDistinct(t *testing.T) {
-	if code, reason := mapServiceError(service.ErrMessageAlreadyDeleted, "message_not_found"); code != http.StatusBadRequest || reason != "message_not_found" {
-		t.Fatalf("deleted message mapping = %d %q", code, reason)
+// mapServiceError no longer selects an HTTP status: a handled Slack failure is
+// always HTTP 200 plus `{"ok":false,"error":…}`. The previous version of this
+// test asserted `503 service_unavailable` for an unclassified handled error;
+// `service_unavailable` appears in none of the 174 pinned error enums, and a 503
+// makes every official SDK retry a request that can never succeed, which is the
+// exact pattern AGENTS.md forbids. The names below are the pinned replacements.
+func TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		notFound string
+		want     string
+	}{
+		{"already deleted", service.ErrMessageAlreadyDeleted, "message_not_found", "message_not_found"},
+		{"blob unavailable", service.ErrBlobUnavailable, "file_not_found", "file_storage_unavailable"},
+		{"not found", store.ErrNotFound, "channel_not_found", "channel_not_found"},
+		{"validation", service.ErrInvalidAppApproval, "app_not_found", "invalid_arg_name"},
+		{"denied", service.ErrMessageNotOwned, "message_not_found", "no_permission"},
+		{"role denied", service.ErrNotWorkspaceAdmin, "channel_not_found", "no_permission"},
+		// A gRPC status this handler cannot recognise is a genuine transport
+		// failure, not a handled domain error, so it takes the catch-all. Cases
+		// asserting that a bare status code names a specific domain error were
+		// removed with the `status.Code(err)` fallbacks they described: the
+		// transport now restores the domain sentinel itself before the error
+		// reaches this package, so a raw status no longer carries domain meaning
+		// here. Local-versus-remote parity for every class is asserted end to end
+		// over a real wire by TestEveryClassSurvivesTheWireInBothDirections and
+		// the differential harness in internal/modules/chat/transport/grpc.
+		{"unrecognised transport failure", status.Error(codes.Unavailable, "peer gone"), "channel_not_found", "fatal_error"},
+		// A bare errors.New raised by a service or store validation path used to
+		// become `503 service_unavailable`. `fatal_error` is declared by 55 pinned
+		// operations; no pinned operation declares `service_unavailable`.
+		{"unclassified", errors.New("unexpected dependency failure"), "channel_not_found", "fatal_error"},
 	}
-	if code, reason := mapServiceError(status.Error(codes.FailedPrecondition, "deleted"), "message_not_found"); code != http.StatusBadRequest || reason != "message_not_found" {
-		t.Fatalf("remote deleted message mapping = %d %q", code, reason)
+	for _, testCase := range cases {
+		if reason := mapServiceError(testCase.err, testCase.notFound); reason != testCase.want {
+			t.Errorf("%s: mapServiceError = %q, want %q", testCase.name, reason, testCase.want)
+		}
 	}
-	if code, reason := mapServiceError(service.ErrBlobUnavailable, "service_unavailable"); code != http.StatusServiceUnavailable || reason != "file_storage_unavailable" {
-		t.Fatalf("blob mapping = %d %q", code, reason)
-	}
-	if code, reason := mapServiceError(status.Error(codes.Unavailable, "blob unavailable"), "service_unavailable"); code == http.StatusInternalServerError || reason == "" {
-		t.Fatalf("remote unavailable mapping = %d %q", code, reason)
-	}
-	if code, reason := mapServiceError(service.ErrInvalidAppApproval, "app_not_found"); code != http.StatusBadRequest || reason != "invalid_arguments" {
-		t.Fatalf("app approval mapping = %d %q", code, reason)
-	}
-	if code, reason := mapServiceError(errors.New("unexpected dependency failure"), "service_unavailable"); code != http.StatusServiceUnavailable || reason != "service_unavailable" {
-		t.Fatalf("unknown handled failure mapping = %d %q, want 503 service_unavailable", code, reason)
+	if reason := mapServiceErrorNamed(service.ErrInvalidConversation, "channel_not_found", "restricted_action"); reason != "restricted_action" {
+		t.Errorf("named validation reason = %q, want restricted_action", reason)
 	}
 }
 
@@ -737,7 +825,9 @@ func TestAdminUsersListIsBoundedAndWorkspaceScoped(t *testing.T) {
 	foreign.Header.Set("Authorization", "Bearer token")
 	denied := httptest.NewRecorder()
 	handler.ServeHTTP(denied, foreign)
-	if denied.Code != http.StatusBadRequest {
+	// admin.users.list declares no error enum; `invalid_arguments` is in only 4 of the
+	// 174 pinned enums, so the generic pinned argument rejection is used instead.
+	if denied.Code != http.StatusOK || !strings.Contains(denied.Body.String(), `"error":"invalid_arg_name"`) {
 		t.Fatalf("foreign status=%d body=%s", denied.Code, denied.Body)
 	}
 }
@@ -776,7 +866,7 @@ func TestFileCommentDeleteIsDurable(t *testing.T) {
 	secondRequest.Header.Set("Authorization", "Bearer token")
 	second := httptest.NewRecorder()
 	handler.ServeHTTP(second, secondRequest)
-	if second.Code != http.StatusNotFound {
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"error":"comment_not_found"`) {
 		t.Fatalf("second status=%d body=%s", second.Code, second.Body)
 	}
 }
@@ -867,7 +957,7 @@ func TestAdminConversationTeamsAreExplicitlySingleWorkspace(t *testing.T) {
 	foreign.Header.Set("Authorization", "Bearer token")
 	foreignResult := httptest.NewRecorder()
 	handler.ServeHTTP(foreignResult, foreign)
-	if foreignResult.Code != http.StatusBadRequest {
+	if foreignResult.Code != http.StatusOK || !strings.Contains(foreignResult.Body.String(), `"error":"invalid_team"`) {
 		t.Fatalf("foreign status=%d body=%s", foreignResult.Code, foreignResult.Body)
 	}
 }
@@ -930,7 +1020,7 @@ func TestAdminUserGroupAddTeamsValidatesWorkspaceTopology(t *testing.T) {
 	foreign.Header.Set("Authorization", "Bearer token")
 	foreignResult := httptest.NewRecorder()
 	handler.ServeHTTP(foreignResult, foreign)
-	if foreignResult.Code != http.StatusBadRequest {
+	if foreignResult.Code != http.StatusOK || !strings.Contains(foreignResult.Body.String(), `"error":"invalid_team"`) {
 		t.Fatalf("foreign status=%d body=%s", foreignResult.Code, foreignResult.Body)
 	}
 }
@@ -1057,7 +1147,7 @@ func TestAdminUsersRemoveDeactivatesUser(t *testing.T) {
 	info.Header.Set("Authorization", "Bearer token")
 	after := httptest.NewRecorder()
 	handler.ServeHTTP(after, info)
-	if after.Code != http.StatusNotFound {
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"error":"user_not_found"`) {
 		t.Fatalf("removed user status=%d body=%s", after.Code, after.Body)
 	}
 	token, err := store.LookupToken(context.Background(), "user-two-token")
@@ -1132,7 +1222,7 @@ func TestAdminUsersSessionResetIsRegistered(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"error":"user_not_found"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"user_not_found"`) {
 		t.Fatalf("reset status=%d body=%s", response.Code, response.Body)
 	}
 }
@@ -1172,7 +1262,7 @@ func TestAdminConversationDeleteRemovesPublicChannel(t *testing.T) {
 	info.Header.Set("Authorization", "Bearer token")
 	after := httptest.NewRecorder()
 	handler.ServeHTTP(after, info)
-	if after.Code != http.StatusNotFound {
+	if after.Code != http.StatusOK || !strings.Contains(after.Body.String(), `"error":"channel_not_found"`) {
 		t.Fatalf("deleted channel status=%d body=%s", after.Code, after.Body)
 	}
 }
@@ -1546,8 +1636,21 @@ func TestAuthRevokeDurablyInvalidatesToken(t *testing.T) {
 	check.Header.Set("Authorization", "Bearer token")
 	checkResult := httptest.NewRecorder()
 	mux.ServeHTTP(checkResult, check)
-	if checkResult.Code != http.StatusUnauthorized {
+	// A revoked token is `token_revoked`, not `not_authed`. The two are distinct
+	// members of the same pinned `error` enum, and this assertion used to accept
+	// the code that means "you sent no credential" for a credential this
+	// deployment issued and then withdrew — so nothing here could tell a revoked
+	// token from an absent one.
+	if checkResult.Code != http.StatusOK || !strings.Contains(checkResult.Body.String(), `"error":"token_revoked"`) {
 		t.Fatalf("revoked auth status=%d body=%s", checkResult.Code, checkResult.Body)
+	}
+	// And an absent credential must still be `not_authed`, so the two cases stay
+	// distinguishable in both directions.
+	anonymous := httptest.NewRequest(http.MethodGet, "/api/auth.test", nil)
+	anonymousResult := httptest.NewRecorder()
+	mux.ServeHTTP(anonymousResult, anonymous)
+	if anonymousResult.Code != http.StatusOK || !strings.Contains(anonymousResult.Body.String(), `"error":"not_authed"`) {
+		t.Fatalf("anonymous auth status=%d body=%s", anonymousResult.Code, anonymousResult.Body)
 	}
 }
 
@@ -1557,7 +1660,10 @@ func TestJSONDuplicateFieldsAreRejected(t *testing.T) {
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusBadRequest || !strings.Contains(res.Body.String(), "invalid_form_data") {
+	// A duplicated JSON key is a malformed JSON document, not malformed form data:
+	// `invalid_json` is the code the pinned enums declare for it, and the blanket
+	// `invalid_form_data` told the caller to look at the wrong encoding.
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"error":"invalid_json"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
 }
@@ -2359,7 +2465,7 @@ func TestConversationsOpenReusesDirectConversation(t *testing.T) {
 	publicClose.Header.Set("Authorization", "Bearer token")
 	publicResult := httptest.NewRecorder()
 	handler.ServeHTTP(publicResult, publicClose)
-	if publicResult.Code != http.StatusBadRequest || !strings.Contains(publicResult.Body.String(), `"error":"method_not_supported_for_channel_type"`) {
+	if publicResult.Code != http.StatusOK || !strings.Contains(publicResult.Body.String(), `"error":"method_not_supported_for_channel_type"`) {
 		t.Fatalf("public close status=%d body=%s", publicResult.Code, publicResult.Body)
 	}
 }

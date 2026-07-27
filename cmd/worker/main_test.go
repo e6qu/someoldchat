@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/outbox"
 )
 
 func TestHTTPDeliveryUsesStableEventIdempotency(t *testing.T) {
@@ -58,7 +60,14 @@ func TestSlackEventDeliveryBuildsSignedSlackEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	record := events.Record{Sequence: 1, Event: events.Event{ID: "evt_1", WorkspaceID: "T1", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`}}
+	// The record is built by the typed constructor the service uses, so this
+	// asserts the delivery of a payload production actually emits rather than a
+	// hand-written envelope.
+	event, err := events.New("evt_1", "T1", "U1", events.NewPayload("message.created", events.String("message_id", "M1"), events.String("channel_id", "C1")), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := events.Record{Sequence: 1, Event: event}
 	if err := delivery(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +80,49 @@ func TestSlackEventDeliveryBuildsSignedSlackEnvelope(t *testing.T) {
 	}
 	if envelope["type"] != "event_callback" || envelope["api_app_id"] != "A1" || envelope["team_id"] != "T1" {
 		t.Fatalf("envelope=%s", gotBody)
+	}
+}
+
+// A record whose payload can never be encoded for Slack must be reported as
+// permanent. Retrying it forever stops the outbox from draining and produces a
+// log line every lease period with no escalation.
+func TestSlackEventDeliveryReportsUndeliverableRecordsAsPermanent(t *testing.T) {
+	delivery, err := newSlackEventDeliveryWithClient("https://delivery.invalid/events", "A1", "signing-secret", &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		t.Error("an undeliverable record was sent to the destination")
+		return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := events.Record{Sequence: 1, Event: events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", Payload: "M0123", CreatedAt: time.Unix(1700000000, 0).UTC()}}
+	if err := delivery(context.Background(), legacy); !errors.Is(err, outbox.ErrPermanent) {
+		t.Fatalf("identifier-only payload error=%v, want %v", err, outbox.ErrPermanent)
+	}
+	internal := events.Record{Sequence: 2, Event: events.Event{ID: "evt_2", WorkspaceID: "T1", Topic: events.UserPhotoBlobDeleteTopic, Payload: "T1/users/U1/photo_1", CreatedAt: time.Unix(1700000000, 0).UTC()}}
+	if err := delivery(context.Background(), internal); !errors.Is(err, outbox.ErrPermanent) {
+		t.Fatalf("internal record error=%v, want %v", err, outbox.ErrPermanent)
+	}
+}
+
+// A destination failure is not the record's fault: retrying is the only way to
+// avoid losing a committed event to a temporarily misconfigured receiver.
+func TestSlackEventDeliveryKeepsDestinationFailuresRetryable(t *testing.T) {
+	delivery, err := newSlackEventDeliveryWithClient("https://delivery.invalid/events", "A1", "signing-secret", &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusForbidden, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := events.New("evt_1", "T1", "U1", events.NewPayload("message.created", events.String("message_id", "M1")), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deliveryErr := delivery(context.Background(), events.Record{Sequence: 1, Event: event})
+	if deliveryErr == nil {
+		t.Fatal("a rejected delivery was reported as success")
+	}
+	if errors.Is(deliveryErr, outbox.ErrPermanent) {
+		t.Fatalf("error=%v, want a retryable failure", deliveryErr)
 	}
 }
 

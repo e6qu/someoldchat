@@ -39,7 +39,11 @@ func TestMemoryStoreConcurrentMessageLoad(t *testing.T) {
 			defer group.Done()
 			for offset := 0; offset < messagesEach; offset++ {
 				sequence := worker*messagesEach + offset
-				createdAt := time.Unix(1, int64(sequence)).UTC()
+				// Spaced by a microsecond, the finest resolution a message
+				// timestamp can express. Nanosecond spacing described instants
+				// the store cannot represent, so every message in a microsecond
+				// collapsed onto one value.
+				createdAt := time.Unix(1, 0).Add(time.Duration(sequence) * time.Microsecond).UTC()
 				message := domain.Message{
 					ID:           domain.MessageID(fmt.Sprintf("M-%06d", sequence)),
 					WorkspaceID:  "T-load",
@@ -72,8 +76,17 @@ func TestMemoryStoreConcurrentMessageLoad(t *testing.T) {
 			if _, exists := seen[message.ID]; exists {
 				t.Fatalf("message %s appeared twice", message.ID)
 			}
-			if index > 0 && !page.Messages[index-1].CreatedAt.Before(message.CreatedAt) {
-				t.Fatalf("page is not ordered at %s", message.ID)
+			// The ordering key is (created_at, id), not created_at alone: two
+			// messages may share an instant, and the identifier breaks the tie.
+			// Requiring a strictly increasing instant asserted something the
+			// contract never promised.
+			if index > 0 {
+				previous := page.Messages[index-1]
+				ordered := previous.CreatedAt.Before(message.CreatedAt) ||
+					(previous.CreatedAt.Equal(message.CreatedAt) && string(previous.ID) < string(message.ID))
+				if !ordered {
+					t.Fatalf("page is not ordered at %s: %s@%v then %s@%v", message.ID, previous.ID, previous.CreatedAt, message.ID, message.CreatedAt)
+				}
 			}
 			seen[message.ID] = struct{}{}
 		}

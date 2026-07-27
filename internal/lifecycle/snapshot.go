@@ -43,9 +43,18 @@ type Manifest struct {
 	Signature          string `json:"signature"`
 }
 
+// ErrNoVerifiedSnapshot reports that no manifest at or before the requested
+// generation passed verification. It is a distinct sentinel because "nothing
+// has been snapshotted yet" is an ordinary state during a first hibernation,
+// while an unreadable snapshot provider is not.
+var ErrNoVerifiedSnapshot = errors.New("no verified snapshot is available at or before recovery generation")
+
+// SnapshotManager stores encrypted, signed snapshot artifacts and manifests in
+// exactly one durable target: either a filesystem Root or an ObjectStore.
+// Validate enforces that invariant so the two shapes cannot drift apart again.
 type SnapshotManager struct {
 	Root          string
-	ObjectStore   blob.ListStore
+	ObjectStore   blob.WalkStore
 	EncryptionKey []byte
 	SigningKey    []byte
 	KeyID         string
@@ -53,29 +62,54 @@ type SnapshotManager struct {
 }
 
 func NewSnapshotManager(root string, encryptionKey, signingKey []byte, keyID string, maxBytes int64) (SnapshotManager, error) {
-	if strings.TrimSpace(root) == "" || filepath.IsAbs(root) == false {
-		return SnapshotManager{}, errors.New("snapshot root must be an absolute path")
+	manager := SnapshotManager{Root: root, EncryptionKey: append([]byte(nil), encryptionKey...), SigningKey: append([]byte(nil), signingKey...), KeyID: keyID, MaxBytes: maxBytes}
+	if err := manager.Validate(); err != nil {
+		return SnapshotManager{}, err
 	}
-	if len(encryptionKey) != 32 || len(signingKey) < 32 {
-		return SnapshotManager{}, errors.New("snapshot keys are too short")
-	}
-	if strings.TrimSpace(keyID) == "" || maxBytes <= 0 {
-		return SnapshotManager{}, errors.New("snapshot key ID and positive size limit are required")
-	}
-	return SnapshotManager{Root: root, EncryptionKey: append([]byte(nil), encryptionKey...), SigningKey: append([]byte(nil), signingKey...), KeyID: keyID, MaxBytes: maxBytes}, nil
+	return manager, nil
 }
 
-func NewObjectSnapshotManager(store blob.ListStore, encryptionKey, signingKey []byte, keyID string, maxBytes int64) (SnapshotManager, error) {
+func NewObjectSnapshotManager(store blob.WalkStore, encryptionKey, signingKey []byte, keyID string, maxBytes int64) (SnapshotManager, error) {
 	if store == nil {
 		return SnapshotManager{}, errors.New("object snapshot manager requires an object store")
 	}
-	if len(encryptionKey) != 32 || len(signingKey) < 32 {
-		return SnapshotManager{}, errors.New("snapshot keys are too short")
+	manager := SnapshotManager{ObjectStore: store, EncryptionKey: append([]byte(nil), encryptionKey...), SigningKey: append([]byte(nil), signingKey...), KeyID: keyID, MaxBytes: maxBytes}
+	if err := manager.Validate(); err != nil {
+		return SnapshotManager{}, err
 	}
-	if strings.TrimSpace(keyID) == "" || maxBytes <= 0 {
-		return SnapshotManager{}, errors.New("snapshot key ID and positive size limit are required")
+	return manager, nil
+}
+
+// Validate reports whether the manager names exactly one durable snapshot
+// target and carries complete key material. Every consumer uses it, so an
+// object-store manager and a filesystem manager are accepted or rejected by one
+// rule instead of by separately drifting guards.
+func (m SnapshotManager) Validate() error {
+	hasRoot := strings.TrimSpace(m.Root) != ""
+	if hasRoot && !filepath.IsAbs(m.Root) {
+		return errors.New("snapshot root must be an absolute path")
 	}
-	return SnapshotManager{ObjectStore: store, EncryptionKey: append([]byte(nil), encryptionKey...), SigningKey: append([]byte(nil), signingKey...), KeyID: keyID, MaxBytes: maxBytes}, nil
+	if hasRoot == (m.ObjectStore != nil) {
+		return errors.New("snapshot manager requires exactly one of an absolute filesystem root or an object store")
+	}
+	if len(m.EncryptionKey) != 32 || len(m.SigningKey) < 32 {
+		return errors.New("snapshot keys are too short")
+	}
+	if strings.TrimSpace(m.KeyID) == "" || m.MaxBytes <= 0 {
+		return errors.New("snapshot key ID and positive size limit are required")
+	}
+	return nil
+}
+
+// stagingDirectory is where large temporary artifacts are built before they are
+// promoted. A filesystem manager stages beside its final location so promotion
+// is a rename; an object-store manager has no local namespace and uses the
+// system temporary directory.
+func (m SnapshotManager) stagingDirectory() string {
+	if m.ObjectStore != nil {
+		return os.TempDir()
+	}
+	return m.Root
 }
 
 func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest, error) {
@@ -179,6 +213,12 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 		if err := os.Rename(temporaryPath, artifactPath); err != nil {
 			return Manifest{}, err
 		}
+		// The manifest publication below is fsynced, so without syncing the
+		// artifact directory a power loss can leave a durable current.json
+		// naming an artifact that never reached the disk.
+		if err := syncDirectory(filepath.Dir(artifactPath)); err != nil {
+			return Manifest{}, err
+		}
 	} else {
 		upload, err := os.Open(temporaryPath)
 		if err != nil {
@@ -205,7 +245,9 @@ func (m SnapshotManager) Create(sourcePath string, metadata Manifest) (Manifest,
 		return Manifest{}, err
 	}
 	metadata.VerifiedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	metadata.Signature = m.sign(metadata)
+	if metadata.Signature, err = m.signManifest(metadata); err != nil {
+		return Manifest{}, err
+	}
 	if err := m.publishManifest(metadata); err != nil {
 		return Manifest{}, err
 	}
@@ -391,33 +433,42 @@ func (m SnapshotManager) Current(generation uint64) (Manifest, error) {
 	return manifest, nil
 }
 
+// LastVerified selects the newest manifest at or before maxGeneration whose
+// signature and artifact both verify.
+//
+// A manifest that fails verification is skipped, because skipping corruption is
+// the point of the recovery policy. A provider that cannot be read is not
+// skipped: an unavailable snapshot store is indistinguishable from corruption
+// to this loop, and treating it as corruption silently selects older data.
 func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
 	if m.ObjectStore != nil {
-		objects, err := m.ObjectStore.List(context.Background(), "manifests/")
-		if err != nil {
-			return Manifest{}, err
-		}
 		var newest Manifest
-		for _, object := range objects {
+		if err := m.ObjectStore.Walk(context.Background(), "manifests/", func(object blob.Object) error {
 			if !strings.HasSuffix(object.Key, ".json") {
-				continue
+				return nil
 			}
 			body, err := m.readObject(object.Key)
+			if errors.Is(err, blob.ErrNotFound) {
+				return nil
+			}
 			if err != nil {
-				continue
+				return fmt.Errorf("read snapshot manifest %q: %w", object.Key, err)
 			}
 			var manifest Manifest
 			if json.Unmarshal(body, &manifest) != nil || manifest.Generation == 0 || manifest.Generation > maxGeneration || manifest.Generation <= newest.Generation {
-				continue
+				return nil
 			}
 			if err := m.verifyManifest(manifest); err == nil {
 				newest = manifest
 			}
+			return nil
+		}); err != nil {
+			return Manifest{}, err
 		}
 		if newest.Generation > 0 {
 			return newest, nil
 		}
-		return Manifest{}, errors.New("no verified snapshot is available at or before recovery generation")
+		return Manifest{}, ErrNoVerifiedSnapshot
 	}
 	manifestDirectory, err := safePath(m.Root, "manifests")
 	if err != nil {
@@ -437,8 +488,11 @@ func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
 					continue
 				}
 				body, readErr := os.ReadFile(filepath.Join(manifestDirectory, entry.Name()))
-				if readErr != nil {
+				if errors.Is(readErr, os.ErrNotExist) {
 					continue
+				}
+				if readErr != nil {
+					return Manifest{}, fmt.Errorf("read snapshot manifest %q: %w", entry.Name(), readErr)
 				}
 				var manifest Manifest
 				if json.Unmarshal(body, &manifest) != nil || manifest.Generation == 0 || manifest.Generation > maxGeneration || manifest.Generation <= newest.Generation {
@@ -465,6 +519,9 @@ func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
 			return Manifest{}, pathErr
 		}
 		body, readErr := os.ReadFile(currentPath)
+		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+			return Manifest{}, fmt.Errorf("read current snapshot manifest: %w", readErr)
+		}
 		if readErr == nil {
 			var manifest Manifest
 			if json.Unmarshal(body, &manifest) == nil && manifest.Generation > 0 && manifest.Generation <= maxGeneration {
@@ -474,7 +531,7 @@ func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
 			}
 		}
 	}
-	return Manifest{}, errors.New("no verified snapshot is available at or before recovery generation")
+	return Manifest{}, ErrNoVerifiedSnapshot
 }
 
 func (m SnapshotManager) verifyManifest(manifest Manifest) error {
@@ -496,7 +553,11 @@ func (m SnapshotManager) verifyManifest(manifest Manifest) error {
 	if manifest.KeyID != m.KeyID || manifest.Signature == "" {
 		return errors.New("snapshot manifest authentication failed")
 	}
-	if !hmac.Equal([]byte(manifest.Signature), []byte(m.sign(manifest))) {
+	signature, err := m.signManifest(manifest)
+	if err != nil {
+		return err
+	}
+	if !hmac.Equal([]byte(manifest.Signature), []byte(signature)) {
 		return errors.New("snapshot manifest signature mismatch")
 	}
 	return m.verifyArtifact(manifest)
@@ -590,12 +651,19 @@ func (m SnapshotManager) publishManifest(manifest Manifest) error {
 	return atomicWrite(current, body)
 }
 
-func (m SnapshotManager) sign(manifest Manifest) string {
+// signManifest authenticates the manifest. The marshal error is surfaced rather
+// than dropped: an empty body would produce a perfectly valid signature over
+// nothing, which is the one failure an authentication boundary must never
+// silently accept.
+func (m SnapshotManager) signManifest(manifest Manifest) (string, error) {
 	manifest.Signature = ""
-	body, _ := json.Marshal(manifest)
+	body, err := json.Marshal(manifest)
+	if err != nil {
+		return "", fmt.Errorf("sign snapshot manifest: %w", err)
+	}
 	mac := hmac.New(sha512.New, m.SigningKey)
 	mac.Write(body)
-	return hex.EncodeToString(mac.Sum(nil))
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 func (m SnapshotManager) artifactMACKey() []byte {
 	sum := sha256.Sum256(append([]byte("sameoldchat-artifact-mac\x00"), m.EncryptionKey...))
@@ -635,10 +703,17 @@ func atomicWrite(path string, body []byte) error {
 	if err := os.Rename(temp, path); err != nil {
 		return err
 	}
-	directory, err := os.Open(filepath.Dir(path))
+	return syncDirectory(filepath.Dir(path))
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
 	if err != nil {
 		return err
 	}
-	defer directory.Close()
-	return directory.Sync()
+	if err := directory.Sync(); err != nil {
+		_ = directory.Close()
+		return err
+	}
+	return directory.Close()
 }

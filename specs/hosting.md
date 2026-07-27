@@ -27,7 +27,9 @@ Every hosting profile MUST account for these logical units:
 
 - `activator`: public cold-path endpoint and lifecycle coordinator;
 - `server`: HTMX and Slack-compatible HTTP service, scaled `0..N`;
-- `worker`: asynchronous work, scaled `0..N`;
+- `worker`: asynchronous outbox and scheduled-message work, scaled `0..N`;
+- `socketmode-worker`: Socket Mode response delivery, scaled `0..N`;
+- `blobgc`: blob cleanup and reconciliation, scaled `0..N`;
 - `lifecycle`: fenced restore, migration, snapshot, and verification job;
 - `database`: SQLite `0..1`, PostgreSQL `1..N` as an external durable service,
   or active dqlite `3..N`, hibernated at zero;

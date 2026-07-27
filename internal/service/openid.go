@@ -14,6 +14,15 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
+// secretDigestsEqual compares two credential digests without leaking how many
+// leading bytes matched. The digests are not secret in themselves, but the
+// comparison runs once per token exchange against an attacker-supplied secret,
+// so a data-dependent early exit is an oracle for forging a client secret one
+// byte at a time.
+func secretDigestsEqual(stored, presented string) bool {
+	return hmac.Equal([]byte(stored), []byte(presented))
+}
+
 const openIDRefreshLifetime = 30 * 24 * time.Hour
 
 func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret, code, redirectURI, grantType, refreshToken, codeVerifier string) (domain.OpenIDToken, error) {
@@ -45,7 +54,7 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 			return domain.OpenIDToken{}, err
 		}
 		client, err := m.Store.GetOAuthClient(ctx, clientID)
-		if err != nil || client.SecretHash != domain.HashToken(clientSecret) {
+		if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
 			return domain.OpenIDToken{}, ErrInvalidOAuthClient
 		}
 		token, err := m.Store.ExchangeOpenIDRefreshToken(ctx, clientID, refreshToken, accessToken, newRefreshToken, domain.OpenIDToken{OAuthToken: domain.OAuthToken{ClientID: clientID, AppID: client.AppID, TokenType: "Bearer"}})

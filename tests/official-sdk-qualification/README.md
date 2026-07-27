@@ -8,8 +8,9 @@ The Node Web API suite uses `@slack/web-api` 7.19.0, the Node Bolt suite uses
 `@slack/bolt` 4.7.3, the Node Socket Mode suite uses `@slack/socket-mode`
 3.0.0, and the Node Real Time Messaging suite uses `@slack/rtm-api` 7.0.4.
 The Python Web API and Socket Mode suites use `slack-sdk` 3.43.0, the
-Python Bolt suite uses `slack-bolt` 1.28.0, and the Java Web API and Socket Mode
-suites use `com.slack.api:slack-api-client` 1.49.0. Their immutable artifact
+Python Bolt suite uses `slack-bolt` 1.28.0, the Java Web API and Socket Mode
+suites use `com.slack.api:slack-api-client` 1.49.0, the Java Bolt suite uses
+`com.slack.api:bolt` 1.49.0, and the Deno suite uses `deno-slack-runtime` 1.1.3. Their immutable artifact
 hashes and suite paths are recorded in [`../../specs/sdk-compatibility.yaml`](../../specs/sdk-compatibility.yaml).
 
 To run the reproducible Node, Python, and Java suites with artifact hash

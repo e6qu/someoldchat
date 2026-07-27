@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+// DomainError carries the identity of the domain sentinel a chat handler failed
+// with, attached to the gRPC status as a detail.
+//
+// A gRPC status code alone cannot express the contract: several distinct
+// sentinels share one code (store.ErrAlreadyExists and
+// service.ErrEmojiAlreadyExists are both AlreadyExists, and more than thirty
+// validation sentinels are all InvalidArgument), so a client that reconstructed
+// an error from the code alone either lost the sentinel or restored the wrong
+// one. `key` names exactly one sentinel, which is what lets errors.Is behave
+// identically whether the module was called in process or across the seam.
+//
+// The key strings are part of the wire contract and must never be renamed: a
+// chat server and an HTTP server at different versions have to agree on them
+// during a rolling deployment.
+message DomainError {
+  string key = 1;
+}

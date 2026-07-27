@@ -13,6 +13,8 @@ Build SameOldChat, a multi-workspace chat application with:
   published OpenAPI/AsyncAPI specifications and official open-source SDKs;
 - a server-rendered HTMX web application;
 - SQLite for local and small deployments;
+- PostgreSQL as the qualified external durable SQL profile, gated in CI against
+  a pinned PostgreSQL 18.1 service;
 - dqlite as the production replicated SQLite implementation;
 - stateless application processes that scale from zero;
 - application hibernation in which the database is snapshotted and stopped;
@@ -138,7 +140,7 @@ back-channel receiver accepted the standard `sid` or `sub` correlation forms,
 rejected non-canonical token delivery and replayed `jti` values, and revoked
 only the correlated provider sessions. Logout-token replay state remained
 durable until expiry through the same SQLite/PostgreSQL store and generated
-gRPC boundary used by split-process deployments.
+gRPC boundary used by distributed composition.
 
 Shauth qualification used the provider's exact pinned browser contract against
 real PostgreSQL, Ory Hydra, and two SameOldChat relying parties with distinct
@@ -150,7 +152,7 @@ validator credential isolation.
 
 Remote chat services preserved canonical store and context errors across the
 gRPC boundary, so first-login identity provisioning behaved the same in local
-and split-process deployments. Concurrent first login was qualified through a
+and distributed composition. Concurrent first login was qualified through a
 real gRPC server and PostgreSQL repository and converged on one durable user and
 external identity.
 
@@ -211,6 +213,21 @@ Implement methods in domain waves:
 An operation is complete only after input, authorization, success, warning,
 error, pagination, SDK, SQLite, and dqlite tests pass as applicable.
 
+Implemented. All six waves have handlers: `internal/api/slack/handler.go`
+registers 206 distinct `/api/<method>` routes, and all 206 operations in
+`specs/compatibility.yaml` carry `status: behavior-compatible` with no
+`unimplemented` entry remaining. That covers the files, search, bookmarks,
+user-group, scheduled-message, OAuth, webhook, interactivity, view, canvases,
+`slackLists`, entity, `openid.connect.*`, RTM, and Socket Mode families.
+
+What that status does and does not assert is worth stating precisely, because
+`behavior-compatible` is the fourth of five ledger levels
+([API compatibility](specs/api-compatibility.md)): it means local behavior
+matches the selected contract tests, not that the behavior has been compared
+with Slack. No operation has reached `verified-against-slack`. Raising them is
+Phase 6's differential verification, and until that runs, the ledger records a
+self-consistent local claim rather than externally confirmed equivalence.
+
 ### Phase 6: Differential verification and production hardening
 
 - Run controlled differential requests against a disposable Slack developer
@@ -230,7 +247,11 @@ Every change must pass:
 - the relevant official Slack SDK suites;
 - SQLite and dqlite persistence suites;
 - hibernation/wake tests when lifecycle code or schema changes;
-- dependency age, integrity, provenance, license, and vulnerability checks;
+- dependency age, integrity, provenance, and license checks
+  (`make dependency-check`);
+- vulnerability scanning. `govulncheck` runs in the pull-request workflow over
+  the module source; OSV/advisory and container-image scanning required by the
+  [dependency policy](specs/dependency-policy.md) are not yet wired into CI;
 - migration forward and restore compatibility checks; and
 - generated compatibility-ledger validation.
 

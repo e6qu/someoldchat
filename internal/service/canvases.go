@@ -53,12 +53,20 @@ func (m Messages) CreateCanvas(ctx context.Context, workspaceID domain.Workspace
 		canvasTitle = "Untitled"
 	}
 	canvas := domain.Canvas{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Title: canvasTitle, DocumentContent: content, CreatedAt: now, UpdatedAt: now}
-	if err := m.Store.CreateCanvas(ctx, canvas, canvasEvent(workspaceID, "canvas.created", string(id), now)); err != nil {
+	event, err := canvasEvent(workspaceID, userID, "canvas.created", id, now)
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	if err := m.Store.CreateCanvas(ctx, canvas, event); err != nil {
 		return domain.Canvas{}, err
 	}
 	if channelID != "" {
 		if err := m.SetCanvasAccess(ctx, workspaceID, userID, id, "write", []domain.ConversationID{channelID}, nil); err != nil {
-			cleanupErr := m.Store.DeleteCanvas(ctx, workspaceID, id, canvasEvent(workspaceID, "canvas.create_reverted", string(id), time.Now().UTC()))
+			reverted, revertErr := canvasEvent(workspaceID, userID, "canvas.create_reverted", id, time.Now().UTC())
+			if revertErr != nil {
+				return domain.Canvas{}, errors.Join(err, revertErr)
+			}
+			cleanupErr := m.Store.DeleteCanvas(ctx, workspaceID, id, reverted)
 			return domain.Canvas{}, errors.Join(err, cleanupErr)
 		}
 	}
@@ -66,7 +74,7 @@ func (m Messages) CreateCanvas(ctx context.Context, workspaceID domain.Workspace
 }
 
 func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessWrite); err != nil {
 		return err
 	}
 	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
@@ -90,19 +98,31 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 	}
 	canvas.DocumentContent = string(encoded)
 	canvas.UpdatedAt = time.Now().UTC()
-	return m.Store.UpdateCanvas(ctx, canvas, canvasEvent(workspaceID, "canvas.updated", string(id), canvas.UpdatedAt))
+	event, err := canvasEvent(workspaceID, userID, "canvas.updated", id, canvas.UpdatedAt)
+	if err != nil {
+		return err
+	}
+	return m.Store.UpdateCanvas(ctx, canvas, event)
 }
 
 func (m Messages) DeleteCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	// Destroying a canvas is reserved to whoever owns it: a collaborator granted
+	// write access may change the document, not remove it from everyone else.
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessOwner); err != nil {
 		return err
 	}
 	now := time.Now().UTC()
-	return m.Store.DeleteCanvas(ctx, workspaceID, id, canvasEvent(workspaceID, "canvas.deleted", string(id), now))
+	event, err := canvasEvent(workspaceID, userID, "canvas.deleted", id, now)
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteCanvas(ctx, workspaceID, id, event)
 }
 
 func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, access string, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	// Granting access is the strongest operation on a canvas: write access must not
+	// be enough to hand the canvas to anyone else.
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessOwner); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetCanvas(ctx, workspaceID, id); err != nil {
@@ -127,12 +147,20 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 		}
 	}
 	for _, targetID := range channelIDs {
-		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(targetID), Access: access}, canvasEvent(workspaceID, "canvas.access_set", string(id)+"|channel|"+string(targetID), time.Now().UTC())); err != nil {
+		event, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, time.Now().UTC(), events.String("entity_type", "channel"), events.String("entity_id", string(targetID)), events.String("access", access))
+		if err != nil {
+			return err
+		}
+		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(targetID), Access: access}, event); err != nil {
 			return err
 		}
 	}
 	for _, targetID := range userIDs {
-		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "user", EntityID: string(targetID), Access: access}, canvasEvent(workspaceID, "canvas.access_set", string(id)+"|user|"+string(targetID), time.Now().UTC())); err != nil {
+		event, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, time.Now().UTC(), events.String("entity_type", "user"), events.String("entity_id", string(targetID)), events.String("access", access))
+		if err != nil {
+			return err
+		}
+		if err := m.Store.SetCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "user", EntityID: string(targetID), Access: access}, event); err != nil {
 			return err
 		}
 	}
@@ -140,7 +168,7 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, channelIDs []domain.ConversationID, userIDs []domain.UserID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessOwner); err != nil {
 		return err
 	}
 	if _, err := m.Store.GetCanvas(ctx, workspaceID, id); err != nil {
@@ -160,12 +188,20 @@ func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.Wor
 		}
 	}
 	for _, targetID := range channelIDs {
-		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(targetID)}, canvasEvent(workspaceID, "canvas.access_deleted", string(id)+"|channel|"+string(targetID), time.Now().UTC())); err != nil {
+		event, err := canvasEvent(workspaceID, userID, "canvas.access_deleted", id, time.Now().UTC(), events.String("entity_type", "channel"), events.String("entity_id", string(targetID)))
+		if err != nil {
+			return err
+		}
+		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(targetID)}, event); err != nil {
 			return err
 		}
 	}
 	for _, targetID := range userIDs {
-		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "user", EntityID: string(targetID)}, canvasEvent(workspaceID, "canvas.access_deleted", string(id)+"|user|"+string(targetID), time.Now().UTC())); err != nil {
+		event, err := canvasEvent(workspaceID, userID, "canvas.access_deleted", id, time.Now().UTC(), events.String("entity_type", "user"), events.String("entity_id", string(targetID)))
+		if err != nil {
+			return err
+		}
+		if err := m.Store.DeleteCanvasAccess(ctx, domain.CanvasAccess{CanvasID: id, EntityType: "user", EntityID: string(targetID)}, event); err != nil {
 			return err
 		}
 	}
@@ -173,7 +209,7 @@ func (m Messages) DeleteCanvasAccess(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) LookupCanvasSections(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, criteria string) ([]domain.CanvasSection, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
 		return nil, err
 	}
 	canvas, err := m.Store.GetCanvas(ctx, workspaceID, id)
@@ -216,12 +252,12 @@ func validateCanvasAccess(access string, channelIDs []domain.ConversationID, use
 	return nil
 }
 
-func canvasEvent(workspaceID domain.WorkspaceID, topic, payload string, createdAt time.Time) events.Event {
-	id, err := domain.NewEventID()
-	if err != nil {
-		panic(fmt.Sprintf("generate canvas event ID: %v", err))
-	}
-	return events.Event{ID: id, WorkspaceID: workspaceID, Topic: topic, Payload: payload, CreatedAt: createdAt}
+// canvasEvent builds a canvas journal record. It reports an error instead of
+// panicking on a failed identifier draw: a random-source failure is a handled
+// condition, and a panic here would surface as an unhandled HTTP 500.
+func canvasEvent(workspaceID domain.WorkspaceID, actorID domain.UserID, topic string, id domain.CanvasID, createdAt time.Time, fields ...events.Field) (events.Event, error) {
+	fields = append([]events.Field{events.String("canvas_id", string(id))}, fields...)
+	return newEvent(workspaceID, actorID, events.NewPayload(topic, fields...), createdAt)
 }
 
 func normalizeCanvasContent(value string) (string, error) {

@@ -23,5 +23,4 @@ go test -tags dqlite ./tests/dqlite-qualification
 
 The application adapter remains under `internal/store/dqlite`. This suite
 qualifies same-topology snapshot restore and changed-address recovery using
-local state directories. It does not qualify a provider-specific snapshot
-upload procedure.
+local state directories.

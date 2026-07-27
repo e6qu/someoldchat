@@ -11,6 +11,10 @@ message EventRecord {
   string topic = 4;
   string payload = 5;
   int64 created_at_unix_nano = 6;
+  // The actor is part of events.Event and was absent from this message, so every
+  // record delivered through the seam lost the user who caused it while the
+  // monolith kept it.
+  string actor_id = 7;
 }
 
 message EventsRequest {

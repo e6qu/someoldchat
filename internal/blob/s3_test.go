@@ -107,9 +107,15 @@ func TestS3StoresBoundedObjectsAndListsByPrefix(t *testing.T) {
 	if err != nil || closeErr != nil || gotObject.Size != int64(len(want)) || !bytes.Equal(got, want) {
 		t.Fatalf("got=%q object=%+v err=%v close=%v", got, gotObject, err, closeErr)
 	}
-	objects, err := store.List(context.Background(), "artifacts")
-	if err != nil || len(objects) != 1 || objects[0].Key != "artifacts/1" {
-		t.Fatalf("objects=%+v err=%v", objects, err)
+	objects := make([]Object, 0)
+	if err := store.Walk(context.Background(), "artifacts", func(object Object) error {
+		objects = append(objects, object)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(objects) != 1 || objects[0].Key != "artifacts/1" {
+		t.Fatalf("objects=%+v", objects)
 	}
 	if err := store.Delete(context.Background(), "artifacts/1"); err != nil {
 		t.Fatal(err)

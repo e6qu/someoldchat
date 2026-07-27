@@ -10,6 +10,8 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/sqlstore"
 )
 
+func TestSQLiteQualification(t *testing.T) { runQualification(t, openStore) }
+
 func openStore(t *testing.T, ctx context.Context) (qualificationStore, func()) {
 	t.Helper()
 	repository, err := sqlstore.Open(ctx, filepath.Join(t.TempDir(), "qualification.db"))

@@ -80,7 +80,23 @@ func TestBookmarkRequiresWriteScope(t *testing.T) {
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, req)
-	if response.Code != http.StatusForbidden {
+	// A handled scope denial is HTTP 200 with the Slack envelope, and the pinned
+	// `default` schema declares `needed`/`provided` beside `error` so the caller
+	// can repair the grant. Asserting 403 alone accepted a body an SDK cannot act
+	// on.
+	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	var denial struct {
+		OK       bool   `json:"ok"`
+		Error    string `json:"error"`
+		Needed   string `json:"needed"`
+		Provided string `json:"provided"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&denial); err != nil {
+		t.Fatal(err)
+	}
+	if denial.OK || denial.Error != "missing_scope" || denial.Needed != string(auth.ScopeBookmarksWrite) || !strings.Contains(denial.Provided, string(auth.ScopeBookmarksRead)) {
+		t.Fatalf("denial=%+v", denial)
 	}
 }
