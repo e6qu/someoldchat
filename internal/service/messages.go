@@ -99,11 +99,19 @@ var (
 	ErrLastWorkspaceOwner = errors.New("workspace must retain an owner")
 )
 
-// MaxMessageTextRunes is the single text ceiling for every way a message can
-// enter or change in the product. It is measured in Unicode code points, as
-// Slack's documented 40,000-character contract is; byte length would reject
-// non-ASCII text earlier than an equally long ASCII message.
-const MaxMessageTextRunes = 40000
+const (
+	// MaxMessageTextRunes is the single text ceiling for every way a message can
+	// enter or change in the product. It is measured in Unicode code points, as
+	// Slack's documented 40,000-character contract is; byte length would reject
+	// non-ASCII text earlier than an equally long ASCII message.
+	MaxMessageTextRunes = 40000
+
+	// MaxMessageBodyBytes bounds the combined normalized Block Kit and legacy
+	// attachment document. The Slack HTTP adapter enforced this first, but the
+	// shared service did not, so gRPC and incoming-webhook callers could persist
+	// a structured message large enough to amplify every later history read.
+	MaxMessageBodyBytes = 256 << 10
+)
 
 type Messages struct {
 	Store store.Store
@@ -3766,6 +3774,9 @@ func (m Messages) Unfurl(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if message.Deleted {
 		return domain.Message{}, ErrMessageAlreadyDeleted
 	}
+	if messageUnfurlsTooLong(unfurls) {
+		return domain.Message{}, ErrInvalidMessage
+	}
 	normalized, err := domain.NormalizeUnfurls(unfurls)
 	if err != nil {
 		return domain.Message{}, ErrInvalidMessage
@@ -4134,6 +4145,9 @@ func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, w
 		return domain.ScheduledMessage{}, err
 	}
 	text = strings.TrimSpace(text)
+	if messagePayloadTooLong(blocks, attachments) {
+		return domain.ScheduledMessage{}, ErrInvalidMessage
+	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
 	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || postAt.IsZero() || !postAt.After(time.Now().UTC()) {
@@ -4160,6 +4174,9 @@ func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 		return domain.EphemeralMessage{}, err
 	}
 	text = strings.TrimSpace(text)
+	if messagePayloadTooLong(blocks, attachments) {
+		return domain.EphemeralMessage{}, ErrInvalidEphemeral
+	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
 	if conversation == "" || recipientID == "" || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || err != nil || attachmentErr != nil {
@@ -4206,6 +4223,9 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 		if !errors.Is(err, store.ErrNotFound) {
 			return domain.Message{}, err
 		}
+	}
+	if messagePayloadTooLong(blocks, attachments) {
+		return domain.Message{}, ErrInvalidMessage
 	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
@@ -4271,6 +4291,9 @@ func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, worksp
 }
 
 func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
+	if messagePayloadTooLong(blocks, attachments) {
+		return domain.Message{}, ErrInvalidMessage
+	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
 	if err != nil || attachmentErr != nil || (strings.TrimSpace(text) == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) {
@@ -4298,6 +4321,25 @@ func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceI
 
 func messageTextTooLong(text string) bool {
 	return utf8.RuneCountInString(text) > MaxMessageTextRunes
+}
+
+func messagePayloadTooLong(blocks, attachments string) bool {
+	return len(blocks) > MaxMessageBodyBytes || len(attachments) > MaxMessageBodyBytes-len(blocks)
+}
+
+func messageUnfurlsTooLong(unfurls map[string]string) bool {
+	remaining := MaxMessageBodyBytes
+	for sourceURL, value := range unfurls {
+		if len(sourceURL) > remaining {
+			return true
+		}
+		remaining -= len(sourceURL)
+		if len(value) > remaining {
+			return true
+		}
+		remaining -= len(value)
+	}
+	return false
 }
 
 func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, mimeType string, size int64, ttl time.Duration) (domain.ExternalUpload, error) {
@@ -4404,6 +4446,9 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 	}
 	if strings.TrimSpace(initialComment) != "" {
 		blocks = ""
+	}
+	if messagePayloadTooLong(blocks, "") {
+		return nil, ErrInvalidExternalUpload
 	}
 	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
 	if err != nil {

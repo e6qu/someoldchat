@@ -434,9 +434,12 @@ func TestDiscoverOpenIDConnectProviderAllowsOnlyLoopbackHTTPDevelopmentCoordinat
 }
 
 func TestSignedOutPageStaysOnApplicationOriginAndDoesNotRestartSSO(t *testing.T) {
+	handler := Handler{Login: &LoginHandler{providers: map[string]ProviderConfig{
+		"oidc": {Name: "oidc", Issuer: "https://auth.example.test"},
+	}}}
 	request := httptest.NewRequest(http.MethodGet, "https://chat.example.test/signed-out", nil)
 	response := httptest.NewRecorder()
-	signedOut(response, request)
+	handler.signedOut(response, request)
 	if response.Code != http.StatusOK || response.Header().Get("Location") != "" || response.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("status=%d location=%q headers=%v", response.Code, response.Header().Get("Location"), response.Header())
 	}
@@ -445,9 +448,51 @@ func TestSignedOutPageStaysOnApplicationOriginAndDoesNotRestartSSO(t *testing.T)
 		t.Fatalf("signed-out page=%s", body)
 	}
 	failure := httptest.NewRecorder()
-	signedOut(failure, httptest.NewRequest(http.MethodGet, "https://chat.example.test/signed-out?global=failed", nil))
+	handler.signedOut(failure, httptest.NewRequest(http.MethodGet, "https://chat.example.test/signed-out?global=failed", nil))
 	if failure.Code != http.StatusServiceUnavailable || !strings.Contains(failure.Body.String(), "could not complete global sign-out") {
 		t.Fatalf("global logout failure status=%d body=%s", failure.Code, failure.Body.String())
+	}
+
+	nonShauth := Handler{Login: &LoginHandler{providers: map[string]ProviderConfig{
+		"github": {Name: "github"},
+	}}}
+	other := httptest.NewRecorder()
+	nonShauth.signedOut(other, request)
+	if other.Code != http.StatusOK || !strings.Contains(other.Body.String(), `href="/login">Choose a sign-in method</a>`) || strings.Contains(other.Body.String(), `/auth/oidc`) {
+		t.Fatalf("non-Shauth signed-out page=%s", other.Body.String())
+	}
+}
+
+func TestLoginPageListsOnlyEnabledProviders(t *testing.T) {
+	store := memory.New()
+	store.SeedWorkspace(domain.Workspace{ID: "T1"})
+	login, err := NewLoginHandler(service.Messages{Store: store}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{
+		{Name: "google", ClientID: "google-client", ClientSecret: "secret", AuthorizeURL: "https://accounts.google.com/authorize", TokenURL: "https://accounts.google.com/token", UserInfoURL: "https://accounts.google.com/userinfo", Scopes: []string{"openid", "email"}},
+		{Name: "github", ClientID: "github-client", ClientSecret: "secret", AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", UserInfoURL: "https://api.github.com/user", EmailURL: "https://api.github.com/user/emails", Scopes: []string{"user:email"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetAuthMethod(context.Background(), domain.AuthMethod{WorkspaceID: "T1", Provider: "google", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	login.login(response, httptest.NewRequest(http.MethodGet, "https://chat.example.test/login", nil))
+	body := response.Body.String()
+	if response.Code != http.StatusOK || !strings.Contains(body, `href="/auth/github">Continue with GitHub</a>`) || strings.Contains(body, `/auth/google`) {
+		t.Fatalf("partially enabled login page status=%d body=%s", response.Code, body)
+	}
+	if !strings.Contains(body, `<meta name="color-scheme" content="light dark">`) {
+		t.Fatalf("login page does not support the reader's color scheme: %s", body)
+	}
+
+	if err := store.SetAuthMethod(context.Background(), domain.AuthMethod{WorkspaceID: "T1", Provider: "github", Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	disabled := httptest.NewRecorder()
+	login.login(disabled, httptest.NewRequest(http.MethodGet, "https://chat.example.test/login", nil))
+	if disabled.Code != http.StatusServiceUnavailable || !strings.Contains(disabled.Body.String(), "No sign-in methods are enabled") || strings.Contains(disabled.Body.String(), `class="provider"`) {
+		t.Fatalf("fully disabled login page status=%d body=%s", disabled.Code, disabled.Body.String())
 	}
 }
 

@@ -52,6 +52,15 @@ the implementation should consume and emit records incrementally. File
 uploads are streamed through the module boundary in bounded chunks; metadata
 is committed only after the blob is durably published.
 
+Message limits are service invariants, not HTTP-adapter conveniences. Plain
+text is bounded by Unicode code points, while normalized blocks, attachments,
+and unfurls share a byte ceiling before parsing and persistence. The same
+limits therefore apply to local calls, gRPC calls, incoming webhooks, scheduled
+and ephemeral messages, edits, and external-upload completion. The browser
+projects stored blocks, attachments, and unfurls into server-rendered content;
+it does not offer its plain-text editor for a structured message because that
+editor cannot round-trip the structured payload without destroying it.
+
 Blob storage is an explicit capability. A configured absolute directory selects
 the filesystem store; a configured Amazon Simple Storage Service bucket selects
 the provider store; no storage configuration selects the typed `blob.Disabled` store,

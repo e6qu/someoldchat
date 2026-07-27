@@ -91,6 +91,12 @@ the explicit **Sign in with Shauth** action starts another authorization flow. I
 provider logout metadata is incomplete, SameOldChat still revokes its local
 session and reports the incomplete global logout on that application-owned
 page instead of silently claiming success.
+The signed-out page is provider-aware: an OpenID Connect deployment offers the
+direct Shauth action, other provider-backed deployments return to `/login`, and
+a deployment with no browser provider does not invent a dead sign-in link.
+`/login` reads durable provider enablement before rendering, omits disabled
+methods, and reports an explicit unavailable state when no configured method is
+enabled.
 The identity provider also sends a signed OpenID Connect back-channel logout token to
 `POST /auth/oidc/backchannel-logout`. SameOldChat verifies the issuer, audience,
 signature, expiration, exact standard logout event, `iat`, and `jti`, rejects a

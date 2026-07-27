@@ -130,6 +130,10 @@ type messageView struct {
 	AuthorName    string
 	AuthorInitial string
 	Text          string
+	DisplayText   string
+	Blocks        []messageBlockView
+	Attachments   []messageAttachmentView
+	Unfurls       []messageAttachmentView
 	MachineTime   string
 	DisplayTime   string
 	Pinned        bool
@@ -142,6 +146,7 @@ type messageView struct {
 	UpdateURL     string
 	DeleteURL     string
 	CanEdit       bool
+	CanDelete     bool
 	Permalink     string
 	Channel       string
 	ChannelName   string
@@ -217,6 +222,7 @@ type membersData struct {
 	UserInitial    string
 	CSRFToken      string
 	Error          string
+	CanEditProfile bool
 	CanMessage     bool
 	MoreMembersURL string
 }
@@ -358,6 +364,22 @@ const pageStyle = `<style>
 .time{color:var(--muted);font-size:12px}
 .pinned{color:var(--muted);font-size:12px;font-weight:700}
 .message-text{margin:2px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.message-blocks,.message-attachments,.message-unfurls{display:grid;gap:8px;margin:8px 0}
+.message-block{white-space:pre-wrap;overflow-wrap:anywhere}
+.message-block.header{font-size:17px;font-weight:800}
+.message-block.context{color:var(--muted);font-size:12px}
+.message-block.divider{border:0;border-top:1px solid var(--line);margin:5px 0}
+.message-block-fields,.attachment-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px 14px;margin:6px 0 0;padding:0;list-style:none}
+.message-block-fields li,.attachment-fields li{white-space:pre-wrap}
+.message-block-actions{display:flex;flex-wrap:wrap;gap:6px;margin:5px 0 0;padding:0;list-style:none}
+.message-block-actions li{border:1px solid var(--line);border-radius:5px;padding:4px 8px;background:var(--panel-strong);font-weight:700}
+.message-media{display:block;max-width:min(520px,100%);max-height:360px;margin-top:7px;border-radius:8px;object-fit:contain}
+.message-attachment{border-left:4px solid var(--line);border-radius:4px;background:var(--panel-strong);padding:9px 12px;overflow-wrap:anywhere}
+.message-attachment .pretext{margin:0 0 6px}
+.message-attachment .attachment-author,.message-attachment .attachment-footer,.unfurl-source{color:var(--muted);font-size:12px}
+.message-attachment .attachment-title{display:block;margin:2px 0;font-weight:800}
+.message-attachment .attachment-text{margin:4px 0;white-space:pre-wrap}
+.message-unfurls .message-attachment{border-left-color:var(--action)}
 .reactions{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 6px;padding:0;list-style:none}
 .chip{display:inline-flex;gap:5px;align-items:center;border:1px solid var(--field-line);border-radius:12px;background:var(--panel);color:var(--text);padding:1px 9px;font-size:12px}
 .chip[aria-pressed=true]{border-color:var(--action);font-weight:800}
@@ -468,6 +490,20 @@ html.js .sidebar.is-open{transform:translateX(0)}
 }
 </style>`
 
+const attachmentPartial = `{{define "attachment"}}
+<article class="message-attachment">
+  {{if .Pretext}}<p class="pretext">{{.Pretext}}</p>{{end}}
+  {{if .Author}}<div class="attachment-author">{{.Author}}</div>{{end}}
+  {{if .Title}}{{if .TitleURL}}<a class="attachment-title" href="{{.TitleURL}}" rel="noreferrer noopener">{{.Title}}</a>{{else}}<strong class="attachment-title">{{.Title}}</strong>{{end}}{{end}}
+  {{if .Text}}<p class="attachment-text">{{.Text}}</p>{{end}}
+  {{if .Fields}}<ul class="attachment-fields">{{range .Fields}}<li>{{if .Title}}<strong>{{.Title}}</strong><br>{{end}}{{.Value}}</li>{{end}}</ul>{{end}}
+  {{if .Blocks}}<div class="message-blocks">{{range .Blocks}}{{if eq .Kind "divider"}}<hr class="message-block divider">{{else}}<div class="message-block {{.Kind}}">{{.Text}}{{if .Fields}}<ul class="message-block-fields">{{range .Fields}}<li>{{.}}</li>{{end}}</ul>{{end}}</div>{{end}}{{end}}</div>{{end}}
+  {{if .ImageURL}}<img class="message-media" src="{{.ImageURL}}" alt="{{.ImageAlt}}" loading="lazy">{{end}}
+  {{if .Footer}}<div class="attachment-footer">{{.Footer}}</div>{{end}}
+  {{if .SourceURL}}<a class="unfurl-source" href="{{.SourceURL}}" rel="noreferrer noopener">{{.SourceURL}}</a>{{end}}
+</article>
+{{end}}`
+
 const messagesPartial = `{{define "messages"}}
 {{range $message := .Messages}}
 <article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}">
@@ -478,7 +514,31 @@ const messagesPartial = `{{define "messages"}}
       <time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>
       {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
     </div>
-    <p class="message-text">{{$message.Text}}</p>
+    {{if $message.DisplayText}}<p class="message-text">{{$message.DisplayText}}</p>{{end}}
+    {{if $message.Blocks}}
+    <div class="message-blocks" aria-label="Structured message">
+      {{range $block := $message.Blocks}}
+        {{if eq $block.Kind "divider"}}<hr class="message-block divider">
+        {{else}}<div class="message-block {{$block.Kind}}">
+          {{if $block.Text}}<div>{{$block.Text}}</div>{{end}}
+          {{if $block.Fields}}<ul class="message-block-fields">{{range $field := $block.Fields}}<li>{{$field}}</li>{{end}}</ul>{{end}}
+          {{if $block.ActionText}}<ul class="message-block-actions" aria-label="Message actions">{{range $action := $block.ActionText}}<li>{{$action}}</li>{{end}}</ul>{{end}}
+          {{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
+          {{if $block.LinkURL}}<a href="{{$block.LinkURL}}" rel="noreferrer noopener">{{$block.LinkLabel}}</a>{{end}}
+        </div>{{end}}
+      {{end}}
+    </div>
+    {{end}}
+    {{if $message.Attachments}}
+    <div class="message-attachments" aria-label="Attachments">
+      {{range $attachment := $message.Attachments}}{{template "attachment" $attachment}}{{end}}
+    </div>
+    {{end}}
+    {{if $message.Unfurls}}
+    <div class="message-unfurls" aria-label="Link previews">
+      {{range $attachment := $message.Unfurls}}{{template "attachment" $attachment}}{{end}}
+    </div>
+    {{end}}
     {{if $message.Reactions}}
     <ul class="reactions">
       {{range $reaction := $message.Reactions}}
@@ -525,6 +585,8 @@ const messagesPartial = `{{define "messages"}}
           <button type="submit">Save</button>
         </form>
       </details>
+      {{end}}
+      {{if $message.CanDelete}}
       <details class="delete-message">
         <summary>Delete</summary>
         <form aria-label="Delete message" method="post" action="{{$message.DeleteURL}}" hx-post="{{$message.DeleteURL}}">
@@ -541,7 +603,7 @@ const messagesPartial = `{{define "messages"}}
 {{end}}
 {{end}}`
 
-var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
+var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
 {{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
 {{define "scripts"}}` + progressiveEnhancementScript + `{{end}}
 {{define "content"}}
@@ -731,14 +793,14 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
         <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong>{{if .Profile.StatusText}}<p class="muted">{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
       </div>
       {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
-      <form method="post" action="/app/profile">
+      {{if .CanEditProfile}}<form method="post" action="/app/profile">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
         <label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}"><small>The name teammates see in messages.</small></label>
         <label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}" placeholder="What are you working on?"></label>
         <label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}" placeholder=":wave:"></label>
         <label class="field" for="avatar_url">Profile photo URL<input id="avatar_url" type="url" maxlength="2048" name="avatar_url" value="{{.AvatarURL}}" placeholder="https://example.com/avatar.jpg"><small>Leave blank to use your initial.</small></label>
         <button class="save" type="submit">Save changes</button>
-      </form>
+      </form>{{else}}<p class="muted">Your current permissions allow viewing profiles but not changing yours.</p>{{end}}
     </section>
     <section class="card" aria-labelledby="people-heading">
       <h2 id="people-heading">Workspace members</h2>
@@ -892,6 +954,10 @@ navToggle.setAttribute('aria-label',open?'Close navigation':'Open navigation');
 if(mobile&&!open)nav.setAttribute('inert','');else nav.removeAttribute('inert');
 if(open&&focus){var current=nav.querySelector('[aria-current="page"]')||nav.querySelector('.side-link');if(current)current.focus()}
 }
+function navFocusables(){
+if(!nav)return[];
+return Array.prototype.slice.call(nav.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),summary,[tabindex]:not([tabindex="-1"])')).filter(function(item){return !!(item.offsetParent||item.getClientRects().length)});
+}
 function ownPath(value){return typeof value==='string'&&value.charAt(0)==='/'&&value.charAt(1)!=='/'}
 function shown(region){return !!(region.offsetParent||region.getClientRects().length)}
 function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
@@ -985,6 +1051,16 @@ composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 })}
 document.addEventListener('keydown',function(event){
 var key=typeof event.key==='string'?event.key.toLowerCase():'';
+if(event.key==='Tab'&&nav&&nav.classList.contains('is-open')){
+var focusable=navFocusables();
+if(focusable.length){
+var first=focusable[0];
+var last=focusable[focusable.length-1];
+var active=document.activeElement;
+if(event.shiftKey&&(active===first||!nav.contains(active))){event.preventDefault();last.focus();return}
+if(!event.shiftKey&&(active===last||!nav.contains(active))){event.preventDefault();first.focus();return}
+}
+}
 if(event.key==='Escape'&&nav&&nav.classList.contains('is-open')){
 event.preventDefault();
 setNav(false,false);
@@ -1065,7 +1141,7 @@ func liveEventTopicsLiteral() string {
 // ---------------------------------------------------------------------------
 
 func (h Handler) Register(mux *http.ServeMux) {
-	mux.HandleFunc("GET /signed-out", signedOut)
+	mux.HandleFunc("GET /signed-out", h.signedOut)
 	if h.Login != nil {
 		h.Login.Register(mux)
 		mux.HandleFunc("GET /auth/validation", h.validation)
@@ -1328,7 +1404,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		WorkspaceName:   workspaceName,
 		CSRFToken:       csrfToken,
 		ShowProfile:     h.canShowIdentity(),
-		ShowAdmin:       h.canShowAuthorizationAdmin(principal),
+		ShowAdmin:       h.canShowAuthorizationAdmin(r.Context(), principal),
 		IsMember:        isMember,
 		CanPost:         isMember && principal.HasScope(auth.ScopeChatWrite),
 		CanJoin:         canJoin,
@@ -1535,12 +1611,18 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 		timestamp := string(domain.NewMessageTimestamp(message.CreatedAt))
 		author := names.name(message.AuthorID)
+		content := newRichMessageContent(message)
+		ownsMessage := request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite)
 		view := messageView{
 			ID:            anchorPrefix + string(message.ID),
 			Anchor:        anchorPrefix + messageAnchor(message.ID),
 			AuthorName:    author,
 			AuthorInitial: initial(author),
 			Text:          message.Text,
+			DisplayText:   content.Text,
+			Blocks:        content.Blocks,
+			Attachments:   content.Attachments,
+			Unfurls:       content.Unfurls,
 			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
 			DisplayTime:   formatTime(message.CreatedAt),
 			Channel:       channel,
@@ -1552,7 +1634,12 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			UnpinURL:      mutationURL("/app/pin/remove", channel, timestamp, threadTimestamp, before),
 			UpdateURL:     mutationURL("/app/message/update", channel, timestamp, threadTimestamp, before),
 			DeleteURL:     mutationURL("/app/message/delete", channel, timestamp, threadTimestamp, before),
-			CanEdit:       request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite),
+			// The first-party editor currently writes plain text. Offering it on
+			// an API-authored rich message would erase its blocks and
+			// attachments on save, so rich messages retain deletion but are
+			// edited through the Slack API that can round-trip their structure.
+			CanEdit:   ownsMessage && !hasStructuredMessageContent(message.Blocks) && !hasStructuredMessageContent(message.Attachments),
+			CanDelete: ownsMessage,
 		}
 		if _, ok := pinned[message.ID]; ok {
 			view.Pinned = true
@@ -1725,11 +1812,16 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 				}
 			}
 		}
-		// A search hit is opened where it lives: the window that ends at the
+		// A search hit is opened where it lives: the window that includes the
 		// message, the message anchored, and the thread pane only when the hit
-		// really is a threaded reply.
+		// really is a threaded reply. Message cursors are exclusive, so the hit's
+		// own cursor would remove it from the descending page. A boundary one
+		// nanosecond later includes the exact stored row without changing the
+		// repository-wide cursor contract.
 		before := ""
-		if cursor, err := domain.NewMessageCursor(message); err == nil {
+		boundary := message
+		boundary.CreatedAt = boundary.CreatedAt.Add(time.Nanosecond)
+		if cursor, err := domain.NewMessageCursor(boundary); err == nil {
 			before = string(cursor)
 		}
 		views = append(views, messageView{
@@ -1799,13 +1891,14 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		profile = *submitted
 	}
 	data := membersData{
-		Members:     members,
-		Profile:     profile,
-		AvatarURL:   profileImageURL(profile),
-		UserInitial: initial(displayName(current)),
-		CSRFToken:   auth.CSRFToken(sessionCookie.Value),
-		Error:       message,
-		CanMessage:  principal.HasScope(auth.ScopeChannelsManage),
+		Members:        members,
+		Profile:        profile,
+		AvatarURL:      profileImageURL(profile),
+		UserInitial:    initial(displayName(current)),
+		CSRFToken:      auth.CSRFToken(sessionCookie.Value),
+		Error:          message,
+		CanEditProfile: principal.HasScope(auth.ScopeUsersWrite),
+		CanMessage:     principal.HasScope(auth.ScopeChannelsManage),
 	}
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreMembersURL = "/app/members?" + url.Values{"cursor": {string(page.NextCursor)}}.Encode()
@@ -1913,16 +2006,25 @@ func (h Handler) canShowIdentity() bool {
 	return h.Login != nil && h.Login.hasOpenIDConnectProvider() && immutableReleaseRevision.MatchString(h.ReleaseRevision)
 }
 
-func (h Handler) canShowAuthorizationAdmin(principal auth.Principal) bool {
+func (h Handler) canShowAuthorizationAdmin(ctx context.Context, principal auth.Principal) bool {
 	if h.Login == nil {
 		return false
 	}
+	hasScope := false
 	for _, scope := range []auth.Scope{auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite} {
 		if principal.HasScope(scope) {
-			return true
+			hasScope = true
+			break
 		}
 	}
-	return false
+	if !hasScope {
+		return false
+	}
+	membership, err := h.Messages.WorkspaceMembership(ctx, principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil || !membership.Active {
+		return false
+	}
+	return membership.Role == domain.WorkspaceRoleAdmin || membership.Role == domain.WorkspaceRoleOwner
 }
 
 func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string) {
@@ -2398,8 +2500,8 @@ var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
 // /login and /signed-out. Both are static documents with one inline stylesheet
 // and no script, so the policy can be stricter than the workspace's. They used
 // to carry no policy and no X-Frame-Options at all, which made both framable —
-// and /signed-out carries the "Sign in with Shauth" link, so framing it is
-// enough to make a victim start an authorization flow they did not choose.
+// and a provider-backed /signed-out page carries a sign-in link, so framing it
+// is enough to make a victim start an authorization flow they did not choose.
 const entryContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
 
 // inlineScriptHashes is the CSP source list for a set of documents' inline

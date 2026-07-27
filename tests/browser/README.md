@@ -7,11 +7,14 @@ advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
 workspace search, theme switching, reactions, pins, and navigation to workspace
 members. It also exercises message editing and deletion, private channel
 creation and duplicate-name errors, named mobile navigation, thread reflow,
-contextual mutation failures, unread bookkeeping, live delivery, history
-pagination, and draft preservation. It signs out through the application UI,
+drawer focus containment, contextual mutation failures, unread bookkeeping,
+live delivery, history pagination, search-result positioning, JSON-authored
+blocks, attachments, and link previews, and draft preservation. It signs out
+through the application UI,
 asserts the application-owned signed-out destination remains terminal across a
-reload, exposes an explicit **Sign in with Shauth** control, and verifies the
-revoked session cannot reopen a protected page.
+reload, does not invent a sign-in route when the local fixture has no provider,
+and verifies the revoked session cannot reopen a protected page. Provider-backed
+qualification separately verifies the configured sign-in destination.
 
 Run it from the repository root:
 

@@ -32,6 +32,10 @@ async function postThroughTheAPI(request, text, threadTimestamp) {
   if (threadTimestamp) {
     body.thread_ts = threadTimestamp;
   }
+  return postPayloadThroughTheAPI(request, body);
+}
+
+async function postPayloadThroughTheAPI(request, body) {
   const response = await request.post('/api/chat.postMessage', {
     headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
     data: body,
@@ -80,6 +84,10 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
   await expect(page.getByRole('heading', { name: 'Search results' })).toBeVisible();
   await expect(page.locator('.result').last()).toContainText(message);
 
+  await page.locator('.result', { hasText: message }).click();
+  await expect(page).toHaveURL(/#message-/);
+  await expect(page.locator('.message-text', { hasText: message })).toBeVisible();
+  await page.goBack();
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page.locator('.channel-title')).toHaveText('# general');
 
@@ -87,6 +95,78 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
   await expect(page.getByRole('heading', { name: 'Workspace members' })).toBeVisible();
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page.locator('.channel-title')).toHaveText('# general');
+});
+
+test('JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {
+  const stamp = Date.now();
+  const blockHeader = `Deployment complete ${stamp}`;
+  await postPayloadThroughTheAPI(request, {
+    channel: CHANNEL,
+    text: `notification fallback ${stamp}`,
+    blocks: [
+      { type: 'header', text: { type: 'plain_text', text: blockHeader } },
+      {
+        type: 'section',
+        text: { type: 'mrkdwn', text: '*Production* is healthy' },
+        fields: [{ type: 'plain_text', text: 'Region: eu-west' }],
+      },
+      {
+        type: 'actions',
+        elements: [{ type: 'button', text: { type: 'plain_text', text: 'View build' } }],
+      },
+    ],
+  });
+  const attachmentTitle = `Build 842 ${stamp}`;
+  await postPayloadThroughTheAPI(request, {
+    channel: CHANNEL,
+    attachments: [
+      {
+        author_name: 'CI',
+        title: attachmentTitle,
+        title_link: 'https://example.com/build/842',
+        text: 'All checks passed',
+        fields: [{ title: 'Duration', value: '3m 12s' }],
+        footer: 'Continuous delivery',
+      },
+    ],
+  });
+  const linkText = `runbook link ${stamp}`;
+  const linked = await postThroughTheAPI(request, linkText);
+  const unfurl = await request.post('/api/chat.unfurl', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: {
+      channel: CHANNEL,
+      ts: linked.ts,
+      unfurls: {
+        'https://example.com/runbook': {
+          title: `Production runbook ${stamp}`,
+          text: 'Recovery steps',
+        },
+      },
+    },
+  });
+  const unfurlPayload = await unfurl.json();
+  expect(unfurlPayload.ok, JSON.stringify(unfurlPayload)).toBe(true);
+
+  await signIn(context);
+  await page.goto('/app');
+
+  const blockMessage = page.locator('.message', { hasText: blockHeader });
+  await expect(blockMessage.getByText('*Production* is healthy', { exact: true })).toBeVisible();
+  await expect(blockMessage.getByText('Region: eu-west', { exact: true })).toBeVisible();
+  await expect(blockMessage.getByText('View build', { exact: true })).toBeVisible();
+  await expect(blockMessage.locator('.message-text')).toHaveCount(0);
+  await expect(blockMessage.getByText(`notification fallback ${stamp}`, { exact: true })).toHaveCount(0);
+  await expect(blockMessage.getByText('Edit', { exact: true })).toHaveCount(0);
+  await expect(blockMessage.getByText('Delete', { exact: true })).toBeVisible();
+
+  const attachmentMessage = page.locator('.message', { hasText: attachmentTitle });
+  await expect(attachmentMessage.getByText('All checks passed', { exact: true })).toBeVisible();
+  await expect(attachmentMessage.locator('.attachment-fields')).toContainText('3m 12s');
+
+  const unfurledMessage = page.locator('.message', { hasText: linkText });
+  await expect(unfurledMessage.getByText(`Production runbook ${stamp}`, { exact: true })).toBeVisible();
+  await expect(unfurledMessage.getByText('Recovery steps', { exact: true })).toBeVisible();
 });
 
 // Every thread view answered `503 page rendering unavailable`, because the
@@ -387,6 +467,13 @@ test('the narrow layout exposes named navigation and keeps the thread reachable'
   }
   await expect(sidebar.getByText('general', { exact: true })).toBeVisible();
 
+  // The drawer is modal on narrow screens. Keyboard focus must not disappear
+  // into the conversation hidden behind its scrim.
+  const firstDrawerControl = sidebar.locator('a[href], button:not([disabled]), summary').first();
+  await firstDrawerControl.focus();
+  await page.keyboard.press('Shift+Tab');
+  expect(await page.evaluate(() => document.querySelector('#workspace-sidebar').contains(document.activeElement))).toBe(true);
+
   await expect(page.getByRole('button', { name: 'Sign out' })).toHaveAttribute('aria-label', 'Sign out');
   // The thread reflows instead of disappearing.
   await expect(page.locator('#thread-messages')).toBeVisible();
@@ -541,7 +628,8 @@ test('signing out ends the session and the signed-out page is terminal', async (
   // an authenticated view.
   await page.reload();
   await expect(page).toHaveURL('/signed-out');
-  await expect(page.getByRole('link', { name: 'Sign in with Shauth' })).toBeVisible();
+  await expect(page.getByText('Ask a workspace administrator how to sign in again.')).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Sign in with Shauth' })).toHaveCount(0);
 
   // The revoked session cannot reopen a protected page.
   const protectedResponse = await page.goto('/app');

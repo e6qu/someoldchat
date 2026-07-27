@@ -2789,6 +2789,47 @@ func TestPostMessageAcceptsAttachmentsWithoutFallbackText(t *testing.T) {
 	}
 }
 
+func TestPostMessageJSONAcceptsStructuredArrays(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader(`{
+		"channel":"C1",
+		"blocks":[{"type":"section","text":{"type":"plain_text","text":"from blocks"}}],
+		"attachments":[{"text":"from attachments"}]
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	testHandler().ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	for _, want := range []string{`"blocks":[{"type":"section"`, `"attachments":[{"text":"from attachments"}]`} {
+		if !strings.Contains(res.Body.String(), want) {
+			t.Fatalf("response does not contain %q: %s", want, res.Body)
+		}
+	}
+}
+
+func TestDecodeJSONFieldsPreservesStructuredArrayArguments(t *testing.T) {
+	fields, err := decodeJSONFields(strings.NewReader(`{
+		"blocks":[{"type":"divider"}],
+		"attachments":[{"text":"attachment"}],
+		"files":[{"id":"F1","title":"report"}]
+	}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wants := map[string]string{
+		"blocks":      `[{"type":"divider"}]`,
+		"attachments": `[{"text":"attachment"}]`,
+		"files":       `[{"id":"F1","title":"report"}]`,
+	}
+	for name, want := range wants {
+		if fields[name] != want {
+			t.Fatalf("%s=%q, want %q", name, fields[name], want)
+		}
+	}
+}
+
 func TestUpdateMessageAcceptsAttachmentsWithoutFallbackText(t *testing.T) {
 	handler := testHandler()
 	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=before"))

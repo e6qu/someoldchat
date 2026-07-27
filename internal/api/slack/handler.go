@@ -5472,7 +5472,7 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 // admitting an unbounded structured body.
 const (
 	maxMessageTextRunes = service.MaxMessageTextRunes
-	maxMessageBodyBytes = 256 << 10
+	maxMessageBodyBytes = service.MaxMessageBodyBytes
 )
 
 // checkMessageLength refuses a message body above the ceiling with the code the
@@ -6911,7 +6911,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // shape instead — see normalizeJSONField.
 func isStructuredField(name string) bool {
 	switch name {
-	case "unfurls", "metadata", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment":
+	case "blocks", "attachments", "files", "unfurls", "metadata", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment":
 		return true
 	default:
 		return false
