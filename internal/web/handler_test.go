@@ -309,11 +309,12 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	requireMissing(t, "sidebar", body, `>direct<`, `aria-label="general, `)
 }
 
-// TestSidebarLinksKeepAnAccessibleNameWhenTheyCollapse replaces an assertion on
-// a literal CSS string with the contract that assertion was standing in for: at
-// a narrow viewport the sidebar hides its labels, so every link and the sign-out
-// control must carry a name of its own, and the icons must survive.
-func TestSidebarLinksKeepAnAccessibleNameWhenTheyCollapse(t *testing.T) {
+// TestNarrowNavigationKeepsConversationNamesReachable covers the responsive
+// rail that rendered every channel as the same # glyph and every DM as the same
+// @ glyph. Accessible names alone did not let a sighted mobile reader choose a
+// conversation; the narrow shell now opens the full named navigation as a
+// focus-managed drawer.
+func TestNarrowNavigationKeepsConversationNamesReachable(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	tags := regexp.MustCompile(`<(?:a|button)[^>]*class="side-link"[^>]*>`).FindAllString(body, -1)
@@ -325,15 +326,15 @@ func TestSidebarLinksKeepAnAccessibleNameWhenTheyCollapse(t *testing.T) {
 			t.Fatalf("collapsed sidebar control has no accessible name: %s", tag)
 		}
 	}
-	narrow := body[strings.Index(body, "@media(max-width:800px)"):]
-	narrow = narrow[:strings.Index(narrow, "</style>")]
-	collapse := regexp.MustCompile(`(?m)^([^{}\n]+)\{display:none\}`).FindStringSubmatch(narrow)
-	if collapse == nil || !strings.Contains(collapse[1], ".side-text") {
-		t.Fatalf("narrow viewport does not collapse the sidebar labels: %q", narrow)
-	}
-	if strings.Contains(collapse[1], ".side-icon") {
-		t.Fatalf("narrow viewport hides the sidebar icons as well: %q", collapse[1])
-	}
+	requireContains(t, "navigation drawer", body,
+		`id="nav-toggle"`,
+		`aria-controls="workspace-sidebar"`,
+		`aria-label="Open navigation"`,
+		`id="workspace-sidebar"`,
+		`.sidebar.is-open{transform:translateX(0)}`,
+		`.side-label,.side-text,.signed-in-name{display:block}`,
+	)
+	requireMissing(t, "navigation drawer", body, `.side-text,.signed-in-name{display:none}`)
 	if strings.Contains(body, ".thread{display:none}") {
 		t.Fatal("narrow viewports delete the thread pane instead of reflowing it")
 	}
@@ -441,7 +442,7 @@ func TestAnotherMembersMessageCannotBeChanged(t *testing.T) {
 func TestWorkspaceCanCreateAChannel(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "workspace", body, `action="/app/conversation/create"`, `name="is_private"`, "Add channel")
+	requireContains(t, "workspace", body, `action="/app/conversation/create"`, `hx-post="/app/conversation/create"`, `name="is_private"`, "Add channel")
 
 	created := postForm(t, mux, "/app/conversation/create", "name=Product+Launch&is_private=true", false)
 	if created.Code != http.StatusSeeOther {
@@ -460,6 +461,14 @@ func TestWorkspaceCanCreateAChannel(t *testing.T) {
 	member, err := s.IsConversationMember(context.Background(), channel, "U1")
 	if err != nil || !member {
 		t.Fatalf("member=%t err=%v", member, err)
+	}
+
+	enhanced := postForm(t, mux, "/app/conversation/create", "name=Enhanced", true)
+	if enhanced.Code != http.StatusNoContent {
+		t.Fatalf("enhanced create status=%d body=%s", enhanced.Code, enhanced.Body)
+	}
+	if target := enhanced.Header().Get("HX-Redirect"); !strings.Contains(target, "channel=") {
+		t.Fatalf("enhanced create did not name its destination: %q", target)
 	}
 }
 
@@ -1564,6 +1573,15 @@ func TestProgressiveEnhancementHandlesRedirectResponses(t *testing.T) {
 	}
 	if !strings.Contains(progressiveEnhancementScript, "if(response.status===204)return ''") {
 		t.Fatal("progressive enhancement does not handle empty 204 responses")
+	}
+	if !strings.Contains(progressiveEnhancementScript, "form===composer?errorBox:actionBox") {
+		t.Fatal("unrelated mutation failures are still rendered as composer errors")
+	}
+	if !strings.Contains(progressiveEnhancementScript, "clearError(form)") {
+		t.Fatal("one mutation can still clear another control's error")
+	}
+	if !strings.Contains(progressiveEnhancementScript, "setNav(false,false)") || !strings.Contains(progressiveEnhancementScript, "navToggle.focus()") {
+		t.Fatal("the narrow navigation does not close on Escape and restore focus")
 	}
 }
 

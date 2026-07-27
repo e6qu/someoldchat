@@ -1512,6 +1512,51 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	}
 }
 
+// The Slack HTTP decoder already enforced this ceiling, but the shared service
+// did not. Browser, gRPC and webhook callers could therefore persist an
+// oversized post or edit, while scheduled and ephemeral messages counted bytes
+// and rejected non-ASCII text earlier than ASCII.
+func TestEveryMessageWriteUsesOneUnicodeCharacterLimit(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	messages := Messages{Store: s}
+	ctx := context.Background()
+	atLimit := strings.Repeat("界", MaxMessageTextRunes)
+	overLimit := atLimit + "界"
+
+	message, err := messages.Post(ctx, "T1", "U1", "C1", atLimit, "", "")
+	if err != nil {
+		t.Fatalf("post at the Unicode character limit: %v", err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", overLimit, "", ""); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("oversized post error=%v, want %v", err, ErrInvalidMessage)
+	}
+	if _, err := messages.Update(ctx, "T1", "U1", "C1", domain.NewMessageTimestamp(message.CreatedAt), overLimit); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("oversized edit error=%v, want %v", err, ErrInvalidMessage)
+	}
+	stored, err := s.GetMessage(ctx, message.ID)
+	if err != nil || stored.Text != atLimit {
+		t.Fatalf("rejected edit changed message: len=%d err=%v", len([]rune(stored.Text)), err)
+	}
+	if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", atLimit, "", time.Now().UTC().Add(time.Hour)); err != nil {
+		t.Fatalf("schedule at the Unicode character limit: %v", err)
+	}
+	if _, err := messages.ScheduleMessageWithBlocks(ctx, "T1", "U1", "C1", overLimit, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("oversized schedule error=%v, want %v", err, ErrInvalidMessage)
+	}
+	if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", atLimit, ""); err != nil {
+		t.Fatalf("ephemeral post at the Unicode character limit: %v", err)
+	}
+	if _, err := messages.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", overLimit, ""); !errors.Is(err, ErrInvalidEphemeral) {
+		t.Fatalf("oversized ephemeral error=%v, want %v", err, ErrInvalidEphemeral)
+	}
+}
+
 func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

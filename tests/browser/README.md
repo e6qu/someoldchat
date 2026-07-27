@@ -5,7 +5,10 @@ browser journey that server-side tests cannot observe: session-authenticated
 workspace entry, public-channel preview and joining, message posting with the
 advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
 workspace search, theme switching, reactions, pins, and navigation to workspace
-members. It also signs out through the application UI,
+members. It also exercises message editing and deletion, private channel
+creation and duplicate-name errors, named mobile navigation, thread reflow,
+contextual mutation failures, unread bookkeeping, live delivery, history
+pagination, and draft preservation. It signs out through the application UI,
 asserts the application-owned signed-out destination remains terminal across a
 reload, exposes an explicit **Sign in with Shauth** control, and verifies the
 revoked session cannot reopen a protected page.

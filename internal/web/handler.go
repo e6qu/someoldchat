@@ -290,12 +290,13 @@ a{color:var(--action)}
 .theme-toggle{border:1px solid #ffffffb8;border-radius:5px;color:inherit;background:transparent;padding:6px 9px}
 .theme-toggle:hover{background:#ffffff2b}
 .theme-toggle[aria-pressed=true]{background:#ffffff42}
+.nav-toggle,.nav-scrim{display:none}
 .pager{margin:0;padding:6px 0;text-align:center;font-size:13px}
 @media(prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important}}`
 
 // themeBootstrap resolves the theme before the first paint, so a stored or
 // operating-system dark preference never flashes the light palette.
-const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored?stored==='dark':!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')})();</script>`
+const themeBootstrap = `<script>(function(){var root=document.documentElement;var dark=false;root.classList.add('js');try{var stored=localStorage.getItem('sameoldchat-theme');dark=stored?stored==='dark':!!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches)}catch(error){dark=false}root.setAttribute('data-theme',dark?'dark':'light');root.setAttribute('data-theme-explicit','')})();</script>`
 
 const themeToggleScript = `<script>(function(){var root=document.documentElement;var toggle=document.getElementById('theme-toggle');function apply(theme){root.setAttribute('data-theme',theme);root.setAttribute('data-theme-explicit','');if(toggle)toggle.setAttribute('aria-pressed',theme==='dark'?'true':'false')}apply(root.getAttribute('data-theme')==='dark'?'dark':'light');if(!toggle)return;toggle.addEventListener('click',function(){var next=root.getAttribute('data-theme')==='dark'?'light':'dark';apply(next);try{localStorage.setItem('sameoldchat-theme',next)}catch(error){}})})();</script>`
 
@@ -342,6 +343,7 @@ const pageStyle = `<style>
 .channel-title{margin:0;font-size:18px;font-weight:800}
 .channel-meta{margin:2px 0 0;color:var(--muted);font-size:13px}
 .channel-actions{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:13px}
+.action-feedback{margin:0;max-width:520px;padding:7px 10px;border:1px solid var(--danger);border-radius:6px;background:var(--danger-bg);color:var(--danger);font-weight:700}
 .timeline-wrap{grid-area:timeline;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}
 .pager-older{grid-row:1}
 .timeline{grid-row:2;overflow:auto;padding:18px 26px 12px;scroll-behavior:smooth}
@@ -377,12 +379,7 @@ const pageStyle = `<style>
 .thread{grid-area:thread;min-height:0;border-left:1px solid var(--line);background:var(--panel);padding:16px 18px;overflow:auto}
 .thread h2{margin:0 0 12px;font-size:16px}
 @media(max-width:800px){
-.workspace{grid-template-columns:64px minmax(0,1fr)}
-.sidebar{padding:16px 6px}
-.workspace-name,.workspace-sub,.side-label,.side-text,.signed-in-name{display:none}
-.side-link{justify-content:center;padding:9px 4px}
-.side-more{padding:6px 2px;text-align:center;font-size:11px}
-.side-icon{font-size:18px}
+.workspace{grid-template-columns:minmax(0,1fr)}
 .search{max-width:none}
 .topbar{padding:0 8px;gap:8px}
 .timeline,.composer-wrap,.channel-header{padding-left:12px;padding-right:12px}
@@ -447,23 +444,27 @@ const workspaceRefinements = `<style>
 .conversation-gate p{margin:0;color:var(--muted);font-size:13px}
 .join-button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);font-weight:800;padding:8px 18px;white-space:nowrap}
 @media(max-width:800px){
-.workspace{grid-template-columns:64px minmax(0,1fr)}
 .brand{display:none}
-.workspace-name,.workspace-sub{display:none}
+html.js .nav-toggle{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border:1px solid #ffffff8a;border-radius:6px;background:transparent;color:var(--on-accent);font-size:21px;line-height:1}
+html.js .nav-toggle:hover{background:#ffffff2b}
+html.js .nav-scrim{position:fixed;inset:48px 0 0;z-index:7;border:0;background:#0008}
+html.js .nav-scrim.is-open{display:block}
+.workspace{grid-template-columns:minmax(0,1fr)}
+html.js .sidebar{position:fixed;inset:48px auto 0 0;z-index:8;width:min(320px,calc(100vw - 48px));padding:12px 8px;transform:translateX(-105%);transition:transform .18s ease;box-shadow:var(--shadow)}
+html.js .sidebar.is-open{transform:translateX(0)}
+.workspace-name{display:block}
+.workspace-sub{display:flex}
+.side-label,.side-text,.signed-in-name{display:block}
+.side-link{justify-content:flex-start;padding:7px 10px}
+.side-more{padding:6px 10px;text-align:left;font-size:13px}
+.side-icon{font-size:inherit}
 .search-shortcut{display:none}
+.search-submit{display:none}
 .channel-header{padding-left:12px;padding-right:12px}
 .membership-pill{display:none}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
-.new-channel summary{font-size:0;text-align:center}
-.new-channel summary::before{content:"＋";font-size:22px;line-height:1}
-.new-channel[open]{position:fixed;left:72px;top:64px;width:280px;max-width:calc(100vw - 84px);z-index:4;box-shadow:var(--shadow);background:var(--panel-strong);border-color:var(--line);color:var(--text)}
-.new-channel[open] summary{font-size:13px;text-align:left;color:var(--text)}
-.new-channel[open] summary::before{content:"";font-size:0}
-.new-channel[open] label{color:var(--text)}
-.new-channel[open] input[type=text]{background:var(--bg);border-color:var(--field-line);color:var(--text)}
-.new-channel[open] button{background:var(--ok);color:var(--on-strong)}
 }
 </style>`
 
@@ -547,6 +548,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell">
   <header class="topbar">
+    <button class="nav-toggle" id="nav-toggle" type="button" aria-controls="workspace-sidebar" aria-expanded="false" aria-label="Open navigation"><span aria-hidden="true">☰</span></button>
     <span class="brand">{{.WorkspaceName}}</span>
     <form class="search" method="get" action="/app/search" role="search" aria-label="Search {{.WorkspaceName}}">
       <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
@@ -562,7 +564,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
     </div>
   </header>
   <div class="workspace">
-    <aside class="sidebar">
+    <aside class="sidebar" id="workspace-sidebar">
       <div>
         <div class="workspace-name">{{.WorkspaceName}}</div>
         <div class="workspace-sub"><span class="presence-dot" aria-hidden="true"></span>{{.Username}}</div>
@@ -583,7 +585,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
         {{if .CanCreate}}
         <details class="new-channel">
           <summary>＋ Add channel</summary>
-          <form method="post" action="/app/conversation/create">
+          <form method="post" action="/app/conversation/create" hx-post="/app/conversation/create">
             <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
             <label for="new-channel-name">Channel name<input id="new-channel-name" type="text" name="name" maxlength="80" placeholder="project-name" required></label>
             <label class="privacy"><input type="checkbox" name="is_private" value="true"> Private channel</label>
@@ -612,6 +614,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
         </form>
       </div>
     </aside>
+    <button class="nav-scrim" id="nav-scrim" type="button" aria-label="Close navigation" tabindex="-1"></button>
     <main class="content" id="content">
       <header class="channel-header">
         <div class="channel-identity">
@@ -622,6 +625,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
           <span class="membership-pill{{if .IsMember}} joined{{end}}">{{if .IsMember}}Joined{{else}}Not joined{{end}}</span>
         </div>
         <div class="channel-actions">
+          <p class="action-feedback" id="action-feedback" role="alert" tabindex="-1" hidden></p>
           {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
           {{if .MarkReadURL}}
           <form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true">
@@ -650,7 +654,7 @@ var pageMarkup = `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.Wor
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
           <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
-          <textarea id="text" name="text" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
           {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
           <div class="composer-footer">
             <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line</span>
@@ -861,7 +865,12 @@ var composer=document.getElementById('composer');
 var text=document.getElementById('text');
 var search=document.getElementById('workspace-search');
 var errorBox=document.getElementById('composer-error');
+var actionBox=document.getElementById('action-feedback');
 var status=document.getElementById('live-status');
+var nav=document.getElementById('workspace-sidebar');
+var navToggle=document.getElementById('nav-toggle');
+var navScrim=document.getElementById('nav-scrim');
+var narrow=window.matchMedia?window.matchMedia('(max-width:800px)'):null;
 var generation=0;
 var inFlight=null;
 var scheduled=null;
@@ -869,9 +878,20 @@ var sending=false;
 var streamState='';
 function localize(root){if(window.sameoldchatLocalTimes)window.sameoldchatLocalTimes(root)}
 function announce(message){if(status)status.textContent=message}
-function showError(message){if(!errorBox){window.alert(message);return}errorBox.textContent=message;errorBox.hidden=false;if(composer)composer.classList.add('is-error');errorBox.scrollIntoView({block:'nearest'})}
-function clearError(){if(!errorBox)return;errorBox.textContent='';errorBox.hidden=true;if(composer)composer.classList.remove('is-error')}
-function failure(error){var message=error&&error.message?String(error.message).trim():'';if(message.charAt(0)==='<')message='';if(message.length>200)message=message.slice(0,200);return message||'The request could not be completed. Your message was kept in the composer.'}
+function showError(message,form){var box=form===composer?errorBox:actionBox;if(!box){window.alert(message);return}box.textContent=message;box.hidden=false;if(form===composer&&composer)composer.classList.add('is-error');box.scrollIntoView({block:'nearest'});box.focus()}
+function clearError(form){var box=form===composer?errorBox:actionBox;if(!box)return;box.textContent='';box.hidden=true;if(form===composer&&composer)composer.classList.remove('is-error')}
+function failure(error,form){var message=error&&error.message?String(error.message).trim():'';if(message.charAt(0)==='<')message='';if(message.length>200)message=message.slice(0,200);if(message)return message;return form===composer?'The request could not be completed. Your message was kept in the composer.':'The request could not be completed. Nothing was changed.'}
+function setNav(open,focus){
+if(!nav||!navToggle||!navScrim)return;
+var mobile=!!(narrow&&narrow.matches);
+open=mobile&&open;
+nav.classList.toggle('is-open',open);
+navScrim.classList.toggle('is-open',open);
+navToggle.setAttribute('aria-expanded',open?'true':'false');
+navToggle.setAttribute('aria-label',open?'Close navigation':'Open navigation');
+if(mobile&&!open)nav.setAttribute('inert','');else nav.removeAttribute('inert');
+if(open&&focus){var current=nav.querySelector('[aria-current="page"]')||nav.querySelector('.side-link');if(current)current.focus()}
+}
 function ownPath(value){return typeof value==='string'&&value.charAt(0)==='/'&&value.charAt(1)!=='/'}
 function shown(region){return !!(region.offsetParent||region.getClientRects().length)}
 function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
@@ -915,7 +935,7 @@ if(behind)announce('New activity is available in this conversation.');
 function submitQuietly(form){
 var action=form.getAttribute('hx-post');
 if(!ownPath(action))return;
-fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(response.ok)form.hidden=true}).catch(function(){});
+fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
 document.addEventListener('submit',function(event){
 var form=event.target.closest('form');
@@ -930,7 +950,7 @@ var sent=text?text.value:'';
 var button=form.querySelector('button[type=submit]');
 if(button)button.disabled=true;
 var release=function(){if(button)button.disabled=false;if(form===composer)sending=false};
-clearError();
+clearError(form);
 fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
 var redirect=response.headers.get('HX-Redirect');
@@ -954,7 +974,7 @@ if(form===composer&&text){if(text.value===sent)text.value='';text.focus()}else{f
 toBottom(target);
 toBottom(document.getElementById('timeline'));
 return refresh(true);
-}).catch(function(error){showError(failure(error))}).then(release,release);
+}).catch(function(error){showError(failure(error,form),form)}).then(release,release);
 });
 if(text&&composer){text.addEventListener('keydown',function(event){
 if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.metaKey||event.altKey||event.isComposing)return;
@@ -965,6 +985,12 @@ composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 })}
 document.addEventListener('keydown',function(event){
 var key=typeof event.key==='string'?event.key.toLowerCase():'';
+if(event.key==='Escape'&&nav&&nav.classList.contains('is-open')){
+event.preventDefault();
+setNav(false,false);
+if(navToggle)navToggle.focus();
+return;
+}
 if((event.ctrlKey||event.metaKey)&&!event.altKey&&key==='k'){
 if(!search)return;
 event.preventDefault();
@@ -996,6 +1022,9 @@ if(!ownPath(href))return;
 event.preventDefault();
 window.location.assign(href);
 });
+if(navToggle)navToggle.addEventListener('click',function(){setNav(!nav.classList.contains('is-open'),true)});
+if(navScrim)navScrim.addEventListener('click',function(){setNav(false,false);if(navToggle)navToggle.focus()});
+if(narrow){if(typeof narrow.addEventListener==='function')narrow.addEventListener('change',function(){setNav(false,false)});setNav(false,false)}
 if(window.EventSource){
 var cursor='';
 try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
@@ -1981,6 +2010,14 @@ func (h Handler) joinConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	target := h.viewURL(r, strings.TrimSpace(r.URL.Query().Get("thread")))
+	h.redirectMutation(w, r, target)
+}
+
+// redirectMutation keeps navigation-producing mutations compatible with both
+// ordinary forms and the enhanced workspace shell. A fetch follows a 303 on its
+// own and hands the client a full HTML page with no destination; the explicit
+// header lets the shell navigate only after the mutation has succeeded.
+func (h Handler) redirectMutation(w http.ResponseWriter, r *http.Request, target string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Redirect", target)
@@ -2256,7 +2293,7 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, status, heading, reason)
 		return
 	}
-	http.Redirect(w, r, appURL(string(conversation.ID), "", "", "", ""), http.StatusSeeOther)
+	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
 }
 
 func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
@@ -2286,7 +2323,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, status, heading, reason)
 		return
 	}
-	http.Redirect(w, r, appURL(string(conversation.ID), "", "", "", ""), http.StatusSeeOther)
+	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
 }
 
 func normalizeUserIDs(raw string) ([]domain.UserID, error) {

@@ -16,6 +16,61 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
+func TestConversationNameMigrationRepairsDuplicatesBeforeAddingConstraint(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "conversation-names.sqlite")
+	first, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `DROP INDEX conversations_workspace_name`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `UPDATE schema_migrations SET version = 84 WHERE version = ?`, schemaVersion); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"C1", "C2"} {
+		if _, err := first.db.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, name_folded) VALUES (?, 'T1', 'general', 'general')`, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	var firstName, secondName string
+	if err := migrated.db.QueryRowContext(ctx, `SELECT name FROM conversations WHERE id = 'C1'`).Scan(&firstName); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrated.db.QueryRowContext(ctx, `SELECT name FROM conversations WHERE id = 'C2'`).Scan(&secondName); err != nil {
+		t.Fatal(err)
+	}
+	if firstName != "general" || secondName != "general-c2" {
+		t.Fatalf("migrated names=(%q, %q), want (general, general-c2)", firstName, secondName)
+	}
+	var notices int
+	if err := migrated.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migration_notices WHERE kind = 'conversation_name_disambiguated' AND subject = 'C2'`).Scan(&notices); err != nil {
+		t.Fatal(err)
+	}
+	if notices != 1 {
+		t.Fatalf("migration notices=%d, want 1", notices)
+	}
+	if err := migrated.CreateConversation(ctx, domain.Conversation{ID: "C3", WorkspaceID: "T1", Name: "general"}, "U1", events.Event{ID: "E3", WorkspaceID: "T1", Topic: "conversation.created", CreatedAt: time.Now().UTC()}); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate name after migration error=%v, want %v", err, store.ErrAlreadyExists)
+	}
+}
+
 func TestSQLiteFindUserByEmailIsCaseInsensitiveAndMigrated(t *testing.T) {
 	s, err := Open(context.Background(), "file:email_lookup?mode=memory&cache=shared")
 	if err != nil {
