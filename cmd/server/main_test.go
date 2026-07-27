@@ -121,3 +121,23 @@ func TestResolveDatabaseDSNRejectsUnknownComposition(t *testing.T) {
 		t.Fatal("unknown chat composition was accepted")
 	}
 }
+
+// The Socket Mode connection host used to be hardcoded to "localhost:8080",
+// which ignored -addr entirely, so a server on another port handed every Socket
+// Mode client an unreachable URL from apps.connections.open.
+func TestSocketHostDefaultFollowsTheListenAddress(t *testing.T) {
+	for _, testCase := range []struct{ addr, want string }{
+		{addr: ":8080", want: "localhost:8080"},
+		{addr: ":9000", want: "localhost:9000"},
+		{addr: " :9000 ", want: "localhost:9000"},
+		{addr: "0.0.0.0:9100", want: "localhost:9100"},
+		{addr: "[::]:9200", want: "localhost:9200"},
+		{addr: "chat.example.com:443", want: "chat.example.com:443"},
+		{addr: "10.0.0.5:8080", want: "10.0.0.5:8080"},
+		{addr: "not-an-address", want: "localhost:8080"},
+	} {
+		if got := socketHostDefault(testCase.addr); got != testCase.want {
+			t.Errorf("socketHostDefault(%q) = %q, want %q", testCase.addr, got, testCase.want)
+		}
+	}
+}
