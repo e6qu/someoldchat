@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -154,7 +155,7 @@ func verify() error {
 			return fmt.Errorf("required path %s missing", path)
 		}
 	}
-	if err := verifyHandlerRegistrations(implementedMethods, seenMethods); err != nil {
+	if err := verifyHandlerRegistrations(slackHandlerPackage, implementedMethods, seenMethods); err != nil {
 		return err
 	}
 	return nil
@@ -246,39 +247,79 @@ func cumulativeEvidenceCounts(operations []operation) map[string]int {
 	return counts
 }
 
-func verifyHandlerRegistrations(implementedMethods, ledgerMethods map[string]struct{}) error {
-	file, err := parser.ParseFile(token.NewFileSet(), "internal/api/slack/handler.go", nil, 0)
+// slackHandlerPackage is the directory whose every non-test file registers the
+// Slack surface. The gate reads the directory rather than a named file: a route
+// registered in a second file of the same package is just as live as one in
+// handler.go, and reading one file made such a route invisible to the ledger.
+const slackHandlerPackage = "internal/api/slack"
+
+// stringLiteral reports the value of an unadorned string literal. Anything the
+// gate would have to evaluate — a constant, a concatenation, a variable — is
+// deliberately not accepted, so it becomes a reported error rather than a route
+// the gate cannot see.
+func stringLiteral(expression ast.Expr) (string, bool) {
+	literal, ok := expression.(*ast.BasicLit)
+	if !ok || literal.Kind != token.STRING {
+		return "", false
+	}
+	value, err := strconv.Unquote(literal.Value)
 	if err != nil {
-		return fmt.Errorf("parse Slack handler: %w", err)
+		return "", false
+	}
+	return value, true
+}
+
+func verifyHandlerRegistrations(directory string, implementedMethods, ledgerMethods map[string]struct{}) error {
+	fileSet := token.NewFileSet()
+	packages, err := parser.ParseDir(fileSet, directory, func(info os.FileInfo) bool {
+		return !strings.HasSuffix(info.Name(), "_test.go")
+	}, 0)
+	if err != nil {
+		return fmt.Errorf("parse %s: %w", directory, err)
+	}
+	if len(packages) == 0 {
+		return fmt.Errorf("parse %s: no non-test Go files", directory)
 	}
 	registered := make(map[string]struct{})
-	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) == 0 {
-			return true
+	var unreadable []string
+	for _, pkg := range packages {
+		for path, file := range pkg.Files {
+			ast.Inspect(file, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) == 0 {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				// Handle registers a route exactly as HandleFunc does; matching
+				// only the latter let a route ship undeclared.
+				if !ok || (selector.Sel.Name != "HandleFunc" && selector.Sel.Name != "Handle") {
+					return true
+				}
+				route, ok := stringLiteral(call.Args[0])
+				if !ok {
+					// A route this gate cannot read is a route it cannot hold to
+					// the ledger. Refusing it keeps the ledger complete by
+					// construction; skipping it silently did not.
+					unreadable = append(unreadable, fmt.Sprintf("%s:%d", path, fileSet.Position(call.Pos()).Line))
+					return true
+				}
+				parts := strings.Fields(route)
+				if len(parts) != 2 || !strings.HasPrefix(parts[1], "/api/") {
+					return true
+				}
+				method := strings.TrimPrefix(parts[1], "/api/")
+				if !strings.Contains(method, "{") {
+					registered[method] = struct{}{}
+				}
+				return true
+			})
 		}
-		selector, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || selector.Sel.Name != "HandleFunc" {
-			return true
-		}
-		literal, ok := call.Args[0].(*ast.BasicLit)
-		if !ok || literal.Kind != token.STRING {
-			return true
-		}
-		route, err := strconv.Unquote(literal.Value)
-		if err != nil {
-			return true
-		}
-		parts := strings.Fields(route)
-		if len(parts) != 2 || !strings.HasPrefix(parts[1], "/api/") {
-			return true
-		}
-		method := strings.TrimPrefix(parts[1], "/api/")
-		if !strings.Contains(method, "{") {
-			registered[method] = struct{}{}
-		}
-		return true
-	})
+	}
+	if len(unreadable) > 0 {
+		sort.Strings(unreadable)
+		return fmt.Errorf("route registrations in %s must use a string literal so the compatibility ledger can be checked against them; found %d that cannot be read: %s",
+			directory, len(unreadable), strings.Join(unreadable, ", "))
+	}
 	for method := range registered {
 		if _, ok := ledgerMethods[method]; !ok {
 			return fmt.Errorf("registered Slack handler %q is absent from compatibility ledger", method)
