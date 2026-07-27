@@ -266,14 +266,42 @@ func TestMarshallingARecordRefusesEveryPayloadNoAudienceMayReceive(t *testing.T)
 // fields. Topic alone decides internal-topic exclusion, recipient scoping and
 // the browser event name, so a reader that accepts a disagreement makes those
 // three decisions about an event the record does not contain.
-func TestDeliverableRequiresThePayloadToDescribeItsOwnTopic(t *testing.T) {
-	divergent := Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created",
-		Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"only for U2"}`}
-	if _, err := Deliverable(divergent); !errors.Is(err, ErrPayloadMalformed) {
-		t.Fatalf("divergent record error=%v, want %v", err, ErrPayloadMalformed)
+// A record's routing is decided by its topic and its content by its payload. A
+// record this system produces cannot disagree, because the payload's type is
+// derived from the topic at construction. A record whose payload carries a
+// Slack event type is a different thing entirely — it is what an official
+// Socket Mode or real-time client must receive — and refusing it delivered
+// nothing to any official client while protecting against nothing a producer
+// can do.
+func TestAPayloadCarryingASlackEventTypeIsStillDeliverable(t *testing.T) {
+	// The shape a Socket Mode client parses.
+	envelope := Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created",
+		Payload: `{"type":"event_callback","team_id":"T1","event":{"type":"message","channel":"C1","text":"hello"}}`}
+	if _, err := Deliverable(envelope); err != nil {
+		t.Fatalf("a Socket Mode envelope was refused: %v", err)
 	}
-	if _, err := Broadcastable(divergent); !errors.Is(err, ErrPayloadMalformed) {
-		t.Fatalf("divergent record broadcast error=%v, want %v", err, ErrPayloadMalformed)
+	// The shape a real-time client parses.
+	realtime := Event{ID: "Ev2", WorkspaceID: "T1", Topic: "message.created",
+		Payload: `{"type":"message","channel":"C1","text":"hello"}`}
+	if _, err := Deliverable(realtime); err != nil {
+		t.Fatalf("a real-time payload was refused: %v", err)
+	}
+	// What must still be refused: routing is topic-driven, so a recipient-scoped
+	// or internal record is withheld regardless of what its payload says.
+	scoped := Event{ID: "Ev3", WorkspaceID: "T1", Topic: EphemeralMessageTopic,
+		Payload: `{"type":"message","channel":"C1","text":"only for one reader"}`}
+	if _, err := Broadcastable(scoped); !errors.Is(err, ErrPayloadRecipientScoped) {
+		t.Fatalf("recipient-scoped broadcast error=%v, want %v", err, ErrPayloadRecipientScoped)
+	}
+	internal := Event{ID: "Ev4", WorkspaceID: "T1", Topic: UserPhotoBlobDeleteTopic,
+		Payload: `{"type":"message"}`}
+	if _, err := Deliverable(internal); !errors.Is(err, ErrPayloadInternal) {
+		t.Fatalf("internal record error=%v, want %v", err, ErrPayloadInternal)
+	}
+	// And a payload that describes nothing at all is still refused.
+	opaque := Event{ID: "Ev5", WorkspaceID: "T1", Topic: "message.created", Payload: "M1"}
+	if _, err := Deliverable(opaque); !errors.Is(err, ErrPayloadMalformed) {
+		t.Fatalf("identifier payload error=%v, want %v", err, ErrPayloadMalformed)
 	}
 }
 

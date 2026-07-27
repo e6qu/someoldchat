@@ -1242,12 +1242,15 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	s.conversations[conversation.ID] = conversation
 	s.conversationTeams[conversation.ID] = map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
 	s.conversationOrg[conversation.ID] = false
-	if conversation.IsPrivate {
-		if s.memberships[conversation.ID] == nil {
-			s.memberships[conversation.ID] = make(map[domain.UserID]struct{})
-		}
-		s.memberships[conversation.ID][creator] = struct{}{}
+	// The creator joins the conversation, public or private. Joining only on
+	// private conversations was invisible while membership was consulted only to
+	// decide whether a private conversation could be read; once membership
+	// governed writing, it meant a caller could create a public channel and then
+	// be refused permission to rename the channel they had just made.
+	if s.memberships[conversation.ID] == nil {
+		s.memberships[conversation.ID] = make(map[domain.UserID]struct{})
 	}
+	s.memberships[conversation.ID][creator] = struct{}{}
 	s.outbox = append(s.outbox, event)
 	return nil
 }

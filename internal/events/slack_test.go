@@ -55,7 +55,6 @@ func TestSlackEventBodyErrorsAboutARecordAllCarrySentinels(t *testing.T) {
 	for name, record := range map[string]Record{
 		"identifier payload":     {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "M1"}},
 		"payload without a type": {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"text":"hello"}`}},
-		"topic disagreement":     {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"secret"}`}},
 		"missing event_ts":       {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.created"}`}},
 		"internal record":        {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: UserPhotoBlobDeleteTopic, CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "T1/users/U1/photo"}},
 		"recipient scoped":       {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: EphemeralMessageTopic, CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"secret"}`}},

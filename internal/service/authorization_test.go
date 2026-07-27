@@ -621,3 +621,48 @@ func claimPhotoReclamations(t *testing.T, repository *memory.Store, owner string
 	}
 	return len(records)
 }
+
+// Creating a channel makes the creator a member of it. Membership was recorded
+// only for private conversations, which was invisible while membership decided
+// only whether a private conversation could be read. Once membership governed
+// writing, a caller could create a public channel and immediately be refused
+// permission to rename the channel they had just created — which is how the
+// official SDK suite found it.
+func TestCreatingAConversationMakesTheCreatorAMemberOfIt(t *testing.T) {
+	for _, private := range []bool{false, true} {
+		name := "public"
+		if private {
+			name = "private"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			repository := memory.New()
+			if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"}); err != nil {
+				t.Fatal(err)
+			}
+			if err := repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "creator"}); err != nil {
+				t.Fatal(err)
+			}
+			messages := Messages{Store: repository}
+
+			conversation, err := messages.CreateConversation(ctx, "T1", "U1", "qualification-"+name, private)
+			if err != nil {
+				t.Fatal(err)
+			}
+			member, err := repository.IsConversationMember(ctx, conversation.ID, "U1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !member {
+				t.Fatal("the creator is not a member of the conversation they created")
+			}
+			// The operations that require membership must accept the creator.
+			if _, err := messages.RenameConversation(ctx, "T1", "U1", conversation.ID, "qualification-renamed-"+name); err != nil {
+				t.Fatalf("the creator could not rename the channel they created: %v", err)
+			}
+			if _, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", conversation.ID, "hello", "", "", "", ""); err != nil {
+				t.Fatalf("the creator could not post into the channel they created: %v", err)
+			}
+		})
+	}
+}

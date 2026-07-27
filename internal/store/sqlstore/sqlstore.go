@@ -2858,10 +2858,11 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, conversation.ID, conversation.WorkspaceID); err != nil {
 		return classify(err)
 	}
-	if conversation.IsPrivate {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?)`, conversation.ID, creator); err != nil {
-			return classify(err)
-		}
+	// The creator joins the conversation, public or private. See the note on the
+	// in-memory repository: joining only private conversations left the creator
+	// of a public channel unable to act on it.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?)`, conversation.ID, creator); err != nil {
+		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
