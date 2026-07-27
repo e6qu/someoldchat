@@ -25,6 +25,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
@@ -37,11 +38,68 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+// servedRemote starts a chat server the way the shipped binaries build one and
+// returns the Remote that talks to it over an in-process listener.
+//
+// Every test in this file used to build a bare grpc.NewServer() and call
+// RegisterServer on it, so the package's own tests exercised a server with no
+// interceptors, no panic recovery, no message bound, no header-list bound and no
+// keepalive — that is, not the configuration either binary runs. Two transport
+// defects (an oversized message restored as the wrong sentinel, and transport
+// validation ordered ahead of the implementation's authorization) survived a
+// 946-line differential suite behind exactly that gap.
+//
+// RegisterServer stays exported because internal/generated/bindings.go calls it
+// and cmd/modulegen emits that call, so unexporting it is not this package's
+// change to make. Routing every test through NewChatServer is what closes the
+// gap regardless.
+func servedRemote(t *testing.T, implementation chatapi.Service, target *memory.Store, extra ...grpc.ServerOption) chatgrpc.Remote {
+	t.Helper()
+	remote, _ := servedRemoteConnection(t, implementation, target, extra...)
+	return remote
+}
+
+func servedRemoteConnection(t *testing.T, implementation chatapi.Service, target *memory.Store, extra ...grpc.ServerOption) (chatgrpc.Remote, *grpc.ClientConn) {
+	t.Helper()
+	server, err := chatgrpc.NewChatServer(implementation, target, target, target, chatgrpc.Observer{}, extra...)
+	if err != nil {
+		t.Fatalf("chat server: %v", err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		<-served
+	})
+	dial := append([]grpc.DialOption{
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	}, chatgrpc.DialOptions(chatgrpc.Observer{})...)
+	connection, err := grpc.NewClient("passthrough:///bufnet", dial...)
+	if err != nil {
+		t.Fatalf("chat client: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	remote, err := chatgrpc.NewRemote(connection)
+	if err != nil {
+		t.Fatalf("chat remote: %v", err)
+	}
+	return remote, connection
+}
+
 func TestRemoteRequiresMutualTLS(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Email: "alice@example.com", Name: "alice", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	// Posting requires conversation membership, so the poster is a member of the
+	// conversation it posts to; the refusal for a non-member is asserted by the
+	// differential harness, not here.
+	store.SeedConversationMember("C1", "U1")
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,8 +111,8 @@ func TestRemoteRequiresMutualTLS(t *testing.T) {
 	if !caPool.AppendCertsFromPEM(caCertificate) {
 		t.Fatal("failed to build CA pool")
 	}
-	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{serverCertificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: caPool, MinVersion: tls.VersionTLS13})))
-	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
+	server, err := chatgrpc.NewChatServer(local, store, store, store, chatgrpc.Observer{}, grpc.Creds(credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{serverCertificate}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: caPool, MinVersion: tls.VersionTLS13})))
+	if err != nil {
 		t.Fatal(err)
 	}
 	listener := bufconn.Listen(1 << 20)
@@ -95,24 +153,8 @@ func TestRemoteListsUseTheProcessIndependentContract(t *testing.T) {
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
-	local := service.Messages{Store: store}
-	server := grpc.NewServer()
-	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
-		t.Fatal(err)
-	}
-	listener := bufconn.Listen(1 << 20)
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
+	remote := servedRemote(t, service.Messages{Store: store}, store)
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	remote, err := chatgrpc.NewRemote(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
 	list, err := remote.CreateList(ctx, "T1", "U1", "Remote list", "[]", "", "", false, false)
 	if err != nil || list.ID == "" {
 		t.Fatalf("list=%+v err=%v", list, err)
@@ -157,22 +199,7 @@ func TestRemoteOpenIDConnectUsesTheProcessIndependentContract(t *testing.T) {
 	if err := store.CreateOAuthCode(ctx, domain.OAuthCode{Code: "code", ClientID: "client", WorkspaceID: "T1", UserID: "U1", Scopes: append(auth.AllScopes(), "openid"), RedirectURI: "https://callback"}); err != nil {
 		t.Fatal(err)
 	}
-	server := grpc.NewServer()
-	if err := chatgrpc.RegisterServer(server, service.Messages{Store: store}, store, store, store); err != nil {
-		t.Fatal(err)
-	}
-	listener := bufconn.Listen(1 << 20)
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	remote, err := chatgrpc.NewRemote(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	remote := servedRemote(t, service.Messages{Store: store}, store)
 	token, err := remote.OpenIDConnectToken(ctx, "client", "secret", "code", "https://callback", "authorization_code", "", "")
 	if err != nil || token.AccessToken == "" || token.IDToken == "" || token.RefreshToken == "" {
 		t.Fatalf("token=%+v err=%v", token, err)
@@ -245,24 +272,8 @@ func TestRemoteStreamsFileAndUsesMetadataMethods(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	local := service.Messages{Store: store, Blob: blobs}
-	server := grpc.NewServer()
-	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
-		t.Fatal(err)
-	}
-	listener := bufconn.Listen(1 << 20)
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
+	remote := servedRemote(t, service.Messages{Store: store, Blob: blobs}, store)
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	remote, err := chatgrpc.NewRemote(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
 	content := bytes.Repeat([]byte("file-content-"), 10000)
 	file, err := remote.UploadFile(ctx, "T1", "U1", "notes.txt", "Notes", "text/plain", int64(len(content)), bytes.NewReader(content))
 	if err != nil {
@@ -300,28 +311,15 @@ func TestRemoteExternalUploadUsesDurableTicket(t *testing.T) {
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	// Sharing an external upload into C1 posts to it, which now requires the
+	// uploader to be a member of it.
+	store.SeedConversationMember("C1", "U1")
 	blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
-	local := service.Messages{Store: store, Blob: blobs}
-	server := grpc.NewServer()
-	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
-		t.Fatal(err)
-	}
-	listener := bufconn.Listen(1 << 20)
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
+	remote := servedRemote(t, service.Messages{Store: store, Blob: blobs}, store)
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	remote, err := chatgrpc.NewRemote(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
 	content := []byte("external bytes")
 	upload, err := remote.CreateExternalUpload(ctx, "T1", "U1", "external.txt", "text/plain", int64(len(content)), time.Minute)
 	if err != nil {
@@ -391,6 +389,7 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	// parity of, not an obstacle to it.
 	seedWorkspaceAdmin(t, store, "T1", "U1")
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	store.SeedConversationMember("C1", "U1")
 	store.SeedConversationMember("C1", "U2")
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
@@ -402,25 +401,8 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err := store.SeedSession(context.Background(), "session-token", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour), OIDCProvider: "oidc", OIDCIDToken: "signed.id.token", OIDCSubject: "subject", OIDCSID: "provider-session"}); err != nil {
 		t.Fatal(err)
 	}
-	local := service.Messages{Store: store}
-	server := grpc.NewServer()
-	if err := chatgrpc.RegisterServer(server, local, store, store, store); err != nil {
-		t.Fatal(err)
-	}
-	listener := bufconn.Listen(1 << 20)
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
-
+	remote := servedRemote(t, service.Messages{Store: store}, store)
 	ctx := context.Background()
-	conn, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close()
-	remote, err := chatgrpc.NewRemote(conn)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := remote.GetExternalIdentity(ctx, "T1", "oidc", "missing-subject"); !errors.Is(err, storepkg.ErrNotFound) || status.Code(err) != codes.NotFound {
 		t.Fatalf("missing external identity error=%v, want domain not-found and gRPC NotFound", err)
 	}
@@ -805,23 +787,8 @@ func TestRemoteConcurrentPostsPreserveEveryCall(t *testing.T) {
 	store.SeedUser(domain.User{ID: "U-load", WorkspaceID: "T-load", Name: "load"})
 	store.SeedConversation(domain.Conversation{ID: "C-load", WorkspaceID: "T-load", Name: "load"})
 	store.SeedConversationMember("C-load", "U-load")
-	server := grpc.NewServer()
-	if err := chatgrpc.RegisterServer(server, service.Messages{Store: store}, store, store, store); err != nil {
-		t.Fatal(err)
-	}
-	listener := bufconn.Listen(1 << 20)
-	go func() { _ = server.Serve(listener) }()
-	defer server.Stop()
+	remote := servedRemote(t, service.Messages{Store: store}, store)
 	ctx := context.Background()
-	connection, err := grpc.DialContext(ctx, "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer connection.Close()
-	remote, err := chatgrpc.NewRemote(connection)
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	errorsCh := make(chan error, expected)
 	var group sync.WaitGroup

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net"
 	"os"
@@ -35,9 +37,9 @@ import (
 
 // serve starts a chat server for one implementation and returns the Remote and
 // the raw connection, wired with the options both binaries are expected to use.
-func serve(t *testing.T, implementation chatapi.Service, target *memory.Store, observer Observer) (Remote, grpclib.ClientConnInterface) {
+func serve(t *testing.T, implementation chatapi.Service, target *memory.Store, observer Observer, extra ...grpclib.ServerOption) (Remote, grpclib.ClientConnInterface) {
 	t.Helper()
-	server, err := NewChatServer(implementation, target, target, target, observer)
+	server, err := NewChatServer(implementation, target, target, target, observer, extra...)
 	if err != nil {
 		t.Fatalf("chat server: %v", err)
 	}
@@ -65,6 +67,109 @@ func serve(t *testing.T, implementation chatapi.Service, target *memory.Store, o
 		t.Fatalf("chat remote: %v", err)
 	}
 	return remote, connection
+}
+
+// serveWithDialOptions is serve with extra client options, so a test can make a
+// bound reachable without building a payload the size of the shipped one.
+func serveWithDialOptions(t *testing.T, implementation chatapi.Service, target *memory.Store, extra ...grpclib.DialOption) Remote {
+	t.Helper()
+	server, err := NewChatServer(implementation, target, target, target, Observer{})
+	if err != nil {
+		t.Fatalf("chat server: %v", err)
+	}
+	listener := bufconn.Listen(1 << 20)
+	served := make(chan struct{})
+	go func() {
+		defer close(served)
+		_ = server.Serve(listener)
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		<-served
+	})
+	dial := append([]grpclib.DialOption{
+		grpclib.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpclib.WithTransportCredentials(insecure.NewCredentials()),
+	}, DialOptions(Observer{})...)
+	connection, err := grpclib.NewClient("passthrough:///bufnet", append(dial, extra...)...)
+	if err != nil {
+		t.Fatalf("chat client: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+	remote, err := NewRemote(connection)
+	if err != nil {
+		t.Fatalf("chat remote: %v", err)
+	}
+	return remote
+}
+
+// TestAnOversizedResponseIsNotRestoredAsADomainSentinel covers the
+// mis-restoration: codes.ResourceExhausted is what grpc-go itself answers when a
+// message exceeds the receive bound, and it answers it with no DomainError
+// detail. While store.ErrSocketModeConnectionLimit was the fallback for that
+// code, every page too large for the seam came back carrying a sentinel the chat
+// process never reported — which internal/api/slack renders as
+// socket_mode_unavailable, for an operation that has nothing to do with Socket
+// Mode.
+//
+// The bound is lowered on the client rather than the payload raised to 64 MiB:
+// the defect is in what the code means, not in where the bound sits.
+func TestAnOversizedResponseIsNotRestoredAsADomainSentinel(t *testing.T) {
+	target := seededStore(t)
+	remote := serveWithDialOptions(t, service.Messages{Store: target}, target,
+		grpclib.WithDefaultCallOptions(grpclib.MaxCallRecvMsgSize(2048)))
+	ctx := context.Background()
+
+	for index := 0; index < 8; index++ {
+		if _, err := remote.Post(ctx, "T1", "U1", "C1", strings.Repeat("block", 200), "", ""); err != nil {
+			t.Fatalf("post %d: %v", index, err)
+		}
+	}
+	_, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 200})
+	if err == nil {
+		t.Fatal("a page larger than the receive bound was accepted")
+	}
+	if got := status.Code(err); got != codes.ResourceExhausted {
+		t.Fatalf("history error = %v (code %s), want the transport's own size rejection", err, got)
+	}
+	if errors.Is(err, storepkg.ErrSocketModeConnectionLimit) {
+		t.Fatalf("a message-size failure was restored as store.ErrSocketModeConnectionLimit: %v", err)
+	}
+	for _, class := range errorClasses {
+		if errors.Is(err, class.sentinel) {
+			t.Errorf("a message-size failure was restored as %s, a sentinel the chat process never reported", class.key)
+		}
+	}
+}
+
+// TestTheHeaderListIsBoundedOnBothPeers covers the second bound. The status, its
+// message and the DomainError detail travel in trailers, which grpc-go defaults
+// to 16 MiB on both peers — four times looser than the message bound the file
+// comment presents as the bound on the seam.
+func TestTheHeaderListIsBoundedOnBothPeers(t *testing.T) {
+	if MaxHeaderListBytes >= MaxMessageBytes {
+		t.Fatalf("MaxHeaderListBytes = %d must be well below MaxMessageBytes = %d", MaxHeaderListBytes, MaxMessageBytes)
+	}
+	if MaxHeaderListBytes <= maxStatusMessageBytes {
+		t.Fatalf("MaxHeaderListBytes = %d must leave room for a bounded status message of %d bytes plus the rest of the list", MaxHeaderListBytes, maxStatusMessageBytes)
+	}
+	var serverBound, clientBound bool
+	for _, option := range ServerOptions(Observer{}) {
+		if fmt.Sprintf("%T", option) == fmt.Sprintf("%T", grpclib.MaxHeaderListSize(MaxHeaderListBytes)) {
+			serverBound = true
+		}
+	}
+	for _, option := range DialOptions(Observer{}) {
+		if fmt.Sprintf("%T", option) == fmt.Sprintf("%T", grpclib.WithMaxHeaderListSize(MaxHeaderListBytes)) {
+			clientBound = true
+		}
+	}
+	if !serverBound {
+		t.Error("ServerOptions does not bound the header list; the trailers a failure travels in are bounded only by grpc-go's 16 MiB default")
+	}
+	if !clientBound {
+		t.Error("DialOptions does not bound the header list")
+	}
 }
 
 func seededStore(t *testing.T) *memory.Store {
@@ -178,6 +283,115 @@ func (h *recordingHandler) attributes(t *testing.T, message string) map[string]s
 	}
 	t.Fatalf("no log record with message %q; got %d records", message, len(h.records))
 	return nil
+}
+
+// byPeer returns the records with one message, keyed by the peer that produced
+// them. recordCall runs on both interceptors, so one failed request produces two.
+func (h *recordingHandler) byPeer(t *testing.T, message string) map[string]slog.Record {
+	t.Helper()
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	result := make(map[string]slog.Record, 2)
+	for _, record := range h.records {
+		if record.Message != message {
+			continue
+		}
+		peer := ""
+		record.Attrs(func(attribute slog.Attr) bool {
+			if attribute.Key == "peer" {
+				peer = attribute.Value.String()
+			}
+			return true
+		})
+		if peer == "" {
+			t.Fatalf("a %q record carries no peer attribute, so the two sides of the seam are indistinguishable", message)
+		}
+		result[peer] = record
+	}
+	return result
+}
+
+// TestOnlyAnOperatorFailureIsAWarning covers the log volume.
+//
+// codes.InvalidArgument is the ordinary outcome of a malformed Slack API call —
+// the seam produces it for thirty-odd validation sentinels — and it was logged at
+// warning on both peers, so one bad request from a browser wrote two
+// unrate-limited WARN lines to a chatd whose logger is at Info level.
+func TestOnlyAnOperatorFailureIsAWarning(t *testing.T) {
+	ctx := context.Background()
+
+	target := seededStore(t)
+	handler := &recordingHandler{}
+	remote, _ := serve(t, service.Messages{Store: target}, target, Observer{Logger: slog.New(handler)})
+	if _, err := remote.Post(ctx, "T1", "U1", "C1", "", "", ""); !errors.Is(err, service.ErrInvalidMessage) {
+		t.Fatalf("invalid post error = %v", err)
+	}
+	callerCaused := handler.byPeer(t, "chat rpc failed")
+	if len(callerCaused) != 2 {
+		t.Fatalf("a failed call produced records from %d peers, want both sides of the seam: %v", len(callerCaused), callerCaused)
+	}
+	for peer, record := range callerCaused {
+		if record.Level != slog.LevelDebug {
+			t.Errorf("a caller's malformed request logged at %s on the %s, want %s", record.Level, peer, slog.LevelDebug)
+		}
+	}
+
+	// A panic is this system failing, and stays a warning.
+	panicking := seededStore(t)
+	panicHandler := &recordingHandler{}
+	broken, _ := serve(t, panickingChat{Service: service.Messages{Store: panicking}}, panicking, Observer{Logger: slog.New(panicHandler)})
+	if _, err := broken.Post(ctx, "T1", "U1", "C1", "provokes a panic", "", ""); err == nil {
+		t.Fatal("a panicking handler answered without an error")
+	}
+	operatorCaused := panicHandler.byPeer(t, "chat rpc failed")
+	if record, served := operatorCaused[peerServer]; !served || record.Level != slog.LevelWarn {
+		t.Errorf("a recovered panic logged at %s on the server, want %s", record.Level, slog.LevelWarn)
+	}
+}
+
+// TestWorkspaceMembershipSurvivesAPeerThatPredatesTheMethod covers the rolling
+// deployment. GetWorkspaceMembership was added by the change that introduced it
+// and is called on every sign-in and on /me; a chat replica that predates it
+// answers codes.Unimplemented, which has no fallback class and cannot have one,
+// so sign-in failed for the whole skew window with a raw status.
+//
+// The interceptor is what an older peer looks like from here: the method is not
+// served, everything else is.
+func TestWorkspaceMembershipSurvivesAPeerThatPredatesTheMethod(t *testing.T) {
+	target := seededStore(t)
+	olderPeer := grpclib.ChainUnaryInterceptor(func(ctx context.Context, request any, info *grpclib.UnaryServerInfo, handler grpclib.UnaryHandler) (any, error) {
+		if strings.HasSuffix(info.FullMethod, "/GetWorkspaceMembership") {
+			return nil, status.Error(codes.Unimplemented, "unknown method GetWorkspaceMembership")
+		}
+		return handler(ctx, request)
+	})
+	remote, _ := serve(t, service.Messages{Store: target}, target, Observer{}, olderPeer)
+	ctx := context.Background()
+
+	membership, err := remote.WorkspaceMembership(ctx, "T1", "UA", "U1")
+	if err != nil {
+		t.Fatalf("membership against a peer without the method: %v", err)
+	}
+	if membership.UserID != "U1" || membership.Role != domain.WorkspaceRoleMember || !membership.Active {
+		t.Fatalf("membership = %+v, want U1's active member row", membership)
+	}
+	if _, err := remote.WorkspaceMembership(ctx, "T1", "UA", "U-missing"); !errors.Is(err, storepkg.ErrNotFound) {
+		t.Fatalf("membership of an unknown user = %v, want store.ErrNotFound", err)
+	}
+
+	// The two RPCs that carry no actor have no equivalent to fall back to, so
+	// they must at least say what is wrong instead of surfacing a bare status.
+	_, err = remote.ProvisionExternalUser(ctx, "T1", "carol@example.com", "Carol", domain.WorkspaceRoleMember)
+	if err != nil {
+		t.Fatalf("provisioning against a peer that serves it: %v", err)
+	}
+	skewed := skewFailure("ProvisionExternalUser", status.Error(codes.Unimplemented, "unknown method"))
+	if !strings.Contains(skewed.Error(), "older than this build") || !strings.Contains(skewed.Error(), "ProvisionExternalUser") {
+		t.Fatalf("skew failure text = %q, want the cause and the remedy", skewed.Error())
+	}
+	if got := skewFailure("ProvisionExternalUser", storepkg.ErrNotFound); !errors.Is(got, storepkg.ErrNotFound) {
+		t.Fatalf("skewFailure rewrote an error that is not a version skew: %v", got)
+	}
 }
 
 // TestTheSeamIsObservable covers the operational gap: the boundary reported no
@@ -361,15 +575,176 @@ func strconvInt(value string) (int64, error) {
 // class, so the client cannot restore a sentinel for it — which is how 139
 // transport rejections came to answer differently from the same rejection in
 // process.
+// It reads every non-test file in the package except the two that legitimately
+// construct a status. It used to read "grpc.go" by name, and grpc.go is 6,000
+// lines whose obvious next refactor is a split, so any handler moved to a new
+// file left the gate silently.
 func TestHandlersDoNotBuildStatusErrorsDirectly(t *testing.T) {
-	source, err := os.ReadFile("grpc.go")
+	// errors.go owns the mapping and transport.go owns the panic conversion, so
+	// both build statuses on purpose.
+	allowed := map[string]bool{"errors.go": true, "transport.go": true}
+	for _, name := range packageSourceFiles(t) {
+		if allowed[name] {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"status.Error(", "status.Errorf(", "status.New("} {
+			if bytes.Contains(source, []byte(forbidden)) {
+				t.Errorf("%s builds a status with %s; use invalidArgument, invalidArgumentFrom or mapError so the failure carries a domain class", name, forbidden)
+			}
+		}
+	}
+}
+
+func packageSourceFiles(t *testing.T) []string {
+	t.Helper()
+	entries, err := os.ReadDir(".")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"status.Error(", "status.Errorf(", "status.New("} {
-		if bytes.Contains(source, []byte(forbidden)) {
-			t.Errorf("grpc.go builds a status with %s; use invalidArgument, invalidArgumentFrom or mapError so the failure carries a domain class", forbidden)
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
 		}
+		names = append(names, entry.Name())
+	}
+	if len(names) == 0 {
+		t.Fatal("no package source files found; the scan is broken")
+	}
+	return names
+}
+
+// TestNoServerHandlerRejectsARequestField holds the ordering this seam settled
+// on: the implementation authorises first and validates second, and the
+// transport validates only what the implementation cannot see.
+//
+// A Server handler that rejected a missing field ran *before*
+// service.Messages.authorizeWorkspace, so a caller outside the workspace learned
+// which field of its request was wrong — a fact the monolith never tells it,
+// because there the authorisation failure comes first. files.upload with an
+// empty title answered channel_not_found in the monolith and invalid_arg_name in
+// the split deployment; canvases.edit did the same. There were 105 such guards.
+//
+// What remains legitimate is what the transport alone can decide: a stream whose
+// first message is not metadata, a stream part that is not a chunk, a timestamp
+// that does not parse, a oneof arm this build cannot map. None of those is a
+// field-presence test, so the gate is exactly "no rejection may read a request
+// field's value".
+func TestNoServerHandlerRejectsARequestField(t *testing.T) {
+	for _, name := range packageSourceFiles(t) {
+		parsed, err := parser.ParseFile(token.NewFileSet(), name, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil || receiverTypeName(function.Recv) != "Server" {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				branch, ok := node.(*ast.IfStmt)
+				if !ok || !rejectsTheRequest(branch.Body) {
+					return true
+				}
+				if field := requestFieldRead(branch.Cond); field != "" {
+					t.Errorf("%s: Server.%s rejects a request because %s is unset or out of range. The implementation decides that, and it decides it after authorising the caller, so this rejection makes the two compositions answer differently.",
+						name, function.Name.Name, field)
+				}
+				return true
+			})
+		}
+	}
+}
+
+// rejectsTheRequest reports whether a branch answers with invalidArgument.
+func rejectsTheRequest(body *ast.BlockStmt) bool {
+	rejects := false
+	ast.Inspect(body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		if identifier, ok := call.Fun.(*ast.Ident); ok && (identifier.Name == "invalidArgument" || identifier.Name == "invalidArgumentFrom") {
+			rejects = true
+		}
+		return true
+	})
+	return rejects
+}
+
+// requestFieldRead names the first generated getter a condition reads, which is
+// how a condition tests a request field rather than a transport fact.
+func requestFieldRead(condition ast.Expr) string {
+	field := ""
+	ast.Inspect(condition, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || !strings.HasPrefix(selector.Sel.Name, "Get") || field != "" {
+			return true
+		}
+		field = selector.Sel.Name
+		return false
+	})
+	return field
+}
+
+// TestEveryChatServerIsBuiltWithTransportCredentials reads the composition roots.
+//
+// NewChatServer makes the message bounds, the panic recovery, the keepalive and
+// the instrumentation non-optional, and leaves transport credentials in a
+// variadic grpc.ServerOption — the one requirement whose absence is a workspace
+// takeover, because ProvisionExternalUser takes no actor and is reachable by
+// anyone who can open the port. grpc.ServerOption is opaque, so the constructor
+// cannot detect it; this reads the call sites instead.
+func TestEveryChatServerIsBuiltWithTransportCredentials(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "..", "cmd")
+	found := 0
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			return nil
+		}
+		parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		if parseErr != nil {
+			return parseErr
+		}
+		// The check is per file rather than per function because a composition
+		// root legitimately splits the two: cmd/chatd builds the credentials in
+		// run() and calls the constructor from a chatServer helper that forwards
+		// the option.
+		used := make(map[string]struct{})
+		ast.Inspect(parsed, func(node ast.Node) bool {
+			if identifier, ok := node.(*ast.Ident); ok {
+				used[identifier.Name] = struct{}{}
+			}
+			return true
+		})
+		if _, builds := used["NewChatServer"]; !builds {
+			return nil
+		}
+		found++
+		if _, credentials := used["Creds"]; !credentials {
+			t.Errorf("%s builds a chat server without naming transport credentials; the three actorless DirectoryService RPCs would then be served in plaintext to anyone who reaches the port", path)
+		}
+		if _, plaintext := used["NewCredentials"]; plaintext {
+			t.Errorf("%s builds a chat server with insecure transport credentials", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("scan %s: %v", root, err)
+	}
+	if found == 0 {
+		t.Fatalf("no chat server construction found under %s; the scan is broken and the requirement is unchecked", root)
 	}
 }
 

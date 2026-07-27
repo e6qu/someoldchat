@@ -44,6 +44,20 @@ const MaxMessageBytes = 16 * httpRequestBodyBytes
 // is restated here and gated by a test that reads their declarations from source.
 const httpRequestBodyBytes = 4 << 20
 
+// MaxHeaderListBytes bounds the HTTP/2 header and trailer list on both peers.
+//
+// MaxMessageBytes bounds the message, and the file comment above presents it as
+// the bound on the seam — but the gRPC status, its message and the DomainError
+// detail travel in trailers, which grpc-go defaults to 16 MiB on both sides
+// (internal/transport/defaults.go). So the part of a failed call a caller
+// actually reads was bounded four times more loosely than the call itself, and
+// restoreSentinel unmarshals every detail in the list on every failure.
+//
+// Everything this contract puts in headers is fixed-shape — the method path, one
+// traceparent, and a status whose message boundStatusMessage caps at 2 KiB — so
+// 64 KiB is an order of magnitude of headroom over the largest legitimate list.
+const MaxHeaderListBytes = 64 << 10
+
 // Observer receives the measurements and the log records of the chat seam.
 //
 // Both fields are optional: a nil Registry or Logger disables that half rather
@@ -94,6 +108,7 @@ func ServerOptions(observer Observer) []grpc.ServerOption {
 	return []grpc.ServerOption{
 		grpc.MaxRecvMsgSize(MaxMessageBytes),
 		grpc.MaxSendMsgSize(MaxMessageBytes),
+		grpc.MaxHeaderListSize(MaxHeaderListBytes),
 		grpc.ChainUnaryInterceptor(UnaryServerInterceptor(observer)),
 		grpc.ChainStreamInterceptor(StreamServerInterceptor(observer)),
 		grpc.KeepaliveParams(keepalive.ServerParameters{Time: 30 * time.Second, Timeout: 10 * time.Second}),
@@ -108,9 +123,23 @@ func ServerOptions(observer Observer) []grpc.ServerOption {
 // built one with grpc.NewServer(grpc.Creds(...)) and registered the module
 // separately, which is why the process ran with no panic recovery, no message
 // bound, no keepalive and no instrumentation for as long as it did: nothing in
-// the transport package was in a position to notice. Extra options — transport
-// credentials, in particular — are appended, so a caller can add what only it
-// knows without being able to drop what the seam needs.
+// the transport package was in a position to notice.
+//
+// Transport credentials are the one requirement this signature cannot express.
+// grpc.ServerOption is opaque, so a constructor that receives one cannot tell
+// whether grpc.Creds is among them, and a server built without it serves the
+// three actorless DirectoryService RPCs — ProvisionExternalUser among them — in
+// plaintext to anyone who reaches the port. The requirement is therefore stated
+// here and enforced by TestEveryChatServerIsBuiltWithTransportCredentials, which
+// reads the composition roots under cmd/ and fails on a file that builds a chat
+// server without naming grpc.Creds, or that names insecure credentials. It reads
+// cmd/ rather than the whole tree because the tests in this package build servers
+// over an in-process bufconn listener, where there is no port to reach.
+//
+// Making credentials a parameter would be stronger and is the change to make when
+// cmd/chatd can be updated in the same commit: the signature would become
+// NewChatServer(..., observer Observer, credentials credentials.TransportCredentials,
+// extra ...grpc.ServerOption), rejecting nil and insecure.NewCredentials().
 func NewChatServer(implementation chatapi.Service, tokens auth.TokenStore, sessions auth.SessionStore, revoker auth.SessionRevoker, observer Observer, extra ...grpc.ServerOption) (*grpc.Server, error) {
 	server := grpc.NewServer(append(ServerOptions(observer), extra...)...)
 	if err := RegisterServer(server, implementation, tokens, sessions, revoker); err != nil {
@@ -128,6 +157,7 @@ func DialOptions(observer Observer) []grpc.DialOption {
 			grpc.MaxCallRecvMsgSize(MaxMessageBytes),
 			grpc.MaxCallSendMsgSize(MaxMessageBytes),
 		),
+		grpc.WithMaxHeaderListSize(MaxHeaderListBytes),
 		grpc.WithChainUnaryInterceptor(UnaryClientInterceptor(observer)),
 		grpc.WithChainStreamInterceptor(StreamClientInterceptor(observer)),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{Time: 30 * time.Second, Timeout: 10 * time.Second, PermitWithoutStream: true}),
@@ -137,6 +167,18 @@ func DialOptions(observer Observer) []grpc.DialOption {
 const (
 	serverMetricPrefix = "sameoldchat_chat_server_"
 	clientMetricPrefix = "sameoldchat_chat_client_"
+)
+
+// peerServer and peerClient name which side of the seam produced a record.
+//
+// recordCall and recordStream are installed on both interceptors, so one failed
+// request produces two records. They were indistinguishable — the message and
+// every attribute were identical and only the metric prefix differed, which is
+// not part of the log record — so an operator reading the chat process's log
+// could not tell a failure it served from a failure it called.
+const (
+	peerServer = "server"
+	peerClient = "client"
 )
 
 // UnaryServerInterceptor recovers handler panics and records the call.
@@ -151,7 +193,7 @@ func UnaryServerInterceptor(observer Observer) grpc.UnaryServerInterceptor {
 					"method", info.FullMethod, "panic", fmt.Sprint(recovered), "stack", string(debug.Stack()), "trace_id", traceID(ctx))
 				response, err = nil, panicError(recovered)
 			}
-			recordCall(ctx, observer, serverMetricPrefix, info.FullMethod, started, err)
+			recordCall(ctx, observer, serverMetricPrefix, peerServer, info.FullMethod, started, err)
 		}()
 		return handler(ctx, request)
 	}
@@ -171,7 +213,7 @@ func StreamServerInterceptor(observer Observer) grpc.StreamServerInterceptor {
 					"method", info.FullMethod, "panic", fmt.Sprint(recovered), "stack", string(debug.Stack()), "trace_id", traceID(ctx))
 				err = panicError(recovered)
 			}
-			recordStream(ctx, observer, serverMetricPrefix, info.FullMethod, started, err)
+			recordStream(ctx, observer, serverMetricPrefix, peerServer, info.FullMethod, started, err)
 		}()
 		return handler(service, tracedServerStream{ServerStream: stream, ctx: ctx})
 	}
@@ -184,7 +226,7 @@ func UnaryClientInterceptor(observer Observer) grpc.UnaryClientInterceptor {
 		ctx = traceClientContext(ctx)
 		started := time.Now()
 		err := invoker(ctx, method, request, response, connection, options...)
-		recordCall(ctx, observer, clientMetricPrefix, method, started, err)
+		recordCall(ctx, observer, clientMetricPrefix, peerClient, method, started, err)
 		return err
 	}
 }
@@ -196,41 +238,43 @@ func StreamClientInterceptor(observer Observer) grpc.StreamClientInterceptor {
 		ctx = traceClientContext(ctx)
 		started := time.Now()
 		stream, err := streamer(ctx, descriptor, connection, method, options...)
-		recordStream(ctx, observer, clientMetricPrefix, method, started, err)
+		recordStream(ctx, observer, clientMetricPrefix, peerClient, method, started, err)
 		return stream, err
 	}
 }
 
-func recordCall(ctx context.Context, observer Observer, prefix, method string, started time.Time, err error) {
+func recordCall(ctx context.Context, observer Observer, prefix, peer, method string, started time.Time, err error) {
 	code := status.Code(err)
 	observer.count(prefix + "rpc_requests_total")
 	observer.count(prefix + "rpc_code_" + codeMetricName(code) + "_total")
 	observer.observe(prefix+"rpc_duration_seconds", time.Since(started))
-	logOutcome(ctx, observer, "chat rpc", method, started, code, err)
+	logOutcome(ctx, observer, "chat rpc", peer, method, started, code, err)
 }
 
-func recordStream(ctx context.Context, observer Observer, prefix, method string, started time.Time, err error) {
+func recordStream(ctx context.Context, observer Observer, prefix, peer, method string, started time.Time, err error) {
 	code := status.Code(err)
 	observer.count(prefix + "stream_requests_total")
 	observer.count(prefix + "stream_code_" + codeMetricName(code) + "_total")
 	observer.observe(prefix+"stream_duration_seconds", time.Since(started))
-	logOutcome(ctx, observer, "chat stream", method, started, code, err)
+	logOutcome(ctx, observer, "chat stream", peer, method, started, code, err)
 }
 
 // logOutcome records one line per failed call on the seam.
 //
 // A successful call is not logged: the counters and the duration summary already
 // describe the healthy path, and a log line per request would cost more than it
-// tells. codes.NotFound is expected traffic (a lookup that misses) and is logged
-// at debug. Everything else is a warning, and the error text is attached only
-// when the failure carries no domain class, because that is the only case where
-// the text is the sole description of the cause; a classified failure logs its
-// sentinel key instead, which keeps storage-internal text out of the record.
-func logOutcome(ctx context.Context, observer Observer, kind, method string, started time.Time, code codes.Code, err error) {
+// tells. The error text is attached only when the failure carries no domain
+// class, because that is the only case where the text is the sole description of
+// the cause; a classified failure logs its sentinel key instead, which keeps
+// storage-internal text out of the record.
+//
+// Only an operator-caused failure is a warning; see operatorFailureCodes.
+func logOutcome(ctx context.Context, observer Observer, kind, peer, method string, started time.Time, code codes.Code, err error) {
 	if observer.Logger == nil || err == nil {
 		return
 	}
 	attributes := []any{
+		"peer", peer,
 		"method", method,
 		"code", code.String(),
 		"duration_ms", time.Since(started).Milliseconds(),
@@ -238,9 +282,9 @@ func logOutcome(ctx context.Context, observer Observer, kind, method string, sta
 	if identity := traceID(ctx); identity != "" {
 		attributes = append(attributes, "trace_id", identity)
 	}
-	level := slog.LevelWarn
-	if code == codes.NotFound {
-		level = slog.LevelDebug
+	level := slog.LevelDebug
+	if operatorFailureCodes[code] {
+		level = slog.LevelWarn
 	}
 	if class, classified := classifyError(err); classified {
 		attributes = append(attributes, "domain_error", class.key)
@@ -248,6 +292,24 @@ func logOutcome(ctx context.Context, observer Observer, kind, method string, sta
 		attributes = append(attributes, "error", err.Error())
 	}
 	observer.log(ctx, level, kind+" failed", attributes...)
+}
+
+// operatorFailureCodes are the status codes that describe a failure of this
+// system rather than of the request, and therefore the only ones worth a warning.
+//
+// Everything else on this seam is ordinary client-driven traffic: the transport
+// now produces codes.InvalidArgument for thirty-odd validation sentinels,
+// codes.NotFound for every lookup that misses, and PermissionDenied,
+// AlreadyExists, FailedPrecondition, Aborted and ResourceExhausted for refusals a
+// caller provokes. Warning on those meant one malformed Slack API call from a
+// browser wrote two unrate-limited WARN lines — one on each peer — to a chatd
+// whose logger is at Info level, so the log filled with records that describe
+// correct behaviour and buried the ones that do not.
+var operatorFailureCodes = map[codes.Code]bool{
+	codes.Internal:    true,
+	codes.Unavailable: true,
+	codes.Unknown:     true,
+	codes.DataLoss:    true,
 }
 
 // codeMetricName is the metric-name fragment for a status code. The set is the

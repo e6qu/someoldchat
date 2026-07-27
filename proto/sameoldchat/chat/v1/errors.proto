@@ -17,7 +17,22 @@ option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/tr
 //
 // The key strings are part of the wire contract and must never be renamed: a
 // chat server and an HTTP server at different versions have to agree on them
-// during a rolling deployment.
+// during a rolling deployment. TestTheWireKeySetMatchesTheRecordedContract gates
+// the set against a checked-in golden file, because the keys are derived from Go
+// identifiers and a pure rename would otherwise rewrite the contract silently.
 message DomainError {
+  // key is the first, most specific class the error matched. It is what a peer
+  // that predates `keys` reads, so it is always populated.
   string key = 1;
+
+  // keys is every class the error matched, most specific first.
+  //
+  // One error can carry several sentinels: errors.Join(store.ErrNotFound,
+  // service.ErrInvalidCanvas) is what a compensating delete produces after a
+  // rejected create, and errors.Is answers true for both in process. While the
+  // wire carried one key, the caller restored one of the two, so the same
+  // failure was channel_not_found in the monolith and invalid_arg_name across
+  // the seam. keys is additive, so an older peer that reads only `key` behaves
+  // exactly as it did.
+  repeated string keys = 2;
 }

@@ -1,7 +1,12 @@
 package grpc
 
 import (
+	"bytes"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"hash/fnv"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,6 +14,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"google.golang.org/protobuf/proto"
 )
 
 // This file is the field-completeness property test for the proto conversion
@@ -39,8 +45,10 @@ type conversionCase struct {
 	sample any
 
 	// through encodes and decodes the filled value and returns the result as a
-	// pointer to the same type.
-	through func(t *testing.T, filled any) any
+	// pointer to the same type, together with the proto message the encoder
+	// produced. The wire message is what lets a case assert that an omitted field
+	// did not cross the boundary, rather than asserting it in a comment.
+	through func(t *testing.T, filled any) (any, proto.Message)
 
 	// omitted names the fields that must not cross the boundary, with the reason.
 	// A field is listed here only when carrying it would be wrong, never because
@@ -53,20 +61,112 @@ type conversionCase struct {
 	prepare func(filled any)
 }
 
+// omittedMarker is the value an omitted field is filled with before the wire
+// check. It is distinctive enough that finding it in the marshalled message can
+// only mean the encoder wrote that field.
+const omittedMarker = "must-not-cross-the-boundary-9f3c1"
+
 func TestEveryConverterCarriesEveryField(t *testing.T) {
 	for name, testCase := range conversionCases() {
-		t.Run(name, func(t *testing.T) {
+		// Each case runs once per bit of the bool numbering; see boolFillRuns.
+		// Every bool used to be filled true, so two sibling flags carried
+		// identical values and swapping them was invisible — swapping
+		// InviteRequest.Restricted with .UltraRestricted, which is the difference
+		// between a single-channel guest who may post and one who may not, left
+		// all 271 tests in this package green.
+		for run := 0; run < boolFillRuns; run++ {
+			t.Run(fmt.Sprintf("%s/bools=%d", name, run), func(t *testing.T) {
+				filled := reflect.New(reflect.TypeOf(testCase.sample).Elem())
+				fillValue(t, filled.Elem(), name, &filler{run: run})
+				for field := range testCase.omitted {
+					zeroField(t, filled.Elem(), field)
+				}
+				if testCase.prepare != nil {
+					testCase.prepare(filled.Interface())
+				}
+				result, _ := testCase.through(t, filled.Interface())
+				compareValues(t, name, filled.Elem(), reflect.ValueOf(result).Elem())
+			})
+		}
+		if len(testCase.omitted) == 0 {
+			continue
+		}
+		// The omitted contract is "must not cross the boundary". Zeroing the field
+		// before encoding only proves zero-in/zero-out: the encoder is never handed
+		// a value, so no assertion in the round trip can observe whether it would
+		// have put one on the wire. IncomingWebhook.SecretHash is the field that
+		// matters — its reason says the hash must never leave the module — and it
+		// was asserted by that sentence alone.
+		t.Run(name+"/omitted fields never reach the wire", func(t *testing.T) {
 			filled := reflect.New(reflect.TypeOf(testCase.sample).Elem())
-			fillValue(t, filled.Elem(), name)
-			for field := range testCase.omitted {
-				zeroField(t, filled.Elem(), field)
+			fillValue(t, filled.Elem(), name, &filler{})
+			for field, reason := range testCase.omitted {
+				setStringField(t, filled.Elem(), field, omittedMarker)
+				_ = reason
 			}
 			if testCase.prepare != nil {
 				testCase.prepare(filled.Interface())
 			}
-			result := testCase.through(t, filled.Interface())
-			compareValues(t, name, filled.Elem(), reflect.ValueOf(result).Elem())
+			_, wire := testCase.through(t, filled.Interface())
+			if wire == nil {
+				t.Fatal("the case does not expose the encoded message, so the omitted contract cannot be checked")
+			}
+			encoded, err := proto.Marshal(wire)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			if bytes.Contains(encoded, []byte(omittedMarker)) {
+				fields := make([]string, 0, len(testCase.omitted))
+				for field, reason := range testCase.omitted {
+					fields = append(fields, fmt.Sprintf("%s (%s)", field, reason))
+				}
+				t.Errorf("%s: the encoder put an omitted field on the wire; the case names %v", name, fields)
+			}
 		})
+	}
+}
+
+// setStringField writes a marker into every field with the given name. It fails
+// on a non-string field rather than skipping it, because an omitted field this
+// check cannot reach is an omitted field nothing asserts.
+func setStringField(t *testing.T, value reflect.Value, name, marker string) {
+	t.Helper()
+	found := false
+	var walk func(reflect.Value)
+	walk = func(value reflect.Value) {
+		switch value.Kind() {
+		case reflect.Struct:
+			if value.Type() == reflect.TypeOf(time.Time{}) {
+				return
+			}
+			for index := 0; index < value.NumField(); index++ {
+				field := value.Type().Field(index)
+				if !field.IsExported() {
+					continue
+				}
+				if field.Name == name {
+					if value.Field(index).Kind() != reflect.String {
+						t.Fatalf("omitted field %q is a %s; the wire check can only mark a string", name, value.Field(index).Kind())
+					}
+					value.Field(index).SetString(marker)
+					found = true
+					continue
+				}
+				walk(value.Field(index))
+			}
+		case reflect.Slice:
+			for index := 0; index < value.Len(); index++ {
+				walk(value.Index(index))
+			}
+		case reflect.Pointer:
+			if !value.IsNil() {
+				walk(value.Elem())
+			}
+		}
+	}
+	walk(value)
+	if !found {
+		t.Fatalf("omitted field %q does not exist; remove it from the case", name)
 	}
 }
 
@@ -142,53 +242,194 @@ func conversionCases() map[string]conversionCase {
 			omitted: map[string]string{
 				"SecretHash": "the hash must never cross the boundary; only the one-time plaintext secret does, as a separate return value",
 			},
-			through: func(t *testing.T, filled any) any {
+			through: func(t *testing.T, filled any) (any, proto.Message) {
 				value := *filled.(*domain.IncomingWebhook)
-				decodedValue, secret, err := decodeProtoIncomingWebhook(encodeProtoIncomingWebhook(value, "plaintext-secret"))
+				wire := encodeProtoIncomingWebhook(value, "plaintext-secret")
+				decodedValue, secret, err := decodeProtoIncomingWebhook(wire)
 				if err != nil {
 					t.Fatalf("decode: %v", err)
 				}
 				if secret != "plaintext-secret" {
 					t.Fatalf("secret = %q, want the plaintext the encoder was given", secret)
 				}
-				return &decodedValue
+				return &decodedValue, wire
 			},
 		},
-		"events.Record": {sample: &events.Record{}, through: func(t *testing.T, filled any) any {
-			records, err := decodeProtoEvents(encodeProtoEvents([]events.Record{*filled.(*events.Record)}))
+		"WorkspaceMembership": {sample: &domain.WorkspaceMembership{}, through: through(encodeProtoWorkspaceMembership, decodeProtoWorkspaceMembership)},
+		// The three paginated wrappers below decode into anonymous structs rather
+		// than a domain page type, so the case restates the shape. They were the
+		// only converters covered nowhere: dropping NextCursor and HasMore from
+		// encodeProtoPinPage left all 271 tests in this package green, and
+		// pins.list would have lost pagination in the distributed composition
+		// while the monolith kept it.
+		"PinPage": {sample: &pinPage{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+			value := filled.(*pinPage)
+			wire := encodeProtoPinPage(value.Pins, value.NextCursor, value.HasMore)
+			decoded, err := decodeProtoPinPage(wire)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			return &pinPage{Pins: decoded.Pins, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
+		}},
+		"StarPage": {sample: &starPage{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+			value := filled.(*starPage)
+			wire := encodeProtoStarPage(value.Stars, value.NextCursor, value.HasMore)
+			decoded, err := decodeProtoStarPage(wire)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			return &starPage{Stars: decoded.Stars, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
+		}},
+		"ReactionPage": {sample: &reactionPage{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+			value := filled.(*reactionPage)
+			wire := encodeProtoReactionPage(value.Reactions, value.NextCursor, value.HasMore)
+			decoded, err := decodeProtoReactionPage(wire)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			return &reactionPage{Reactions: decoded.Reactions, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
+		}},
+		"events.Record": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+			wire := encodeProtoEvents([]events.Record{*filled.(*events.Record)})
+			records, err := decodeProtoEvents(wire)
 			if err != nil {
 				t.Fatalf("decode: %v", err)
 			}
 			if len(records) != 1 {
 				t.Fatalf("decoded %d records, want 1", len(records))
 			}
-			return &records[0]
+			return &records[0], wire
 		}},
 	}
+}
+
+// pinPage, starPage and reactionPage restate the anonymous structs
+// decodeProtoPinPage, decodeProtoStarPage and decodeProtoReactionPage return, so
+// the property can be expressed for them. They are the reason those three
+// converters were outside the property; the underlying fix is for
+// Pins/Stars/Reactions to return a page type, which is a change to
+// chatapi.Service rather than to this package.
+type pinPage struct {
+	Pins       []domain.Pin
+	NextCursor domain.Cursor
+	HasMore    bool
+}
+
+type starPage struct {
+	Stars      []domain.Star
+	NextCursor domain.Cursor
+	HasMore    bool
+}
+
+type reactionPage struct {
+	Reactions  []domain.Reaction
+	NextCursor domain.Cursor
+	HasMore    bool
+}
+
+// TestEveryConverterPairIsExercisedByTheProperty derives the case list instead
+// of trusting it.
+//
+// conversionCases is a hand-written map, and nothing asserted that it named
+// every encodeProto/decodeProto pair in the package. Four were absent —
+// including encodeProtoWorkspaceMembership, the record that carries the role
+// authorising every administrative operation — so the property that exists to
+// stop a converter dropping a field could not see them at all. This test reads
+// both sides from source: the pairs from grpc.go and the converters the case
+// list actually names, so adding a converter without a case fails here rather
+// than shipping.
+func TestEveryConverterPairIsExercisedByTheProperty(t *testing.T) {
+	parsed, err := parser.ParseFile(token.NewFileSet(), "grpc.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoders, decoders := make(map[string]struct{}), make(map[string]struct{})
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Recv != nil {
+			continue
+		}
+		if name, found := strings.CutPrefix(function.Name.Name, "encodeProto"); found {
+			encoders[name] = struct{}{}
+		}
+		if name, found := strings.CutPrefix(function.Name.Name, "decodeProto"); found {
+			decoders[name] = struct{}{}
+		}
+	}
+	if len(encoders) == 0 {
+		t.Fatal("no converters discovered in grpc.go; the source scan is broken")
+	}
+
+	named := convertersNamedByTheCaseList(t)
+	for name := range encoders {
+		if _, symmetric := decoders[name]; !symmetric {
+			// An encoder with no decoder of its own is read by another decoder
+			// (encodeProtoProfile is read by decodeProtoUser) and is covered
+			// through it.
+			continue
+		}
+		if _, exercised := named["encodeProto"+name]; !exercised {
+			t.Errorf("encodeProto%s/decodeProto%s round-trip no domain value in conversionCases: add a case, so a field either converter drops is caught", name, name)
+		}
+		if _, exercised := named["decodeProto"+name]; !exercised {
+			t.Errorf("decodeProto%s is never called by conversionCases: a case that encodes without decoding proves nothing", name)
+		}
+	}
+}
+
+// convertersNamedByTheCaseList reads the converter names conversionCases
+// mentions out of this file's own source, so the two sides of the comparison are
+// both derived and neither is a list to maintain.
+func convertersNamedByTheCaseList(t *testing.T) map[string]struct{} {
+	t.Helper()
+	parsed, err := parser.ParseFile(token.NewFileSet(), "roundtrip_test.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := make(map[string]struct{})
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Name.Name != "conversionCases" {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if identifier, ok := node.(*ast.Ident); ok {
+				named[identifier.Name] = struct{}{}
+			}
+			return true
+		})
+	}
+	if len(named) == 0 {
+		t.Fatal("conversionCases was not found in roundtrip_test.go; the source scan is broken")
+	}
+	return named
 }
 
 // through builds the round trip for a symmetric converter pair. Naming the two
 // functions rather than writing the call out per case is what keeps a case a
 // single line, so adding a converter to this test costs nothing.
-func through[Value, Proto any](encode func(Value) Proto, decode func(Proto) (Value, error)) func(*testing.T, any) any {
-	return func(t *testing.T, filled any) any {
+func through[Value any, Proto proto.Message](encode func(Value) Proto, decode func(Proto) (Value, error)) func(*testing.T, any) (any, proto.Message) {
+	return func(t *testing.T, filled any) (any, proto.Message) {
 		t.Helper()
-		result, err := decode(encode(*filled.(*Value)))
+		wire := encode(*filled.(*Value))
+		result, err := decode(wire)
 		if err != nil {
 			t.Fatalf("decode: %v", err)
 		}
-		return &result
+		return &result, wire
 	}
 }
 
 // throughInfallible is through for the three converters whose decoder cannot fail.
-func throughInfallible[Value, Proto any](encode func(Value) Proto, decode func(Proto) Value) func(*testing.T, any) any {
-	return func(t *testing.T, filled any) any {
+func throughInfallible[Value any, Proto proto.Message](encode func(Value) Proto, decode func(Proto) Value) func(*testing.T, any) (any, proto.Message) {
+	return func(t *testing.T, filled any) (any, proto.Message) {
 		t.Helper()
-		result := decode(encode(*filled.(*Value)))
-		return &result
+		wire := encode(*filled.(*Value))
+		return ptr(decode(wire)), wire
 	}
 }
+
+func ptr[Value any](value Value) *Value { return &value }
 
 // fillTime is the instant every timestamp is filled with. It is whole-second and
 // UTC; see the file comment.
@@ -200,7 +441,34 @@ var fillTime = time.Date(2026, 3, 14, 15, 9, 26, 0, time.UTC)
 // A few fields carry a value from a closed set rather than an arbitrary string,
 // because the surrounding code normalises them and a normalised value is not the
 // value that was sent — which would look like a dropped field without being one.
-func fillValue(t *testing.T, value reflect.Value, path string) {
+// boolFillRuns is how many times a case is filled and round-tripped.
+//
+// A bool can only take two values, so no single filling can distinguish more
+// than two boolean fields. filler numbers the bools in traversal order and uses
+// bit `run` of that number, so across boolFillRuns runs any two distinct bool
+// fields differ in at least one of them, for up to 2^boolFillRuns bools in one
+// value. That is what makes a swap between two sibling flags detectable rather
+// than a coin toss: no domain type on this contract carries anywhere near 64.
+const boolFillRuns = 6
+
+// filler carries the state fillValue needs across one filling: which run this
+// is, and how many bools have been assigned so far.
+type filler struct {
+	run   int
+	bools int
+}
+
+func (f *filler) nextBool() bool {
+	index := f.bools
+	f.bools++
+	return (index>>f.run)&1 == 1
+}
+
+// Numeric scalars are derived from a hash of the whole field path rather than
+// from its length: two fields whose names happened to be the same length used to
+// receive the same integer, so a converter that swapped them was
+// indistinguishable from one that carried them correctly.
+func fillValue(t *testing.T, value reflect.Value, path string, state *filler) {
 	t.Helper()
 	switch value.Kind() {
 	case reflect.Struct:
@@ -213,7 +481,7 @@ func fillValue(t *testing.T, value reflect.Value, path string) {
 			if !field.IsExported() {
 				continue
 			}
-			fillValue(t, value.Field(index), path+"."+field.Name)
+			fillValue(t, value.Field(index), path+"."+field.Name, state)
 		}
 	case reflect.String:
 		if value.Type() == reflect.TypeOf(domain.MessageTimestamp("")) {
@@ -224,11 +492,11 @@ func fillValue(t *testing.T, value reflect.Value, path string) {
 		}
 		value.SetString(fillString(path))
 	case reflect.Bool:
-		value.SetBool(true)
+		value.SetBool(state.nextBool())
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		value.SetInt(int64(7 + len(path)%13))
+		value.SetInt(int64(7 + pathHash(path)%13))
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
-		value.SetUint(uint64(11 + len(path)%17))
+		value.SetUint(uint64(11 + pathHash(path)%17))
 	case reflect.Float32, reflect.Float64:
 		value.SetFloat(1.5)
 	case reflect.Slice:
@@ -240,26 +508,32 @@ func fillValue(t *testing.T, value reflect.Value, path string) {
 		}
 		slice := reflect.MakeSlice(value.Type(), 2, 2)
 		for index := 0; index < 2; index++ {
-			fillValue(t, slice.Index(index), fmt.Sprintf("%s[%d]", path, index))
+			fillValue(t, slice.Index(index), fmt.Sprintf("%s[%d]", path, index), state)
 		}
 		value.Set(slice)
 	case reflect.Map:
 		result := reflect.MakeMap(value.Type())
 		for index := 0; index < 2; index++ {
 			key := reflect.New(value.Type().Key()).Elem()
-			fillValue(t, key, fmt.Sprintf("%s.key%d", path, index))
+			fillValue(t, key, fmt.Sprintf("%s.key%d", path, index), state)
 			element := reflect.New(value.Type().Elem()).Elem()
-			fillValue(t, element, fmt.Sprintf("%s.value%d", path, index))
+			fillValue(t, element, fmt.Sprintf("%s.value%d", path, index), state)
 			result.SetMapIndex(key, element)
 		}
 		value.Set(result)
 	case reflect.Pointer:
 		allocated := reflect.New(value.Type().Elem())
-		fillValue(t, allocated.Elem(), path)
+		fillValue(t, allocated.Elem(), path, state)
 		value.Set(allocated)
 	default:
 		t.Fatalf("%s: the filler does not handle %s; extend it rather than skipping the field", path, value.Kind())
 	}
+}
+
+func pathHash(path string) int {
+	digest := fnv.New32a()
+	_, _ = digest.Write([]byte(path))
+	return int(digest.Sum32() % (1 << 24))
 }
 
 // fillString supplies a value for one string field. The overrides keep normalised

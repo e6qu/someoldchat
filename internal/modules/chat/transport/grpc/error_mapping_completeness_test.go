@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sameoldchat/sameoldchat/internal/service"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -59,67 +58,27 @@ func serviceValidationErrorNames(t *testing.T) []string {
 	return names
 }
 
-// lookupServiceError resolves a sentinel by name. A sentinel declared in the
-// service package but absent from the table fails loudly rather than silently
-// skipping coverage.
-func lookupServiceError(t *testing.T, name string) error {
-	t.Helper()
-	err, ok := serviceErrorsByName()[name]
-	if !ok {
-		t.Fatalf("service.%s is declared but not listed in serviceErrorsByName; add it", name)
-	}
-	return err
-}
-
 // A validation error describes a caller mistake. codes.Unavailable tells the
 // caller to retry, which a malformed request will never survive, so every
 // sentinel must map to codes.InvalidArgument.
+//
+// The sentinel is resolved through errorClasses, not through a second
+// hand-written name→sentinel map. That map had 33 entries that had to be kept in
+// step with the table by hand — the exact duplication the single table was
+// introduced to delete — and a sentinel missing from it failed the test for
+// bookkeeping reasons rather than for a defect.
 func TestMapErrorClassifiesEveryServiceValidationErrorAsInvalidArgument(t *testing.T) {
 	for _, name := range serviceValidationErrorNames(t) {
-		err := lookupServiceError(t, name)
 		t.Run(name, func(t *testing.T) {
-			got := status.Code(mapError(fmt.Errorf("wrapped: %w", err)))
+			key := "service." + sentinelKey(name)
+			class, classified := errorClassesByKey[key]
+			if !classified {
+				t.Fatalf("service.%s has no class; TestEveryDomainSentinelIsClassified says which table entry is missing", name)
+			}
+			got := status.Code(mapError(fmt.Errorf("wrapped: %w", class.sentinel)))
 			if got != codes.InvalidArgument {
 				t.Fatalf("mapError(service.%s) = %s, want %s", name, got, codes.InvalidArgument)
 			}
 		})
-	}
-}
-
-func serviceErrorsByName() map[string]error {
-	return map[string]error{
-		"ErrInvalidMessage":           service.ErrInvalidMessage,
-		"ErrInvalidTimestamp":         service.ErrInvalidTimestamp,
-		"ErrInvalidConversation":      service.ErrInvalidConversation,
-		"ErrInvalidWorkspace":         service.ErrInvalidWorkspace,
-		"ErrInvalidConversationPrefs": service.ErrInvalidConversationPrefs,
-		"ErrInvalidReaction":          service.ErrInvalidReaction,
-		"ErrInvalidFile":              service.ErrInvalidFile,
-		"ErrInvalidSearch":            service.ErrInvalidSearch,
-		"ErrInvalidProfile":           service.ErrInvalidProfile,
-		"ErrInvalidPresence":          service.ErrInvalidPresence,
-		"ErrInvalidSnooze":            service.ErrInvalidSnooze,
-		"ErrInvalidReminder":          service.ErrInvalidReminder,
-		"ErrInvalidCall":              service.ErrInvalidCall,
-		"ErrInvalidUserGroup":         service.ErrInvalidUserGroup,
-		"ErrInvalidEphemeral":         service.ErrInvalidEphemeral,
-		"ErrInvalidAccessLog":         service.ErrInvalidAccessLog,
-		"ErrInvalidEmoji":             service.ErrInvalidEmoji,
-		"ErrInvalidRemoteFile":        service.ErrInvalidRemoteFile,
-		"ErrInvalidInviteRequest":     service.ErrInvalidInviteRequest,
-		"ErrInvalidAppApproval":       service.ErrInvalidAppApproval,
-		"ErrInvalidView":              service.ErrInvalidView,
-		"ErrInvalidWorkflowStep":      service.ErrInvalidWorkflowStep,
-		"ErrInvalidDialog":            service.ErrInvalidDialog,
-		"ErrInvalidBot":               service.ErrInvalidBot,
-		"ErrInvalidMigration":         service.ErrInvalidMigration,
-		"ErrInvalidOAuth":             service.ErrInvalidOAuth,
-		"ErrInvalidOAuthClient":       service.ErrInvalidOAuthClient,
-		"ErrInvalidIntegrationLogs":   service.ErrInvalidIntegrationLogs,
-		"ErrInvalidBookmark":          service.ErrInvalidBookmark,
-		"ErrInvalidCanvas":            service.ErrInvalidCanvas,
-		"ErrInvalidList":              service.ErrInvalidList,
-		"ErrInvalidEntity":            service.ErrInvalidEntity,
-		"ErrInvalidExternalUpload":    service.ErrInvalidExternalUpload,
 	}
 }

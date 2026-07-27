@@ -97,6 +97,13 @@ type parityCase struct {
 	// wantSentinel is the sentinel both compositions must fail with, or nil when
 	// both must succeed.
 	wantSentinel error
+
+	// wantUnclassifiedFailure marks a case where both compositions must fail
+	// with an error that carries no sentinel at all. Refusing a non-positive
+	// page limit is one: the store rejects it with a bare error, and the point
+	// of the case is that the seam does not invent a class of its own where the
+	// local path has none.
+	wantUnclassifiedFailure bool
 }
 
 func seedBaseline(t *testing.T, target *memory.Store) {
@@ -203,11 +210,22 @@ func TestCompositionsAgreeOnEveryErrorClassAndValue(t *testing.T) {
 			if (localErr == nil) != (remoteErr == nil) {
 				t.Fatalf("local error = %v, remote error = %v: one composition failed and the other did not", localErr, remoteErr)
 			}
-			if testCase.wantSentinel == nil {
+			switch {
+			case testCase.wantUnclassifiedFailure:
+				if localErr == nil {
+					t.Fatal("both compositions succeeded, want a failure with no domain class")
+				}
+				if class, classified := classifyError(localErr); classified {
+					t.Fatalf("the local failure carries %s; the case documents a failure with no class", class.key)
+				}
+				if class, classified := classifyError(remoteErr); classified {
+					t.Fatalf("the remote failure carries %s where the local one carries none", class.key)
+				}
+			case testCase.wantSentinel == nil:
 				if localErr != nil {
 					t.Fatalf("both compositions failed with %v, want success", localErr)
 				}
-			} else {
+			default:
 				if localErr == nil {
 					t.Fatalf("both compositions succeeded, want %v", testCase.wantSentinel)
 				}
@@ -533,6 +551,84 @@ func parityCases() []parityCase {
 				return nil, err
 			},
 		},
+		// The malformed-field-plus-unauthorised-caller class. The transport used
+		// to reject a missing required field before the implementation ran, so a
+		// caller learned that its *field* was wrong from a request the
+		// implementation would have refused for a reason it is not allowed to
+		// know. files.upload with an empty title answered channel_not_found in
+		// the monolith and invalid_arg_name in the split deployment; with blob
+		// storage down it answered file_storage_unavailable locally and
+		// invalid_arg_name remotely. Every seam guard that duplicated an
+		// implementation check is deleted, and these cases keep them deleted.
+		{
+			name:         "upload with an empty title by a caller outside the workspace",
+			blobs:        true,
+			wantSentinel: storepkg.ErrNotFound,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.UploadFile(ctx, "T1", "U-missing", "notes.txt", "", "text/plain", 5, bytes.NewReader([]byte("hello")))
+				return nil, err
+			},
+		},
+		{
+			name:         "upload with an empty title while blob storage is down",
+			wantSentinel: service.ErrBlobUnavailable,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.UploadFile(ctx, "T1", "U1", "notes.txt", "", "text/plain", 5, bytes.NewReader([]byte("hello")))
+				return nil, err
+			},
+		},
+		{
+			name:         "canvas edit with empty changes by a caller outside the workspace",
+			wantSentinel: storepkg.ErrNotFound,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				return nil, chat.EditCanvas(ctx, "T1", "U-missing", "CV1", "")
+			},
+		},
+		{
+			name:         "an unknown workspace is absent, not malformed",
+			wantSentinel: storepkg.ErrNotFound,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.WorkspaceInfo(ctx, "", "U1")
+				return nil, err
+			},
+		},
+		// The page-bound class. protoPageRequest rejected a limit outside 1..200
+		// on the seam only, so a limit of 201 returned a page in the monolith and
+		// invalid_arg_name in the split deployment, and a limit of 0 failed with
+		// two different classes. No parity case varied a limit, which is why 24
+		// call sites carried the divergence.
+		{
+			name: "a page limit above the old seam bound",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "paged", "", ""); err != nil {
+					return nil, err
+				}
+				history, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 201})
+				if err != nil {
+					return nil, err
+				}
+				conversations, err := chat.Conversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 500})
+				if err != nil {
+					return nil, err
+				}
+				users, err := chat.Users(ctx, "T1", "U1", domain.PageRequest{Limit: 1000})
+				if err != nil {
+					return nil, err
+				}
+				return []any{len(history.Messages), history.HasMore, len(conversations.Conversations), len(users.Users)}, nil
+			},
+		},
+		{
+			// Both compositions must refuse a non-positive limit the same way.
+			// The store owns the rule, so the refusal is the store's and neither
+			// composition invents one of its own.
+			name:                    "a page limit of zero",
+			wantUnclassifiedFailure: true,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 0})
+				return nil, err
+			},
+		},
 		{
 			name:         "unknown external identity",
 			wantSentinel: storepkg.ErrNotFound,
@@ -844,13 +940,17 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			// The user-group mutations are administrative: creating one and
+			// setting its membership is workspace administration, so they run as
+			// UA. A member is refused, which the case below asserts in both
+			// compositions.
 			name: "user groups",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				group, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things")
+				group, err := chat.CreateUserGroup(ctx, "T1", "UA", "Engineers", "engineers", "builds things")
 				if err != nil {
 					return nil, err
 				}
-				withUsers, err := chat.SetUserGroupUsers(ctx, "T1", "U1", group.ID, []domain.UserID{"U1", "U2"})
+				withUsers, err := chat.SetUserGroupUsers(ctx, "T1", "UA", group.ID, []domain.UserID{"U1", "U2"})
 				if err != nil {
 					return nil, err
 				}
@@ -859,6 +959,14 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{group.Name, group.Handle, group.Description, withUsers.Users, len(page.Groups)}, nil
+			},
+		},
+		{
+			name:         "a member cannot create a user group",
+			wantSentinel: service.ErrNotWorkspaceAdmin,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, err := chat.CreateUserGroup(ctx, "T1", "U1", "Engineers", "engineers", "builds things")
+				return nil, err
 			},
 		},
 		{
