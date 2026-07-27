@@ -4059,6 +4059,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 	}
 	s.mu.RLock()
 	values := make([]domain.Message, 0, request.Limit+1)
+	total := 0
 	for conversationID, messages := range s.messages {
 		conversation, exists := s.conversations[conversationID]
 		if !exists || conversation.WorkspaceID != workspace || conversation.IsPrivate {
@@ -4070,7 +4071,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 			}
 		}
 		for _, message := range messages {
-			if message.Deleted || (request.Cursor != "" && (message.CreatedAt.Before(startTime) || (message.CreatedAt.Equal(startTime) && message.ID <= startID))) {
+			if message.Deleted {
 				continue
 			}
 			text := domain.FoldSearchText(message.Text)
@@ -4082,6 +4083,10 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 				}
 			}
 			if matches {
+				total++
+				if request.Cursor != "" && (message.CreatedAt.Before(startTime) || (message.CreatedAt.Equal(startTime) && message.ID <= startID)) {
+					continue
+				}
 				values = appendSorted(values, cloneMessage(message), request.Limit+1, messageBefore)
 			}
 		}
@@ -4091,7 +4096,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 	if hasMore {
 		values = values[:request.Limit]
 	}
-	page := domain.MessagePage{Messages: values, HasMore: hasMore}
+	page := domain.MessagePage{Messages: values, HasMore: hasMore, Total: total}
 	if hasMore {
 		page.NextCursor, err = domain.NewMessageCursor(values[len(values)-1])
 		if err != nil {

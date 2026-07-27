@@ -4291,12 +4291,19 @@ func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, worksp
 }
 
 func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
-	if messagePayloadTooLong(blocks, attachments) {
-		return domain.Message{}, ErrInvalidMessage
-	}
-	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
-	if err != nil || attachmentErr != nil || (strings.TrimSpace(text) == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) {
+	return m.UpdateMessage(ctx, workspaceID, userID, conversation, timestamp, domain.MessagePatch{
+		Text:        &text,
+		Blocks:      &blocks,
+		Attachments: &attachments,
+	})
+}
+
+// UpdateMessage applies Slack's presence-sensitive chat.update rules. Omitted
+// blocks survive when text is also omitted, text without blocks removes the old
+// blocks, omitted attachments always survive, and explicit empty arrays remove
+// either collection.
+func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, patch domain.MessagePatch) (domain.Message, error) {
+	if patch.Text == nil && patch.Blocks == nil && patch.Attachments == nil {
 		return domain.Message{}, ErrInvalidMessage
 	}
 	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
@@ -4306,9 +4313,28 @@ func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceI
 	if message.Deleted {
 		return domain.Message{}, ErrMessageAlreadyDeleted
 	}
-	message.Text = text
-	message.Blocks = normalizedBlocks
-	message.Attachments = normalizedAttachments
+	if patch.Text != nil {
+		message.Text = *patch.Text
+	}
+	if patch.Blocks != nil {
+		message.Blocks, err = domain.NormalizeBlocks([]byte(*patch.Blocks))
+		if err != nil {
+			return domain.Message{}, ErrInvalidMessage
+		}
+	} else if patch.Text != nil {
+		message.Blocks = ""
+	}
+	if patch.Attachments != nil {
+		message.Attachments, err = domain.NormalizeAttachments([]byte(*patch.Attachments))
+		if err != nil {
+			return domain.Message{}, ErrInvalidMessage
+		}
+	}
+	if messagePayloadTooLong(message.Blocks, message.Attachments) ||
+		messageTextTooLong(message.Text) ||
+		(strings.TrimSpace(message.Text) == "" && message.Blocks == "" && message.Attachments == "") {
+		return domain.Message{}, ErrInvalidMessage
+	}
 	event, err := messageEvent(workspaceID, "message.changed", message)
 	if err != nil {
 		return domain.Message{}, err

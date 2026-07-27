@@ -336,6 +336,31 @@ assert.equal(updated.ok, true);
 const deleted = await client.chat.delete({ channel: "C1", ts: posted.ts });
 assert.equal(deleted.ok, true);
 
+// Slack's chat.update contract is presence-sensitive. These calls go through
+// the official client's real array serialization so the suite catches a
+// server that treats an omitted field like [] and silently erases rich content.
+const richForUpdate = await client.chat.postMessage({
+	channel: "C1",
+	text: "rich update fallback",
+	blocks: [{ type: "section", text: { type: "plain_text", text: "retained block" } }],
+	attachments: [{ text: "retained attachment" }],
+});
+const attachmentsOnly = await client.chat.update({
+	channel: "C1",
+	ts: richForUpdate.ts,
+	attachments: [{ text: "changed attachment" }],
+});
+assert.equal(attachmentsOnly.message.text, "rich update fallback");
+assert.equal(attachmentsOnly.message.blocks[0].text.text, "retained block");
+assert.equal(attachmentsOnly.message.attachments[0].text, "changed attachment");
+const removeBlocks = await client.chat.update({ channel: "C1", ts: richForUpdate.ts, blocks: [] });
+assert.deepEqual(removeBlocks.message.blocks ?? [], []);
+assert.equal(removeBlocks.message.attachments[0].text, "changed attachment");
+const removeAttachments = await client.chat.update({ channel: "C1", ts: richForUpdate.ts, attachments: [] });
+assert.deepEqual(removeAttachments.message.attachments ?? [], []);
+assert.equal(removeAttachments.message.text, "rich update fallback");
+assert.equal((await client.chat.delete({ channel: "C1", ts: richForUpdate.ts })).ok, true);
+
 const conversation = await client.conversations.info({ channel: "C1" });
 assert.equal(conversation.ok, true);
 assert.equal(conversation.channel.id, "C1");
@@ -685,9 +710,17 @@ assert.equal(history.ok, true);
 assert.equal(history.messages.length, 3);
 assert.equal(history.messages.some((message) => message.ts === posted.ts), false);
 assert.equal(history.has_more, false);
-const search = await client.search.messages({ query: "thread" });
+const search = await client.search.messages({ query: "thread", count: 999, cursor: "*" });
 assert.equal(search.ok, true);
 assert.equal(search.messages.matches.length >= 2, true);
+assert.equal(search.messages.total >= 2, true);
+assert.equal(search.messages.pagination.per_page, 100);
+assert.equal(search.messages.paging.count, 100);
+assert.equal(search.messages.matches[0].channel.id, "C1");
+assert.equal(search.messages.matches[0].channel.name, "general");
+assert.equal(search.messages.matches[0].team, "T1");
+assert.equal(search.messages.matches[0].username, "alice");
+assert.equal(typeof search.messages.matches[0].permalink, "string");
 
 const users = await client.users.list({ limit: 10 });
 assert.equal(users.ok, true);

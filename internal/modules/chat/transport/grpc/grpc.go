@@ -5262,7 +5262,7 @@ func encodeProtoMessagePage(page domain.MessagePage) *chatv1.MessagePage {
 	for _, message := range page.Messages {
 		messages = append(messages, encodeProtoMessage(message))
 	}
-	return &chatv1.MessagePage{Messages: messages, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+	return &chatv1.MessagePage{Messages: messages, NextCursor: string(page.NextCursor), HasMore: page.HasMore, Total: int64(page.Total)}
 }
 
 func decodeProtoMessagePage(value *chatv1.MessagePage) (domain.MessagePage, error) {
@@ -5277,7 +5277,7 @@ func decodeProtoMessagePage(value *chatv1.MessagePage) (domain.MessagePage, erro
 		}
 		messages = append(messages, message)
 	}
-	return domain.MessagePage{Messages: messages, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+	return domain.MessagePage{Messages: messages, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore(), Total: int(value.GetTotal())}, nil
 }
 
 func encodeProtoCanvas(value domain.Canvas) *chatv1.Canvas {
@@ -5990,6 +5990,15 @@ func (s *Server) UpdateWithBlocks(ctx context.Context, input *chatv1.UpdateWithB
 	return encodeProtoMessage(value), nil
 }
 
+func (s *Server) UpdateMessage(ctx context.Context, input *chatv1.UpdateMessageRequest) (*chatv1.Message, error) {
+	patch := domain.MessagePatch{Text: input.Text, Blocks: input.Blocks, Attachments: input.Attachments}
+	value, err := s.implementation.UpdateMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), patch)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
 func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
 	return r.ScheduleMessageWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", postAt)
 }
@@ -6024,6 +6033,22 @@ func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, works
 
 func (r Remote) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
 	out, err := r.messages.UpdateWithBlocks(ctx, &chatv1.UpdateWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Text: text, Blocks: blocks, Attachments: attachments})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, patch domain.MessagePatch) (domain.Message, error) {
+	out, err := r.messages.UpdateMessage(ctx, &chatv1.UpdateMessageRequest{
+		WorkspaceId:    string(workspaceID),
+		UserId:         string(userID),
+		ConversationId: string(conversationID),
+		Timestamp:      string(timestamp),
+		Text:           patch.Text,
+		Blocks:         patch.Blocks,
+		Attachments:    patch.Attachments,
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}

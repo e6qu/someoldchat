@@ -361,6 +361,7 @@ const pageStyle = `<style>
 .pager-newer{grid-row:3}
 .message{display:grid;grid-template-columns:38px minmax(0,1fr);gap:10px;padding:10px 8px;border-radius:7px}
 .message:hover{background:var(--hover)}
+.message:focus{background:var(--hover);outline:3px solid var(--focus);outline-offset:-1px}
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
 .avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}
 .message-body{min-width:0}
@@ -438,14 +439,18 @@ const workspaceRefinements = `<style>
 .channel-meta{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:680px}
 .membership-pill{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
 .membership-pill.joined{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,var(--line))}
+.channel-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:5px 9px;font-weight:700}
+.channel-actions button:hover{background:var(--hover)}
 .timeline{padding-top:12px}
-.message{position:relative;border-radius:6px}
-.message-actions{min-height:25px}
+.message{position:relative;border-radius:6px;padding-top:8px;padding-bottom:8px}
+.message-actions{position:absolute;z-index:3;right:8px;top:-15px;display:flex;min-height:0;gap:2px;padding:3px 5px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow);opacity:0;transition:opacity .12s ease}
+.message:hover .message-actions,.message:focus .message-actions,.message:focus-within .message-actions{opacity:1}
+.message-actions a,.message-actions button,.message-actions summary{display:inline-flex;align-items:center;min-height:28px;border-radius:4px;padding:4px 7px;color:var(--muted);font-size:12px;font-weight:700;white-space:nowrap}
+.message-actions a:hover,.message-actions button:hover,.message-actions summary:hover{background:var(--hover);color:var(--text);text-decoration:none}
 .message-actions details{display:inline-block;position:relative}
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
 .message-actions summary::-webkit-details-marker{display:none}
-.message-actions details[open]{padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--panel-strong);box-shadow:var(--shadow)}
-.message-actions details[open] summary{margin-bottom:6px;font-weight:700}
+.message-actions details[open]>form{position:absolute;z-index:5;right:0;top:34px;display:flex;width:max-content;max-width:min(480px,80vw);padding:9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .message-actions .edit-message{width:min(420px,70vw)}
 .message-actions .edit-message textarea{width:min(320px,55vw);min-height:64px;resize:vertical;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:5px 7px}
 .message-actions .delete-message button{color:var(--danger);font-weight:700}
@@ -458,11 +463,11 @@ const workspaceRefinements = `<style>
 .new-channel input[type=text]{min-width:0;width:100%;border:1px solid #ffffff8a;border-radius:4px;background:#ffffff1f;color:#fff;padding:6px 7px}
 .new-channel .privacy{display:flex;grid-template-columns:none;align-items:center;gap:6px}
 .new-channel button{width:100%;border:0;border-radius:5px;background:#fff;color:var(--accent);font-weight:800;padding:6px 9px}
-.composer-wrap{background:var(--panel-strong);padding-top:10px}
-.composer{border-color:var(--field-line);border-radius:9px;box-shadow:none}
+.composer-wrap{background:var(--panel-strong);padding-top:7px;padding-bottom:12px}
+.composer{border-color:var(--field-line);border-radius:9px;box-shadow:none;padding:8px 10px}
 .composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
-.composer textarea{min-height:58px}
-.composer-footer{border-top:1px solid var(--line);padding-top:8px}
+.composer textarea{min-height:44px}
+.composer-footer{border-top:1px solid var(--line);padding-top:6px}
 .composer-tools kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel);font:11px/1.4 inherit}
 .send{min-width:70px}
 .conversation-gate{border:1px solid var(--line);border-radius:9px;background:var(--panel);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:18px}
@@ -489,9 +494,14 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .search-submit{display:none}
 .channel-header{padding-left:12px;padding-right:12px}
 .membership-pill{display:none}
+.message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1}
+.message-actions details[open]>form{left:0;right:auto}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
+}
+@media(hover:none){
+.message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1}
 }
 </style>`
 
@@ -511,7 +521,7 @@ const attachmentPartial = `{{define "attachment"}}
 
 const messagesPartial = `{{define "messages"}}
 {{range $message := .Messages}}
-<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}">
+<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="Message from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
   <div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div>
   <div class="message-body">
     <div class="message-head">
@@ -967,6 +977,21 @@ function ownPath(value){return typeof value==='string'&&value.charAt(0)==='/'&&v
 function shown(region){return !!(region.offsetParent||region.getClientRects().length)}
 function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
 function toBottom(region){if(region)region.scrollTop=region.scrollHeight}
+function messageItems(region){return region?Array.prototype.slice.call(region.querySelectorAll('.message')).filter(shown):[]}
+function focusMessage(message){if(!message)return false;try{message.focus({preventScroll:true})}catch(error){message.focus()}message.scrollIntoView({block:'nearest'});return true}
+function messageDetails(message,label){
+var details=message?message.querySelectorAll('.message-actions details'):null;
+for(var index=0;details&&index<details.length;index++){var summary=details[index].querySelector('summary');if(summary&&summary.textContent.trim()===label)return details[index]}
+return null;
+}
+function openMessageDetails(message,label,control){
+var details=messageDetails(message,label);
+if(!details)return false;
+details.open=true;
+var target=details.querySelector(control);
+if(target)target.focus();
+return true;
+}
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
 function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
 function refresh(force){
@@ -986,7 +1011,9 @@ if(focused&&!force)return;
 var stick=atBottom(region);
 var options={headers:{'HX-Request':'true'},credentials:'same-origin'};
 if(controller)options.signal=controller.signal;
-pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){if(token!==generation)return;region.innerHTML=html;localize(region);if(stick)toBottom(region);if(focused&&region.hasAttribute('tabindex'))region.focus()}));
+var activeMessage=focused?document.activeElement.closest('.message'):null;
+var activeMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
+pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){if(token!==generation)return;region.innerHTML=html;localize(region);if(stick)toBottom(region);if(activeMessageID){var items=messageItems(region);var restored=items.find(function(item){return item.getAttribute('data-message-id')===activeMessageID});if(focusMessage(restored))return}if(focused&&region.hasAttribute('tabindex'))region.focus()}));
 })(live[index])}
 return Promise.all(pending).then(function(){if(inFlight===controller)inFlight=null});
 }
@@ -1048,6 +1075,12 @@ return refresh(true);
 }).catch(function(error){showError(failure(error,form),form)}).then(release,release);
 });
 if(text&&composer){text.addEventListener('keydown',function(event){
+if(event.key==='ArrowUp'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&text.value===''){
+var target=composer.getAttribute('hx-target');
+var region=target&&target.charAt(0)==='#'?document.querySelector(target):document.getElementById('timeline');
+var items=messageItems(region);
+if(items.length){event.preventDefault();focusMessage(items[items.length-1]);return}
+}
 if(event.key!=='Enter'||event.shiftKey||event.ctrlKey||event.metaKey||event.altKey||event.isComposing)return;
 event.preventDefault();
 if(sending)return;
@@ -1081,6 +1114,36 @@ return;
 }
 var target=event.target;
 var editing=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.isContentEditable);
+var focusedMessage=target&&target.closest?target.closest('.message'):null;
+if(focusedMessage&&target===focusedMessage&&!event.ctrlKey&&!event.metaKey&&!event.altKey){
+var region=focusedMessage.closest('[data-fragment]');
+var items=messageItems(region);
+var position=items.indexOf(focusedMessage);
+if(event.key==='ArrowUp'||event.key==='ArrowDown'||event.key==='Home'||event.key==='End'){
+var next=position;
+if(event.key==='ArrowUp')next=Math.max(0,position-1);
+if(event.key==='ArrowDown')next=Math.min(items.length-1,position+1);
+if(event.key==='Home')next=0;
+if(event.key==='End')next=items.length-1;
+if(next>=0){event.preventDefault();focusMessage(items[next]);return}
+}
+if(event.key==='ArrowRight'||key==='t'){
+var reply=focusedMessage.querySelector('.message-actions a');
+if(reply&&ownPath(reply.getAttribute('href'))){event.preventDefault();window.location.assign(reply.getAttribute('href'));return}
+}
+if(event.key==='ArrowLeft'){
+var back=Array.prototype.slice.call(document.querySelectorAll('.channel-actions a')).find(function(link){return link.textContent.trim()==='Back to channel'});
+if(back&&ownPath(back.getAttribute('href'))){event.preventDefault();window.location.assign(back.getAttribute('href'));return}
+}
+if(key==='e'&&openMessageDetails(focusedMessage,'Edit','textarea')){event.preventDefault();return}
+if(event.key==='Delete'&&openMessageDetails(focusedMessage,'Delete','button[type=submit]')){event.preventDefault();return}
+if(key==='r'&&openMessageDetails(focusedMessage,'Add reaction','input[name=name]')){event.preventDefault();return}
+if(key==='p'){
+var buttons=focusedMessage.querySelectorAll('.message-actions button[type=submit]');
+var pin=Array.prototype.slice.call(buttons).find(function(button){var label=button.textContent.trim();return label==='Pin'||label==='Unpin'});
+if(pin){event.preventDefault();var form=pin.closest('form');if(form&&typeof form.requestSubmit==='function')form.requestSubmit(pin);else if(form)form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));return}
+}
+}
 if(key==='/'&&!editing&&!event.ctrlKey&&!event.metaKey&&!event.altKey){
 if(!search)return;
 event.preventDefault();

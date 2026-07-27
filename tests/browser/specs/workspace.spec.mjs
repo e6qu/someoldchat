@@ -237,6 +237,65 @@ test('the composer honours the keyboard contract it advertises', async ({ page, 
   await expect(search).toBeFocused();
 });
 
+test('message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
+  await signIn(context);
+  const first = await postThroughTheAPI(request, `keyboard first ${Date.now()}`);
+  const second = await postThroughTheAPI(request, `keyboard second ${Date.now()}`);
+  const last = await postThroughTheAPI(request, `keyboard last ${Date.now()}`);
+  await page.goto('/app');
+
+  const composer = page.locator('form.composer textarea[name="text"]');
+  await composer.fill('');
+  await composer.press('ArrowUp');
+  const lastMessage = page.locator('.message', { hasText: `keyboard last` });
+  const secondMessage = page.locator('.message', { hasText: `keyboard second` });
+  await expect(lastMessage).toBeFocused();
+
+  await page.keyboard.press('ArrowUp');
+  await expect(secondMessage).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(page.locator('#timeline .message').last()).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(page.locator('#timeline .message').first()).toBeFocused();
+
+  await lastMessage.focus();
+  await page.keyboard.press('p');
+  await expect(lastMessage.locator('.pinned')).toBeVisible();
+  await expect(lastMessage).toBeFocused();
+
+  await page.keyboard.press('r');
+  const reaction = lastMessage.locator('input[name="name"]');
+  await expect(reaction).toBeFocused();
+  await reaction.fill('wave');
+  await reaction.press('Enter');
+  await expect(lastMessage.locator('.reactions .chip')).toContainText('wave');
+
+  await lastMessage.focus();
+  await page.keyboard.press('e');
+  const editor = lastMessage.getByRole('textbox', { name: 'Edit your message' });
+  await expect(editor).toBeFocused();
+  await editor.evaluate((node) => {
+    node.closest('details').open = false;
+    node.closest('.message').focus();
+  });
+
+  await page.keyboard.press('t');
+  await expect(page).toHaveURL(new RegExp(`thread=${encodeURIComponent(last.ts)}`));
+  const threadRoot = page.locator('#thread-messages .message').first();
+  await threadRoot.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(page).not.toHaveURL(/thread=/);
+
+  const returned = page.locator('.message', { hasText: `keyboard last` });
+  await returned.focus();
+  await page.keyboard.press('Delete');
+  await expect(returned.getByRole('button', { name: 'Delete this message' })).toBeFocused();
+
+  // The earlier messages are intentionally referenced so the journey proves
+  // arrow navigation follows chronology rather than a coincidental last row.
+  expect(first.ts).not.toBe(second.ts);
+});
+
 // Public channels are intentionally readable before joining, but that does not
 // make their mutation controls usable. The UI must offer the real membership
 // transition first and reveal the composer only after it succeeds.
@@ -303,6 +362,7 @@ test('reactions and pins render and reverse in place', async ({ page, context, r
   const target = page.locator('.message').last();
   const url = page.url();
 
+  await target.hover();
   const reaction = target.locator('form[aria-label="Add reaction"] input[name="name"]');
   await target.getByText('Add reaction', { exact: true }).click();
   await reaction.fill('wave');
@@ -335,6 +395,7 @@ test('a member can edit and delete their own message in place', async ({ page, c
   await composer.press('Enter');
 
   const target = page.locator('.message', { hasText: original });
+  await target.hover();
   await target.getByText('Edit', { exact: true }).click();
   const editor = target.getByRole('textbox', { name: 'Edit your message' });
   const changed = `edited in browser ${Date.now()}`;
@@ -344,6 +405,7 @@ test('a member can edit and delete their own message in place', async ({ page, c
   await expect(page.locator('.message', { hasText: original })).toHaveCount(0);
 
   const changedTarget = page.locator('.message', { hasText: changed });
+  await changedTarget.hover();
   await changedTarget.getByText('Delete', { exact: true }).click();
   await changedTarget.getByRole('button', { name: 'Delete this message' }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(0);

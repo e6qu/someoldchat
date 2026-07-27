@@ -4153,17 +4153,41 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	limit, err := clampLimit(fields["count"], 100, 200)
+	limit, err := clampLimit(fields["count"], 20, 100)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	cursor, err := decodeMessageCursor(fields["cursor"], "invalid_arg_name")
+	pageNumber, err := pageNumber(fields["page"])
+	if err != nil || pageNumber > 100 {
+		if err == nil {
+			err = decodeFailure("invalid_arg_name", "page must be no greater than 100")
+		}
+		writeDecodeError(w, err)
+		return
+	}
+	rawCursor := strings.TrimSpace(fields["cursor"])
+	if rawCursor == "*" {
+		rawCursor = ""
+	}
+	cursor, err := decodeMessageCursor(rawCursor, "invalid_arg_name")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: limit, Cursor: cursor})
+	var page domain.MessagePage
+	for current := 1; current <= pageNumber; current++ {
+		page, err = h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: limit, Cursor: cursor})
+		if err != nil || current == pageNumber {
+			break
+		}
+		if !page.HasMore {
+			page.Messages = nil
+			page.NextCursor = ""
+			break
+		}
+		cursor = page.NextCursor
+	}
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -4171,10 +4195,31 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 	matches := make([]map[string]any, 0, len(page.Messages))
 	for _, message := range page.Messages {
 		match := messageResponse(message)
-		match["channel_id"] = message.Conversation
+		conversation, infoErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, message.Conversation)
+		author, userErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, message.AuthorID)
+		permalink, linkErr := h.Messages.Permalink(r.Context(), principal.WorkspaceID, principal.UserID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt))
+		if infoErr != nil || userErr != nil || linkErr != nil {
+			writeError(w, "fatal_error")
+			return
+		}
+		match["channel"] = conversationResponse(conversation)
+		match["team"] = principal.WorkspaceID
+		match["username"] = author.Name
+		match["permalink"] = permalink
 		matches = append(matches, match)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": query, "messages": map[string]any{"matches": matches, "total": len(matches), "pagination": map[string]any{"page": 1, "per_page": limit, "page_count": 1, "total_count": len(matches)}}, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+	pageCount := 0
+	if page.Total > 0 {
+		pageCount = (page.Total + limit - 1) / limit
+	}
+	first, last := 0, 0
+	if len(matches) > 0 {
+		first = (pageNumber-1)*limit + 1
+		last = first + len(matches) - 1
+	}
+	pagination := map[string]any{"first": first, "last": last, "page": pageNumber, "per_page": limit, "page_count": pageCount, "total_count": page.Total}
+	paging := map[string]any{"count": limit, "page": pageNumber, "pages": pageCount, "total": page.Total}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": query, "messages": map[string]any{"matches": matches, "total": page.Total, "pagination": pagination, "paging": paging}, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
 }
 
 func (h Handler) remoteFileAdd(w http.ResponseWriter, r *http.Request) {
@@ -5557,14 +5602,27 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	conversation, timestamp, text := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"]), fields["text"]
-	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
-	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
-	if conversation == "" || timestamp == "" || (strings.TrimSpace(text) == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil {
+	conversation, timestamp := strings.TrimSpace(fields["channel"]), strings.TrimSpace(fields["ts"])
+	text, hasText := fields["text"]
+	rawBlocks, hasBlocks := fields["blocks"]
+	rawAttachments, hasAttachments := fields["attachments"]
+	blocks, blockErr := domain.NormalizeBlocks([]byte(rawBlocks))
+	attachments, attachmentErr := domain.NormalizeAttachments([]byte(rawAttachments))
+	if conversation == "" || timestamp == "" || (!hasText && !hasBlocks && !hasAttachments) || blockErr != nil || attachmentErr != nil {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	message, err := h.Messages.UpdateWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), text, blocks, attachments)
+	patch := domain.MessagePatch{}
+	if hasText {
+		patch.Text = &text
+	}
+	if hasBlocks {
+		patch.Blocks = &blocks
+	}
+	if hasAttachments {
+		patch.Attachments = &attachments
+	}
+	message, err := h.Messages.UpdateMessage(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(conversation), domain.MessageTimestamp(timestamp), patch)
 	if err != nil {
 		writeError(w, mapServiceError(err, "message_not_found"))
 		return

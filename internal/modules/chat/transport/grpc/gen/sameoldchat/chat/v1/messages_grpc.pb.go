@@ -24,6 +24,7 @@ const (
 	MessagesService_PostEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/PostEphemeral"
 	MessagesService_Update_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Update"
 	MessagesService_UpdateWithBlocks_FullMethodName               = "/sameoldchat.chat.v1.MessagesService/UpdateWithBlocks"
+	MessagesService_UpdateMessage_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/UpdateMessage"
 	MessagesService_Unfurl_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Unfurl"
 	MessagesService_Delete_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Delete"
 	MessagesService_Permalink_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/Permalink"
@@ -44,6 +45,7 @@ type MessagesServiceClient interface {
 	PostEphemeral(ctx context.Context, in *PostEphemeralRequest, opts ...grpc.CallOption) (*EphemeralMessage, error)
 	Update(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*Message, error)
 	UpdateWithBlocks(ctx context.Context, in *UpdateWithBlocksRequest, opts ...grpc.CallOption) (*Message, error)
+	UpdateMessage(ctx context.Context, in *UpdateMessageRequest, opts ...grpc.CallOption) (*Message, error)
 	Unfurl(ctx context.Context, in *UnfurlRequest, opts ...grpc.CallOption) (*Message, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*Message, error)
 	Permalink(ctx context.Context, in *PermalinkRequest, opts ...grpc.CallOption) (*PermalinkResponse, error)
@@ -107,6 +109,16 @@ func (c *messagesServiceClient) UpdateWithBlocks(ctx context.Context, in *Update
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Message)
 	err := c.cc.Invoke(ctx, MessagesService_UpdateWithBlocks_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) UpdateMessage(ctx context.Context, in *UpdateMessageRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_UpdateMessage_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +224,7 @@ type MessagesServiceServer interface {
 	PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error)
 	Update(context.Context, *UpdateRequest) (*Message, error)
 	UpdateWithBlocks(context.Context, *UpdateWithBlocksRequest) (*Message, error)
+	UpdateMessage(context.Context, *UpdateMessageRequest) (*Message, error)
 	Unfurl(context.Context, *UnfurlRequest) (*Message, error)
 	Delete(context.Context, *DeleteRequest) (*Message, error)
 	Permalink(context.Context, *PermalinkRequest) (*PermalinkResponse, error)
@@ -244,6 +257,9 @@ func (UnimplementedMessagesServiceServer) Update(context.Context, *UpdateRequest
 }
 func (UnimplementedMessagesServiceServer) UpdateWithBlocks(context.Context, *UpdateWithBlocksRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateWithBlocks not implemented")
+}
+func (UnimplementedMessagesServiceServer) UpdateMessage(context.Context, *UpdateMessageRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateMessage not implemented")
 }
 func (UnimplementedMessagesServiceServer) Unfurl(context.Context, *UnfurlRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unfurl not implemented")
@@ -378,6 +394,24 @@ func _MessagesService_UpdateWithBlocks_Handler(srv interface{}, ctx context.Cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MessagesServiceServer).UpdateWithBlocks(ctx, req.(*UpdateWithBlocksRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_UpdateMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).UpdateMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_UpdateMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).UpdateMessage(ctx, req.(*UpdateMessageRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -570,6 +604,10 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateWithBlocks",
 			Handler:    _MessagesService_UpdateWithBlocks_Handler,
+		},
+		{
+			MethodName: "UpdateMessage",
+			Handler:    _MessagesService_UpdateMessage_Handler,
 		},
 		{
 			MethodName: "Unfurl",

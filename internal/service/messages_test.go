@@ -1512,6 +1512,47 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	}
 }
 
+func TestMessagePatchPreservesOmittedRichContentAndRemovesExplicitEmptyArrays(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+	value, err := messages.PostWithBlocksAndAttachments(
+		context.Background(), "T1", "U1", "C1", "fallback",
+		`[{"type":"section","text":{"type":"plain_text","text":"block"}}]`,
+		`[{"text":"attachment"}]`, "", "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	timestamp := domain.NewMessageTimestamp(value.CreatedAt)
+	changedAttachments := `[{"text":"changed"}]`
+	updated, err := messages.UpdateMessage(context.Background(), "T1", "U1", "C1", timestamp, domain.MessagePatch{Attachments: &changedAttachments})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Text != value.Text || updated.Blocks != value.Blocks || updated.Attachments != changedAttachments {
+		t.Fatalf("attachments-only patch erased omitted fields: %+v", updated)
+	}
+	empty := "[]"
+	updated, err = messages.UpdateMessage(context.Background(), "T1", "U1", "C1", timestamp, domain.MessagePatch{Blocks: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Blocks != "[]" || updated.Attachments != changedAttachments {
+		t.Fatalf("explicit empty blocks did not remove only blocks: %+v", updated)
+	}
+	updated, err = messages.UpdateMessage(context.Background(), "T1", "U1", "C1", timestamp, domain.MessagePatch{Attachments: &empty})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Attachments != "[]" || updated.Text != value.Text {
+		t.Fatalf("explicit empty attachments did not remove only attachments: %+v", updated)
+	}
+}
+
 // The Slack HTTP decoder already enforced this ceiling, but the shared service
 // did not. Browser, gRPC and webhook callers could therefore persist an
 // oversized post or edit, while scheduled and ephemeral messages counted bytes
