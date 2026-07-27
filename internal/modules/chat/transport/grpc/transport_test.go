@@ -3,6 +3,7 @@ package grpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -22,6 +24,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
@@ -856,3 +859,178 @@ func TestChunkingRefusesAStalledSource(t *testing.T) {
 type stalledReader struct{}
 
 func (stalledReader) Read([]byte) (int, error) { return 0, nil }
+
+// pageRecordingChat records the page bound the implementation is asked for, so
+// the test can assert what crosses the seam rather than what the caller sent.
+type pageRecordingChat struct {
+	chatapi.Service
+
+	mu      sync.Mutex
+	records []int
+}
+
+func (c *pageRecordingChat) record(limit int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.records = append(c.records, limit)
+}
+
+func (c *pageRecordingChat) observed() []int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]int(nil), c.records...)
+}
+
+func (c *pageRecordingChat) ListEventsAfter(_ context.Context, _ domain.WorkspaceID, _ uint64, limit int) ([]events.Record, error) {
+	c.record(limit)
+	return nil, nil
+}
+
+func (c *pageRecordingChat) History(_ context.Context, _ domain.WorkspaceID, _ domain.UserID, _ domain.ConversationID, page domain.PageRequest) (domain.MessagePage, error) {
+	c.record(page.Limit)
+	return domain.MessagePage{}, nil
+}
+
+// A page limit is not a question about the caller's domain — it is a bound on
+// what the server allocates on the caller's behalf. Every store preallocates
+// from it (make([]T, 0, limit) in both backends), and with the seam bound
+// deleted one request for limit=2147483647 took the process from 18 MB to
+// 320 MB of resident memory for a two-record answer; thirty concurrent requests
+// is about nine gigabytes. Nothing below the transport re-bounds it:
+// domain.PageRequest is a plain struct and the service passes it through.
+//
+// The bound is a clamp rather than a rejection, so it cannot make the two
+// compositions answer differently: no caller is refused, and no real page is
+// changed.
+func TestAPageLimitIsBoundedByATransportResourceLimit(t *testing.T) {
+	target := seededStore(t)
+	recorder := &pageRecordingChat{Service: service.Messages{Store: target}}
+	remote, _ := serve(t, recorder, target, Observer{})
+	ctx := context.Background()
+	if _, err := remote.ListEventsAfter(ctx, "T1", 0, math.MaxInt32); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: math.MaxInt32}); err != nil {
+		t.Fatal(err)
+	}
+	for _, observed := range recorder.observed() {
+		if observed > maxSeamPage {
+			t.Fatalf("the implementation was asked to allocate a page of %d, which nothing below the transport bounds", observed)
+		}
+	}
+	// A page a caller can really ask for crosses unchanged, so the clamp is not
+	// a second, invisible product limit.
+	before := len(recorder.observed())
+	if _, err := remote.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 201}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.ListEventsAfter(ctx, "T1", 0, 1000); err != nil {
+		t.Fatal(err)
+	}
+	ordinary := recorder.observed()[before:]
+	if len(ordinary) != 2 || ordinary[0] != 201 || ordinary[1] != 1000 {
+		t.Fatalf("ordinary page bounds were rewritten: %v", ordinary)
+	}
+}
+
+// The seam rebuilds a durable record from independent proto fields: Topic and
+// Payload arrive as separate values and nothing on the wire says they describe
+// the same event. That is the one producer in the tree that can create a record
+// whose topic understates what its payload carries, and the payload rules used
+// to be applied to the topic alone — so a payload that self-describes as
+// message.ephemeral or as internal blob work crossed the seam under
+// message.created and was handed to every app, every webhook and every browser
+// in the workspace.
+//
+// The refusal is not duplicated here. events applies it to both names a record
+// carries, from one shared site, so anything this codec rebuilds is judged by
+// what it actually contains; this test is what proves that the codec's output
+// reaches that rule.
+func TestARecordRebuiltFromProtoFieldsIsJudgedByItsPayload(t *testing.T) {
+	at := time.Unix(1700000000, 0).UTC()
+	restricted := map[string]struct {
+		payloadType string
+		sentinel    error
+	}{}
+	for _, topic := range events.RecipientScopedTopics() {
+		restricted["a payload addressed to one recipient: "+topic] = struct {
+			payloadType string
+			sentinel    error
+		}{topic, events.ErrPayloadRecipientScoped}
+	}
+	for _, topic := range events.InternalTopics() {
+		restricted["an internal worker payload: "+topic] = struct {
+			payloadType string
+			sentinel    error
+		}{topic, events.ErrPayloadInternal}
+	}
+	for name, testCase := range restricted {
+		t.Run(name, func(t *testing.T) {
+			// Topic says one thing, payload says another. Only a rebuild can
+			// produce this: events.New derives the payload type from the topic.
+			original := []events.Record{{Sequence: 9, Event: events.Event{
+				ID: "evt_9", WorkspaceID: "T1", ActorID: "U1", Topic: "message.created", CreatedAt: at,
+				Payload: fmt.Sprintf(`{"type":%q,"event_ts":"1700000000.000000","user_id":"U2","text":"SECRET-ONLY-FOR-U2"}`, testCase.payloadType),
+			}}}
+			rebuilt, err := decodeProtoEvents(encodeProtoEvents(original))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rebuilt) != 1 || rebuilt[0].Event.Topic != "message.created" {
+				t.Fatalf("rebuilt=%+v", rebuilt)
+			}
+			if _, err := events.Broadcastable(rebuilt[0].Event); !errors.Is(err, testCase.sentinel) {
+				t.Fatalf("a rebuilt record was broadcastable: error=%v, want %v", err, testCase.sentinel)
+			}
+			if _, err := json.Marshal(rebuilt[0]); !errors.Is(err, testCase.sentinel) {
+				t.Fatalf("a rebuilt record was serialized for a third party: error=%v, want %v", err, testCase.sentinel)
+			}
+		})
+	}
+	// A payload carrying a Slack event type still crosses: that is the shape
+	// every official client parses, and refusing it here is what broke them.
+	compatible := []events.Record{{Sequence: 10, Event: events.Event{
+		ID: "evt_10", WorkspaceID: "T1", Topic: "message.created", CreatedAt: at,
+		Payload: `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`,
+	}}}
+	rebuilt, err := decodeProtoEvents(encodeProtoEvents(compatible))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := events.Broadcastable(rebuilt[0].Event); err != nil {
+		t.Fatalf("a Slack-shaped payload was refused after crossing the seam: %v", err)
+	}
+}
+
+// An upload that keeps arriving and never delivers a byte is a peer that has
+// stopped making progress, and the handler used to wait for it forever: the
+// stream, the receive loop, the io.Pipe and the implementation goroutine stay
+// pinned, and keepalive never fires because frames are arriving. The client
+// half of this package already refuses the same shape (transport.go, "an
+// io.Reader that keeps returning (0, nil) spun that loop forever").
+func TestAnUploadStreamThatNeverDeliversAByteIsBounded(t *testing.T) {
+	target := seededStore(t)
+	_, connection := serve(t, service.Messages{Store: target}, target, Observer{})
+	client := chatv1.NewChatServiceClient(connection)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	stream, err := client.UploadFile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := stream.Send(&chatv1.UploadFilePart{Part: &chatv1.UploadFilePart_Metadata{Metadata: &chatv1.UploadFileRequest{
+		WorkspaceId: "T1", UserId: "U1", Name: "notes.txt", Title: "Notes", MimeType: "text/plain", Size: 8,
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	for range maxEmptyUploadFrames + 64 {
+		if err := stream.Send(&chatv1.UploadFilePart{Part: &chatv1.UploadFilePart_Chunk{Chunk: nil}}); err != nil {
+			// The server has already refused the stream, which is the point.
+			break
+		}
+	}
+	if _, err := stream.CloseAndRecv(); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("a stream that delivered no bytes in %d frames ended with %v (code %s), want a refusal",
+			maxEmptyUploadFrames+64, err, status.Code(err))
+	}
+}

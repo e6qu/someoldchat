@@ -134,6 +134,17 @@ jobs:
       - name: Validate Terraform
         run: terraform validate
 
+      # A module's README example is a call an operator copies, and
+      # `terraform validate` never reads a README. module-docs-check compares
+      # argument names, which cannot see a type error or the module's own
+      # `validation` blocks — so deploy/ecs-scale-zero's example could document
+      # the task-local store the module exists to forbid, with every gate green.
+      # This job is the only one with Terraform, so it is the only place the
+      # example can be validated for real.
+      - name: Validate the module README example
+        working-directory: ${{ github.workspace }}
+        run: ./scripts/check-terraform-module-examples.sh "${{ matrix.directory }}"
+
   # The WebSocket edge image and the activator Lambda were the only shipped
   # deployment artifacts no workflow exercised, which is why an arm64-only build
   # and three defects in activator.py all survived every gate.

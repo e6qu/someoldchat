@@ -23,7 +23,7 @@ func TestOutboxReplicasPartitionDurableClaims(t *testing.T) {
 	createdAt := time.Now().UTC()
 	for index := 0; index < 32; index++ {
 		id := domain.MessageID(fmt.Sprintf("M-competition-%02d", index))
-		if err := repository.CreateMessage(ctx, domain.Message{ID: id, WorkspaceID: "T-competition", Conversation: "C-competition", AuthorID: "U-competition", Text: string(id), CreatedAt: createdAt.Add(time.Duration(index) * time.Nanosecond)}, events.Event{ID: domain.EventID("E-" + string(id)), WorkspaceID: "T-competition", Topic: "message.created", Payload: string(id), CreatedAt: createdAt}, ""); err != nil {
+		if err := repository.CreateMessage(ctx, domain.Message{ID: id, WorkspaceID: "T-competition", Conversation: "C-competition", AuthorID: "U-competition", Text: string(id), CreatedAt: createdAt.Add(time.Duration(index) * time.Microsecond)}, events.Event{ID: domain.EventID("E-" + string(id)), WorkspaceID: "T-competition", Topic: "message.created", Payload: string(id), CreatedAt: createdAt}, ""); err != nil {
 			t.Fatal(err)
 		}
 	}

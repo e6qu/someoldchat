@@ -169,3 +169,60 @@ type sqlStateError struct {
 
 func (e sqlStateError) Error() string    { return e.message }
 func (e sqlStateError) SQLState() string { return e.state }
+
+// TestContentionIsRecognisedOnEveryEngine is the retry predicate's own contract.
+//
+// It was sqliteBusy, and it matched only SQLite result codes and SQLite English:
+// on PostgreSQL it returned false for 40001, 40P01 and 55P03, so underContention
+// made exactly ONE attempt and handed the raw driver error back. Before this
+// change the assertions below reported
+//
+//	sqliteBusy(ERROR: could not serialize access … (SQLSTATE 40001)) = false
+//	underContention attempts for a PostgreSQL serialization failure: 1
+//
+// and classify returned that SQLSTATE unchanged, so a routine retryable
+// condition reached the transport unclassified.
+func TestContentionIsRecognisedOnEveryEngine(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"postgres serialization failure", sqlStateError{state: "40001", message: "ERROR: could not serialize access due to concurrent update"}, true},
+		{"postgres deadlock victim", sqlStateError{state: "40P01", message: "ERROR: deadlock detected"}, true},
+		{"postgres lock not available", sqlStateError{state: "55P03", message: "ERROR: could not obtain lock on row"}, true},
+		{"postgres constraint failure", sqlStateError{state: "23505", message: "duplicate key"}, false},
+		{"sqlite busy text", errors.New("database is locked"), true},
+		{"dqlite lost leadership", errors.New("driver: leadership lost while committing"), true},
+		{"unrelated failure", errors.New("disk I/O error"), false},
+	} {
+		if got := contended(testCase.err); got != testCase.want {
+			t.Errorf("contended(%s) = %v, want %v", testCase.name, got, testCase.want)
+		}
+	}
+
+	// It retries, rather than reporting the first attempt's error.
+	attempts := 0
+	err := underContention(context.Background(), func() error {
+		attempts++
+		if attempts < 3 {
+			return sqlStateError{state: "40001", message: "ERROR: could not serialize access due to concurrent update"}
+		}
+		return nil
+	})
+	if err != nil || attempts != 3 {
+		t.Fatalf("underContention attempts=%d err=%v, want it to retry a serialization failure", attempts, err)
+	}
+
+	// And a contention that outlives the budget reaches the caller CLASSIFIED,
+	// because AGENTS.md reserves HTTP 500 for the unhandled.
+	for _, err := range []error{
+		sqlStateError{state: "40001", message: "ERROR: could not serialize access due to concurrent update"},
+		sqlStateError{state: "40P01", message: "ERROR: deadlock detected"},
+		errors.New("driver: leadership lost while committing"),
+	} {
+		if classified := classify(err); !errors.Is(classified, store.ErrTransient) {
+			t.Errorf("classify(%v) = %v, want store.ErrTransient", err, classified)
+		}
+	}
+}

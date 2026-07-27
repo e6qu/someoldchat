@@ -3,6 +3,7 @@ package auth
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"mime/multipart"
@@ -155,6 +156,20 @@ func TestValidateCSRFRefusesRequestsTheBrowserReportsAsForeign(t *testing.T) {
 		"opaque origin": func(r *http.Request) {
 			r.Header.Set("Origin", "null")
 		},
+		// Four values that compare equal on Host alone and are not this
+		// origin. Each one was accepted while only parsed.Host was compared.
+		"scheme-relative origin": func(r *http.Request) {
+			r.Header.Set("Origin", "//chat.example.test")
+		},
+		"non-web scheme": func(r *http.Request) {
+			r.Header.Set("Origin", "ftp://chat.example.test")
+		},
+		"userinfo hides the authority": func(r *http.Request) {
+			r.Header.Set("Origin", "https://evil.example@chat.example.test")
+		},
+		"origin carrying a path": func(r *http.Request) {
+			r.Header.Set("Origin", "https://chat.example.test/evil")
+		},
 	} {
 		request := forged()
 		apply(request)
@@ -173,12 +188,27 @@ func TestValidateCSRFRefusesRequestsTheBrowserReportsAsForeign(t *testing.T) {
 			r.Header.Set("Origin", "https://chat.example.test")
 		},
 		"no browser metadata at all": func(*http.Request) {},
+		// A deployment this process serves in the clear really does have an
+		// http origin, and refusing it would lock out every client on the
+		// Origin path.
+		"plaintext deployment": func(r *http.Request) {
+			r.Header.Set("Origin", "http://chat.example.test")
+		},
 	} {
 		request := forged()
 		apply(request)
 		if err := ValidateCSRF(request); err != nil {
 			t.Fatalf("%s: rejected a request from this origin: %v", name, err)
 		}
+	}
+
+	// The same http origin against a request this process terminated over TLS
+	// is a downgrade and is refused.
+	downgraded := forged()
+	downgraded.TLS = &tls.ConnectionState{}
+	downgraded.Header.Set("Origin", "http://chat.example.test")
+	if err := ValidateCSRF(downgraded); !errors.Is(err, ErrCSRFCrossSite) {
+		t.Fatalf("a scheme downgrade against a TLS request was accepted: %v", err)
 	}
 }
 

@@ -315,43 +315,99 @@ func RecipientScopedTopics() []string {
 	return append([]string(nil), recipientScopedTopics...)
 }
 
+// audience names what a consumer of a decoded payload can address.
+type audience uint8
+
+const (
+	// oneRecipient delivers to a single authenticated user and can therefore
+	// filter a record addressed to one recipient.
+	oneRecipient audience = iota
+	// everyone has no recipient to filter on: an event webhook, an app
+	// connection, or a durable record shipped verbatim as JSON.
+	everyone
+)
+
+// refuse reports why a record that names this topic must be withheld from the
+// audience, or nil when it may be delivered.
+//
+// It takes a topic rather than an Event because a record carries two names for
+// the same thing — the Topic column, which decides routing, the recipient
+// filter and the event name a browser receives, and the "type" the payload
+// describes itself as, which is the body every transport actually ships — and
+// either can be the one a consumer acts on. One predicate, applied to each name
+// from one shared site, is the whole rule:
+//
+//   - testing Topic alone is how a payload that self-describes as
+//     message.ephemeral was broadcast to a whole workspace and to every app
+//     under topic message.created;
+//   - testing the two for *equality* instead is how every official Socket Mode
+//     and real-time client broke, because a Slack-shaped payload legitimately
+//     names a Slack event type that is not the record's topic.
+//
+// Refusing a record that is restricted by topic OR by payload accepts the
+// compatible record and refuses the dangerous one, and it does so on every
+// path rather than on the one that remembered to check.
+func (a audience) refuse(topic string) error {
+	if InternalTopic(topic) {
+		return fmt.Errorf("%w: topic %s", ErrPayloadInternal, topic)
+	}
+	if a == everyone && RecipientScoped(topic) {
+		return fmt.Errorf("%w: topic %s", ErrPayloadRecipientScoped, topic)
+	}
+	return nil
+}
+
+// AddressedToOneRecipient reports whether a decoded record is addressed to
+// exactly one user, by its topic or by the type its payload describes itself
+// as.
+//
+// A consumer that can scope delivery must ask this rather than asking about the
+// topic alone. Topic and the payload's "type" are separate storage columns and
+// separate wire fields, so a record rebuilt from independent parts can carry an
+// ordinary topic over a payload that is addressed to one user; a filter that
+// reads only the topic then decides that record is addressed to nobody and
+// writes it to every subscriber in the workspace. A consumer that cannot scope
+// delivery does not need this: Broadcastable refuses the record outright.
+func AddressedToOneRecipient(topic string, delivered Delivered) bool {
+	return RecipientScoped(topic) || RecipientScoped(delivered.Type)
+}
+
 // Broadcastable decodes an event's stored payload for a consumer that delivers
 // to an audience rather than to one user, such as an event webhook or an app
 // connection. It refuses recipient-scoped records in addition to everything
 // Deliverable refuses, so the recipient filter cannot be forgotten by a
 // transport that has no recipient to filter on.
 func Broadcastable(event Event) (Delivered, error) {
-	if RecipientScoped(event.Topic) {
-		return Delivered{}, fmt.Errorf("%w: topic %s", ErrPayloadRecipientScoped, event.Topic)
-	}
-	return Deliverable(event)
+	return decodeDelivered(event.Payload, event.Topic, everyone)
 }
 
-// Deliverable decodes an event's stored payload for delivery. It returns
-// ErrPayloadInternal for internal worker records and ErrPayloadMalformed for a
-// payload that is not a JSON object with a non-empty "type", which is what a
-// record written before the typed payload contract looks like.
+// Deliverable decodes an event's stored payload for delivery to one
+// authenticated recipient. It returns ErrPayloadInternal for internal worker
+// records — whether the record says so in its topic or in its payload — and
+// ErrPayloadMalformed for a payload that is not a JSON object with a non-empty
+// "type", which is what a record written before the typed payload contract
+// looks like.
 //
-// It also refuses a record whose payload "type" differs from its Topic. New
-// establishes that equality at the write boundary, but Topic and Payload are
-// separate storage columns and separate wire fields, and a producer that
-// bypasses New — a hand-built literal, or a codec that rebuilds an Event from
-// independent proto fields — can set them apart. Topic alone decides
-// internal-topic exclusion, recipient scoping and the event name a browser
-// receives, while the content a consumer acts on comes from the payload, so a
-// divergent record is a record whose security decisions were made about a
-// different event. Re-establishing the equality on read makes the divergence
-// unrepresentable at both boundaries rather than only at the writing one.
+// It does not refuse a recipient-scoped record: its caller has a recipient, and
+// must filter with AddressedToOneRecipient rather than on the topic alone.
 func Deliverable(event Event) (Delivered, error) {
-	if InternalTopic(event.Topic) {
-		return Delivered{}, fmt.Errorf("%w: topic %s", ErrPayloadInternal, event.Topic)
-	}
-	return decodeDelivered(event.Payload, event.Topic)
+	return decodeDelivered(event.Payload, event.Topic, oneRecipient)
 }
 
-// decodeDelivered decodes a stored payload and, when expectedTopic is not
-// empty, requires the payload to describe itself as that topic.
-func decodeDelivered(payload, expectedTopic string) (Delivered, error) {
+// decodeDelivered decodes a stored payload and applies the audience's refusal
+// to both names the record carries: the topic it is filed under and the type
+// its payload describes itself as.
+//
+// This is the one site both halves of the rule go through. Broadcastable,
+// Deliverable, SlackEventBody and Event.MarshalJSON all funnel here, so a
+// record cannot be refused by one and admitted by another, and a record rebuilt
+// from independent parts — which is what the transport codec produces from
+// separate proto fields, with no way to check that they agree — is judged by
+// what it actually carries rather than by what it is filed as.
+func decodeDelivered(payload, topic string, to audience) (Delivered, error) {
+	if err := to.refuse(topic); err != nil {
+		return Delivered{}, err
+	}
 	trimmed := strings.TrimSpace(payload)
 	if trimmed == "" || trimmed[0] != '{' {
 		return Delivered{}, ErrPayloadMalformed
@@ -378,11 +434,12 @@ func decodeDelivered(payload, expectedTopic string) (Delivered, error) {
 	// envelope exists yet. Asserting the equality here broke every official
 	// Socket Mode and real-time client while protecting nothing.
 	//
-	// The real hazard the equality was aimed at is a record REBUILT from
-	// independent parts, which happens only at the transport codec. That is
-	// where it belongs, and the absent translation is recorded as a
-	// compatibility gap rather than papered over here.
-	_ = expectedTopic
+	// What the equality was reaching for is the refusal below: a record rebuilt
+	// from independent parts must not escape a rule by being filed under a topic
+	// that does not describe it.
+	if err := to.refuse(kind); err != nil {
+		return Delivered{}, err
+	}
 	return Delivered{Type: kind, Object: object}, nil
 }
 

@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
@@ -147,6 +148,80 @@ func TestTheStatusMessageIsBounded(t *testing.T) {
 	}
 	if !errors.Is(mapRemoteError(sent.Err()), store.ErrInvalidArgument) {
 		t.Fatal("bounding the message lost the classification")
+	}
+	// The bound is in bytes and the message is text. Truncating inside a
+	// multi-byte rune produces a status message that is not valid UTF-8, which
+	// grpc-go repairs on the wire with U+FFFD and internal/web renders straight
+	// into a browser.
+	// Every alignment is exercised, because whether the byte offset lands inside
+	// a rune depends on the length of the sentinel's own text.
+	for offset := range 4 {
+		message := strings.Repeat("x", offset) + strings.Repeat("é", 2*maxStatusMessageBytes)
+		bounded := boundStatusMessage(message)
+		if len(bounded) > maxStatusMessageBytes {
+			t.Fatalf("offset %d: bounded message is %d bytes, want at most %d", offset, len(bounded), maxStatusMessageBytes)
+		}
+		if !utf8.ValidString(bounded) {
+			t.Fatalf("offset %d: the bounded status message is not valid UTF-8: %q", offset, bounded[len(bounded)-8:])
+		}
+		multibyte := mapError(fmt.Errorf("%w: %s", store.ErrNotFound, message))
+		truncated, _ := status.FromError(multibyte)
+		if !utf8.ValidString(truncated.Message()) {
+			t.Fatalf("offset %d: the status message on the wire is not valid UTF-8", offset)
+		}
+	}
+}
+
+// The code a status carries is the answer a caller acts on: 403 is a denial,
+// 404 an absence and 400 a caller mistake. An error that matches several classes
+// took its code from whichever class the table listed first, and the table lists
+// the validation block first — so errors.Join(store.ErrNotFound,
+// service.ErrInvalidCanvas), the shape internal/service returns when a
+// compensating delete fails after a rejected create, crossed the seam as a 400
+// naming invalid_canvas while the monolith answered channel_not_found. keys
+// fixed the sentinel set for a peer that reads keys; the code and the key a
+// peer that predates keys reads were still the wrong ones, which is the case
+// keys was added for.
+func TestTheStatusCodeComesFromTheMostRestrictiveMatchedClass(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		err  error
+		code codes.Code
+		key  string
+	}{
+		"absence with a validation failure":   {errors.Join(store.ErrNotFound, service.ErrInvalidCanvas), codes.NotFound, "store.not_found"},
+		"denial with a validation failure":    {errors.Join(service.ErrInvalidMessage, service.ErrNotWorkspaceAdmin), codes.PermissionDenied, "service.not_workspace_admin"},
+		"conflict with a validation failure":  {errors.Join(store.ErrInvalidArgument, store.ErrConflict), codes.Aborted, "store.conflict"},
+		"a validation failure on its own":     {fmt.Errorf("%w: bad", service.ErrInvalidCanvas), codes.InvalidArgument, "service.invalid_canvas"},
+		"two members of the same block":       {errors.Join(service.ErrInvalidCanvas, store.ErrInvalidArgument), codes.InvalidArgument, "service.invalid_canvas"},
+		"absence with a denial and a mistake": {errors.Join(store.ErrInvalidArgument, store.ErrNotFound, service.ErrMessageNotOwned), codes.PermissionDenied, "service.message_not_owned"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mapped := mapError(testCase.err)
+			sent, _ := status.FromError(mapped)
+			if sent.Code() != testCase.code {
+				t.Errorf("code = %s, want %s", sent.Code(), testCase.code)
+			}
+			var detail *chatv1.DomainError
+			for _, value := range sent.Details() {
+				if domainError, ok := value.(*chatv1.DomainError); ok {
+					detail = domainError
+				}
+			}
+			if detail == nil {
+				t.Fatal("no domain detail")
+			}
+			if detail.GetKey() != testCase.key {
+				t.Errorf("key = %q, want %q: a peer that predates keys reads this one and must not disagree with the code", detail.GetKey(), testCase.key)
+			}
+			// keys stays the whole matched set, so a peer that reads it restores
+			// every sentinel errors.Is answers in process.
+			restored := mapRemoteError(sent.Err())
+			for _, class := range errorClasses {
+				if errors.Is(testCase.err, class.sentinel) != errors.Is(restored, class.sentinel) {
+					t.Errorf("errors.Is(err, %s): local = %t, restored = %t", class.key, errors.Is(testCase.err, class.sentinel), errors.Is(restored, class.sentinel))
+				}
+			}
+		})
 	}
 }
 
@@ -322,17 +397,53 @@ func TestContextErrorsRestoreWithoutDetails(t *testing.T) {
 	}
 }
 
-func TestUnknownDetailKeyFallsBackToTheCode(t *testing.T) {
-	// A newer chat process may send a class this client does not know. The client
-	// must fall back to the code rather than dropping the classification.
-	result := status.New(codes.NotFound, "unknown class")
-	detailed, err := result.WithDetails(&chatv1.DomainError{Key: "store.some_future_sentinel"})
+// A detail this build does not recognise is not the same thing as no detail.
+//
+// No detail means "the peer is older than the detail and the code is all I
+// have", and the code's fallback class is then the best available answer. An
+// unrecognised detail means "the peer named a class and I do not know it", and
+// answering with the code's fallback invents a *different specific* class: a
+// newer peer's FailedPrecondition channel_is_archived was restored as
+// service.ErrMessageAlreadyDeleted and its PermissionDenied
+// not_a_workspace_owner as service.ErrMessageNotOwned. internal/api/slack maps
+// by sentinel, so for the whole rolling window a caller was told a message had
+// been deleted when the channel was archived. Leaving it unclassified gives the
+// generic path instead of a confidently wrong one.
+func TestAnUnknownDetailKeyIsNotGuessedFromTheCode(t *testing.T) {
+	for name, testCase := range map[string]struct {
+		code codes.Code
+		keys []string
+	}{
+		"a code whose fallback is a specific precondition": {codes.FailedPrecondition, []string{"service.channel_is_archived"}},
+		"a code whose fallback is a specific denial":       {codes.PermissionDenied, []string{"service.not_a_workspace_owner"}},
+		"a code whose fallback is generic":                 {codes.InvalidArgument, []string{"service.invalid_huddle"}},
+		"an absence this build does not know":              {codes.NotFound, []string{"service.huddle_not_found"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			result := status.New(testCase.code, "a class this build does not know")
+			detailed, err := result.WithDetails(&chatv1.DomainError{Key: testCase.keys[0], Keys: testCase.keys})
+			if err != nil {
+				t.Fatal(err)
+			}
+			restored := mapRemoteError(detailed.Err())
+			for _, class := range errorClasses {
+				if errors.Is(restored, class.sentinel) {
+					t.Fatalf("an unrecognised key %q restored %s, a class the peer did not name", testCase.keys[0], class.key)
+				}
+			}
+			if status.Code(restored) != testCase.code {
+				t.Fatalf("the status code was lost: %s", status.Code(restored))
+			}
+		})
+	}
+	// One recognised key among unrecognised ones is still a classification.
+	result := status.New(codes.NotFound, "one known class")
+	detailed, err := result.WithDetails(&chatv1.DomainError{Key: "service.huddle_not_found", Keys: []string{"service.huddle_not_found", "store.not_found"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored := mapRemoteError(detailed.Err())
-	if !errors.Is(restored, store.ErrNotFound) {
-		t.Fatalf("unknown key did not fall back to the code: %v", restored)
+	if !errors.Is(mapRemoteError(detailed.Err()), store.ErrNotFound) {
+		t.Fatal("a known key alongside an unknown one lost its classification")
 	}
 }
 

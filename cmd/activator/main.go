@@ -42,7 +42,12 @@ import (
 //
 // The two entries are the ones that must stay open: the catch-all is forwarded
 // application traffic, which the active stack authenticates itself, and the
-// liveness probe is what a load balancer polls before any token exists.
+// liveness probe is what a load balancer polls before any token exists. The
+// probe answers {"ok":true} and nothing else — leaving the lifecycle state and
+// the fencing generation on it reinstated two thirds of the /metrics leak on the
+// same public listener, which specs/scale-to-zero.md:189 forbids. They are
+// served by GET /lifecycle, which is absent from this list and therefore
+// requires the token.
 var unauthenticatedPatterns = map[string]bool{"/": true, "GET /healthz": true}
 
 // exitConfiguration and exitRuntime separate "the operator gave us something
@@ -168,7 +173,21 @@ func run(logger *slog.Logger) int {
 		logger.Error("configure lifecycle coordinator", "error", err)
 		return exitConfiguration
 	}
-	if err := coordinator.Recover(context.Background()); err != nil && !errors.Is(err, lifecycle.ErrRecoveryRequired) {
+	// Signals are installed before recovery, not after it. Recovery downloads and
+	// restores a snapshot, so an unreachable object store parks it for as long as
+	// the provider's own timeouts allow; with the handler installed afterwards,
+	// SIGTERM did nothing at all until it returned. cmd/server establishes its
+	// signal context before any durable resource for the same reason.
+	applicationContext, stopApplication := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopApplication()
+	if err := coordinator.Recover(applicationContext); err != nil && !errors.Is(err, lifecycle.ErrRecoveryRequired) {
+		// A recovery abandoned because the operator stopped the task is a clean
+		// stop, not a failure: reporting it as one makes a rolling deploy record a
+		// task failure and can trip the deployment circuit breaker.
+		if applicationContext.Err() != nil {
+			logger.Info("lifecycle recovery interrupted by shutdown")
+			return 0
+		}
 		logger.Error("recover lifecycle state", "error", err)
 		return exitRuntime
 	} else if errors.Is(err, lifecycle.ErrRecoveryRequired) {
@@ -181,8 +200,6 @@ func run(logger *slog.Logger) int {
 		return exitConfiguration
 	}
 	defer spool.Close()
-	applicationContext, stopApplication := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stopApplication()
 	handler, err := activator.NewDurableForwardingHandler(applicationContext, controller, coordinator.WakeAt, proxy, spool, *spoolOwner, *maxRequestBytes, *wakeDeadline, metrics)
 	if err != nil {
 		logger.Error("configure forwarding activator", "error", err)
@@ -386,7 +403,10 @@ func restoreHandler(controller *lifecycle.Controller, coordinator lifecycle.Coor
 			http.Error(w, "an operator restore requires a failed or hibernated stack", http.StatusConflict)
 			return
 		}
-		restoreFence, err := controller.BeginOperatorRestore(fence)
+		// The selection is recorded with the transition, so the restore that runs
+		// under this fence can only be the generation the operator named, and a
+		// refusal or a crash leaves no standing permission behind.
+		restoreFence, err := controller.BeginOperatorRestore(fence, generation)
 		if err != nil {
 			logger.Error("begin operator restore", "error", err, "generation", generation)
 			http.Error(w, "restore unavailable", http.StatusConflict)

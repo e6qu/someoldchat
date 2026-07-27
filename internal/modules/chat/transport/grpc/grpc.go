@@ -3478,7 +3478,7 @@ func (s *Server) AccessLogs(ctx context.Context, input *chatv1.AccessLogsRequest
 	if input.GetBefore() != 0 {
 		before = time.Unix(input.GetBefore(), 0).UTC()
 	}
-	values, hasMore, err := s.implementation.ListAccessLogs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), before, int(input.GetLimit()), int(input.GetPage()))
+	values, hasMore, err := s.implementation.ListAccessLogs(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), before, seamPage(int(input.GetLimit())), int(input.GetPage()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -3579,7 +3579,7 @@ func (s *Server) RecordSocketModeResponse(ctx context.Context, input *chatv1.Soc
 }
 
 func (s *Server) ClaimSocketModeResponses(ctx context.Context, input *chatv1.SocketModeResponseLeaseRequest) (*chatv1.SocketModeResponseBatch, error) {
-	values, err := s.implementation.ClaimSocketModeResponses(ctx, domain.AppID(input.GetAppId()), input.GetOwner(), int(input.GetLimit()), time.Duration(input.GetLeaseNanos()))
+	values, err := s.implementation.ClaimSocketModeResponses(ctx, domain.AppID(input.GetAppId()), input.GetOwner(), seamPage(int(input.GetLimit())), time.Duration(input.GetLeaseNanos()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -4058,6 +4058,25 @@ func (s *Server) filesProto(ctx context.Context, input *chatv1.FilesRequest) (*c
 	return encodeProtoFilePage(page), nil
 }
 
+// maxEmptyUploadFrames bounds how many frames in a row an upload stream may
+// send that carry no bytes.
+//
+// An empty frame is a no-op rather than a rejection, because in the monolith the
+// same upload hands the implementation an io.Reader and a zero-length write on
+// it does nothing. What was missing is a progress requirement: a peer that sends
+// empty frames forever holds the stream, the handler goroutine, the io.Pipe and
+// the implementation goroutine open indefinitely, and keepalive never fires
+// because frames are arriving. This package already refuses the mirror image on
+// the client side (transport.go: "an io.Reader that keeps returning (0, nil)
+// spun that loop forever"), and the server-side equivalent was deleted while
+// that comment stayed.
+//
+// The bound is a resource bound, not a domain judgement: it reads no field of
+// any request, it counts frames that carried nothing. A real client cannot
+// reach it — a thousand consecutive flushes with no bytes is not a flush
+// pattern, it is a peer that has stopped making progress.
+const maxEmptyUploadFrames = 1024
+
 func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 	first, err := stream.Recv()
 	if err != nil {
@@ -4073,6 +4092,7 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 		err  error
 	}
 	result := make(chan uploadResult, 1)
+	emptyFrames := 0
 	go func() {
 		// The implementation runs on its own stack, which no interceptor
 		// unwinds: a panic here would terminate the whole chat process and
@@ -4113,9 +4133,19 @@ func (s *Server) UploadFile(stream chatv1.ChatService_UploadFileServer) error {
 		// upload hands the implementation an io.Reader, and a zero-length Write on
 		// it does nothing; rejecting it here made a client that flushes an empty
 		// frame succeed in process and fail with invalid_arg_name across the seam.
+		// A stream that never makes progress is a different thing: see
+		// maxEmptyUploadFrames.
 		if len(chunk) == 0 {
+			emptyFrames++
+			if emptyFrames > maxEmptyUploadFrames {
+				refusal := invalidArgument("upload stream sent no data in consecutive frames and is making no progress")
+				_ = writer.CloseWithError(refusal)
+				<-result
+				return refusal
+			}
 			continue
 		}
+		emptyFrames = 0
 		if _, err := writer.Write(chunk); err != nil {
 			_ = writer.CloseWithError(err)
 			// A write fails because the implementation stopped reading, so its
@@ -4145,6 +4175,7 @@ func (s *Server) UploadUserPhoto(stream chatv1.ChatService_UploadUserPhotoServer
 		err  error
 	}
 	done := make(chan result, 1)
+	emptyFrames := 0
 	go func() {
 		// See Server.UploadFile: a panic on this stack is not reachable by the
 		// stream interceptor, so it is recovered where it happens.
@@ -4177,10 +4208,20 @@ func (s *Server) UploadUserPhoto(stream chatv1.ChatService_UploadUserPhotoServer
 			return recvErr
 		}
 		chunk := part.GetChunk()
-		// See Server.UploadFile: an empty frame is the no-op it is in process.
+		// See Server.UploadFile: an empty frame is the no-op it is in process,
+		// and a stream of nothing but empty frames is a stream making no
+		// progress.
 		if len(chunk) == 0 {
+			emptyFrames++
+			if emptyFrames > maxEmptyUploadFrames {
+				refusal := invalidArgument("user photo stream sent no data in consecutive frames and is making no progress")
+				_ = writer.CloseWithError(refusal)
+				<-done
+				return refusal
+			}
 			continue
 		}
+		emptyFrames = 0
 		if _, err := writer.Write(chunk); err != nil {
 			_ = writer.CloseWithError(err)
 			// See Server.UploadFile: the implementation's error is the cause of a
@@ -4730,9 +4771,9 @@ func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsR
 	var records []events.Record
 	var err error
 	if input.GetAppId() != "" {
-		records, err = s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), int(input.GetLimit()))
+		records, err = s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), seamPage(int(input.GetLimit())))
 	} else {
-		records, err = s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), int(input.GetLimit()))
+		records, err = s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), seamPage(int(input.GetLimit())))
 	}
 	if err != nil {
 		return nil, mapError(err)
@@ -4803,16 +4844,49 @@ func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
 	}
 }
 
-// protoPageRequest carries a page request across the seam unchanged.
+// maxSeamPage bounds what one request may make the server allocate on the
+// caller's behalf.
+//
+// This is a resource bound, not a domain judgement, which is the distinction
+// the "no rejection may read a request field's value" rule needs and did not
+// make. Both stores preallocate from the page bound — make([]T, 0, limit) in
+// internal/store/memory and internal/store/sqlstore — so a single request for
+// 2147483647 took the process from 18 MB to 320 MB of resident memory for a
+// two-record answer, and nothing below this line re-bounds it:
+// domain.PageRequest is a plain struct with no normaliser and internal/service
+// passes it straight through. The package already owns bounds of exactly this
+// kind (MaxMessageBytes, MaxHeaderListBytes, maxStatusMessageBytes).
+//
+// It clamps rather than rejects, so the two compositions cannot answer
+// differently: no caller is refused and no page a caller can really ask for is
+// changed (internal/api/slack clamps at 100/200 before it reaches here). The
+// *product* page budget still belongs in internal/service, where both
+// compositions read it, and does not exist yet — this is the allocation
+// backstop, not that budget.
+const maxSeamPage = 10000
+
+// seamPage clamps a caller-supplied page bound to maxSeamPage. A non-positive
+// bound is left exactly as it arrived: what a zero or negative page means is a
+// domain question, and the implementation owns it in both compositions.
+func seamPage(limit int) int {
+	if limit > maxSeamPage {
+		return maxSeamPage
+	}
+	return limit
+}
+
+// protoPageRequest carries a page request across the seam, bounded only by the
+// transport's own allocation limit.
 //
 // It used to reject a limit outside 1..200. Neither internal/service nor either
 // store has that bound, so conversations.history?limit=201 returned a page in the
 // monolith and invalid_arg_name in the split deployment, and limit=0 failed with
 // two different classes. A bound that exists on one composition only is a
 // divergence, not a limit: the page budget belongs to service.Messages, where
-// both compositions read it.
+// both compositions read it. What survives here is maxSeamPage, which refuses
+// nothing and only stops one request from reserving gigabytes.
 func protoPageRequest(limit int32, cursor string) domain.PageRequest {
-	return domain.PageRequest{Limit: int(limit), Cursor: domain.Cursor(cursor)}
+	return domain.PageRequest{Limit: seamPage(int(limit)), Cursor: domain.Cursor(cursor)}
 }
 
 func stringIDs(values []domain.UserID) []string {

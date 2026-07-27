@@ -1,11 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -268,6 +271,13 @@ func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.File{}, ErrInvalidFile
 	}
 	id, err := domain.NewFileID()
+	if err != nil {
+		return domain.File{}, err
+	}
+	// The recorded type is published to every API client as mimetype and
+	// filetype, and it decides what a viewer does with the bytes. It may not be
+	// a client assertion the bytes contradict.
+	mimeType, source, err = resolveUploadContentType(mimeType, source)
 	if err != nil {
 		return domain.File{}, err
 	}
@@ -1702,6 +1712,101 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 
 const maxUserPhotoBytes = 10 << 20
 
+// userPhotoContentTypes is the closed set of types a profile photo may be. It is
+// an allow-list rather than an "image/" prefix test because the prefix admits
+// image/svg+xml, which is a script container, and because the DECLARED type was
+// the only thing ever checked.
+//
+// A member could upload an HTML document declared as image/png; the public
+// capability URL then served it on the application origin, the browser sniffed
+// it as a document, and the script in it read the victim's CSRF token. That is a
+// session takeover, and it was reproduced end to end. The serving side needs its
+// own defences — nosniff, a pinned content type — but the bytes must never reach
+// storage in the first place: a stored file that is a lie is a defect wherever
+// it is later served from.
+var userPhotoContentTypes = map[string]bool{
+	"image/png":  true,
+	"image/jpeg": true,
+	"image/gif":  true,
+	"image/webp": true,
+}
+
+// userPhotoSniffLength is what http.DetectContentType reads. It is the whole
+// algorithm's input, so nothing beyond it needs buffering.
+const userPhotoSniffLength = 512
+
+// normalizeImageContentType reduces a declared content type to the bare type,
+// lower case, with the one alias clients actually send folded onto its
+// registered name.
+func normalizeImageContentType(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if index := strings.IndexByte(value, ';'); index >= 0 {
+		value = strings.TrimSpace(value[:index])
+	}
+	if value == "image/jpg" {
+		return "image/jpeg"
+	}
+	return value
+}
+
+// scriptableContentTypes are the types a browser will execute or render as a
+// document. A byte stream that IS one of these must never be recorded as
+// anything else, whatever the uploader called it: the recorded type is what
+// every API client is told and what a viewer acts on.
+var scriptableContentTypes = map[string]bool{
+	"text/html":       true,
+	"image/svg+xml":   true,
+	"text/xml":        true,
+	"application/xml": true,
+}
+
+// resolveUploadContentType decides the type a stored file is RECORDED with, and
+// returns a reader that still yields every byte.
+//
+// The declared type used to be recorded verbatim, so files.upload published
+// whatever the client said. Two disagreements matter and both are resolved in
+// favour of the bytes: a stream that is a scriptable document called something
+// harmless, and a declared image that is not that image. Every other
+// disagreement keeps the declared type, because http.DetectContentType knows a
+// small closed set and reports application/octet-stream for everything else —
+// overriding on that would replace good metadata with none.
+func resolveUploadContentType(declared string, source io.Reader) (string, io.Reader, error) {
+	head := make([]byte, userPhotoSniffLength)
+	read, err := io.ReadFull(source, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return "", nil, err
+	}
+	head = head[:read]
+	rest := io.MultiReader(bytes.NewReader(head), source)
+	sniffed := normalizeImageContentType(http.DetectContentType(head))
+	normalized := normalizeImageContentType(declared)
+	switch {
+	case scriptableContentTypes[sniffed] && sniffed != normalized:
+		return sniffed, rest, nil
+	case strings.HasPrefix(normalized, "image/") && sniffed != normalized:
+		return sniffed, rest, nil
+	default:
+		return declared, rest, nil
+	}
+}
+
+// sniffUserPhoto reads enough of the stream to identify it and returns a reader
+// that still yields every byte, so the caller streams the original bytes to the
+// blob store rather than a copy held in memory.
+func sniffUserPhoto(declared string, source io.Reader) (io.Reader, error) {
+	head := make([]byte, userPhotoSniffLength)
+	read, err := io.ReadFull(source, head)
+	if err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	head = head[:read]
+	sniffed := normalizeImageContentType(http.DetectContentType(head))
+	if !userPhotoContentTypes[sniffed] || sniffed != declared {
+		return nil, ErrInvalidProfile
+	}
+	return io.MultiReader(bytes.NewReader(head), source), nil
+}
+
 func userPhotoURL(workspaceID domain.WorkspaceID, userID domain.UserID, token string) string {
 	return "/users/" + string(workspaceID) + "/" + string(userID) + "/photo/" + token
 }
@@ -1721,13 +1826,18 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 	if m.Blob == nil {
 		return domain.User{}, ErrBlobUnavailable
 	}
-	mimeType = strings.TrimSpace(strings.ToLower(mimeType))
-	if !strings.HasPrefix(mimeType, "image/") || size <= 0 || size > maxUserPhotoBytes || source == nil {
+	mimeType = normalizeImageContentType(mimeType)
+	if !userPhotoContentTypes[mimeType] || size <= 0 || size > maxUserPhotoBytes || source == nil {
 		return domain.User{}, ErrInvalidProfile
 	}
 	user, err := m.Store.GetUser(ctx, userID)
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
 		return domain.User{}, store.ErrNotFound
+	}
+	// The bytes decide, not the label on them.
+	source, err = sniffUserPhoto(mimeType, source)
+	if err != nil {
+		return domain.User{}, err
 	}
 	token, err := domain.PublicID("photo_")
 	if err != nil {
@@ -4100,18 +4210,32 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
-	event, err := newEvent(workspaceID, authorID, messagePayload("message.created", message), message.CreatedAt)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
-		if errors.Is(err, store.ErrIdempotencyConflict) {
-			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: domain.MessageInstant(time.Now())}
+	// A message's ts is its public identifier and it carries microseconds, so two
+	// messages in one conversation may not be created on the same microsecond.
+	// The repository refuses the collision; the remedy is the next microsecond,
+	// and the event and the response are rebuilt from the instant that was
+	// actually taken so the client is told the identifier the row really has.
+	// This is the same construction the real Slack timestamp uses, and it is why
+	// the identifier cannot be merged no matter how coarse the host clock is.
+	for {
+		event, err := newEvent(workspaceID, authorID, messagePayload("message.created", message), message.CreatedAt)
+		if err != nil {
+			return domain.Message{}, err
 		}
-		return domain.Message{}, err
+		err = m.Store.CreateMessage(ctx, message, event, idempotencyKey)
+		if errors.Is(err, store.ErrMessageTimestampTaken) {
+			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
+			continue
+		}
+		if err != nil {
+			if errors.Is(err, store.ErrIdempotencyConflict) {
+				return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+			}
+			return domain.Message{}, err
+		}
+		return message, nil
 	}
-	return message, nil
 }
 
 func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {

@@ -325,6 +325,9 @@ func TestSQLiteStoredTimestampMigrationRewritesLegacyRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer second.Close()
+	if err := second.AwaitBackfills(ctx); err != nil {
+		t.Fatal(err)
+	}
 	rows, err := second.db.QueryContext(ctx, `SELECT created_at FROM messages`)
 	if err != nil {
 		t.Fatal(err)
@@ -413,7 +416,10 @@ func TestSQLiteStoredTimestampMigrationIsSafeUnderConcurrentStartup(t *testing.T
 			<-start
 			replica, err := Open(context.Background(), path)
 			if err == nil {
-				err = replica.Close()
+				err = replica.AwaitBackfills(context.Background())
+				if closeErr := replica.Close(); err == nil {
+					err = closeErr
+				}
 			}
 			results <- err
 		}()
@@ -432,6 +438,7 @@ func TestSQLiteStoredTimestampMigrationIsSafeUnderConcurrentStartup(t *testing.T
 	}
 	defer final.Close()
 	var unordered int
+
 	if err := final.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE length(created_at) <> ?`, domain.StoredTimeWidth).Scan(&unordered); err != nil {
 		t.Fatal(err)
 	}
@@ -829,6 +836,9 @@ func TestSQLiteMigrationRepairsMessageInstantsWrittenBeforeTruncation(t *testing
 		t.Fatalf("reopening an existing database must migrate it: %v", err)
 	}
 	defer migrated.Close()
+	if err := migrated.AwaitBackfills(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	stored, err := migrated.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
 	if err != nil || len(stored.Messages) != 1 {

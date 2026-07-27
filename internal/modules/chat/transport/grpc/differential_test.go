@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"net"
 	"path"
@@ -98,12 +101,24 @@ type parityCase struct {
 	// both must succeed.
 	wantSentinel error
 
-	// wantUnclassifiedFailure marks a case where both compositions must fail
-	// with an error that carries no sentinel at all. Refusing a non-positive
-	// page limit is one: the store rejects it with a bare error, and the point
-	// of the case is that the seam does not invent a class of its own where the
-	// local path has none.
-	wantUnclassifiedFailure bool
+	// wantAgreedFailure marks a case where both compositions must fail and the
+	// class is whatever the implementation gives, which the sweep below then
+	// requires them to agree on.
+	//
+	// It replaces a wantUnclassifiedFailure flag that asserted the *absence* of
+	// a domain class. That assertion ratified a defect: a non-positive page
+	// bound is refused by a store guard that returns a bare errors.New
+	// (internal/store/memory/memory.go "event limit must be positive",
+	// internal/store/sqlstore/sqlstore.go "invalid Socket Mode response lease"),
+	// so classifyErrors matches nothing and mapError falls through to
+	// codes.Unavailable — HTTP 503, which asks a caller to retry a request that
+	// can never succeed, for a request that is simply malformed. Nine RPCs
+	// answer that way. Locking it in with a test meant giving those store guards
+	// a sentinel would turn the suite red for doing the right thing. This flag
+	// keeps the parity requirement, which is what the harness is for, and stops
+	// asserting the class is missing; it passes before and after the store is
+	// fixed. The fix itself belongs to internal/store and is reported.
+	wantAgreedFailure bool
 }
 
 func seedBaseline(t *testing.T, target *memory.Store) {
@@ -211,15 +226,9 @@ func TestCompositionsAgreeOnEveryErrorClassAndValue(t *testing.T) {
 				t.Fatalf("local error = %v, remote error = %v: one composition failed and the other did not", localErr, remoteErr)
 			}
 			switch {
-			case testCase.wantUnclassifiedFailure:
+			case testCase.wantAgreedFailure:
 				if localErr == nil {
-					t.Fatal("both compositions succeeded, want a failure with no domain class")
-				}
-				if class, classified := classifyError(localErr); classified {
-					t.Fatalf("the local failure carries %s; the case documents a failure with no class", class.key)
-				}
-				if class, classified := classifyError(remoteErr); classified {
-					t.Fatalf("the remote failure carries %s where the local one carries none", class.key)
+					t.Fatal("both compositions succeeded, want a failure")
 				}
 			case testCase.wantSentinel == nil:
 				if localErr != nil {
@@ -622,8 +631,13 @@ func parityCases() []parityCase {
 			// Both compositions must refuse a non-positive limit the same way.
 			// The store owns the rule, so the refusal is the store's and neither
 			// composition invents one of its own.
-			name:                    "a page limit of zero",
-			wantUnclassifiedFailure: true,
+			//
+			// The refusal reaches a remote caller as codes.Unavailable today,
+			// because the store guard carries no sentinel; that is a defect in
+			// the guard, not a contract, and this case deliberately does not
+			// assert it either way. See wantAgreedFailure.
+			name:              "a page limit of zero",
+			wantAgreedFailure: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 0})
 				return nil, err
@@ -763,7 +777,11 @@ func parityCases() []parityCase {
 			name:  "user photo download returns the stored user",
 			blobs: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				photo := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47}, 64)
+				// The bytes have to sniff as the declared type: internal/service
+				// now reads the leading bytes and refuses a photo whose content
+				// does not match what the caller declared, so a repeated
+				// four-byte stand-in is no longer a PNG to either composition.
+				photo := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0x00, 0x01, 0x02, 0x03}, 64)...)
 				if _, err := chat.SetUserPhoto(ctx, "T1", "U1", "image/png", int64(len(photo)), bytes.NewReader(photo)); err != nil {
 					return nil, err
 				}
@@ -1051,4 +1069,256 @@ func parityCases() []parityCase {
 			},
 		},
 	}
+}
+
+// TestEveryChatMethodHasAParityCaseOrADocumentedGap derives the coverage of this
+// harness instead of trusting the case list to be complete.
+//
+// parityCases is hand-written, and the same change that added it made the
+// converter property derived (TestEveryConverterPairIsExercisedByTheProperty)
+// precisely because a hand-written list "could not see" what was missing. The
+// argument applies here verbatim and was not applied: 96 transport guards were
+// deleted on the claim that "the implementation owns the answer, so both
+// compositions agree", which is exactly what this harness proves, and not one
+// deleted guard got a case. Nine RPCs turned a malformed request from HTTP 400
+// into HTTP 503 and nothing here saw it.
+//
+// The method set is read by reflection, and the methods a case exercises are
+// read from this file's own source, so a method added to chatapi.Service fails
+// here until it is either exercised or listed with the others.
+func TestEveryChatMethodHasAParityCaseOrADocumentedGap(t *testing.T) {
+	exercised := methodsExercisedByParityCases(t)
+	serviceType := reflect.TypeOf((*chatapi.Service)(nil)).Elem()
+	for index := range serviceType.NumMethod() {
+		name := serviceType.Method(index).Name
+		_, isGap := parityGaps[name]
+		switch {
+		case exercised[name] && isGap:
+			t.Errorf("chatapi.Service.%s is exercised by a parity case and also listed in parityGaps; remove the entry", name)
+		case !exercised[name] && !isGap:
+			t.Errorf("chatapi.Service.%s crosses the seam with no parity case. Add a case to parityCases, or add %q to parityGaps and say why it cannot have one.", name, name)
+		}
+	}
+	for name := range parityGaps {
+		if _, exists := serviceType.MethodByName(name); !exists {
+			t.Errorf("parityGaps names %s, which chatapi.Service no longer declares", name)
+		}
+	}
+}
+
+// methodsExercisedByParityCases reads the calls parityCases makes on the caller
+// handle. A case that calls chat.X or chat.Tokens.X exercises X.
+func methodsExercisedByParityCases(t *testing.T) map[string]bool {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, "differential_test.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases *ast.FuncDecl
+	for _, declaration := range file.Decls {
+		if function, ok := declaration.(*ast.FuncDecl); ok && function.Name.Name == "parityCases" {
+			cases = function
+		}
+	}
+	if cases == nil {
+		t.Fatal("differential_test.go declares no parityCases")
+	}
+	exercised := map[string]bool{}
+	ast.Inspect(cases, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		switch receiver := selector.X.(type) {
+		case *ast.Ident:
+			if receiver.Name == "chat" {
+				exercised[selector.Sel.Name] = true
+			}
+		case *ast.SelectorExpr:
+			if identifier, ok := receiver.X.(*ast.Ident); ok && identifier.Name == "chat" {
+				exercised[selector.Sel.Name] = true
+			}
+		}
+		return true
+	})
+	if len(exercised) == 0 {
+		t.Fatal("no parity case calls the chat handle; the scan is reading the wrong thing")
+	}
+	return exercised
+}
+
+// parityGaps is the backlog this harness has not covered yet.
+//
+// It is not an exemption list: every entry is a method whose two compositions
+// have never been compared, which is the state the whole seam was in before the
+// harness existed. It exists so the gap is *enumerated and derived* rather than
+// invisible — the set can only shrink, a method added to chatapi.Service cannot
+// join it silently, and a method whose parity case is deleted reappears here as
+// a failure.
+//
+// Priority for closing it, from the failures the deleted guards produced: the
+// methods that take a page bound, a timestamp in nanoseconds, or an identifier
+// the store treats as optional.
+var parityGaps = map[string]struct{}{
+	"AckSocketModeResponses":                  {},
+	"AcknowledgeEntityCommentAction":          {},
+	"AddCall":                                 {},
+	"AddCallParticipants":                     {},
+	"AddRemoteFile":                           {},
+	"AddUserGroupChannels":                    {},
+	"AdminAddConversationAccessGroup":         {},
+	"AdminAddEmojiAlias":                      {},
+	"AdminAddUserGroupTeams":                  {},
+	"AdminApproveApp":                         {},
+	"AdminApproveInviteRequest":               {},
+	"AdminAssignUser":                         {},
+	"AdminConnectedChannelInfo":               {},
+	"AdminConversationTeams":                  {},
+	"AdminConvertConversationToPrivate":       {},
+	"AdminCreateIncomingWebhook":              {},
+	"AdminCreateUser":                         {},
+	"AdminCreateWorkspace":                    {},
+	"AdminDeleteConversation":                 {},
+	"AdminDenyInviteRequest":                  {},
+	"AdminDisconnectSharedConversation":       {},
+	"AdminInviteConversationMembers":          {},
+	"AdminInviteUser":                         {},
+	"AdminListApps":                           {},
+	"AdminListConversationAccessGroups":       {},
+	"AdminListInviteRequests":                 {},
+	"AdminRemoveConversationAccessGroup":      {},
+	"AdminRemoveEmoji":                        {},
+	"AdminRenameConversation":                 {},
+	"AdminRenameEmoji":                        {},
+	"AdminRestrictApp":                        {},
+	"AdminSearchConversations":                {},
+	"AdminSetConversationArchived":            {},
+	"AdminSetConversationTeams":               {},
+	"AdminSetIncomingWebhookEnabled":          {},
+	"AdminSetWorkspaceDefaultChannels":        {},
+	"AdminSetWorkspaceDescription":            {},
+	"AdminSetWorkspaceDiscoverability":        {},
+	"AdminSetWorkspaceIcon":                   {},
+	"AdminTeamUsers":                          {},
+	"BotInfo":                                 {},
+	"ClaimSocketModeResponses":                {},
+	"CompleteExternalUploads":                 {},
+	"CompleteReminder":                        {},
+	"ConsumeRTMConnection":                    {},
+	"ConversationInfo":                        {},
+	"CountSocketModeConnections":              {},
+	"CreateAppInstallation":                   {},
+	"CreateCanvas":                            {},
+	"CreateExternalIdentity":                  {},
+	"CreateRTMConnection":                     {},
+	"CreateSession":                           {},
+	"DeleteCanvas":                            {},
+	"DeleteCanvasAccess":                      {},
+	"DeleteFile":                              {},
+	"DeleteFileComment":                       {},
+	"DeleteListAccess":                        {},
+	"DeleteListItems":                         {},
+	"DeleteReminder":                          {},
+	"DeleteScheduledMessage":                  {},
+	"DeleteUserPhoto":                         {},
+	"Emojis":                                  {},
+	"EndCall":                                 {},
+	"EndDND":                                  {},
+	"FileInfo":                                {},
+	"GetAuthMethod":                           {},
+	"GetCall":                                 {},
+	"GetListDownload":                         {},
+	"GetListItem":                             {},
+	"GetSocketModeCursor":                     {},
+	"IntegrationLogs":                         {},
+	"InviteConversationMembers":               {},
+	"JoinConversation":                        {},
+	"KickConversationMember":                  {},
+	"LeaveConversation":                       {},
+	"ListAccessLogs":                          {},
+	"ListAppEventsAfter":                      {},
+	"ListAppInstallations":                    {},
+	"ListEventsAfter":                         {},
+	"LookupAppToken":                          {},
+	"LookupCanvasSections":                    {},
+	"MigrationExchange":                       {},
+	"OAuthExchange":                           {},
+	"OpenConversation":                        {},
+	"OpenDialog":                              {},
+	"OpenIDConnectToken":                      {},
+	"OpenIDConnectUserInfo":                   {},
+	"OpenPublicFile":                          {},
+	"OpenView":                                {},
+	"Permalink":                               {},
+	"PostEphemeral":                           {},
+	"PostEphemeralWithBlocks":                 {},
+	"PostEphemeralWithBlocksAndAttachments":   {},
+	"PostIncomingWebhook":                     {},
+	"PostIncomingWebhookWithAttachments":      {},
+	"PostWithBlocks":                          {},
+	"PostWithBlocksAndAttachments":            {},
+	"PresentEntityComments":                   {},
+	"PresentEntityDetails":                    {},
+	"PublishView":                             {},
+	"PushView":                                {},
+	"RecordAccess":                            {},
+	"RecordSocketModeResponse":                {},
+	"ReleaseSocketModeConnection":             {},
+	"ReleaseSocketModeResponses":              {},
+	"ReminderInfo":                            {},
+	"RemoteFileInfo":                          {},
+	"RemoteFiles":                             {},
+	"RemoveBookmark":                          {},
+	"RemoveCallParticipants":                  {},
+	"RemovePin":                               {},
+	"RemoveReaction":                          {},
+	"RemoveRemoteFile":                        {},
+	"RemoveStar":                              {},
+	"RemoveUser":                              {},
+	"RemoveUserGroupChannels":                 {},
+	"RenameConversation":                      {},
+	"RenewSocketModeConnection":               {},
+	"RenewSocketModeResponses":                {},
+	"Replies":                                 {},
+	"RequestAppPermissions":                   {},
+	"ResetUserSessions":                       {},
+	"RevokeFilePublic":                        {},
+	"RevokeSession":                           {},
+	"RevokeToken":                             {},
+	"ScheduleMessageWithBlocks":               {},
+	"ScheduleMessageWithBlocksAndAttachments": {},
+	"SetAuthMethod":                           {},
+	"SetCanvasAccess":                         {},
+	"SetConversationArchived":                 {},
+	"SetConversationPurpose":                  {},
+	"SetConversationTopic":                    {},
+	"SetListAccess":                           {},
+	"SetSocketModeCursor":                     {},
+	"SetUserExpiration":                       {},
+	"SetUserGroupEnabled":                     {},
+	"ShareFilePublic":                         {},
+	"ShareRemoteFile":                         {},
+	"StartListDownload":                       {},
+	"TeamBillableInfo":                        {},
+	"Unfurl":                                  {},
+	"UpdateCall":                              {},
+	"UpdateList":                              {},
+	"UpdateListCells":                         {},
+	"UpdateListItem":                          {},
+	"UpdateRemoteFile":                        {},
+	"UpdateUserGroup":                         {},
+	"UpdateView":                              {},
+	"UpdateWithBlocks":                        {},
+	"UpdateWithBlocksAndAttachments":          {},
+	"UserGroupChannels":                       {},
+	"UserGroupUsers":                          {},
+	"UserReactions":                           {},
+	"WorkflowStepCompleted":                   {},
+	"WorkflowStepFailed":                      {},
+	"WorkflowUpdateStep":                      {},
 }

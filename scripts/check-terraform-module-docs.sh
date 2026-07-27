@@ -113,8 +113,14 @@ while IFS= read -r module; do
 		status=1
 		continue
 	fi
+	# Only the first fenced hcl block. `sed -n '/^```hcl$/,/^```$/p'`
+	# concatenated every fenced block in the README, so an unrelated second
+	# example could supply a required variable the documented example omits —
+	# proved by moving `websocket_certificate_arn` into a second block, which
+	# passed while `terraform plan` on the documented call still failed with "No
+	# value for required variable".
 	# shellcheck disable=SC2016 # the backticks are a literal fenced-block marker
-	example="$(sed -n '/^```hcl$/,/^```$/p' "$readme")"
+	example="$(awk '/^```hcl$/ { if (seen) exit; seen = 1; next } /^```$/ { if (seen) exit } seen' "$readme")"
 	if [[ -z "$example" ]]; then
 		echo "$module/README.md has no hcl example, so its required variables cannot be verified" >&2
 		status=1

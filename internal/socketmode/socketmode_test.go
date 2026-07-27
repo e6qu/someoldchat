@@ -1,6 +1,7 @@
 package socketmode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -368,169 +369,60 @@ func TestHandlerSkipsUndeliverableRecordsAndKeepsDelivering(t *testing.T) {
 	}
 }
 
-// memoryEnvelopeQueue is the store half of per-envelope ownership, with the
-// preconditions a durable implementation has to enforce: a record is offered to
-// one owner at a time, an acknowledgement and a renewal require that owner to
-// still hold the claim, and a released record is immediately claimable again.
-type memoryEnvelopeQueue struct {
-	mu      sync.Mutex
-	records []events.Record
-	acked   map[uint64]bool
-	owner   map[uint64]string
-	until   map[uint64]time.Time
-	claims  int
-}
-
-func newEnvelopeQueue(records ...events.Record) *memoryEnvelopeQueue {
-	return &memoryEnvelopeQueue{records: records, acked: map[uint64]bool{}, owner: map[uint64]string{}, until: map[uint64]time.Time{}}
-}
-
-func (q *memoryEnvelopeQueue) ClaimAppEvent(_ context.Context, _ domain.AppID, owner string, lease time.Duration) (events.Record, bool, error) {
-	now := time.Now().UTC()
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	for _, record := range q.records {
-		if q.acked[record.Sequence] {
-			continue
-		}
-		if holder, held := q.owner[record.Sequence]; held && holder != "" && q.until[record.Sequence].After(now) {
-			continue
-		}
-		q.owner[record.Sequence] = owner
-		q.until[record.Sequence] = now.Add(lease)
-		q.claims++
-		return record, true, nil
-	}
-	return events.Record{}, false, nil
-}
-
-func (q *memoryEnvelopeQueue) RenewAppEvent(_ context.Context, owner string, sequence uint64, lease time.Duration) error {
-	now := time.Now().UTC()
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.owner[sequence] != owner || !q.until[sequence].After(now) {
-		return store.ErrLeaseConflict
-	}
-	q.until[sequence] = now.Add(lease)
-	return nil
-}
-
-func (q *memoryEnvelopeQueue) AckAppEvent(_ context.Context, owner string, sequence uint64) error {
-	now := time.Now().UTC()
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.owner[sequence] != owner || !q.until[sequence].After(now) {
-		return store.ErrLeaseConflict
-	}
-	q.acked[sequence] = true
-	delete(q.owner, sequence)
-	delete(q.until, sequence)
-	return nil
-}
-
-func (q *memoryEnvelopeQueue) ReleaseAppEvent(_ context.Context, owner string, sequence uint64, retryAt time.Time) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if q.owner[sequence] != owner {
-		return store.ErrLeaseConflict
-	}
-	delete(q.owner, sequence)
-	q.until[sequence] = retryAt
-	return nil
-}
-
-func (q *memoryEnvelopeQueue) acknowledged() []uint64 {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	result := make([]uint64, 0, len(q.acked))
-	for sequence := range q.acked {
-		result = append(result, sequence)
-	}
-	return result
-}
-
-// Slack's Socket Mode contract delivers each envelope to exactly one connection,
-// and domain.SocketModeConnectionLimit exists so an application can hold several
-// connections open across a redeploy. A position keyed on the application alone
-// cannot express that: every connection reads the same row, so an application
-// holding the limit open processes every event ten times.
-func TestEachEnvelopeReachesExactlyOneConnection(t *testing.T) {
-	const connections = 3
-	queue := newEnvelopeQueue(producedRecord(t, 4, "event-4", "message.created", events.String("message_id", "M1")))
-	registry := memory.New()
-	handler := Handler{Store: registry, Envelopes: queue, Responses: new(testResponseSink), Logger: quietLogger()}
-	received := make(chan string, connections)
-	var group sync.WaitGroup
-	for range connections {
-		client := dialHandler(t, handler, registry)
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
-			var envelope struct {
-				EnvelopeID string `json:"envelope_id"`
-			}
-			if err := client.ReadJSON(&envelope); err != nil {
-				return
-			}
-			received <- envelope.EnvelopeID
-		}()
-	}
-	group.Wait()
-	close(received)
-	delivered := make([]string, 0, connections)
-	for id := range received {
-		delivered = append(delivered, id)
-	}
-	if len(delivered) != 1 {
-		t.Fatalf("envelope event-4 was delivered to %d of %d concurrent connections for the same app: %v", len(delivered), connections, delivered)
-	}
-	if delivered[0] != "event-4" {
-		t.Fatalf("delivered envelope=%q", delivered[0])
-	}
-}
-
-// A connection that goes away without acknowledging must not take the envelope
-// with it. The claim is handed back so the next connection receives the record
-// immediately rather than after the lease lapses.
-func TestAnUnacknowledgedEnvelopeReturnsToTheQueueForAnotherConnection(t *testing.T) {
-	queue := newEnvelopeQueue(producedRecord(t, 4, "event-4", "message.created", events.String("message_id", "M1")))
+// Delivery from the shared per-app cursor gives every open connection of an
+// application its own copy of every envelope, because the position is keyed on
+// the application and every connection reads and writes the same row. Slack's
+// Socket Mode contract delivers each envelope to exactly one connection, and
+// domain.SocketModeConnectionLimit deliberately permits ten, so an app that
+// holds connections open across a redeploy runs its handler ten times per
+// event, side effects included.
+//
+// No store in this repository implements per-envelope ownership, so the defect
+// is live. What must not be true is that it is also silent: an operator has no
+// other signal that the events their app is handling are duplicates. The
+// warning is emitted exactly when duplication is happening — when a second
+// connection of the same application starts delivering.
+func TestSharedCursorDeliveryReportsThatEveryConnectionReceivesEveryEnvelope(t *testing.T) {
 	connections := memory.New()
-	handler := Handler{Store: connections, Envelopes: queue, Responses: new(testResponseSink), Logger: quietLogger()}
+	var lines lockedBuffer
+	record := producedRecord(t, 4, "event-4", "message.created", events.String("message_id", "M1"))
+	handler := Handler{Store: connections, Events: testEventSource{record: record}, Cursors: connections,
+		Responses: new(testResponseSink), Logger: slog.New(slog.NewTextHandler(&lines, nil))}
 	first := dialHandler(t, handler, connections)
-	_ = first.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var envelope struct {
-		EnvelopeID string `json:"envelope_id"`
-	}
-	if err := first.ReadJSON(&envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.EnvelopeID != "event-4" {
-		t.Fatalf("envelope=%q", envelope.EnvelopeID)
-	}
-	// The connection disappears without answering.
-	_ = first.Close()
+	defer first.Close()
 	second := dialHandler(t, handler, connections)
-	_ = second.SetReadDeadline(time.Now().Add(5 * time.Second))
-	var redelivered struct {
-		EnvelopeID string `json:"envelope_id"`
-	}
-	if err := second.ReadJSON(&redelivered); err != nil {
-		t.Fatalf("the envelope was lost with the connection that never acknowledged it: %v", err)
-	}
-	if redelivered.EnvelopeID != "event-4" {
-		t.Fatalf("redelivered envelope=%q", redelivered.EnvelopeID)
-	}
-	if err := second.WriteJSON(map[string]any{"envelope_id": "event-4"}); err != nil {
-		t.Fatal(err)
-	}
+	defer second.Close()
 	deadline := time.Now().Add(2 * time.Second)
-	for len(queue.acknowledged()) == 0 {
+	for {
+		logged := lines.String()
+		if strings.Contains(logged, "every open connection of this app receives every envelope") {
+			if !strings.Contains(logged, "A123") {
+				t.Fatalf("the warning does not name the application: %s", logged)
+			}
+			return
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("the acknowledged envelope was never recorded")
+			t.Fatalf("a second connection began duplicating every envelope with no operator-visible report: %s", logged)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+type lockedBuffer struct {
+	mu      sync.Mutex
+	written bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(payload []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.written.Write(payload)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.written.String()
 }
 
 // Losing a race for an envelope is not a server fault. Closing with an internal

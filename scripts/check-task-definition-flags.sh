@@ -27,13 +27,33 @@
 # "(required)" must appear in the command; any flag in the command must be
 # defined.
 #
-# Every `command =` in every module must carry one of the two annotations, so a
-# new task definition cannot opt out of the check by omission. That claim used to
-# be false three ways, all proved: `-flag=value` matched no token at all, so
-# `"-bogus-flag=1"` passed and the task exited 2 at start; the same form was
-# reported as an *omission* when written legitimately as `"-listen=:8080"`; and a
+# Every container command in every module must carry one of the two annotations,
+# so a new task definition cannot opt out of the check by omission. That claim
+# used to be false five ways, all proved: `-flag=value` matched no token at all,
+# so `"-bogus-flag=1"` passed and the task exited 2 at start; the same form was
+# reported as an *omission* when written legitimately as `"-listen=:8080"`; a
 # command supplied through a variable produced neither tokens nor an annotation
-# error, so the application server's flags were never checked at all.
+# error, so the application server's flags were never checked at all; a command
+# written as a JSON key inside a `container_definitions` heredoc —
+# `[{"name":"probe","command":["-bogus-flag","1"]}]` — matched neither the
+# attribute pattern nor anything else, so it produced no record and no
+# annotation error; and `entryPoint`, which ECS prepends to `command`, was never
+# inspected at all, so a bogus flag there exited 2 on every start with the gate
+# green.
+#
+# A binary this repository ships but no module deploys is covered through its
+# documentation instead. `cmd/activator` is deployed separately by the operator,
+# so no `.tf` file names it and it was checked by nothing; the document that
+# tells the operator which flags to pass now carries the same contract:
+#
+#     <!-- flag-contract: cmd/activator -->
+#     ... prose naming every `-flag` ...
+#     <!-- /flag-contract -->
+#
+# Inside such a region every backticked `-flag` must be one the binary defines,
+# and every flag whose usage ends in "(required)" must be named. A document that
+# tells an operator to pass a flag the binary dropped is the same defect as a
+# task definition that does.
 set -euo pipefail
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -70,8 +90,13 @@ extract_command_flags() {
 			# `command =` is matched anywhere on the line, not only at its start:
 			# aws_ecs_task_definition.application writes its whole container
 			# definition on one jsonencode line, so an anchored pattern never saw
-			# the application server command at all.
-			if (!collecting && $0 ~ /(^|[[:space:]{,])command[[:space:]]*=/) {
+			# the application server command at all. `entryPoint` is matched for
+			# the same reason it exists in ECS — it is prepended to `command`, so
+			# a flag there reaches the binary exactly as one in `command` does —
+			# and both are matched as JSON keys as well as HCL attributes,
+			# because `container_definitions` is just as often written as a JSON
+			# heredoc, which produced no record at all.
+			if (!collecting && ($0 ~ /(^|[[:space:]{,])(command|entryPoint)[[:space:]]*=/ || $0 ~ /"(command|entryPoint)"[[:space:]]*:/)) {
 				collecting = 1
 				depth = 0
 				start = FNR
@@ -99,22 +124,57 @@ extract_command_flags() {
 	' "$1"
 }
 
+# Emits the same record shape for a documented flag contract, so both sources are
+# verified by one loop. A region with no flags in it still emits its !command
+# record, so an emptied region is an error rather than a silent skip.
+extract_documented_flags() {
+	awk '
+		/<!--[[:space:]]*flag-contract:[[:space:]]*/ {
+			line = $0
+			sub(/^.*<!--[[:space:]]*flag-contract:[[:space:]]*/, "", line)
+			sub(/[[:space:]].*$/, "", line)
+			sub(/-->.*$/, "", line)
+			owner = line
+			inside = 1
+			printf "%s:%d %s !command\n", FILENAME, FNR, (owner == "" ? "-" : owner)
+			next
+		}
+		/<!--[[:space:]]*\/flag-contract[[:space:]]*-->/ { inside = 0; owner = ""; next }
+		inside {
+			rest = $0
+			while (match(rest, /`-[A-Za-z0-9][A-Za-z0-9_-]*(=[^`]*)?`/)) {
+				token = substr(rest, RSTART + 1, RLENGTH - 2)
+				sub(/=.*$/, "", token)
+				printf "%s:%d %s %s\n", FILENAME, FNR, (owner == "" ? "-" : owner), token
+				rest = substr(rest, RSTART + RLENGTH)
+			}
+		}
+	' "$1"
+}
+
 terraform_files() {
 	find deploy terraform -name '*.tf' -not -path '*/.terraform/*' | sort
+}
+
+documentation_files() {
+	find docs deploy terraform -name '*.md' -not -path '*/node_modules/*' | sort
 }
 
 while IFS= read -r file; do
 	extract_command_flags "$file" >>"$scratch/used"
 done <<<"$(terraform_files)"
+while IFS= read -r file; do
+	extract_documented_flags "$file" >>"$scratch/used"
+done <<<"$(documentation_files)"
 touch "$scratch/used"
 
 while read -r position package flag; do
 	[[ -n "${position:-}" ]] || continue
 	if [[ "$package" == "-" ]]; then
 		if [[ "$flag" == "!command" ]]; then
-			echo "$position declares a container command with no '# flag-contract: cmd/<binary>' or '# flag-contract: caller-supplied' annotation, so it cannot be verified against any binary" >&2
+			echo "$position declares a command with no 'flag-contract: cmd/<binary>' or 'flag-contract: caller-supplied' annotation, so it cannot be verified against any binary" >&2
 		else
-			echo "$position passes flag '$flag' from a command with no '# flag-contract: cmd/<binary>' annotation, so it cannot be verified against any binary" >&2
+			echo "$position passes flag '$flag' with no 'flag-contract: cmd/<binary>' annotation, so it cannot be verified against any binary" >&2
 		fi
 		status=1
 		continue
@@ -131,7 +191,7 @@ while read -r position package flag; do
 done <"$scratch/used"
 
 if [[ ! -s "$scratch/packages" ]]; then
-	echo 'no annotated Terraform container command named a binary; this check would silently cover nothing' >&2
+	echo 'no annotated container command or documented flag contract named a binary; this check would silently cover nothing' >&2
 	exit 1
 fi
 
@@ -205,4 +265,4 @@ done <"$scratch/packages.unique"
 if [[ "$status" -ne 0 ]]; then
 	exit 1
 fi
-echo "terraform container command flag contract passed for $(paste -sd' ' - <"$scratch/packages.unique")"
+echo "container command and documented flag contract passed for $(paste -sd' ' - <"$scratch/packages.unique")"

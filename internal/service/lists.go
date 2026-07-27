@@ -159,13 +159,16 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return domain.List{}, err
 	}
-	if err := m.Store.CreateList(ctx, value, event); err != nil {
-		return domain.List{}, err
-	}
+	// One store call, one transaction. Creating the list, publishing list.created
+	// and then copying the records one call at a time left a half-copied list
+	// that clients had already been told about whenever a copy failed partway
+	// through, and the caller could neither finish it nor undo it.
+	items := make([]store.ListItemCreation, len(copiedItems))
 	for index, item := range copiedItems {
-		if err := m.Store.CreateListItem(ctx, item, copiedEvents[index]); err != nil {
-			return domain.List{}, err
-		}
+		items[index] = store.ListItemCreation{Item: item, Event: copiedEvents[index]}
+	}
+	if err := m.Store.CreateListWithItems(ctx, value, event, items); err != nil {
+		return domain.List{}, err
 	}
 	return value, nil
 }

@@ -36,8 +36,13 @@ MAX_BODY_BYTES = int(os.environ["MAX_BODY_BYTES"])
 # the item is unexpired *both* activators refuse every new request lease and
 # every new WebSocket lease. This side used to write REQUEST_TIMEOUT + 60 = 85s
 # on the same item, so a sweep killed by the Lambda timeout blocked the whole
-# deployment for 85 seconds. The value is now one shared setting, and the sweep
-# bounds its own work by it so the lock cannot outlive the work it protects.
+# deployment for 85 seconds. The sweep now bounds its own work by this value so
+# the lock cannot outlive the work it protects.
+#
+# It is not "one shared setting", and saying so was wrong: cmd/ecs-ws-activator's
+# scaleDownLockTTL is a Go constant with no flag, so the two halves can only be
+# kept equal by pinning this one. deploy/ecs-scale-zero/variables.tf pins it to
+# 15 and records what has to change on the Go side to make it settable again.
 SCALE_DOWN_LOCK_SECONDS = int(os.environ["SCALE_DOWN_LOCK_SECONDS"])
 SCALE_DOWN_LOCK = "scale-down"
 LAST_REQUEST = "last-request"

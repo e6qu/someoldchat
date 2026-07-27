@@ -47,13 +47,22 @@ sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db'
 
 sameoldchat-chatd -listen :9443 -store sqlite -db 'file:chat.db' \
   -tls-cert chat.crt -tls-key chat.key \
-  -tls-client-ca ca.crt \
+  -tls-client-ca client-ca.crt \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 sameoldchat -chat-mode grpc -chat-address chatd:9443 \
-  -chat-ca ca.crt -chat-server-name chatd.internal \
+  -chat-ca server-ca.crt -chat-server-name chatd.internal \
   -chat-client-cert http-client.crt -chat-client-key http-client.key \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
+
+The two authorities are deliberately different files, and this example used to
+name one `ca.crt` for both. `-tls-client-ca` answers "who may connect to chatd"
+and `-chat-ca` answers "which server is chatd". With one authority for both,
+every certificate that authority issues authenticates as a client to the whole
+internal data plane — including `chat.crt`, the chatd server certificate
+itself, so anything holding the server's own key becomes a privileged client.
+Issue the server certificate from `server-ca.crt` and the http process's client
+certificate from `client-ca.crt`, and give chatd only `client-ca.crt`.
 
 The HTTP process does not open a local database in `grpc` mode. A
 `SAMEOLDCHAT_DATABASE_URL` environment value is used only by the `local` mode;

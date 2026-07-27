@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -177,6 +179,46 @@ func TestCheckConfigValidatesWithoutStartingAnything(t *testing.T) {
 	}
 }
 
+// TestCheckConfigAcceptsNothingTheRealStartRefuses is the property
+// scripts/check-terraform-module-startup.sh treats -check-config as authoritative
+// for: if -check-config says yes, a task built from that configuration starts.
+//
+// Four values broke it. Each was validated after resolve had already returned,
+// so -check-config exited 0 and the real start exited 1 or 2 — a crash-looping
+// task with the deployment gate green, which is the exact failure that gate
+// exists to prevent. Measured before the fix, with the rest of the command line
+// held at the accepted local configuration:
+//
+//	-release-revision not-a-commit        -check-config 0, real start 2
+//	-auth-cookie-domain "not a domain!!"  -check-config 0, real start 1
+//	-dqlite-cluster "a,,b"                -check-config 0, real start 2
+//	-addr no-such-host.invalid:99999      -check-config 0, real start refused at Listen
+func TestCheckConfigAcceptsNothingTheRealStartRefuses(t *testing.T) {
+	for name, extra := range map[string][]string{
+		"release revision": {"-release-revision", "not-a-commit"},
+		"cookie domain":    {"-auth-cookie-domain", "not a domain!!"},
+		"dqlite cluster":   {"-dqlite-cluster", "a,,b"},
+		"listen address":   {"-addr", "no-such-host.invalid:99999"},
+		"metrics address":  {"-metrics-listen", "127.0.0.1:99999"},
+	} {
+		arguments := append([]string{"-check-config", "-chat-mode", "local", "-store", "memory", "-api-token", "xoxb-test"}, extra...)
+		if code := run(t.Context(), discardLogger(), arguments); code != exitConfiguration {
+			t.Fatalf("%s: -check-config exit = %d, want %d", name, code, exitConfiguration)
+		}
+	}
+	// The values a real deployment supplies still pass.
+	accepted := []string{
+		"-check-config", "-chat-mode", "local", "-store", "memory", "-api-token", "xoxb-test",
+		"-addr", "0.0.0.0:8080", "-metrics-listen", "127.0.0.1:9464",
+		"-auth-cookie-domain", "example.com",
+		"-release-revision", "0123456789abcdef0123456789abcdef01234567",
+		"-dqlite-cluster", "10.0.0.1:9000,10.0.0.2:9000",
+	}
+	if code := run(t.Context(), discardLogger(), accepted); code != 0 {
+		t.Fatalf("a real deployment's configuration was refused: exit = %d", code)
+	}
+}
+
 // A configuration fault must not be reported as a runtime failure: an
 // orchestrator with a restart-on-runtime-failure-only policy restart-loops
 // forever on a mistyped path otherwise.
@@ -185,10 +227,28 @@ func TestConfigurationFaultsExitTwo(t *testing.T) {
 		{"-chat-mode", "local", "-store", "memory"},
 		{"-chat-mode", "grpc", "-api-token", "t"},
 		{"-chat-mode", "local", "-store", "memory", "-api-token", "t", "-app-token", "xapp-1"},
+		// Refused by web.NewHandler after every store was already open. It
+		// exited 1, so the orchestrator retried it forever.
+		{"-chat-mode", "local", "-store", "memory", "-api-token", "t", "-auth-cookie-domain", "not a domain!!"},
 	} {
 		if code := run(t.Context(), discardLogger(), arguments); code != exitConfiguration {
 			t.Fatalf("run(%v) = %d, want %d", arguments, code, exitConfiguration)
 		}
+	}
+}
+
+// TestStartupInterruptedByShutdownIsACleanStop covers the rolling-deploy defect:
+// the signal context is established before the first durable resource — which is
+// right — and is then passed to localchat.Open, the seeding calls and OpenID
+// Connect discovery, so a SIGTERM during a slow cold start made every one of
+// them fail and run returned exitRuntime. A task stopped mid-startup was
+// recorded as a task failure, which a deployment circuit breaker rolls back on.
+func TestStartupInterruptedByShutdownIsACleanStop(t *testing.T) {
+	stopped, cancel := context.WithCancel(context.Background())
+	cancel()
+	arguments := []string{"-chat-mode", "local", "-store", "sqlite", "-db", filepath.Join(t.TempDir(), "chat.db"), "-api-token", "xoxb-test", "-addr", "127.0.0.1:0"}
+	if code := run(stopped, discardLogger(), arguments); code != 0 {
+		t.Fatalf("a startup interrupted by SIGTERM exited %d, want 0", code)
 	}
 }
 

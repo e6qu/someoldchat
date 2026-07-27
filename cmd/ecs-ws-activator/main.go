@@ -193,9 +193,15 @@ func run(logger *slog.Logger) int {
 // enabled, the service could never converge, no WebSocket traffic was ever
 // served, and the unhealthy-target alarm fired continuously.
 //
-// The body matches the lifecycle activator's own GET /healthz
+// The body matches the lifecycle activator's own unauthenticated GET /healthz
 // (internal/activator/handler.go), so an operator polling either edge sees the
-// same shape.
+// same shape. That is now true rather than merely claimed: the lifecycle
+// activator used to add "state" and "generation" here, and
+// internal/scheduler.ActivatorDeadlinePublisher decoded the generation out of
+// whichever of the two it was pointed at — reading 0 from this body with no
+// error and publishing every wake deadline against a fence that is refused
+// forever. The fencing generation is served by the lifecycle activator's
+// token-protected GET /lifecycle, which this edge does not serve at all.
 func health(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

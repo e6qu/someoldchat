@@ -732,7 +732,10 @@ public final class Qualification {
             require(profile.isOk() && profile.getProfile() != null
                             && "alice".equals(profile.getProfile().getDisplayName()), "users.profile.get failed");
             java.io.File image = java.io.File.createTempFile("qualification", ".png");
-            java.nio.file.Files.write(image.toPath(), "qualification-photo".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // A real one-pixel PNG; see the note in the Node suite. The product reads
+            // the bytes and refuses a stream that is not the image it claims to be.
+            java.nio.file.Files.write(image.toPath(), java.util.Base64.getDecoder().decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="));
             com.slack.api.methods.response.users.UsersSetPhotoResponse photo = methods.usersSetPhoto(
                     com.slack.api.methods.request.users.UsersSetPhotoRequest.builder().image(image).build());
             if (!image.delete()) {

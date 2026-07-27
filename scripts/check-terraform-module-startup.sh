@@ -16,9 +16,20 @@
 # peer, or binding a listener, so this check cannot drift from what a real task
 # would do.
 #
-# Values are representative, not real. The contract under test is the *key set* a
-# module exports, so a key with no representative value here is an error rather
-# than a silent skip: a newly exported key must be classified deliberately.
+# Where the module exports a *literal* value, that literal is what the binary is
+# started with. Substituting a representative value for every key meant the
+# module's own values were never tested: changing the exported
+# `SAMEOLDCHAT_CHAT_MODE = "local"` to `"grpc"` left this check at exit 0 while
+# the binary with the module's real values exits 2 with "grpc chat requires
+# address, server CA/name, and client certificate/key". A module that hardcodes
+# a refused literal shipped a crash-looping task with this gate green, which is
+# the precise failure the gate was written for.
+#
+# A value the module takes from a variable or a resource attribute cannot be
+# known here, so those keep a representative value. The contract under test is
+# then the *key set* a module exports, and a key with neither a literal nor a
+# representative value is an error rather than a silent skip: a newly exported
+# key must be classified deliberately.
 set -euo pipefail
 
 root="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
@@ -82,12 +93,21 @@ while IFS= read -r module; do
 	[[ -n "$module" ]] || continue
 	# Comments are stripped first: a comment naming a key the module deliberately
 	# does *not* export must not be read as an export.
-	keys="$(sed 's/#.*//' "$module/outputs.tf" | grep -oE 'SAMEOLDCHAT_[A-Z0-9_]+' | sort -u)"
+	stripped="$(sed 's/#.*//' "$module/outputs.tf")"
+	keys="$(printf '%s\n' "$stripped" | grep -oE 'SAMEOLDCHAT_[A-Z0-9_]+' | sort -u)"
 	[[ -n "$keys" ]] || continue
+	# The module's own literal values, which take precedence over anything this
+	# script would substitute.
+	printf '%s\n' "$stripped" |
+		sed -nE 's/^[[:space:]]*(SAMEOLDCHAT_[A-Z0-9_]+)[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*$/\1 \2/p' >"$scratch/literals"
 	: >"$scratch/environment"
 	unknown=0
 	while IFS= read -r key; do
 		[[ -n "$key" ]] || continue
+		if literal="$(awk -v key="$key" '$1 == key { $1 = ""; sub(/^ /, ""); print; exit }' "$scratch/literals")" && [[ -n "$literal" ]]; then
+			printf '%s=%s\n' "$key" "$literal" >>"$scratch/environment"
+			continue
+		fi
 		if ! value="$(representative_value "$key")"; then
 			echo "$module/outputs.tf exports $key, which scripts/check-terraform-module-startup.sh has no representative value for; add one so the key is covered rather than skipped" >&2
 			unknown=1

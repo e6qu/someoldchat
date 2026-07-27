@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -26,7 +29,7 @@ CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquir
 -- deliberately run outside the migration transaction. See backfill.go: without a
 -- persisted cursor a crash at 80 % of a five-million-row rewrite discarded all of
 -- it, and the whole rewrite held the migration fence while it ran.
-CREATE TABLE IF NOT EXISTS schema_backfills (name TEXT PRIMARY KEY, cursor TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS schema_backfills (name TEXT PRIMARY KEY, cursor TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0, rejected INTEGER NOT NULL DEFAULT 0);
 -- schema_migration_notices is what a data migration records instead of aborting.
 -- An upgrade that stops for ever on one unparseable value, or on two accounts an
 -- older release admitted, is an upgrade with no operator remedy.
@@ -243,7 +246,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 82
+const schemaVersion = 83
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -319,6 +322,23 @@ type Store struct {
 	// being sampled from the wall clock; internal/activator/spool.go uses the
 	// same shape.
 	now func() time.Time
+	// backfills owns the data-migration drain that Migrate starts and Close
+	// stops. See AwaitBackfills.
+	backfills backfillDrain
+}
+
+// backfillDrain is the running state of the data migrations. The drain used to
+// be part of Migrate's own call, so every replica of every binary sat inside
+// Open until every column of a five-million-row database had been rewritten —
+// the outage the design was written to remove, minus the fence. It now runs on
+// its own goroutine with its own context, and the two things a caller can want
+// from it are separable: "is the schema current" is answered by Migrate
+// returning, "is the rewrite finished" by AwaitBackfills.
+type backfillDrain struct {
+	mutex  sync.Mutex
+	cancel context.CancelFunc
+	done   chan struct{}
+	err    error
 }
 
 func systemClock() time.Time { return time.Now().UTC() }
@@ -538,7 +558,7 @@ func (s *Store) configure(ctx context.Context, statements ...string) error {
 		for {
 			if _, err := s.db.ExecContext(ctx, statement); err == nil {
 				break
-			} else if !sqliteBusy(err) || time.Now().After(deadline) {
+			} else if !contended(err) || time.Now().After(deadline) {
 				return fmt.Errorf("configure sqlite (%s): %w", statement, err)
 			}
 			timer := time.NewTimer(backoff)
@@ -604,13 +624,27 @@ const referentialProbeStatement = `INSERT INTO conversation_members(conversation
 // which is why this is a probe and not a setting check.
 func (s *Store) VerifyReferentialIntegrity(ctx context.Context) error {
 	return s.onEachPooledConnection(ctx, func(index int, connection *sql.Conn) error {
-		tx, err := connection.BeginTx(ctx, nil)
-		if err != nil {
-			return fmt.Errorf("begin referential probe on connection %d: %w", index, err)
-		}
-		_, execErr := tx.ExecContext(ctx, referentialProbeStatement)
-		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
-			return fmt.Errorf("roll back referential probe on connection %d: %w", index, err)
+		// The probe holds every pooled connection at once and writes on each, so
+		// on a profile that reports contention rather than waiting through it the
+		// probe competes with itself. Losing that race says nothing about whether
+		// the schema is enforced, so it is waited out rather than read as an
+		// answer — a contended write is not a missing constraint.
+		var execErr error
+		if err := underContention(ctx, func() error {
+			tx, beginErr := connection.BeginTx(ctx, nil)
+			if beginErr != nil {
+				return fmt.Errorf("begin referential probe on connection %d: %w", index, beginErr)
+			}
+			_, execErr = tx.ExecContext(ctx, referentialProbeStatement)
+			if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+				return fmt.Errorf("roll back referential probe on connection %d: %w", index, rollbackErr)
+			}
+			if execErr != nil && contended(execErr) {
+				return execErr
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
 		if execErr == nil {
 			return fmt.Errorf("connection %d accepted a row referencing a missing conversation and a missing user: this storage profile does not enforce the schema's REFERENCES clauses, so every relationship in it is unguarded and store.ErrNotFound is unreachable for referential failures", index)
@@ -649,15 +683,71 @@ func (s *Store) onEachPooledConnection(ctx context.Context, check func(int, *sql
 	return nil
 }
 
-func sqliteBusy(err error) bool {
+// contendedSQLStates are the SQLSTATEs that mean "another transaction got there
+// first". PostgreSQL raises 40001 when a serializable read/write dependency
+// cannot be resolved, 40P01 when it picks this transaction as the deadlock
+// victim, and 55P03 when a NOWAIT lock request loses. All three are defined by
+// the engine as retryable by the client, and the client here is this process.
+var contendedSQLStates = map[string]bool{"40001": true, "40P01": true, "55P03": true}
+
+// contendedMessages is the signal of last resort, for the drivers that forward a
+// failure with no machine-readable classification at all. dqlite forwards a
+// leadership change that way, and a PostgreSQL error that has been flattened to
+// text on its way through a wrapper carries its SQLSTATE in the message.
+var contendedMessages = []string{
+	"database is locked",
+	"database table is locked",
+	"sqlite_busy",
+	"sqlstate 40001",
+	"sqlstate 40p01",
+	"sqlstate 55p03",
+	"could not serialize access",
+	"deadlock detected",
+	"leadership lost",
+	"not leader",
+	"leader changed",
+}
+
+// contended reports a failure that means "another writer got there first; the
+// same call may succeed if it is made again".
+//
+// It used to be sqliteBusy, and it matched only SQLite result codes and SQLite
+// English — on the very profile the retry was written for, the replicated one,
+// and on PostgreSQL, it returned false for every contention the engine can
+// raise. underContention therefore made exactly one attempt there and handed the
+// raw error back, so a routine serialization failure surfaced as an unclassified
+// driver error at the transport. The concept is cross-engine and so is the name.
+func contended(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, store.ErrTransient) {
+		return true
+	}
 	var typed *sqlite.Error
 	if errors.As(err, &typed) {
-		return typed.Code() == sqlite3.SQLITE_BUSY || typed.Code() == sqlite3.SQLITE_LOCKED
+		// The driver reports both the primary and the extended result code
+		// through this method, and SQLITE_BUSY_SNAPSHOT — the WAL writer that
+		// lost — is an extended form of SQLITE_BUSY.
+		switch typed.Code() & 0xff {
+		case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED:
+			return true
+		}
+		return false
+	}
+	var state interface{ SQLState() string }
+	if errors.As(err, &state) {
+		return contendedSQLStates[strings.ToUpper(state.SQLState())]
 	}
 	// The driver reports contention raised inside a statement as a plain error,
 	// so the message check stays as a fallback rather than the only signal.
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
+	for _, marker := range contendedMessages {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // underContention runs a write that may lose a race for the engine's write lock.
@@ -682,7 +772,7 @@ func underContention(ctx context.Context, attempt func() error) error {
 	delay := time.Millisecond
 	var err error
 	for {
-		if err = attempt(); err == nil || !sqliteBusy(err) {
+		if err = attempt(); err == nil || !contended(err) {
 			return err
 		}
 		if !time.Now().Add(delay).Before(deadline) {
@@ -699,7 +789,71 @@ func underContention(ctx context.Context, attempt func() error) error {
 	}
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+// Close stops the data-migration drain before it closes the handle. Closing the
+// database out from under a running drain would surface as "database is closed"
+// from a goroutine nobody is watching.
+func (s *Store) Close() error {
+	s.stopBackfills()
+	return s.db.Close()
+}
+
+// startBackfills runs the registered data migrations on a goroutine. Any drain
+// still running from an earlier Migrate is stopped and awaited first, so a
+// repeated Migrate — which the qualification suite does — never has two drains
+// writing the same cursor.
+func (s *Store) startBackfills() {
+	s.stopBackfills()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	s.backfills.mutex.Lock()
+	s.backfills.cancel = cancel
+	s.backfills.done = done
+	s.backfills.err = nil
+	s.backfills.mutex.Unlock()
+	go func() {
+		err := s.runPendingBackfills(ctx)
+		s.backfills.mutex.Lock()
+		s.backfills.err = err
+		s.backfills.mutex.Unlock()
+		close(done)
+	}()
+}
+
+func (s *Store) stopBackfills() {
+	s.backfills.mutex.Lock()
+	cancel, done := s.backfills.cancel, s.backfills.done
+	s.backfills.cancel, s.backfills.done = nil, nil
+	s.backfills.mutex.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	<-done
+}
+
+// AwaitBackfills blocks until the data migrations this store started have
+// finished, and reports what they finished with. A caller that must see the
+// rewritten encoding — a readiness probe, an operator command, a test — waits
+// here; a caller that only needs the schema does not wait at all.
+//
+// It returns nil immediately when nothing is running, which is the normal state:
+// the drain is registered work, not a permanent worker.
+func (s *Store) AwaitBackfills(ctx context.Context) error {
+	s.backfills.mutex.Lock()
+	done := s.backfills.done
+	s.backfills.mutex.Unlock()
+	if done == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-done:
+	}
+	s.backfills.mutex.Lock()
+	defer s.backfills.mutex.Unlock()
+	return s.backfills.err
+}
 
 // ErrIntegrityCheckUnsupported reports a storage profile with no physical
 // integrity check. It replaces a rewrite that turned PRAGMA integrity_check into
@@ -877,14 +1031,18 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("commit migration: %w", err)
 	}
 	committed = true
-	// Release the fence BEFORE the column-wide rewrites run. The schema is
-	// current and recorded at this point, so every other replica and every other
-	// binary can start and serve; the rewriting is chunked, resumable and
-	// idempotent, so it can be interleaved with them and with a restart. This
-	// ordering is the difference between an upgrade that is slow for one process
-	// and an upgrade that is an outage for the deployment.
+	// Release the fence BEFORE the column-wide rewrites run, and do not wait for
+	// them. The schema is current and recorded at this point, so every replica
+	// and every binary can start and serve; the rewriting is chunked, resumable
+	// and idempotent, so it can be interleaved with them and with a restart.
+	//
+	// Draining here instead — which is what shipped — put the whole rewrite back
+	// on the path Open must complete, on every replica, so the deployment had no
+	// serving capacity for its duration. AwaitBackfills is for the callers that
+	// genuinely need the rewrite finished.
 	connection.Close()
-	return s.runPendingBackfills(ctx)
+	s.startBackfills()
+	return nil
 }
 
 func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
@@ -1579,11 +1737,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate OpenID Connect logout tokens: %w", err)
 		}
 	}
-	if version < 78 {
+	if version < 78 && version > 0 {
 		// Registering the rewrite rather than performing it. The rewrite itself
 		// runs after this transaction commits and the fence is released; see
 		// backfill.go for why an upgrade must not be an outage.
-		if err := registerTimestampBackfills(ctx, db, allTimestampBackfillNames()); err != nil {
+		//
+		// A database at version 0 is one this release just created, so it cannot
+		// contain a value in the old encoding. Registering twenty columns for it
+		// left twenty rows in schema_backfills for ever and made
+		// PendingBackfills report twenty pending rewrites on a database that has
+		// never held a row.
+		if err := registerTimestampBackfills(ctx, db, reEncodingBackfillNames()); err != nil {
 			return err
 		}
 	}
@@ -1615,27 +1779,12 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("discard plaintext oauth codes: %w", err)
 		}
 	}
-	if version < 81 {
-		// Step 78 rewrote every stored timestamp into the fixed-width encoding,
-		// but it re-encoded at full nanosecond resolution — so it corrected the
-		// ORDERING defect and left the RESOLUTION defect untouched.
-		//
-		// A message's timestamp is its public identifier and carries
-		// microseconds. A stored instant finer than that identifier can never be
-		// matched by a read cursor, a thread-root lookup, or a
-		// created-at lookup built from it, so a message written before
-		// domain.MessageInstant existed stays permanently unread. Truncating at
-		// write time fixed only new messages; every row already in the database
-		// kept the defect, and step 78 carried it across the upgrade intact.
-		//
-		// This is a separate step rather than an amendment to 78 because a
-		// deployment that already applied 78 will never run it again. It
-		// registers the same named backfill as 78, so a deployment upgrading
-		// from 77 rewrites the messages table once, not twice.
-		if err := registerTimestampBackfills(ctx, db, []string{messagesCreatedAtBackfill}); err != nil {
-			return err
-		}
-	}
+	// Step 81 registered a rewrite that truncated messages.created_at to the
+	// microsecond in place. It is deliberately not reproduced here: step 83
+	// registers the pass that replaces it, and running the truncation first would
+	// merge identifiers that step 83 would then be unable to tell apart. A
+	// deployment that already ran 81 arrives here with rows already merged; see
+	// runMessageIdentityBackfill for what that pass can and cannot recover.
 	if version < 82 {
 		// One row per app to serialize Socket Mode admission. The previous
 		// serializing statement wrote every live ticket of the app, which takes
@@ -1647,6 +1796,29 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			if !errors.Is(classify(err), store.ErrAlreadyExists) {
 				return fmt.Errorf("create socket mode admission: %w", err)
 			}
+		}
+	}
+	if version < 83 {
+		// schema_backfills.rejected exists so a pass can say "finished, and
+		// skipped four values it could not decode". The shipped shape reported
+		// nothing pending in exactly that state, which made the skip permanent
+		// and invisible.
+		columns, err := s.tableColumns(ctx, db, "schema_backfills")
+		if err != nil {
+			return err
+		}
+		if !columns["rejected"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE schema_backfills ADD COLUMN rejected INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate backfill rejects: %w", err)
+			}
+		}
+		// The pass that gives every message an identifier of its own and then
+		// makes a merged identifier impossible. It is registered for a fresh
+		// database too, because the UNIQUE index it installs is part of the
+		// schema this release promises and a fresh database reaches it in one
+		// empty scan.
+		if err := registerTimestampBackfills(ctx, db, []string{messagesIdentityBackfill}); err != nil {
+			return err
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -1735,35 +1907,19 @@ func parseLifecycleWakeDeadline(value string) (time.Time, error) {
 // on this database, and an administrator can reassign it. Refusing to start
 // removes every sign-in path for everybody.
 func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error {
-	rows, err := db.QueryContext(ctx, `SELECT id, workspace_id, email FROM users WHERE email <> '' ORDER BY id`)
+	rows, err := db.QueryContext(ctx, `SELECT id, workspace_id, email FROM users WHERE email <> ''`)
 	if err != nil {
 		return fmt.Errorf("read user emails: %w", err)
 	}
-	type rewrite struct {
-		id      string
-		email   string
-		cleared string
-	}
-	var rewrites []rewrite
-	owners := make(map[string]string)
+	type account struct{ id, workspace, email string }
+	var accounts []account
 	for rows.Next() {
-		var id, workspace, email string
-		if err := rows.Scan(&id, &workspace, &email); err != nil {
+		var value account
+		if err := rows.Scan(&value.id, &value.workspace, &value.email); err != nil {
 			rows.Close()
 			return fmt.Errorf("read user emails: %w", err)
 		}
-		normalized := domain.NormalizeEmail(email)
-		key := workspace + "\x00" + normalized
-		if existing, taken := owners[key]; taken {
-			// ORDER BY id makes "the first one seen" the lowest identifier, so
-			// the outcome does not depend on physical row order.
-			rewrites = append(rewrites, rewrite{id: id, email: "", cleared: fmt.Sprintf("%s (kept by user %q)", normalized, existing)})
-			continue
-		}
-		owners[key] = id
-		if normalized != email {
-			rewrites = append(rewrites, rewrite{id: id, email: normalized})
-		}
+		accounts = append(accounts, value)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1771,6 +1927,32 @@ func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+	// Sorted in Go, not by ORDER BY id. "The lowest identifier keeps the address"
+	// is a byte rule, and ORDER BY evaluates it in the column's collation:
+	// SQLite and dqlite use BINARY, PostgreSQL uses the database's default
+	// collation, under which '_', '-' and case sort differently. Two deployments
+	// of the same data could clear DIFFERENT accounts' addresses — the same
+	// per-engine identity rule this whole step exists to abolish.
+	sort.Slice(accounts, func(first, second int) bool { return accounts[first].id < accounts[second].id })
+	type rewrite struct {
+		id      string
+		email   string
+		cleared string
+	}
+	var rewrites []rewrite
+	owners := make(map[string]string)
+	for _, value := range accounts {
+		normalized := domain.NormalizeEmail(value.email)
+		key := value.workspace + "\x00" + normalized
+		if existing, taken := owners[key]; taken {
+			rewrites = append(rewrites, rewrite{id: value.id, email: "", cleared: fmt.Sprintf("%s (kept by user %q)", normalized, existing)})
+			continue
+		}
+		owners[key] = value.id
+		if normalized != value.email {
+			rewrites = append(rewrites, rewrite{id: value.id, email: normalized})
+		}
 	}
 	observed := s.now().UTC()
 	for _, value := range rewrites {
@@ -1783,6 +1965,10 @@ func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error
 		if err := recordMigrationNotice(ctx, db, MigrationNoticeEmailCleared, value.id, value.cleared, observed); err != nil {
 			return fmt.Errorf("record cleared user email %q: %w", value.id, err)
 		}
+		// Clearing an address removes a sign-in path. The notice is durable, but
+		// an upgrade that silently takes a user's way in has to say so where an
+		// operator is already looking.
+		slog.Warn("upgrade cleared a colliding workspace e-mail address", "user", value.id, "detail", value.cleared, "remedy", "an administrator can reassign the address")
 	}
 	// The plain-column index is the portable identity: every backend compares the
 	// same canonical bytes.
@@ -1816,7 +2002,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -2914,7 +3100,11 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	// The creator joins the conversation, public or private. See the note on the
 	// in-memory repository: joining only private conversations left the creator
 	// of a public channel unable to act on it.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?)`, conversation.ID, creator); err != nil {
+	//
+	// ON CONFLICT DO NOTHING like every other membership insert in this file. The
+	// in-memory repository is idempotent by construction, so without it the two
+	// profiles disagree about a second attempt.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?) ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation.ID, creator); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -4111,7 +4301,11 @@ func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.Soc
 }
 
 func (s *Store) createSocketModeConnectionOnce(ctx context.Context, value domain.SocketModeConnection) error {
-	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
+	// s.now(), not the wall clock: the admission decision two lines down is made
+	// against the injected clock, and a validation that disagrees with it makes
+	// the limit correct only while the two happen to coincide — which is exactly
+	// why the conformance test could not fail on this.
+	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(s.now().UTC()) {
 		return errors.New("invalid Socket Mode connection")
 	}
 	if err := s.ensureSocketModeAdmissionRow(ctx, value.AppID); err != nil {
@@ -4276,7 +4470,7 @@ func (s *Store) CountSocketModeConnections(ctx context.Context, appID domain.App
 		return 0, store.ErrInvalidAppApproval
 	}
 	var count int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, appID, time.Now().UTC().UnixNano()).Scan(&count)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, appID, s.now().UTC().UnixNano()).Scan(&count)
 	return count, err
 }
 
@@ -5019,7 +5213,10 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 
 func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
 	// A message may not be stored at a finer resolution than its own timestamp
-	// can express, or a read cursor built from that timestamp can never cover it.
+	// can express, or a read cursor built from that timestamp can never cover it
+	// — and it may not be stored at an instant another message in the same
+	// conversation already owns, or the two share one public identifier. See
+	// runMessageIdentityBackfill: truncating alone merged identities.
 	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
@@ -5054,18 +5251,56 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 			return store.ErrIdempotencyConflict
 		}
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, attachments, message.ThreadTimestamp, domain.NewStoredTime(message.CreatedAt), unfurls); err != nil {
+	stored := domain.NewStoredTime(message.CreatedAt)
+	// The check inside the transaction is what makes the common case a clean,
+	// named answer instead of a constraint failure; the UNIQUE index installed by
+	// runMessageIdentityBackfill is what makes it correct when two writers race on
+	// an engine that lets both transactions read before either writes.
+	var owner domain.MessageID
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation = ? AND created_at = ?`, message.Conversation, stored).Scan(&owner); {
+	case err == nil:
+		_ = tx.Rollback()
+		if owner == message.ID {
+			// The same message, not a contested instant: the caller's remedy is a
+			// different identifier, not a different microsecond.
+			return store.ErrAlreadyExists
+		}
+		return store.ErrMessageTimestampTaken
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		_ = tx.Rollback()
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, attachments, message.ThreadTimestamp, stored, unfurls); err != nil {
 		_ = tx.Rollback()
 		// A duplicate identifier is ErrAlreadyExists and a missing conversation,
 		// author or workspace is ErrNotFound; neither may reach the caller as a raw
-		// driver error naming the constraint.
-		return classify(err)
+		// driver error naming the constraint. A duplicate that is the CONVERSATION
+		// TIMESTAMP rather than the message id has its own answer, because the
+		// caller's remedy is different: it must pick another instant, not another
+		// identifier. The two are told apart by re-reading after the rollback
+		// rather than by reading the driver's English.
+		classified := classify(err)
+		if errors.Is(classified, store.ErrAlreadyExists) && s.messageTimestampTaken(ctx, message.Conversation, message.ID, stored) {
+			return store.ErrMessageTimestampTaken
+		}
+		return classified
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		_ = tx.Rollback()
 		return err
 	}
 	return tx.Commit()
+}
+
+// messageTimestampTaken reports whether some OTHER message in the conversation
+// already owns the instant. It runs after the failed insert has been rolled
+// back, because a PostgreSQL transaction is unusable once a statement in it has
+// failed.
+func (s *Store) messageTimestampTaken(ctx context.Context, conversation domain.ConversationID, id domain.MessageID, at domain.StoredTime) bool {
+	var taken int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM messages WHERE conversation = ? AND created_at = ? AND id <> ?`, conversation, at, id).Scan(&taken)
+	return err == nil
 }
 
 // GetMessageByCreatedAt resolves a message by the instant behind its public
@@ -7488,6 +7723,9 @@ func (s *Store) CreateList(ctx context.Context, value domain.List, event events.
 // a half-copied list that clients had already been told about.
 func (s *Store) CreateListWithItems(ctx context.Context, value domain.List, event events.Event, items []store.ListItemCreation) error {
 	for _, creation := range items {
+		if creation.Item.ID == "" {
+			return fmt.Errorf("%w: a list item created with the list must carry an identifier", store.ErrInvalidArgument)
+		}
 		if creation.Item.ListID != value.ID || creation.Item.WorkspaceID != value.WorkspaceID {
 			return fmt.Errorf("%w: list item %q does not belong to the list being created", store.ErrInvalidArgument, creation.Item.ID)
 		}
@@ -7878,6 +8116,16 @@ func classify(err error) error {
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
+	}
+	// Contention is a HANDLED condition on every engine, and it is checked before
+	// the constraint classes because it is the one class whose correct treatment
+	// is "the caller may try again". Returning it raw — which is what the
+	// previous shape did for every code outside the four constraint classes —
+	// puts a routine serialization failure or a lost dqlite leader in front of
+	// the transport as an unclassified error, and AGENTS.md reserves HTTP 500 for
+	// the unhandled.
+	if contended(err) {
+		return fmt.Errorf("%w: %w", store.ErrTransient, err)
 	}
 	var typed *sqlite.Error
 	if errors.As(err, &typed) {

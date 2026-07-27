@@ -29,7 +29,26 @@ func seedSearchWorkspace(t *testing.T) *memory.Store {
 	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
 	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	// The colliding-timestamp corpus below spreads one instant across several
+	// conversations, because a message's timestamp is its identifier WITHIN a
+	// conversation and the repositories now refuse two messages on one
+	// microsecond in one conversation. Search spans conversations, so the
+	// keyset tiebreak this test exists to exercise is still exercised.
+	for index := 1; index < collidingConversations; index++ {
+		repository.SeedConversation(domain.Conversation{ID: collidingConversation(index), WorkspaceID: "T1", Name: fmt.Sprintf("general-%d", index)})
+	}
 	return repository
+}
+
+// collidingConversations is how many conversations share each instant in the
+// pagination corpus.
+const collidingConversations = 8
+
+func collidingConversation(index int) domain.ConversationID {
+	if index%collidingConversations == 0 {
+		return "C1"
+	}
+	return domain.ConversationID(fmt.Sprintf("C1-%d", index%collidingConversations))
 }
 
 func searchMessage(index int, conversation domain.ConversationID, at time.Time) (domain.Message, events.Event) {
@@ -61,14 +80,14 @@ func TestSearchPaginationIsCompleteWhileMessagesArrive(t *testing.T) {
 	ctx := context.Background()
 	base := time.Now().UTC().Add(-time.Hour)
 
-	// Messages are seeded in groups sharing one timestamp. Cursor pagination
-	// over (created_at, id) is only hard when timestamps collide: with unique
-	// timestamps the identifier tiebreak is never consulted, and a broken
-	// tiebreak would silently drop or repeat rows.
-	const perTimestamp = 8
+	// Messages are seeded in groups sharing one timestamp, one message per
+	// conversation. Cursor pagination over (created_at, id) is only hard when
+	// timestamps collide: with unique timestamps the identifier tiebreak is
+	// never consulted, and a broken tiebreak would silently drop or repeat rows.
+	const perTimestamp = collidingConversations
 	for index := 0; index < seeded; index++ {
 		at := base.Add(time.Duration(index/perTimestamp) * time.Millisecond)
-		message, event := searchMessage(index, "C1", at)
+		message, event := searchMessage(index, collidingConversation(index), at)
 		if err := repository.CreateMessage(ctx, message, event, ""); err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +106,7 @@ func TestSearchPaginationIsCompleteWhileMessagesArrive(t *testing.T) {
 				return
 			default:
 			}
-			message, event := searchMessage(seeded+index, "C1", later.Add(time.Duration(index/perTimestamp)*time.Millisecond))
+			message, event := searchMessage(seeded+index, collidingConversation(index), later.Add(time.Duration(index/perTimestamp)*time.Millisecond))
 			if err := repository.CreateMessage(ctx, message, event, ""); err != nil {
 				return
 			}
@@ -122,7 +141,7 @@ func TestSearchPaginationIsCompleteWhileMessagesArrive(t *testing.T) {
 	// Everything that existed before the walk began must have been returned.
 	missing := make([]domain.MessageID, 0)
 	for index := 0; index < seeded; index++ {
-		id := domain.MessageID(fmt.Sprintf("msg_C1_%06d", index))
+		id := domain.MessageID(fmt.Sprintf("msg_%s_%06d", collidingConversation(index), index))
 		if _, ok := seen[id]; !ok {
 			missing = append(missing, id)
 		}

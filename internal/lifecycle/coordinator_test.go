@@ -1,8 +1,10 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -180,6 +182,281 @@ func servingRecord(generation uint64) StateRecord {
 	return StateRecord{State: StateActive, Generation: generation}
 }
 
+// realLifecycle builds the durable control store, the real filesystem
+// snapshotter, and the coordinator over one temporary root, so a test can drive
+// the actual sequence an operator or an inbound request drives rather than a
+// fake of it. The volume is both the snapshot source and the restore
+// destination, exactly as cmd/activator's -snapshot-source/-snapshot-output pair
+// is in the file profile.
+func realLifecycle(t *testing.T, seed StateRecord) (string, *Controller, FileSnapshotter, Coordinator) {
+	t.Helper()
+	root := t.TempDir()
+	volume := filepath.Join(root, "chat.db")
+	manager, err := NewSnapshotManager(filepath.Join(root, "snapshots"), bytes.Repeat([]byte{7}, 32), bytes.Repeat([]byte{9}, 32), "test-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshots, err := NewFileSnapshotter(manager, volume, volume, Manifest{
+		Backend: "sqlite", SchemaVersion: 1, ApplicationVersion: "test", MinRestorerVersion: "test", MaxRestorerVersion: "test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := OpenSQLiteStateStore(filepath.Join(root, "lifecycle.db"), seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	controller, err := NewPersistent(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := newTestCoordinator(controller, &coordinatorDriver{}, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return volume, controller, snapshots, coordinator
+}
+
+func writeVolume(t *testing.T, volume, contents string) {
+	t.Helper()
+	if err := os.WriteFile(volume, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readVolume(t *testing.T, volume string) string {
+	t.Helper()
+	body, err := os.ReadFile(volume)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// A brand-new deployment must cold-start. The control store has never been
+// written, so nothing has published a manifest and the snapshot root is empty:
+// the only copy of the data is the volume the deployment is about to create.
+//
+// Seeding derived snapshot authority from the seeded state, so a fresh store was
+// HIBERNATED *with* authority. The first ever request took the restore branch,
+// found no current.json, exhausted the wake attempts and went FAILED — and the
+// documented recovery, POST /recover, carried the flag forward so the next wake
+// failed identically. There was no runbook out of it: POST /restore needs a
+// generation that does not exist. The deployment was unbootable.
+func TestFreshDeploymentReachesActiveFromTheLiveVolume(t *testing.T) {
+	volume, controller, _, coordinator := realLifecycle(t, StateRecord{State: StateHibernated})
+	if seeded := controller.Metadata(); seeded.SnapshotAuthoritative {
+		t.Fatalf("seeded control row=%+v: a store that has never run claims its snapshot is authoritative", seeded)
+	}
+	fence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.WakeAt(context.Background(), fence); err != nil {
+		t.Fatalf("the first ever wake of a fresh deployment failed: %v", err)
+	}
+	if err := controller.Activate(fence); err != nil {
+		t.Fatal(err)
+	}
+	if state, generation := controller.Snapshot(); state != StateActive || generation != 1 {
+		t.Fatalf("state=%s generation=%d, want a serving stack at generation 1", state, generation)
+	}
+	// Nothing was restored over the volume, so the deployment's own database is
+	// whatever the start commands made of it — here, still absent.
+	if _, err := os.Stat(volume); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("stat volume err=%v, want the wake to have written nothing over it", err)
+	}
+}
+
+// The recorded destruction path, end to end against the real store, the real
+// snapshotter and the real coordinator.
+//
+// The stack crashed during SNAPSHOTTING, so it is FAILED with the volume holding
+// writes no snapshot has and snapshot authority correctly false. An operator
+// types a generation that does not exist into POST /restore. The restore is
+// refused before a byte is written and the handler fails the attempt; the
+// operator then follows docs/operations.md and calls POST /recover. The next
+// unrelated inbound request must not destroy the volume.
+//
+// Consent granted at the transition made that impossible: BeginOperatorRestore
+// set snapshot authority before the selection was even validated, and Fail and
+// AcknowledgeFailure both carried it forward, so the ordinary wake restored the
+// last published snapshot over strictly newer data with no operator involved.
+func TestRefusedOperatorRestoreDoesNotLetTheNextRequestDestroyTheVolume(t *testing.T) {
+	volume, controller, snapshots, coordinator := realLifecycle(t, servingRecord(5))
+	const published = "the bytes generation 5 captured"
+	const live = "every write made since generation 5"
+	writeVolume(t, volume, published)
+	if _, err := snapshots.Create(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	writeVolume(t, volume, live)
+
+	// The crash during SNAPSHOTTING: nothing was published for this fence.
+	fence, err := controller.BeginHibernate(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.BeginSnapshot(fence); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Fail(fence); err != nil {
+		t.Fatal(err)
+	}
+
+	// POST /restore?generation=99 — a generation this deployment does not have.
+	restoreFence, err := controller.BeginOperatorRestore(fence, 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoreErr := coordinator.RestoreAt(context.Background(), restoreFence, 99)
+	if !errors.Is(restoreErr, ErrNoVerifiedSnapshot) && !errors.Is(restoreErr, ErrGenerationNotRestorable) {
+		t.Fatalf("operator restore error=%v, want the selection refused", restoreErr)
+	}
+	// restoreHandler joins the refusal with Fail on the restore fence.
+	if err := controller.Fail(restoreFence); err != nil {
+		t.Fatal(err)
+	}
+	if record := controller.Metadata(); record.SnapshotAuthoritative {
+		t.Fatalf("record=%+v: a restore that wrote nothing left permission to overwrite the volume", record)
+	}
+
+	// POST /recover, exactly as the runbook says.
+	if _, err := controller.AcknowledgeFailure(restoreFence); err != nil {
+		t.Fatal(err)
+	}
+	// Any inbound HTTP request.
+	wakeFence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.WakeAt(context.Background(), wakeFence); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Activate(wakeFence); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVolume(t, volume); got != live {
+		t.Fatalf("volume=%q after an ordinary request, want %q: a snapshot was restored over strictly newer data with no operator involved", got, live)
+	}
+}
+
+// A crash during an operator restore must resume that operator's selection.
+//
+// Once Restore may have written a byte the volume is a ruin and only a snapshot
+// is complete, so the durable record must already say so — before the write, not
+// after. And the record must still name the generation the operator chose: the
+// reason they chose an older one is that the current manifest is not what they
+// want, so resuming "whatever is current" silently restores the wrong data.
+//
+// The crash is injected, not slept for: the restore parks in the middle of the
+// write and never returns, exactly as a killed task would not, while a second
+// controller loaded from the same durable record resumes.
+func TestCrashDuringOperatorRestoreResumesTheSelectedGeneration(t *testing.T) {
+	volume, controller, snapshots, _ := realLifecycle(t, servingRecord(20))
+	const chosen = "the bytes of the generation the operator chose"
+	const rejected = "the newer generation the operator does not want"
+	writeVolume(t, volume, chosen)
+	if _, err := snapshots.Create(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	writeVolume(t, volume, rejected)
+	if _, err := snapshots.Create(context.Background(), 9); err != nil {
+		t.Fatal(err)
+	}
+	writeVolume(t, volume, "live writes the operator has decided to discard")
+
+	fence, err := controller.BeginHibernate(20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.BeginSnapshot(fence); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Fail(fence); err != nil {
+		t.Fatal(err)
+	}
+	restoreFence, err := controller.BeginOperatorRestore(fence, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dying := &haltingSnapshotter{Snapshotter: snapshots, volume: volume, entered: make(chan struct{}), release: make(chan struct{})}
+	abandoned, err := newTestCoordinator(controller, &coordinatorDriver{}, dying)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := make(chan error, 1)
+	go func() { interrupted <- abandoned.RestoreAt(context.Background(), restoreFence, 5) }()
+	<-dying.entered
+
+	// This is the record a replacement process finds. Authority must already be
+	// granted, because the volume is now a partial write of the snapshot, and the
+	// operator's selection must still be named.
+	store, err := OpenSQLiteStateStore(filepath.Join(filepath.Dir(volume), "lifecycle.db"), StateRecord{State: StateActive, Generation: 99})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	record, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.State != StateWaking || record.Generation != restoreFence {
+		t.Fatalf("durable record=%+v, want a persisted WAKING restore at fence %d", record, restoreFence)
+	}
+	if !record.SnapshotAuthoritative {
+		t.Fatalf("durable record=%+v, want the half-written volume reported as incomplete", record)
+	}
+	if record.RestoreGeneration != 5 {
+		t.Fatalf("durable record=%+v, want the operator's selection of generation 5 to survive the crash", record)
+	}
+
+	second, err := NewPersistent(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := newTestCoordinator(second, &coordinatorDriver{}, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := readVolume(t, volume); got != chosen {
+		t.Fatalf("volume=%q after resuming the interrupted restore, want the operator-selected %q", got, chosen)
+	}
+	if state, _ := second.Snapshot(); state != StateActive {
+		t.Fatalf("state=%s, want the resumed restore to reach active", state)
+	}
+	if second.Metadata().RestoreGeneration != 0 {
+		t.Fatalf("metadata=%+v, want the completed selection spent", second.Metadata())
+	}
+	close(dying.release)
+	<-interrupted
+}
+
+// haltingSnapshotter parks forever inside Restore, after the write has begun. It
+// stands in for a process death partway through a restore: the caller never
+// returns from the stage and never persists another transition.
+type haltingSnapshotter struct {
+	Snapshotter
+	volume  string
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *haltingSnapshotter) Restore(_ context.Context, _ Manifest) error {
+	// The volume is left as a partial write, which is the whole reason the record
+	// must already say the snapshot is the only complete copy.
+	if err := os.WriteFile(s.volume, []byte("half a"), 0o600); err != nil {
+		return err
+	}
+	close(s.entered)
+	<-s.release
+	return errors.New("the process died during the restore")
+}
+
 func TestCoordinatorHibernateAndWake(t *testing.T) {
 	controller := New(StateActive)
 	driver := &coordinatorDriver{}
@@ -310,6 +587,16 @@ func TestCoordinatorMigrationRunsOncePerActivation(t *testing.T) {
 	}
 }
 
+// A wake persisted by one process is resumed by its replacement.
+//
+// The control store here is created by the test, so it is a *fresh* one: it has
+// published no manifest, which is why the resumed wake starts from the live
+// volume and selects no snapshot at all. That assertion used to read "two
+// snapshot calls", which was the seeding defect showing through — the seed
+// claimed a hibernated stack whose snapshot was authoritative, and the first ever
+// wake of a real deployment therefore looked for a current.json that cannot
+// exist. Seeding is exercised end to end in
+// TestFreshDeploymentReachesActiveFromTheLiveVolume.
 func TestCoordinatorRecoversPersistedWakeAfterProcessRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lifecycle.db")
 	firstStore, err := OpenSQLiteStateStore(path, StateRecord{State: StateHibernated})
@@ -349,8 +636,11 @@ func TestCoordinatorRecoversPersistedWakeAfterProcessRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	state, generation := second.Snapshot()
-	if state != StateActive || generation != fence || len(driver.calls) != 5 || len(snapshots.calls) != 2 {
+	if state != StateActive || generation != fence || len(driver.calls) != 5 || len(snapshots.calls) != 1 {
 		t.Fatalf("state=%s generation=%d driver=%v snapshots=%v", state, generation, driver.calls, snapshots.calls)
+	}
+	if len(snapshots.restored) != 0 {
+		t.Fatalf("restored=%v, want a store that has published nothing to restore nothing", snapshots.restored)
 	}
 }
 
@@ -581,6 +871,13 @@ func TestWakeAfterCompletedHibernationRestoresThePublishedSnapshot(t *testing.T)
 	if len(snapshots.restored) != 1 || snapshots.restored[0] != 6 {
 		t.Fatalf("restored=%v, want the published generation 6 restored", snapshots.restored)
 	}
+	// Authority is dropped as soon as persistence is up, not at Activate. The
+	// migration and the workers ran inside WakeAt and they write; a crash in that
+	// window used to leave a durable record that restored the snapshot over those
+	// writes, which contradicts the invariant the field is documented with.
+	if backend.load().SnapshotAuthoritative {
+		t.Fatal("workers and servers started with the snapshot still marked authoritative")
+	}
 	if err := controller.Activate(fence); err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +1040,7 @@ func TestWakeDoesNotSilentlyFallBackToAnOlderGenerationOnRestoreFailure(t *testi
 
 	// The mandated replacement: an explicit, fenced, authenticated selection of a
 	// named known-good generation.
-	restoreFence, err := controller.BeginOperatorRestore(fence)
+	restoreFence, err := controller.BeginOperatorRestore(fence, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +1072,7 @@ func TestOperatorRestoreRefusesAGenerationThatIsNotKnownGood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoreFence, err := controller.BeginOperatorRestore(fence)
+	restoreFence, err := controller.BeginOperatorRestore(fence, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -787,10 +1084,15 @@ func TestOperatorRestoreRefusesAGenerationThatIsNotKnownGood(t *testing.T) {
 	}
 }
 
-// A restore driven from an ordinary wake fence must be refused. Only
-// BeginOperatorRestore records the consent that grants snapshot authority, so
-// without this guard the explicit endpoint would be a second way to overwrite a
+// A restore driven from a fence that recorded no operator selection must be
+// refused, so the explicit endpoint cannot become a second way to overwrite a
 // live volume.
+//
+// The guard used to test SnapshotAuthoritative, which an ordinary wake out of a
+// hibernated stack also carries: it admitted any wake fence whose stack had
+// hibernated normally, which is every healthy deployment. Matching the recorded
+// selection against the generation being restored is what actually distinguishes
+// "an operator asked for this" from "a request happened to arrive".
 func TestOperatorRestoreRefusesAFenceWithoutRecordedConsent(t *testing.T) {
 	controller := New(StateActive)
 	hibernateFence, err := controller.BeginHibernate(0)
@@ -810,6 +1112,28 @@ func TestOperatorRestoreRefusesAFenceWithoutRecordedConsent(t *testing.T) {
 	}
 	if len(snapshots.restored) != 0 {
 		t.Fatalf("restored=%v, want the live volume untouched", snapshots.restored)
+	}
+
+	// The same refusal for the fence an ordinary wake out of a normal hibernation
+	// owns, which carries snapshot authority and no consent whatsoever.
+	hibernated := New(StateHibernated)
+	wakeFence, err := hibernated.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hibernated.Metadata().SnapshotAuthoritative {
+		t.Fatal("setup is wrong: an ordinary wake out of hibernation must carry snapshot authority")
+	}
+	ordinary := &coordinatorSnapshots{verified: map[uint64]Manifest{1: {Generation: 1, Backend: "sqlite", SchemaVersion: 1}}}
+	wake, err := newTestCoordinator(hibernated, &coordinatorDriver{}, ordinary)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wake.RestoreAt(context.Background(), wakeFence, 1); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("restore on an ordinary wake fence error=%v, want %v", err, ErrInvalidTransition)
+	}
+	if len(ordinary.restored) != 0 {
+		t.Fatalf("restored=%v, want nothing restored for a fence nobody consented on", ordinary.restored)
 	}
 }
 
@@ -836,6 +1160,49 @@ func TestHibernateRefusesInsideTheWakeSafetyWindow(t *testing.T) {
 	}
 	if len(driver.calls) != 0 || len(snapshots.calls) != 0 {
 		t.Fatalf("driver=%v snapshots=%v, want no hibernation work", driver.calls, snapshots.calls)
+	}
+}
+
+// A deadline that has already passed demands no future wake, so it must not
+// refuse hibernation.
+//
+// The eligibility check tested "is the deadline within the safety margin", which
+// an elapsed deadline satisfies forever. BeginWake preserves the deadline across
+// the wake it triggered and nothing on the activator side clears it, so a
+// deployment whose worker is down — or which never wired the publisher at all —
+// woke once for a scheduled job and could never hibernate again. A scale-to-zero
+// deployment that stops scaling to zero, reported only as repeated 409s.
+func TestHibernateIsNotRefusedForeverByADeadlineThatHasPassed(t *testing.T) {
+	controller := New(StateActive)
+	if err := controller.SetWakeDeadline(0, time.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := &coordinatorSnapshots{manifest: Manifest{Generation: 1, Backend: "sqlite", SchemaVersion: 1}}
+	coordinator, err := newTestCoordinator(controller, &coordinatorDriver{}, snapshots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := coordinator.Hibernate(context.Background(), 0); err != nil {
+		t.Fatalf("hibernate error=%v, want an elapsed deadline to block nothing", err)
+	}
+	if state, _ := controller.Snapshot(); state != StateHibernated {
+		t.Fatalf("state=%s, want hibernated", state)
+	}
+	// And the wake that the elapsed deadline then triggers must consume it, or
+	// the activator's scheduled wake loop fires at a stack it has just woken and
+	// the pair oscillates: wake, hibernate, wake.
+	fence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.WakeAt(context.Background(), fence); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Activate(fence); err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Metadata().WakeDeadline; !got.IsZero() {
+		t.Fatalf("wake deadline=%s after the wake it demanded, want it consumed", got)
 	}
 }
 
@@ -876,7 +1243,7 @@ func TestOperatorRestoreIsCounted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoreFence, err := controller.BeginOperatorRestore(fence)
+	restoreFence, err := controller.BeginOperatorRestore(fence, 2)
 	if err != nil {
 		t.Fatal(err)
 	}

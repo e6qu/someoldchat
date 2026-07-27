@@ -28,6 +28,16 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      # The publication contract now decides "ci.yml really runs every gate"
+      # from the parsed workflow rather than from a grep over its text, which a
+      # YAML comment satisfied. That parse is the repository's own Go program,
+      # so this job needs the toolchain the repository pins.
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
       - name: Validate immutable tags, OCI image shape, and retention policy
         run: ./scripts/check-container-publication.sh
 

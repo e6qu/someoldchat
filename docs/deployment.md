@@ -94,22 +94,42 @@ The first supported installation SHOULD be a Linux VM with:
 - a narrowly scoped credential allowing the activator to start stopped units or
   additional database VMs.
 
-The provider-neutral `sameoldchat-activator` requires all of the following at
-startup, and fails loudly when any is missing: `-listen`; a durable SQLite
-control DSN; an explicit snapshot store (`filesystem` with `-snapshot-root` or
-`s3` with `-snapshot-s3-bucket` and optional `-snapshot-s3-prefix`); a forward
-URL; an authenticated control token; an explicit snapshot mode (`file` for one
-database file or `directory` for a stopped dqlite state directory);
-`-snapshot-source`, `-snapshot-output`, `-snapshot-max-bytes`, `-snapshot-key-id`,
-`-snapshot-encryption-key-hex`, and `-snapshot-signing-key-hex`; `-backend`,
-`-schema-version`, and `-application-version`; `-request-spool-key-hex`,
-`-request-spool-owner`, `-request-spool-max-bytes`, and
-`-request-spool-max-requests`; and every lifecycle command.
+No Terraform module in this repository deploys the provider-neutral
+`sameoldchat-activator`: the operator deploys it, so the list below is the only
+place its startup contract is written down. `make task-flags-check` reads the
+region between the markers and cross-references it against the binary's own
+flag set, the same way it cross-references a container command — so a flag the
+binary drops, renames, or newly requires cannot leave this list stale. The list
+used to be prose that promised "all of the following" and then named eighteen of
+the twenty-eight, describing the other ten ("a durable SQLite control DSN", "a
+forward URL", "an authenticated control token", "every lifecycle command")
+without ever naming a flag an operator could type.
+
+<!-- flag-contract: cmd/activator -->
+`sameoldchat-activator` fails loudly at startup when any of these is missing:
+
+- the control plane: `-listen`, `-forward-url`, `-control-token`, `-state-db`;
+- the snapshot store: `-snapshot-store` (`filesystem` or `s3`), `-snapshot-mode`
+  (`file` for one database file, `directory` for a stopped dqlite state
+  directory), `-snapshot-source`, `-snapshot-output`, `-snapshot-max-bytes`,
+  `-snapshot-key-id`, `-snapshot-encryption-key-hex`,
+  `-snapshot-signing-key-hex`;
+- the recorded identity of what a snapshot contains: `-backend`,
+  `-schema-version`, `-application-version`;
+- the cold-request spool: `-request-spool-key-hex`, `-request-spool-owner`,
+  `-request-spool-max-bytes`, `-request-spool-max-requests`;
+- every lifecycle command: `-cmd-inspect`, `-cmd-run-migration`,
+  `-cmd-start-persistence`, `-cmd-stop-persistence`, `-cmd-start-workers`,
+  `-cmd-stop-workers`, `-cmd-start-servers`, `-cmd-drain-servers`,
+  `-cmd-release-storage`.
+
+`-snapshot-root` is required for `-snapshot-store=filesystem`;
+`-snapshot-s3-bucket` and the optional `-snapshot-s3-prefix` are for
+`-snapshot-store=s3`. The two stores are mutually exclusive.
 `-wake-deadline`, `-wake-safety-margin`, and `-request-max-bytes` have defaults
 and are documented in [operations](operations.md#disaster-recovery), where the
-table of the three sits. `-snapshot-root`, `-snapshot-s3-bucket`, and
-`-snapshot-s3-prefix` are conditionally required and mutually exclusive, as the
-list above states.
+table of the three sits.
+<!-- /flag-contract -->
 Commands receive the fencing
 generation through `SAMEOLDCHAT_LIFECYCLE_GENERATION`; persistence startup also
 receives the selected backend, snapshot artifact, and schema version. Missing

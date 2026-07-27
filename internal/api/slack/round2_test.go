@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -173,33 +174,40 @@ func TestFilesListPagingDescribesTheWholeCollection(t *testing.T) {
 	}
 }
 
-// boundedFileService answers every Files call with another page, so the scan
-// bound is always reached.
-type boundedFileService struct {
+// loopingFileService answers every Files call with another page from a cursor it
+// has already handed out, which is a repository that can never finish.
+type loopingFileService struct {
 	chatapi.Service
 	calls int
 }
 
-func (s *boundedFileService) Files(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error) {
+func (s *loopingFileService) Files(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error) {
 	s.calls++
 	return domain.FilePage{HasMore: true, NextCursor: domain.Cursor("more")}, nil
 }
 
-func (s *boundedFileService) RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error {
+func (s *loopingFileService) RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error {
 	return nil
 }
 
-// When the scan bound is reached the collection has not been read, so there is no
-// complete answer to give. It used to answer ok:true with an empty list and
-// `has_more:true` beside an empty `next_cursor` — a truncation indistinguishable
-// from a complete result, and a page no caller could ever reach.
+// A scan that did not reach the end of the collection has no complete answer to
+// give. It used to answer ok:true with an empty list and `has_more:true` beside an
+// empty `next_cursor` — a truncation indistinguishable from a complete result, and
+// a page no caller could ever reach.
+//
+// The unreachable end used to be a fixed 20,000-row ceiling, which made this the
+// answer for every caller in a workspace holding 20,001 files; see
+// TestFilesListAnswersAWorkspacePastTheOldScanBound. What remains is a repository
+// that reports another page while pointing back at one it has already served:
+// following it is an infinite loop, and calling it complete would report the
+// collection as smaller than it is.
 func TestFilesListReportsRequestTimeoutRatherThanATruncatedSuccess(t *testing.T) {
-	service := &boundedFileService{}
+	files := &loopingFileService{}
 	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeFilesRead: {}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service, authenticator)
+	handler, err := NewHandler(files, authenticator)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,8 +220,10 @@ func TestFilesListReportsRequestTimeoutRatherThanATruncatedSuccess(t *testing.T)
 	if code := errorCode(t, result); code != "request_timeout" {
 		t.Fatalf("want request_timeout, got %q (%s)", code, result.Body)
 	}
-	if service.calls != fileFilterScanLimit/fileFilterScanPage {
-		t.Fatalf("scan read %d pages, want %d", service.calls, fileFilterScanLimit/fileFilterScanPage)
+	// The repeated cursor is recognised on the read that returns it, so the loop
+	// is left immediately rather than run until the deadline.
+	if files.calls != 2 {
+		t.Fatalf("scan read %d pages before recognising a repeated cursor, want 2", files.calls)
 	}
 }
 
@@ -716,8 +726,9 @@ func TestUnroutedAPIRequestsAnswerAJSONEnvelope(t *testing.T) {
 		if result.Code != http.StatusOK {
 			t.Errorf("%s %s: status=%d, want 200", probe.method, probe.target, result.Code)
 		}
-		if contentType := result.Header().Get("Content-Type"); contentType != "application/json" {
-			t.Errorf("%s %s: content-type=%q", probe.method, probe.target, contentType)
+		mediaType, parameters, err := mime.ParseMediaType(result.Header().Get("Content-Type"))
+		if err != nil || mediaType != "application/json" || !strings.EqualFold(parameters["charset"], "utf-8") {
+			t.Errorf("%s %s: content-type=%q", probe.method, probe.target, result.Header().Get("Content-Type"))
 		}
 		if code := errorCode(t, result); code != "unknown_method" {
 			t.Errorf("%s %s: want unknown_method, got %q", probe.method, probe.target, code)

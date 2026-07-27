@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
@@ -563,7 +564,7 @@ func TestProfilePhotoChangesCommitTheirCleanupWithTheChange(t *testing.T) {
 		change func(*testing.T, Messages)
 	}{
 		{"replacing", func(t *testing.T, messages Messages) {
-			if _, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", 4, strings.NewReader("two!")); err != nil {
+			if _, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", int64(len(testImageBytes("two!"))), bytes.NewReader(testImageBytes("two!"))); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -588,7 +589,7 @@ func TestProfilePhotoChangesCommitTheirCleanupWithTheChange(t *testing.T) {
 			}
 			messages := Messages{Store: repository, Blob: objects}
 
-			first, err := messages.SetUserPhoto(ctx, "T1", "U1", "image/png", 4, strings.NewReader("one!"))
+			first, err := messages.SetUserPhoto(ctx, "T1", "U1", "image/png", int64(len(testImageBytes("one!"))), bytes.NewReader(testImageBytes("one!")))
 			if err != nil {
 				t.Fatal(err)
 			}

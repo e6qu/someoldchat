@@ -563,8 +563,15 @@ func credentialWithdrawn(err error) bool {
 // recipient-scoped topic added to events.RecipientScoped would otherwise be
 // refused correctly by Socket Mode and the webhook and broadcast to every member
 // of the workspace by this stream and by RTM.
+//
+// It asks about both names the record carries. Topic and the payload's "type"
+// are separate storage columns and separate wire fields, and the seam codec
+// rebuilds a record from them independently, so a record whose topic is
+// message.created can carry a payload that is addressed to exactly one user.
+// Reading the topic alone made that record look addressed to nobody, and this
+// stream wrote one user's text to every subscriber in the workspace.
 func addressedTo(topic string, delivered events.Delivered, recipient domain.UserID) bool {
-	if !events.RecipientScoped(topic) {
+	if !events.AddressedToOneRecipient(topic, delivered) {
 		return true
 	}
 	userID, ok := delivered.Field("user_id")

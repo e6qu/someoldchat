@@ -513,24 +513,14 @@ func (m SnapshotManager) LastVerified(maxGeneration uint64) (Manifest, error) {
 	if newest.Generation > 0 {
 		return newest, nil
 	}
-	{
-		currentPath, pathErr := safePath(m.Root, "current.json")
-		if pathErr != nil {
-			return Manifest{}, pathErr
-		}
-		body, readErr := os.ReadFile(currentPath)
-		if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
-			return Manifest{}, fmt.Errorf("read current snapshot manifest: %w", readErr)
-		}
-		if readErr == nil {
-			var manifest Manifest
-			if json.Unmarshal(body, &manifest) == nil && manifest.Generation > 0 && manifest.Generation <= maxGeneration {
-				if err := m.verifyManifest(manifest); err == nil {
-					return manifest, nil
-				}
-			}
-		}
-	}
+	// No current.json fallback. Both backends publish every manifest under
+	// manifests/ before selecting it as current, so a generation reachable only
+	// through current.json is not a generation this method was asked for — it is
+	// a *different* one, and returning it is the implicit fallback
+	// specs/scale-to-zero.md:180-183 forbids. The object-store path already
+	// answered ErrNoVerifiedSnapshot here; the two backends now answer the same
+	// question the same way, so a future caller that forgets the coordinator's
+	// exact-generation check cannot silently restore something else.
 	return Manifest{}, ErrNoVerifiedSnapshot
 }
 

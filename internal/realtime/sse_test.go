@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -418,6 +419,23 @@ func TestAddressedToWithholdsEveryRecipientScopedTopic(t *testing.T) {
 		}
 		if !addressedTo(topic, delivered, "U2") {
 			t.Fatalf("%s: a record addressed to U2 was withheld from U2", topic)
+		}
+		// Topic and the payload's type are separate storage columns and separate
+		// wire fields, and the seam codec rebuilds a record from them
+		// independently. A filter that reads the topic alone decides that a
+		// record carrying one user's text is addressed to nobody and writes it
+		// to every subscriber in the workspace.
+		rebuilt := events.Event{ID: "evt_3", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0),
+			Payload: fmt.Sprintf(`{"type":%q,"event_ts":"1700000000.000000","user_id":"U2","text":"only for U2"}`, topic)}
+		rebuiltDelivered, err := events.Deliverable(rebuilt)
+		if err != nil {
+			t.Fatalf("%s: a record addressed to one recipient must still reach that recipient: %v", topic, err)
+		}
+		if addressedTo(rebuilt.Topic, rebuiltDelivered, "U1") {
+			t.Fatalf("%s: a payload addressed to U2 under topic %s was shown to U1", topic, rebuilt.Topic)
+		}
+		if !addressedTo(rebuilt.Topic, rebuiltDelivered, "U2") {
+			t.Fatalf("%s: a payload addressed to U2 was withheld from U2", topic)
 		}
 	}
 	ordinary := producedRecord(2, "evt_2", "message.created", events.String("message_id", "M1"))

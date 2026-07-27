@@ -33,12 +33,24 @@ type Handler struct {
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
 
-func (h *Handler) SetReleaseRevision(revision string) error {
-	revision = strings.TrimSpace(revision)
-	if !immutableReleaseRevision.MatchString(revision) {
+// ValidateReleaseRevision decides, without constructing anything, whether a
+// release identity is acceptable. It is exported so a process can settle the
+// question inside its configuration contract — cmd/server's -check-config
+// accepted `-release-revision not-a-commit` and the real start then exited 2 on
+// it, which is precisely the drift scripts/check-terraform-module-startup.sh
+// treats -check-config as authoritative against.
+func ValidateReleaseRevision(revision string) error {
+	if !immutableReleaseRevision.MatchString(strings.TrimSpace(revision)) {
 		return errors.New("web release revision must be an immutable commit or image digest")
 	}
-	h.ReleaseRevision = revision
+	return nil
+}
+
+func (h *Handler) SetReleaseRevision(revision string) error {
+	if err := ValidateReleaseRevision(revision); err != nil {
+		return err
+	}
+	h.ReleaseRevision = strings.TrimSpace(revision)
 	return nil
 }
 
@@ -120,6 +132,13 @@ type messageList struct {
 	CSRFToken   string
 	CanReact    bool
 	CanPin      bool
+	// Truncated reports that the scan budget ran out before the newest message
+	// was reached, so this region holds old history and not the end of the
+	// conversation. It lives on the region rather than on the page because the
+	// region is what /app/timeline re-renders: a forced refresh used to replace
+	// the messages and discard the page's warning, leaving a stale window on
+	// screen with nothing left to say so.
+	Truncated bool
 }
 
 type messageView struct {
@@ -177,8 +196,15 @@ type pageData struct {
 	// NewestURL is set when the rendered window is not the newest one, so a
 	// post made while reading older history can take the reader to where the
 	// message actually landed instead of refreshing a window that cannot hold it.
-	NewestURL   string
-	AtLatest    bool
+	// It is deliberately empty when Truncated: the newest window cannot be
+	// reached at all, so offering it sent the reader back to the window they
+	// were already on and the message they had just sent vanished with no error.
+	NewestURL string
+	AtLatest  bool
+	// Truncated tells the client that no navigation reaches the newest window,
+	// so a successful post says so instead of appending a message to a region
+	// that a refresh will drop.
+	Truncated   bool
 	Notice      string
 	Error       string
 	Draft       string
@@ -375,12 +401,21 @@ const pageStyle = `<style>
 }
 </style>`
 
-const messagesPartial = `{{define "messages"}}{{range $message := .Messages}}<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}"><div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div><div class="message-body"><div class="message-head"><span class="author">{{$message.AuthorName}}</span><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}</div><p class="message-text">{{$message.Text}}</p>{{if $message.Reactions}}<ul class="reactions">{{range $reaction := $message.Reactions}}<li>{{if $.CanReact}}<form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="name" value="{{$reaction.Name}}"><button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></button></form>{{else}}<span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></span>{{end}}</li>{{end}}</ul>{{end}}<div class="message-actions"><a href="{{$message.ReplyURL}}">Reply in thread</a>{{if $.CanReact}}<form class="inline-form" aria-label="Add reaction" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="reaction-{{$message.ID}}">Add a reaction to the message from {{$message.AuthorName}}</label><input id="reaction-{{$message.ID}}" type="text" name="name" maxlength="255" placeholder=":wave:" required><button type="submit">Add</button></form>{{end}}{{if $.CanPin}}<form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button></form>{{end}}</div></div></article>{{else}}<p class="empty">No messages yet. Start the conversation.</p>{{end}}{{end}}`
+// truncationNotice is the honest description of a window the scan budget could
+// not carry to the end of the conversation. Every clause is a measured fact:
+// the walk starts at the first message and gives up at timelineScan *
+// timelineScanPages rows, so older history still pages backwards, the live
+// region is switched off, a post is stored but lands past the window, and a
+// search permalink re-enters the same bounded walk and arrives back here. The
+// previous wording told the reader to search, which lands on this exact window.
+const truncationNotice = `These are not this conversation's newest messages: it is longer than one view can walk from its beginning. Older messages still open, live updates are off, a message you send is stored but does not appear here, and a search result for this conversation links back to this same window.`
+
+const messagesPartial = `{{define "messages"}}{{if .Truncated}}<p class="notice" role="status">` + truncationNotice + `</p>{{end}}{{range $message := .Messages}}<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}"><div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div><div class="message-body"><div class="message-head"><span class="author">{{$message.AuthorName}}</span><time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}</div><p class="message-text">{{$message.Text}}</p>{{if $message.Reactions}}<ul class="reactions">{{range $reaction := $message.Reactions}}<li>{{if $.CanReact}}<form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="name" value="{{$reaction.Name}}"><button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></button></form>{{else}}<span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></span>{{end}}</li>{{end}}</ul>{{end}}<div class="message-actions"><a href="{{$message.ReplyURL}}">Reply in thread</a>{{if $.CanReact}}<form class="inline-form" aria-label="Add reaction" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="reaction-{{$message.ID}}">Add a reaction to the message from {{$message.AuthorName}}</label><input id="reaction-{{$message.ID}}" type="text" name="name" maxlength="255" placeholder=":wave:" required><button type="submit">Add</button></form>{{end}}{{if $.CanPin}}<form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button></form>{{end}}</div></div></article>{{else}}<p class="empty">No messages yet. Start the conversation.</p>{{end}}{{end}}`
 
 var pageMarkup = `{{define "title"}}#{{.ChannelName}} · SameOldChat{{end}}
 {{define "styles"}}` + pageStyle + `{{end}}
 {{define "scripts"}}` + progressiveEnhancementScript + `{{end}}
-{{define "content"}}<a class="skip-link" href="#timeline">Skip to the messages</a><div class="shell"><header class="topbar"><span class="brand">SameOldChat</span><form class="search" method="get" action="/app/search" role="search" aria-label="Search the workspace"><span aria-hidden="true">⌕</span><label class="visually-hidden" for="workspace-search">Search the workspace</label><input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search the workspace" required><button class="search-submit" type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button>{{if .ShowProfile}}<a class="icon-button" href="/me" aria-label="My profile">●</a>{{end}}</div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">☰</span><span class="side-text">Members</span></a>{{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">⚙</span><span class="side-text">Authorization</span></a>{{end}}</nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Channels}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{else}}<p class="side-empty">No channels available.</p>{{end}}</nav>{{if .Directs}}<nav class="side-section" aria-label="Direct messages"><div class="side-label">Direct messages</div>{{range .Directs}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">◍</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{end}}</nav>{{end}}{{if .MoreChannelsURL}}<a class="side-more" href="{{.MoreChannelsURL}}">More conversations</a>{{end}}<div class="sidebar-bottom"><div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.UserInitial}}</span><span class="signed-in-name">{{.Username}}</span></div><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit" data-shauth-sign-out aria-label="Sign out"><span class="side-icon" aria-hidden="true">↪</span><span class="side-text">Sign out</span></button></form></div></aside><main class="content" id="content"><header class="channel-header"><div><h1 class="channel-title"># {{.ChannelName}}</h1><p class="channel-meta">{{.ChannelMeta}}</p></div><div class="channel-actions">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}{{if .MarkReadURL}}<form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}"><button type="submit">Mark as read</button></form>{{end}}{{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to the channel</a>{{end}}</div></header><div class="timeline-wrap">{{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}<section id="timeline" class="timeline" tabindex="-1" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}</div>{{if .ThreadTimestamp}}<aside class="thread" aria-labelledby="thread-heading"><h2 id="thread-heading">Thread</h2><div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div></aside>{{end}}<div class="composer-wrap"><p class="live-status" id="live-status" role="status" aria-live="polite"></p><form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}"><p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}</label><textarea id="text" name="text" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}">{{.Draft}}</textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><p class="composer-tools">Replying in thread</p>{{end}}<div class="composer-footer"><span class="composer-tools" id="composer-hint">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></main></div></div>{{end}}
+{{define "content"}}<a class="skip-link" href="#timeline">Skip to the messages</a><div class="shell"><header class="topbar"><span class="brand">SameOldChat</span><form class="search" method="get" action="/app/search" role="search" aria-label="Search the workspace"><span aria-hidden="true">⌕</span><label class="visually-hidden" for="workspace-search">Search the workspace</label><input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search the workspace" required><button class="search-submit" type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><div class="top-actions"><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button>{{if .ShowProfile}}<a class="icon-button" href="/me" aria-label="My profile">●</a>{{end}}</div></header><div class="workspace"><aside class="sidebar"><div><div class="workspace-name">SameOldChat</div><div class="workspace-sub">Workspace</div></div><nav class="side-section" aria-label="Workspace navigation"><div class="side-label">Workspace</div><a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">☰</span><span class="side-text">Members</span></a>{{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">⚙</span><span class="side-text">Authorization</span></a>{{end}}</nav><nav class="side-section" aria-label="Channels"><div class="side-label">Channels</div>{{range .Channels}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{else}}<p class="side-empty">No channels available.</p>{{end}}</nav>{{if .Directs}}<nav class="side-section" aria-label="Direct messages"><div class="side-label">Direct messages</div>{{range .Directs}}<a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}"><span class="side-icon" aria-hidden="true">◍</span><span class="side-text">{{.Name}}</span>{{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}</a>{{end}}</nav>{{end}}{{if .MoreChannelsURL}}<a class="side-more" href="{{.MoreChannelsURL}}">More conversations</a>{{end}}<div class="sidebar-bottom"><div class="signed-in" data-shauth-user="{{.Username}}"><span class="signed-in-avatar" aria-hidden="true">{{.UserInitial}}</span><span class="signed-in-name">{{.Username}}</span></div><form method="post" action="/app/session/revoke"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button class="side-link" type="submit" data-shauth-sign-out aria-label="Sign out"><span class="side-icon" aria-hidden="true">↪</span><span class="side-text">Sign out</span></button></form></div></aside><main class="content" id="content"><header class="channel-header"><div><h1 class="channel-title"># {{.ChannelName}}</h1><p class="channel-meta">{{.ChannelMeta}}</p></div><div class="channel-actions">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}{{if .MarkReadURL}}<form class="inline-form" id="mark-read" method="post" action="{{.MarkReadURL}}" hx-post="{{.MarkReadURL}}" data-quiet="true"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="ts" value="{{.MarkReadTimestamp}}"><button type="submit">Mark as read</button></form>{{end}}{{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to the channel</a>{{end}}</div></header><div class="timeline-wrap">{{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}<section id="timeline" class="timeline" tabindex="-1" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>{{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}</div>{{if .ThreadTimestamp}}<aside class="thread" aria-labelledby="thread-heading"><h2 id="thread-heading">Thread</h2><div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div></aside>{{end}}<div class="composer-wrap"><p class="live-status" id="live-status" role="status" aria-live="polite"></p><form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}" data-truncated="{{if .Truncated}}true{{else}}false{{end}}"><p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}</label><textarea id="text" name="text" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message #{{.ChannelName}}{{end}}">{{.Draft}}</textarea>{{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}"><p class="composer-tools">Replying in thread</p>{{end}}<div class="composer-footer"><span class="composer-tools" id="composer-hint">Enter to send · Shift+Enter for a new line</span><button class="send" type="submit">Send</button></div></form></div></main></div></div>{{end}}
 ` + messagesPartial
 
 var pageTemplate = mustPage(pageMarkup)
@@ -506,7 +541,11 @@ const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=functi
 // successful post from a window that is not the newest one navigates to the
 // newest window instead of appending, because the message it just stored cannot
 // appear in the window on screen — which is how a sent message used to flash up
-// and then vanish.
+// and then vanish. When the server reports that no navigation reaches the
+// newest window at all (data-truncated), the post says so instead: appending
+// there would put the message on screen only until the next refresh dropped it,
+// and navigating would land back on the same window, which is the same defect
+// wearing a redirect.
 //
 // The script carries no JavaScript comments on purpose: html/template elides
 // them when it renders a script context, so the bytes the browser receives
@@ -533,7 +572,7 @@ function shown(region){return !!(region.offsetParent||region.getClientRects().le
 function atBottom(region){return region.scrollHeight-region.scrollTop-region.clientHeight<48}
 function toBottom(region){if(region)region.scrollTop=region.scrollHeight}
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
-function messageCount(){return document.querySelectorAll('#timeline .message').length}
+function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
 function refresh(force){
 generation++;
 var token=generation;
@@ -559,10 +598,12 @@ function scheduleRefresh(){
 if(scheduled)return;
 scheduled=window.setTimeout(function(){
 scheduled=null;
+var behind=document.querySelectorAll('[data-fragment]:not([data-live="true"])').length>0;
 var before=messageCount();
 refresh(false).then(function(){
 var arrived=messageCount()-before;
-if(arrived>0)announce(arrived===1?'1 new message.':arrived+' new messages.');
+if(arrived>0){announce(arrived===1?'1 new message.':arrived+' new messages.');return}
+if(behind)announce('New activity is available in this conversation.');
 }).catch(function(error){if(error&&error.name==='AbortError')return;announce('New activity could not be loaded. Reload the page.')});
 },250);
 }
@@ -598,6 +639,11 @@ if(html===''){return refresh(true).then(function(){announce('The conversation wa
 var newest=form===composer?form.getAttribute('data-newest'):'';
 if(newest&&ownPath(newest)){
 window.location.assign(newest);
+return null;
+}
+if(form===composer&&form.getAttribute('data-truncated')==='true'){
+if(text){if(text.value===sent)text.value='';text.focus()}
+announce('Your message was sent. This view cannot reach the newest part of this conversation, so it is not shown here.');
 return null;
 }
 var target=document.querySelector(form.getAttribute('hx-target'));
@@ -849,7 +895,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	names := h.newUserNames(r.Context(), principal)
 	notices := make([]string, 0, 3)
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Names: names})
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Names: names, Truncated: history.Truncated})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -872,9 +918,10 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		}
 	}
 
-	if history.Truncated {
-		notices = append(notices, "This conversation is too long to open from the beginning, so this is not its newest window. Search for a message to reach recent history.")
-	}
+	// The truncation warning is carried by the timeline region itself
+	// (messageList.Truncated), not by the page's notice bar: /app/timeline
+	// re-renders only the region, so a warning outside it survived exactly one
+	// render and every refresh afterwards showed the stale window unannotated.
 
 	conversations := h.sidebar(r.Context(), principal, channel, history.AtLatest, domain.Cursor(strings.TrimSpace(r.URL.Query().Get("conversations"))))
 	if conversations.Notice != "" {
@@ -903,6 +950,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Username:        username,
 		UserInitial:     initial(username),
 		AtLatest:        history.AtLatest,
+		Truncated:       history.Truncated,
 		Notice:          strings.Join(notices, " "),
 		Error:           state.Message,
 		Draft:           state.Draft,
@@ -925,12 +973,12 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if history.OlderCursor != "" {
 		data.OlderURL = appURL(string(channel), threadTimestamp, string(history.OlderCursor), "", "")
 	}
-	if !history.AtLatest {
-		data.NewestURL = appURL(string(channel), threadTimestamp, "", "", "")
-	}
 	if !history.AtLatest && !history.Truncated {
-		// A "jump to the latest" link on a truncated window would lead to this
-		// same window, so it is not offered.
+		// Neither link is offered on a truncated window: both resolve to
+		// /app?channel=… , which is the request that produced this very window,
+		// so following either one — by hand or after a post — silently returns
+		// the reader to the same stale history.
+		data.NewestURL = appURL(string(channel), threadTimestamp, "", "", "")
 		data.LatestURL = appURL(string(channel), threadTimestamp, "", "", "")
 	}
 	status := state.Status
@@ -963,8 +1011,10 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var messages []domain.Message
+	truncated := false
 	if threadTimestamp != "" {
 		if _, parseErr := domain.ParseMessageTimestamp(domain.MessageTimestamp(threadTimestamp)); parseErr != nil {
+			secureHeaders(w, workspaceContentSecurityPolicy)
 			http.Error(w, "that thread link is not valid", http.StatusBadRequest)
 			return
 		}
@@ -978,6 +1028,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		history, historyErr := h.historyWindow(r.Context(), principal, channel, before)
 		if historyErr != nil {
 			if errors.Is(historyErr, domain.ErrInvalidCursor) {
+				secureHeaders(w, workspaceContentSecurityPolicy)
 				http.Error(w, "that history link is not valid", http.StatusBadRequest)
 				return
 			}
@@ -985,8 +1036,9 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		messages = history.Messages
+		truncated = history.Truncated
 	}
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Names: h.newUserNames(r.Context(), principal)})
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Names: h.newUserNames(r.Context(), principal), Truncated: truncated})
 	h.writeFragment(w, list)
 }
 
@@ -996,8 +1048,25 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 // The chat service pages a conversation forward from its first message
 // (domain.PageRequest carries one cursor and store.ListMessages orders
 // ascending), so the newest window is reached by walking forward and keeping a
-// rolling tail. Every walk is bounded by the conversation length; a reverse
-// page request in the store would make it constant.
+// rolling tail. Every walk starts at message 1 and is bounded by
+// timelineScan*timelineScanPages rows, which means a conversation longer than
+// that has no reachable newest window at all: the walk gives up in the same
+// place whatever cursor the caller supplies, so paging forward, "jump to the
+// latest" and a search permalink all land on the identical stale window. That
+// is an availability defect, not a budget, and this package cannot fix it.
+//
+// The fix belongs in the store and needs one field:
+//
+//	domain.PageRequest{Limit, Cursor, Descending bool}
+//
+// with Descending selecting `ORDER BY created_at DESC, id DESC` and a cursor
+// that walks backwards, honoured by store.ListMessages
+// (internal/store/store.go:275) and every backend behind it, and carried
+// unchanged through service.Messages.History and chatapi.Service.History
+// (internal/modules/chat/api:50). historyWindow then reads exactly one
+// descending page of timelineWindow+1 rows, AtLatest is `end == ""`, and both
+// the bound and Truncated disappear. Until then Truncated is load-bearing:
+// every caller must present the window it guards as old history.
 type historyView struct {
 	Messages    []domain.Message
 	OlderCursor domain.Cursor
@@ -1021,9 +1090,9 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 			// The walk is bounded so one request cannot do unbounded work: this
 			// used to issue 250 service calls and materialise 50,000 rows to
 			// render 50 messages on a 50,000-message conversation, once per open
-			// tab per event. The bound makes the request survivable; only a
-			// descending read in the store makes it correct. See the follow-up
-			// recorded for store.ListMessages.
+			// tab per event. The bound makes the request survivable and nothing
+			// more; the descending read recorded on historyView is what makes it
+			// correct.
 			view.AtLatest = false
 			view.Truncated = true
 			break
@@ -1088,6 +1157,9 @@ type messageListRequest struct {
 	Before       string
 	ThreadPane   bool
 	Names        *userNames
+	// Truncated marks a region the scan budget could not carry to the end of
+	// the conversation, so the region renders its own warning.
+	Truncated bool
 }
 
 // newMessageList builds the single type the message partial renders. It also
@@ -1116,6 +1188,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		CSRFToken:   csrfToken,
 		CanReact:    principal.HasScope(auth.ScopeReactionsWrite),
 		CanPin:      principal.HasScope(auth.ScopePinsWrite),
+		Truncated:   request.Truncated,
 		Messages:    make([]messageView, 0, len(messages)),
 	}
 	notice := ""
@@ -1829,6 +1902,14 @@ var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
 	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
+// entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
+// /login and /signed-out. Both are static documents with one inline stylesheet
+// and no script, so the policy can be stricter than the workspace's. They used
+// to carry no policy and no X-Frame-Options at all, which made both framable —
+// and /signed-out carries the "Sign in with Shauth" link, so framing it is
+// enough to make a victim start an authorization flow they did not choose.
+const entryContentSecurityPolicy = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+
 // inlineScriptHashes is the CSP source list for a set of documents' inline
 // scripts. The scripts are package constants with no template action inside
 // them, so their bytes are known at initialisation and a hash is exact.
@@ -1849,18 +1930,32 @@ func inlineScriptHashes(documents ...string) []string {
 	return hashes
 }
 
+// inlineScriptBodies returns the body of every inline script in a document.
+//
+// It refuses any element it cannot hash rather than skipping it. Searching for
+// the literal "<script>" made `<script type="module">` or `<script defer>`
+// invisible to the policy builder *and* to the test that checks the policy
+// against the document, so the browser would block a script both agreed was
+// covered. A tag this cannot hash is a build-time panic, which is the same
+// failure the package already takes for an unclosed script.
 func inlineScriptBodies(document string) []string {
-	const open, close = "<script>", "</script>"
+	const marker, open, close = "<script", "<script>", "</script>"
 	bodies := make([]string, 0, 2)
 	for {
-		start := strings.Index(document, open)
+		start := strings.Index(document, marker)
 		if start < 0 {
 			return bodies
+		}
+		if !strings.HasPrefix(document[start:], open) {
+			panic("inline script carries attributes, so its hash cannot be computed: " + document[start:min(start+40, len(document))])
 		}
 		document = document[start+len(open):]
 		end := strings.Index(document, close)
 		if end < 0 {
 			panic("inline script is not closed")
+		}
+		if strings.Contains(document[:end], marker) {
+			panic("inline script body contains a nested script tag")
 		}
 		bodies = append(bodies, document[:end])
 		document = document[end+len(close):]
@@ -1930,7 +2025,15 @@ func (h Handler) writeStoreError(w http.ResponseWriter, err error, unavailable s
 	h.writePageError(w, http.StatusServiceUnavailable, "Temporarily unavailable", unavailable)
 }
 
+// writeFragmentError and writeAuthError answer with a bare line of text, which
+// is what the enhanced client can render next to the control that failed. The
+// bytes are still an authenticated response on this origin, so they carry the
+// same five headers as every rendered page: without them a fragment failure and
+// every insufficient-scope answer were framable, sniffable and stored by the
+// browser, while the test that checks the header set only ever visited a
+// successful page and a 404.
 func (h Handler) writeFragmentError(w http.ResponseWriter, err error, unavailable string) {
+	secureHeaders(w, workspaceContentSecurityPolicy)
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "that conversation is not available", http.StatusNotFound)
 		return
@@ -1950,6 +2053,7 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 }
 
 func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
+	secureHeaders(w, workspaceContentSecurityPolicy)
 	if errors.Is(err, auth.ErrMissingScope) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return

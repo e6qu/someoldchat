@@ -683,6 +683,37 @@ operations:
     reference: https://docs.slack.dev/reference/methods/openid.connect.userInfo/
 
 decisions:
+  # The two Events-API sources above are pinned and hashed, and until this entry
+  # existed no operation and no decision referenced either of them: every one of
+  # the 205 operations carries provenance slack-api-specs-openapi or
+  # slack-reference, all Web API methods. internal/events/payload.go says the
+  # question of whether a topic's payload matches the event JSON real Slack
+  # emits "is decided separately" and points here, so this is where it is
+  # decided. It is decided against the claim.
+  - method: events-api
+    evidence: specs/upstream/slack-api-specs/events-api/slack_common_event_wrapper_schema.json
+    decision: >-
+      The event surface is unqualified. slack-events-api-asyncapi and
+      slack-events-wrapper-schema are pinned so the envelope shape is recorded
+      and hashed, not because anything is measured against them. No producer in
+      this system translates an internal events.Record into a Slack event
+      envelope: internal/service publishes identifier-only payloads
+      ({"type":"message.created","message_id":...,"channel_id":...}), and
+      internal/events.Payload guarantees only that a payload is well-formed and
+      self-describing. The Socket Mode and real-time transports do deliver a
+      Slack envelope an official client parses, but the envelopes in
+      tests/official-sdk-qualification are supplied by the fixture, not produced
+      from a record. Until a record-to-envelope translation exists, no operation
+      may claim provenance from either events source.
+  - method: rtm.connect
+    evidence: https://docs.slack.dev/reference/methods/rtm.connect/
+    decision: >-
+      behavior-compatible covers this method's own response — it hands out a
+      WebSocket URL and the self/team identity an official client needs to
+      connect, and the official clients do connect with it. It does not extend
+      to the events that arrive on that socket, which are governed by the
+      events-api decision above. The same boundary applies to
+      apps.connections.open.
   - method: apps.connections.open
     evidence: https://docs.slack.dev/reference/methods/apps.connections.open/
     decision: The current official method reference defines this Socket Mode method, while the pinned Web API OpenAPI snapshot does not contain it. Track the method against the official reference and the repository Socket Mode qualification.

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -57,6 +58,7 @@ func TestControlTokenGuardsMetricsAlongsideLifecycleEndpoints(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", serve)
 	mux.HandleFunc("GET /healthz", serve)
+	mux.HandleFunc("GET /lifecycle", serve)
 	mux.HandleFunc("GET /metrics", serve)
 	mux.HandleFunc("POST /hibernate", serve)
 	mux.HandleFunc("POST /recover", serve)
@@ -68,6 +70,11 @@ func TestControlTokenGuardsMetricsAlongsideLifecycleEndpoints(t *testing.T) {
 		path   string
 	}{
 		{http.MethodGet, "/metrics"},
+		// The lifecycle state and the fencing generation are two of the three
+		// things whose presence on the public listener is why /metrics was
+		// protected; specs/scale-to-zero.md:189 forbids public lifecycle status
+		// from revealing topology. They must not come back on the probe.
+		{http.MethodGet, "/lifecycle"},
 		{http.MethodPost, "/hibernate"},
 		{http.MethodPost, "/recover"},
 		{http.MethodPost, "/restore"},
@@ -169,9 +176,9 @@ func TestOperatorRestoreSelectsTheNamedGenerationAndFencesIt(t *testing.T) {
 	}
 }
 
-// An operator restore must never be reachable on a serving stack: it clears
-// volume authority, so on an ACTIVE stack it would consent, on the operator's
-// behalf, to overwriting a volume nobody said was expendable.
+// An operator restore must never be reachable on a serving stack: it records
+// consent to overwrite the volume, so on an ACTIVE stack it would agree, on the
+// operator's behalf, to discarding a volume nobody said was expendable.
 func TestOperatorRestoreIsRefusedOnAServingStack(t *testing.T) {
 	controller := lifecycle.New(lifecycle.StateActive)
 	snapshots := &stubSnapshotter{verified: map[uint64]lifecycle.Manifest{2: {Generation: 2, Backend: "sqlite", SchemaVersion: 1}}}
@@ -190,6 +197,98 @@ func TestOperatorRestoreIsRefusedOnAServingStack(t *testing.T) {
 	if state, _ := controller.Snapshot(); state != lifecycle.StateActive {
 		t.Fatalf("state=%s, want the serving stack intact", state)
 	}
+}
+
+// The documented runbook, driven through the handlers an operator actually
+// calls: POST /restore with a generation this deployment does not have, then
+// POST /recover, then any inbound request.
+//
+// The stack failed mid-hibernation, so the volume holds writes no snapshot has.
+// The restore is refused before a byte is written, but the transition that began
+// it granted snapshot authority, and both Fail and AcknowledgeFailure carried
+// that forward — so the next unrelated request restored the last published
+// snapshot over strictly newer data. One typo in the runbook destroyed the
+// workspace.
+func TestRefusedOperatorRestoreLeavesTheNextWakeOnTheLiveVolume(t *testing.T) {
+	backend := &recordingStateStore{record: lifecycle.StateRecord{State: lifecycle.StateActive, Generation: 5}}
+	controller, err := lifecycle.NewPersistent(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A crash during SNAPSHOTTING: this fence published nothing.
+	fence, err := controller.BeginHibernate(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.BeginSnapshot(fence); err != nil {
+		t.Fatal(err)
+	}
+	if err := controller.Fail(fence); err != nil {
+		t.Fatal(err)
+	}
+	snapshots := &stubSnapshotter{verified: map[uint64]lifecycle.Manifest{5: {Generation: 5, Backend: "sqlite", SchemaVersion: 1}}}
+	coordinator, err := lifecycle.NewCoordinator(controller, &stubDriver{}, snapshots, observability.NewRegistry(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	response := httptest.NewRecorder()
+	restoreHandler(controller, coordinator, logger)(response, httptest.NewRequest(http.MethodPost, "/restore?generation=99", nil))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("mistyped generation status=%d, want 409", response.Code)
+	}
+	if backend.load().SnapshotAuthoritative {
+		t.Fatalf("record=%+v: a refused restore left permission to overwrite the volume", backend.load())
+	}
+
+	response = httptest.NewRecorder()
+	recoverHandler(controller, logger)(response, httptest.NewRequest(http.MethodPost, "/recover", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("recover status=%d, want 204", response.Code)
+	}
+	if backend.load().SnapshotAuthoritative {
+		t.Fatalf("record=%+v: the runbook recovery claimed the snapshot is newer than the volume", backend.load())
+	}
+
+	wakeFence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := coordinator.WakeAt(context.Background(), wakeFence); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshots.restored) != 0 {
+		t.Fatalf("restored=%v, want the ordinary request to leave the live volume intact", snapshots.restored)
+	}
+}
+
+// recordingStateStore is the durable control record, guarded because a wake and
+// an operator action can reach it concurrently.
+type recordingStateStore struct {
+	mu     sync.Mutex
+	record lifecycle.StateRecord
+}
+
+func (s *recordingStateStore) Load() (lifecycle.StateRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.record, nil
+}
+
+func (s *recordingStateStore) load() lifecycle.StateRecord {
+	record, _ := s.Load()
+	return record
+}
+
+func (s *recordingStateStore) CompareAndSwap(expected, next lifecycle.StateRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.record != expected {
+		return lifecycle.ErrStateConflict
+	}
+	s.record = next
+	return nil
 }
 
 type stubDriver struct{}

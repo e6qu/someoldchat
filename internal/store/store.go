@@ -113,6 +113,23 @@ var (
 	ErrConflict                  = errors.New("state conflict")
 	ErrBookmarkLimit             = errors.New("bookmark limit reached")
 	ErrSocketModeConnectionLimit = errors.New("Socket Mode connection limit reached")
+	// ErrMessageTimestampTaken reports that another message in the same
+	// conversation already owns the microsecond the new message was given.
+	//
+	// A message's Slack-style timestamp IS its public identifier: chat.update,
+	// chat.delete, reactions.add and thread-root resolution all address a message
+	// by it, and it carries microseconds and no more. Two messages on one
+	// microsecond therefore share one identifier, and the second becomes
+	// permanently unaddressable. The real Slack timestamp is unique by
+	// construction, and so is this one: the repository refuses the collision and
+	// the caller advances by one microsecond, which is what the service does.
+	ErrMessageTimestampTaken = errors.New("message timestamp already taken")
+	// ErrTransient reports a condition the engine expects the caller to retry:
+	// a serialization failure, a deadlock victim, a lock timeout, a lost leader.
+	// It exists so a routine retryable outcome reaches the transport as a
+	// classified error — AGENTS.md: handled errors must not become HTTP 500 —
+	// instead of as raw driver text.
+	ErrTransient = errors.New("transient storage failure")
 )
 
 type Store interface {
@@ -270,6 +287,27 @@ type Store interface {
 	GetMessageByCreatedAt(context.Context, domain.ConversationID, time.Time) (domain.Message, error)
 	GetIdempotentMessage(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.Message, error)
 	UpdateMessage(context.Context, domain.Message, events.Event) error
+	// CreateMessage stores a message and the event announcing it in one
+	// transaction, at an instant no other message in the same conversation owns.
+	//
+	// created_at is truncated to the microsecond its own Slack-style timestamp
+	// can express, and (conversation, created_at) is UNIQUE. Both halves are the
+	// contract: without the truncation a read cursor built from a message's own
+	// ts can never cover it, and without the uniqueness two messages share one
+	// public identifier and the second becomes permanently unaddressable —
+	// chat.update, chat.delete, reactions.add and thread-root resolution all
+	// address a message by that string.
+	//
+	// A caller that supplies an instant already taken is told so with
+	// ErrMessageTimestampTaken and advances by one microsecond. The choice to
+	// report rather than to silently relocate is deliberate: the event announcing
+	// the message carries the timestamp too, and a repository that moved the row
+	// without the caller's knowledge would publish an announcement naming an
+	// identifier that is not in the database. There is exactly one producer in
+	// the product — service.Messages.PostWithBlocksAndAttachments — it rebuilds
+	// the event from the instant it retries with, and no API surface can observe
+	// the sentinel. A fixture that hands the repository two colliding instants is
+	// in the same position as one that hands it two identical identifiers.
 	CreateMessage(context.Context, domain.Message, events.Event, string) error
 	GetMessage(context.Context, domain.MessageID) (domain.Message, error)
 	ListMessages(context.Context, domain.ConversationID, domain.PageRequest) (domain.MessagePage, error)

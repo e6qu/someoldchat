@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -38,6 +39,13 @@ import (
 // binary in this repository does. Without the distinction an orchestrator with a
 // restart-on-runtime-failure-only policy restart-looped forever on a mistyped
 // certificate path.
+//
+// Everything this process decides before it opens a resource is a configuration
+// failure, including the handler constructors: they only ever refuse an
+// operator-supplied value or a composition this binary cannot serve, and
+// classifying them as runtime failures is what made `-auth-cookie-domain "not a
+// domain!!"` exit 1 and restart-loop. cmd/chatd was corrected for exactly this
+// and cmd/server was not. Only a failure after the listener is up is exitRuntime.
 const (
 	exitConfiguration = 2
 	exitRuntime       = 1
@@ -136,7 +144,8 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	}
 
 	settings := startupConfig{
-		addr: *addr, chatMode: *chatMode, storeName: *storeName, databaseDSN: *dsn,
+		addr: *addr, metricsListen: *metricsListen, authCookieDomain: *authCookieDomain, releaseRevisionFlag: *release,
+		chatMode: *chatMode, storeName: *storeName, databaseDSN: *dsn,
 		dqliteDirectory: *dqliteDirectory, dqliteAddress: *dqliteAddress, dqliteCluster: *dqliteCluster, dqliteDatabase: *dqliteDatabase,
 		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
 		chatAddress: *chatAddress, chatCA: *chatCA, chatServerName: *chatServerName, chatClientCert: *chatClientCert, chatClientKey: *chatClientKey,
@@ -186,8 +195,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		}
 		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail})
 		if err != nil {
-			logger.Error("open local chat", "error", err)
-			return exitRuntime
+			return startupFailure(applicationContext, logger, "open local chat", err)
 		}
 		defer func() {
 			if err := runtime.Closer.Close(); err != nil {
@@ -202,41 +210,38 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 				auth.AppTokenStore
 			})
 			if !ok {
-				logger.Error("storage backend cannot seed Socket Mode app tokens")
-				return exitRuntime
+				logger.Error("storage backend cannot seed Socket Mode app tokens", "store", settings.storeName)
+				return exitConfiguration
 			}
 			if err := appTokenStore.SeedAppToken(applicationContext, settings.appToken, domain.AppTokenRecord{AppID: domain.AppID(settings.appID), Scopes: []string{string(auth.ScopeConnectionsWrite)}}); err != nil {
-				logger.Error("seed Socket Mode app token", "error", err)
-				return exitRuntime
+				return startupFailure(applicationContext, logger, "seed Socket Mode app token", err)
 			}
 			if err := runtime.Store.CreateAppInstallation(applicationContext, domain.AppInstallation{AppID: domain.AppID(settings.appID), WorkspaceID: domain.WorkspaceID(resolved.workspace), Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
-				logger.Error("seed Socket Mode app installation", "error", err)
-				return exitRuntime
+				return startupFailure(applicationContext, logger, "seed Socket Mode app installation", err)
 			}
 		}
 		appTokenStore, ok := runtime.TokenStore.(auth.AppTokenStore)
 		if !ok {
-			logger.Error("storage backend cannot authenticate Socket Mode app tokens")
-			return exitRuntime
+			logger.Error("storage backend cannot authenticate Socket Mode app tokens", "store", settings.storeName)
+			return exitConfiguration
 		}
 		socketModeAuth, err = auth.NewAppStored(appTokenStore)
 		if err != nil {
 			logger.Error("configure Socket Mode authenticator", "error", err)
-			return exitRuntime
+			return exitConfiguration
 		}
 		if err := seedDevelopmentCredentials(applicationContext, runtime, resolved, logger, time.Now().UTC()); err != nil {
-			logger.Error("seed development credentials", "error", err)
-			return exitRuntime
+			return startupFailure(applicationContext, logger, "seed development credentials", err)
 		}
 		authenticator, err = auth.NewStored(runtime.TokenStore)
 		if err != nil {
 			logger.Error("configure stored authenticator", "error", err)
-			return exitRuntime
+			return exitConfiguration
 		}
 		webAuthenticator, err = auth.NewBrowser(runtime.SessionStore)
 		if err != nil {
 			logger.Error("configure browser authenticator", "error", err)
-			return exitRuntime
+			return exitConfiguration
 		}
 		sessionRevoker = runtime.SessionRevoker
 	case "grpc":
@@ -277,18 +282,18 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		remote, tokenStore, sessionStore, remoteSessionRevoker, err := generated.ProvideChatServiceRemote(connection)
 		if err != nil {
 			logger.Error("create chat gRPC client", "error", err)
-			return exitRuntime
+			return exitConfiguration
 		}
 		chatService = remote
 		authenticator, err = auth.NewStored(tokenStore)
 		if err != nil {
 			logger.Error("configure stored authenticator", "error", err)
-			return exitRuntime
+			return exitConfiguration
 		}
 		webAuthenticator, err = auth.NewBrowser(sessionStore)
 		if err != nil {
 			logger.Error("configure stored browser authenticator", "error", err)
-			return exitRuntime
+			return exitConfiguration
 		}
 		sessionRevoker = remoteSessionRevoker
 	}
@@ -300,7 +305,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			configured, configureErr := auth.NewAppStored(value)
 			if configureErr != nil {
 				logger.Error("configure distributed Socket Mode authenticator", "error", configureErr)
-				return exitRuntime
+				return exitConfiguration
 			}
 			socketModeAuth = configured
 		}
@@ -311,12 +316,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// Incomplete configuration must fail at startup instead.
 	if socketModeStore != nil && socketModeAuth == nil {
 		logger.Error("Socket Mode connection store has no app-token authenticator", "mode", settings.chatMode)
-		return exitRuntime
+		return exitConfiguration
 	}
 	slackHandler, err := slack.NewHandler(chatService, authenticator)
 	if err != nil {
 		logger.Error("configure Slack API", "error", err)
-		return exitRuntime
+		return exitConfiguration
 	}
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
@@ -326,7 +331,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, defaultConversation, *authCookieDomain)
 	if err != nil {
 		logger.Error("configure web", "error", err)
-		return exitRuntime
+		return exitConfiguration
 	}
 	// Release identity is exposed by every deployment, not only one that
 	// configures an external provider. Nesting this under `providerCredentials`
@@ -356,15 +361,14 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			oidcProvider, discoveryErr := web.DiscoverOpenIDConnectProvider(discoveryContext, &http.Client{Timeout: 10 * time.Second}, settings.oidcIssuer, settings.oidcClientID, settings.oidcClientSecret)
 			cancelDiscovery()
 			if discoveryErr != nil {
-				logger.Error("discover OpenID Connect provider", "error", discoveryErr)
-				return exitRuntime
+				return startupFailure(applicationContext, logger, "discover OpenID Connect provider", discoveryErr)
 			}
 			providers = append(providers, oidcProvider)
 		}
 		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(resolved.workspace), domain.UserID(resolved.lookupUser), settings.authPublicURL, *authCookieDomain, resolved.authStateKey, providers)
 		if loginErr != nil {
 			logger.Error("configure external authorization", "error", loginErr)
-			return exitRuntime
+			return exitConfiguration
 		}
 		webHandler.Login = &loginHandler
 	}
@@ -376,7 +380,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	sseHandler, err := realtime.NewHandler(chatService, domain.WorkspaceID(resolved.workspace), webAuthenticator)
 	if err != nil {
 		logger.Error("configure realtime", "error", err)
-		return exitRuntime
+		return exitConfiguration
 	}
 	// Without an explicit logger every operator-visible realtime and Socket Mode
 	// diagnostic — a slow-consumer drop, an inconclusive re-authorization, a
@@ -387,7 +391,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	rtmHandler, err := realtime.NewRTMHandler(chatService, domain.WorkspaceID(resolved.workspace), chatService, chatService)
 	if err != nil {
 		logger.Error("configure RTM", "error", err)
-		return exitRuntime
+		return exitConfiguration
 	}
 	rtmHandler.Logger = logger
 	rtmHandler.RegisterRTM(mux)
@@ -464,6 +468,24 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	return 0
 }
 
+// startupFailure classifies a startup step that failed while holding the signal
+// context.
+//
+// A SIGTERM during a slow cold start cancels that context, so localchat.Open,
+// the seeding calls and OpenID Connect discovery all fail — and reporting that
+// as exitRuntime records a task failure for what is an ordinary stop. A rolling
+// deploy that stops a task mid-startup then looks like a crash, which a
+// deployment circuit breaker rolls the release back on. Being asked to stop is
+// exit 0.
+func startupFailure(ctx context.Context, logger *slog.Logger, stage string, err error) int {
+	if ctx.Err() != nil {
+		logger.Info("startup interrupted before completion", "stage", stage)
+		return 0
+	}
+	logger.Error(stage, "error", err)
+	return exitRuntime
+}
+
 // entraTenantDefault is empty on purpose.
 //
 // The default used to be "common", the Microsoft Entra multi-tenant endpoint.
@@ -508,7 +530,16 @@ var multiTenantEntraTenants = map[string]bool{"common": true, "organizations": t
 // and nothing else, so a deployment template can be verified against the binary
 // it configures instead of being discovered wrong by a crash-looping task.
 type startupConfig struct {
-	addr                string
+	addr string
+	// metricsListen, authCookieDomain and releaseRevisionFlag are here because
+	// the values were validated *after* resolve and therefore outside
+	// -check-config: a bad cookie domain, a bad release revision and a
+	// malformed dqlite cluster were each accepted by `-check-config` and then
+	// refused by the real start, so the deployment gate that treats
+	// -check-config as the authority could not see a crash-looping task.
+	metricsListen       string
+	authCookieDomain    string
+	releaseRevisionFlag string
 	chatMode            string
 	storeName           string
 	databaseDSN         string
@@ -592,6 +623,30 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 	resolved := resolvedConfig{workspace: defaultWorkspace, lookupUser: defaultLookupUser}
 	if c.chatMode != "local" && c.chatMode != "grpc" {
 		return resolvedConfig{}, fmt.Errorf("invalid chat composition %q: -chat-mode must be local or grpc", c.chatMode)
+	}
+	// Four checks that a real start already performs and that used to sit
+	// outside this function, so `-check-config` accepted a configuration the
+	// process then refused. Each one is decidable without opening a store,
+	// dialing a peer, or binding a listener, which is this function's whole
+	// admission rule.
+	if err := validateListenAddress("-addr", c.addr); err != nil {
+		return resolvedConfig{}, err
+	}
+	if strings.TrimSpace(c.metricsListen) != "" {
+		if err := validateListenAddress("-metrics-listen", c.metricsListen); err != nil {
+			return resolvedConfig{}, err
+		}
+	}
+	if err := auth.ValidateSessionCookieDomain(c.authCookieDomain); err != nil {
+		return resolvedConfig{}, err
+	}
+	if revision := c.releaseRevision(c.releaseRevisionFlag); revision != "" {
+		if err := web.ValidateReleaseRevision(revision); err != nil {
+			return resolvedConfig{}, err
+		}
+	}
+	if _, err := localchat.ParseCluster(c.dqliteCluster); err != nil {
+		return resolvedConfig{}, err
 	}
 	databaseDSN, err := resolveDatabaseDSN(c.chatMode, c.databaseDSN)
 	if err != nil {
@@ -686,6 +741,34 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 	}
 	resolved.scopes = scopes
 	return resolved, nil
+}
+
+// validateListenAddress rejects an address net/http would refuse at Listen. A
+// port outside 0-65535 or a missing colon is a configuration mistake the
+// operator can only otherwise discover from a crash-looping task, and both were
+// accepted by -check-config.
+func validateListenAddress(flagName, value string) error {
+	host, port, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("%s %q is not a host:port listen address: %w", flagName, value, err)
+	}
+	if strings.TrimSpace(port) == "" {
+		return fmt.Errorf("%s %q names no port", flagName, value)
+	}
+	number, err := strconv.Atoi(port)
+	if err != nil {
+		// A named service ("http") is resolved by the operating system, so it
+		// is not this process's business to reject it.
+		if _, lookupErr := net.LookupPort("tcp", port); lookupErr != nil {
+			return fmt.Errorf("%s %q names no resolvable port", flagName, value)
+		}
+		return nil
+	}
+	if number < 0 || number > 65535 {
+		return fmt.Errorf("%s %q uses port %d, which is outside 0-65535", flagName, value, number)
+	}
+	_ = host
+	return nil
 }
 
 // localOnlySettings names every supplied setting that only local composition can
