@@ -4286,6 +4286,18 @@ func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) err
 }
 
 func (s *Store) ExchangeOAuthCode(ctx context.Context, clientID, secret, code, redirect, accessToken string, token domain.OAuthToken) (domain.OAuthToken, error) {
+	var exchanged domain.OAuthToken
+	err := underContention(ctx, func() error {
+		value, err := s.exchangeOAuthCodeOnce(ctx, clientID, secret, code, redirect, accessToken, token)
+		if err == nil {
+			exchanged = value
+		}
+		return err
+	})
+	return exchanged, err
+}
+
+func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, code, redirect, accessToken string, token domain.OAuthToken) (domain.OAuthToken, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.OAuthToken{}, err
@@ -4362,6 +4374,18 @@ func (s *Store) CreateOpenIDRefreshToken(ctx context.Context, value domain.OpenI
 }
 
 func (s *Store) ExchangeOpenIDRefreshToken(ctx context.Context, clientID, oldToken, accessToken, refreshToken string, token domain.OpenIDToken) (domain.OpenIDToken, error) {
+	var exchanged domain.OpenIDToken
+	err := underContention(ctx, func() error {
+		value, err := s.exchangeOpenIDRefreshTokenOnce(ctx, clientID, oldToken, accessToken, refreshToken, token)
+		if err == nil {
+			exchanged = value
+		}
+		return err
+	})
+	return exchanged, err
+}
+
+func (s *Store) exchangeOpenIDRefreshTokenOnce(ctx context.Context, clientID, oldToken, accessToken, refreshToken string, token domain.OpenIDToken) (domain.OpenIDToken, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.OpenIDToken{}, err
