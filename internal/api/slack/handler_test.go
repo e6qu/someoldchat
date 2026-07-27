@@ -2203,7 +2203,10 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := part.Write([]byte("photo")); err != nil {
+	// A real PNG signature: the profile service sniffs the bytes and refuses a
+	// stream whose content disagrees with the declared type, which is the upload
+	// half of the stored-XSS repair. The field name is what this test is about.
+	if _, err := part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {

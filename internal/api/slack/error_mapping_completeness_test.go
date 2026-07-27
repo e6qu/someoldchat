@@ -74,11 +74,7 @@ func exportedSentinels(t *testing.T, dir string, prefixes ...string) []string {
 // every non-ErrInvalid service sentinel such as ErrMessageNotOwned,
 // ErrEmojiAlreadyExists and ErrBlobUnavailable — escaped the net entirely.
 func TestMapServiceErrorNamesEveryTransportRelevantSentinel(t *testing.T) {
-	source, err := os.ReadFile("handler.go")
-	if err != nil {
-		t.Fatalf("read handler.go: %v", err)
-	}
-	body := string(source)
+	body := handlerSource(t)
 	// Sentinels that describe storage-engine internals rather than a client-visible
 	// outcome. Each entry states why the transport cannot name it.
 	exempt := map[string]string{
@@ -301,12 +297,10 @@ func TestEveryEmittedErrorCodeIsPinnedOrRecorded(t *testing.T) {
 // service_unavailable was the fallback for every unclassified handled failure and
 // appears in none of the pinned enums. Nothing may reintroduce it, and no handled
 // path may answer with a non-200 status other than the one recorded deviation.
+// The text is every source file of the package, not handler.go alone, so moving a
+// writer into a new file does not move it out of this check.
 func TestTheHandlerNeitherEmitsServiceUnavailableNorNon200Errors(t *testing.T) {
-	source, err := os.ReadFile("handler.go")
-	if err != nil {
-		t.Fatalf("read handler.go: %v", err)
-	}
-	body := string(source)
+	body := handlerSource(t)
 	if strings.Contains(body, `"service_unavailable"`) {
 		t.Error(`handler.go emits "service_unavailable", which is in none of the 174 pinned error enums`)
 	}

@@ -16,6 +16,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
 	"math"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -1312,7 +1313,7 @@ func (h Handler) accessLogs(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := clampLimit(fields["page"], 1, 100)
+	page, err := pageNumber(fields["page"])
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -1358,7 +1359,7 @@ func (h Handler) integrationLogs(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := clampLimit(fields["page"], 1, 100)
+	page, err := pageNumber(fields["page"])
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -4545,12 +4546,14 @@ type fileFilterWindow struct {
 	total int
 }
 
-// errFileScanBound reports that the bounded scan behind a filtered files.list ran
-// out before the collection did.
-var errFileScanBound = decodeFailure("request_timeout", "files.list could not read the whole collection within its scan bound")
+// errFileScanIncomplete reports that the scan behind a filtered files.list did
+// not reach the end of the collection, so no complete answer exists to send.
+// /files.list declares request_timeout and no other code that can describe an
+// unfinished read.
+var errFileScanIncomplete = decodeFailure("request_timeout", "files.list could not read the whole collection in time")
 
-// scanFiles reads the workspace's files in bounded pages and applies the filter
-// above the repository, which has no filtered scan of its own.
+// scanFiles reads the workspace's files in pages and applies the filter above the
+// repository, which has no filtered read of its own.
 //
 // It keeps only the requested page plus a running count, so the memory cost is
 // proportional to `count` rather than to the workspace. That is what makes the
@@ -4558,21 +4561,47 @@ var errFileScanBound = decodeFailure("request_timeout", "files.list could not re
 // collection instead of whichever prefix happened to be scanned, and a file that
 // matches only past the first window is still returned.
 //
-// The scan is still bounded, because the repository cannot narrow the read. When
-// the bound is reached the collection has not been read, so there is no honest
-// success to report and /files.list's own `request_timeout` is returned. A short
-// `ok:true` is never emitted: it is indistinguishable from a complete answer.
+// The scan used to stop after a fixed 20,000 stored rows and answer
+// request_timeout. Because `paging.total` describes the whole collection the scan
+// always ran from row one, so at 20,001 files *every* call failed — a bare
+// files.list, a `count=1` first page, and a filter that legitimately matched
+// nothing alike — for every caller in the workspace, permanently. Any principal
+// holding files:write could put the workspace there by uploading 20,001 one-byte
+// files, and ordinary use reaches it on its own. A ceiling a user can reach is not
+// a budget; it replaced a wrong answer with no answer.
+//
+// So the collection is now read to its end, and what is bounded is the resources
+// one call may spend rather than the size of the workspace it may describe:
+//
+//   - fileScanBudget bounds wall-clock time, on top of whatever deadline the
+//     caller's own context carries. Reaching it means the read genuinely did not
+//     finish, which is what request_timeout says, and it degrades with load
+//     instead of failing at a magic row count;
+//   - a repository that reports another page while handing back a cursor it has
+//     already given is stopped rather than followed forever;
+//   - only `count` files are retained, whatever the size of the collection.
+//
+// This is the most a transport can do above a repository that cannot narrow the
+// read. The repair that removes the traversal is a filtered, counted read in the
+// store — ListFiles with user/channel/created-range/type predicates plus a
+// COUNT — recorded as the follow-up this method is waiting on.
 func (h Handler) scanFiles(ctx context.Context, principal auth.Principal, filter fileFilter) (fileFilterWindow, error) {
 	first := (filter.page - 1) * filter.count
 	last := first + filter.count
 	window := fileFilterWindow{files: make([]domain.File, 0, filter.count)}
 	scan := domain.PageRequest{Limit: fileFilterScanPage}
-	for read := 0; ; read += fileFilterScanPage {
-		if read >= fileFilterScanLimit {
-			return fileFilterWindow{}, errFileScanBound
+	ctx, cancel := context.WithTimeout(ctx, fileScanBudget)
+	defer cancel()
+	seen := make(map[domain.Cursor]struct{})
+	for {
+		if ctx.Err() != nil {
+			return fileFilterWindow{}, errFileScanIncomplete
 		}
 		page, err := h.Messages.Files(ctx, principal.WorkspaceID, principal.UserID, scan)
 		if err != nil {
+			if ctx.Err() != nil {
+				return fileFilterWindow{}, errFileScanIncomplete
+			}
 			return fileFilterWindow{}, err
 		}
 		for _, file := range page.Files {
@@ -4587,18 +4616,27 @@ func (h Handler) scanFiles(ctx context.Context, principal auth.Principal, filter
 		if !page.HasMore {
 			return window, nil
 		}
+		if _, repeated := seen[page.NextCursor]; page.NextCursor == "" || repeated {
+			// The repository claims another page and points at a place it has
+			// already served. Following it is an infinite loop, and calling it a
+			// complete read would report the collection as smaller than it is.
+			return fileFilterWindow{}, errFileScanIncomplete
+		}
+		seen[page.NextCursor] = struct{}{}
 		scan.Cursor = page.NextCursor
 	}
 }
 
-// fileFilterScanPage and fileFilterScanLimit bound the repository read that
-// backs a filtered files.list. The bound exists because the repository exposes no
-// filtered read; it is a ceiling on the number of stored rows one call will
-// traverse, not a ceiling on the answer. Reaching it is reported as
-// request_timeout, so it can never be mistaken for a complete result.
+// fileFilterScanPage is how much of the collection one repository read returns,
+// and fileScanBudget is how long the whole traversal behind one files.list may
+// take. Neither is a ceiling on what the answer may describe: the budget bounds
+// the work a single request can cost this process, which nothing else does —
+// cmd/server deliberately sets no WriteTimeout, and Go does not cancel a request
+// context on one, so a caller that has hung up cannot be relied on to end the
+// read.
 const (
-	fileFilterScanPage  = 200
-	fileFilterScanLimit = 20000
+	fileFilterScanPage = 200
+	fileScanBudget     = 15 * time.Second
 )
 
 // fileFilter carries every parameter /files.list declares.
@@ -4623,7 +4661,7 @@ func decodeFileFilter(fields map[string]string) (fileFilter, error) {
 	if filter.count, err = clampLimit(fields["count"], 100, 1000); err != nil {
 		return fileFilter{}, err
 	}
-	if filter.page, err = clampLimit(fields["page"], 1, 100); err != nil {
+	if filter.page, err = pageNumber(fields["page"]); err != nil {
 		return fileFilter{}, err
 	}
 	if filter.tsFrom, filter.hasFrom, err = optionalEpoch(fields["ts_from"]); err != nil {
@@ -4858,9 +4896,8 @@ func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer source.Close()
-	w.Header().Set("Content-Type", file.MIMEType)
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(file.Name))
+	blobHeaders(w, file.MIMEType, file.Name)
 	_, _ = io.Copy(w, source)
 }
 
@@ -4876,6 +4913,67 @@ func capabilityHeaders(w http.ResponseWriter) {
 	w.Header().Set("Referrer-Policy", "no-referrer")
 }
 
+// renderableBlobTypes is the closed set of content types this transport is
+// willing to name for bytes it did not produce. Every member is a raster image
+// format that a browser paints as an image and can never interpret as a
+// document, so naming one cannot make an upload run as script on this origin.
+// image/svg+xml is deliberately absent: an SVG is an XML document that carries
+// <script> and executes when it is rendered at a top-level URL.
+var renderableBlobTypes = map[string]struct{}{
+	"image/png":  {},
+	"image/jpeg": {},
+	"image/gif":  {},
+	"image/webp": {},
+	"image/bmp":  {},
+}
+
+// blobHeaders is the header contract of every response in this transport that
+// carries bytes out of storage.
+//
+// Every byte it serves is attacker-supplied: /files.upload and /users.setPhoto
+// take both the bytes and their declared type from the request, and nothing below
+// this transport verifies that the two agree. Serving the declared type — or, on
+// the photo route, the type http.DetectContentType read back out of those same
+// bytes — meant that a member could upload an HTML document labelled image/png
+// and have the public, unauthenticated capability URL answer
+// `200 text/html`. The document then ran on the application's own origin, read
+// the CSRF token out of /app and satisfied both halves of the cross-site defence
+// honestly: full session takeover, reachable by any member.
+//
+// So the type is not taken from the request and is not sniffed. It is chosen
+// here, from renderableBlobTypes, and everything else is application/octet-stream:
+//
+//   - Content-Type is a type this system chose, never one it read;
+//   - X-Content-Type-Options stops a browser from sniffing its way back to a
+//     document type;
+//   - Content-Disposition: attachment guarantees a non-image is never rendered at
+//     all, and an allow-listed image is served inline so avatars and previews
+//     still display;
+//   - Content-Security-Policy leaves a rendered document with no capability
+//     whatsoever, so the defence still holds if a future browser disregards the
+//     three headers above.
+//
+// This stands alone: it is correct even when the stored bytes are hostile.
+// Refusing hostile bytes at the door belongs to the upload path — see the
+// follow-up recorded on service.SetUserPhoto — and neither fix substitutes for
+// the other.
+func blobHeaders(w http.ResponseWriter, declared, filename string) {
+	contentType := "application/octet-stream"
+	disposition := "attachment"
+	if mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(declared)); err == nil {
+		if _, ok := renderableBlobTypes[strings.ToLower(mediaType)]; ok {
+			contentType, disposition = strings.ToLower(mediaType), "inline"
+		}
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	if strings.TrimSpace(filename) == "" {
+		filename = "download"
+	}
+	w.Header().Set("Content-Disposition", disposition+"; filename="+strconv.Quote(filepath.Base(filename)))
+}
+
 func (h Handler) downloadPublicFile(w http.ResponseWriter, r *http.Request) {
 	token := strings.TrimSpace(r.PathValue("token"))
 	if token == "" {
@@ -4889,9 +4987,8 @@ func (h Handler) downloadPublicFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer source.Close()
 	capabilityHeaders(w)
-	w.Header().Set("Content-Type", file.MIMEType)
 	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(file.Name))
+	blobHeaders(w, file.MIMEType, file.Name)
 	if _, err := io.Copy(w, source); err != nil {
 		return
 	}
@@ -4912,11 +5009,14 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	defer source.Close()
 	// This always answered application/octet-stream, so a browser downloaded an
-	// avatar as a binary blob instead of rendering it; downloadFile and
-	// downloadPublicFile both send the real type. domain.User carries no MIME type
-	// and OpenUserPhoto does not return the blob's, so the type is sniffed from the
-	// leading bytes. See the follow-up recorded for OpenUserPhoto, which should
-	// return the stored content type instead of making the transport guess.
+	// avatar as a binary blob instead of rendering it. It then answered
+	// http.DetectContentType of the stored bytes, which is how an HTML document
+	// uploaded as image/png came back as text/html on a public URL. The sniffed
+	// value is now a candidate, never the answer: blobHeaders serves it only if it
+	// is one of the image types this transport chose to name, and makes the
+	// response inert either way. domain.User carries no MIME type and
+	// OpenUserPhoto does not return the blob's, so the candidate has to be read
+	// from the leading bytes; see the follow-up recorded for OpenUserPhoto.
 	prefix := make([]byte, 512)
 	read, readErr := io.ReadFull(source, prefix)
 	if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
@@ -4925,7 +5025,7 @@ func (h Handler) downloadUserPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	prefix = prefix[:read]
 	capabilityHeaders(w)
-	w.Header().Set("Content-Type", http.DetectContentType(prefix))
+	blobHeaders(w, http.DetectContentType(prefix), "photo")
 	if _, err := w.Write(prefix); err != nil {
 		return
 	}
@@ -6468,6 +6568,20 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrSocketModeConnectionLimit) {
 		return "socket_mode_unavailable"
 	}
+	// Both of these are storage-engine outcomes the layer below is expected to
+	// absorb: the service retries a taken message microsecond on the next one,
+	// and the SQL repositories retry a serialization failure, a deadlock victim
+	// or a lost leader under their contention loop. Reaching the transport means
+	// the retry was exhausted or the path has none, so the request was well formed
+	// and the server did not complete it. `internal_error` is the pinned name for
+	// exactly that, and keeping it distinct from `fatal_error` is the point of
+	// these sentinels: an operator reading the wire can tell a classified engine
+	// failure from an outcome nothing has classified. `rate_limited` is not used
+	// here — it is the one Slack code whose handling is defined by HTTP 429 and
+	// Retry-After, and this transport answers 200.
+	if errors.Is(err, store.ErrMessageTimestampTaken) || errors.Is(err, store.ErrTransient) {
+		return "internal_error"
+	}
 	return "fatal_error"
 }
 
@@ -7019,8 +7133,17 @@ func writeError(w http.ResponseWriter, reason string) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": reason})
 }
 
+// writeJSON answers every one of this transport's routes.
+//
+// The charset is explicit because encoding/json emits UTF-8 and a client that
+// guesses reads a multi-byte display name wrong. nosniff is here because nothing
+// on this surface carried it: /api.test reflects a caller-supplied `error` value
+// straight back into the body, so the whole surface was one Content-Type mistake
+// away from a document rendered on this origin. It is one header on one helper,
+// and it removes the class rather than the instance.
 func writeJSON(w http.ResponseWriter, status int, value any) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }
@@ -7330,7 +7453,10 @@ func (h Handler) downloadListCSV(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s.csv", listID))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	// Quoted, because an unquoted filename parameter ends at the first space or
+	// separator: an id carrying one truncated the header a receiving client read.
+	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(string(listID)+".csv"))
 	writer := csv.NewWriter(w)
 	if err := writer.Write([]string{"item_id", "fields"}); err != nil {
 		return
@@ -7409,6 +7535,33 @@ func clampLimit(raw string, fallback, maximum int) (int, error) {
 	}
 	if value > maximum {
 		return maximum, nil
+	}
+	return value, nil
+}
+
+// maxPageNumber bounds a wire `page`. It exists so the offset a page describes
+// cannot overflow the arithmetic that computes it, here or in the services that
+// take a page number directly; it is far past any collection this system can
+// hold, so no caller reaches it by paginating.
+const maxPageNumber = 1_000_000
+
+// pageNumber reads a wire `page`, which is an offset and not a limit.
+//
+// It is deliberately not clampLimit. Clamping silently answered `"ok":true` with
+// page 100's files under `"page":100` for every page above the ceiling, so a
+// caller paginating a collection of 20,000 files at count=1 — a collection this
+// same response described as 20,000 pages — was served the same page forever with
+// nothing on the wire saying so. A limit above a maximum has an obvious best
+// answer and Slack clamps it; an offset does not, so an unusable one is refused
+// with the `invalid_arg_name` these operations declare for a rejected argument.
+func pageNumber(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 1, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 || value > maxPageNumber {
+		return 0, decodeFailure("invalid_arg_name", "page must be a positive integer no greater than "+strconv.Itoa(maxPageNumber))
 	}
 	return value, nil
 }
@@ -7722,6 +7875,7 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 
 func writePlain(w http.ResponseWriter, status int, value string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_, _ = io.WriteString(w, value)
 }

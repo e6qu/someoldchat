@@ -36,54 +36,102 @@ func (r registeredRoute) operation() string {
 	return strings.TrimPrefix(r.path, "/api")
 }
 
-func parseHandlerSource(t *testing.T) (*token.FileSet, *ast.File) {
+// packageSourceFiles is every non-test source file of this package.
+//
+// This used to be the single name "handler.go". The package happens to hold one
+// implementation file today, so both gates were correct by accident: moving one
+// handler into a second file, or adding one, would have removed it from the error
+// gate and the scope table silently.
+func packageSourceFiles(t *testing.T) []string {
 	t.Helper()
-	source, err := os.ReadFile("handler.go")
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("read handler.go: %v", err)
+		t.Fatalf("read package directory: %v", err)
 	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	sort.Strings(names)
+	if len(names) == 0 {
+		t.Fatal("no package source files discovered; the scan is broken")
+	}
+	return names
+}
+
+// handlerSource is the concatenated text of every file the gates read, for the
+// checks that work on text rather than syntax.
+func handlerSource(t *testing.T) string {
+	t.Helper()
+	var body strings.Builder
+	for _, name := range packageSourceFiles(t) {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("read %s: %v", name, err)
+		}
+		body.Write(source)
+	}
+	return body.String()
+}
+
+func parseHandlerSource(t *testing.T) (*token.FileSet, []*ast.File) {
+	t.Helper()
 	fileSet := token.NewFileSet()
-	parsed, err := parser.ParseFile(fileSet, "handler.go", source, parser.ParseComments)
-	if err != nil {
-		t.Fatalf("parse handler.go: %v", err)
+	files := make([]*ast.File, 0, 2)
+	for _, name := range packageSourceFiles(t) {
+		parsed, err := parser.ParseFile(fileSet, name, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		files = append(files, parsed)
 	}
-	return fileSet, parsed
+	return fileSet, files
 }
 
 // registeredRoutes reads every mux.HandleFunc call in Register.
 func registeredRoutes(t *testing.T) []registeredRoute {
 	t.Helper()
-	_, parsed := parseHandlerSource(t)
+	fileSet, parsed := parseHandlerSource(t)
 	routes := make([]registeredRoute, 0, 400)
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Name.Name != "Register" {
-			continue
+	for _, file := range parsed {
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Name.Name != "Register" {
+				continue
+			}
+			ast.Inspect(function.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok || len(call.Args) != 2 {
+					return true
+				}
+				selector, ok := call.Fun.(*ast.SelectorExpr)
+				if !ok || selector.Sel.Name != "HandleFunc" {
+					return true
+				}
+				pattern, ok := stringLiteral(call.Args[0])
+				if !ok {
+					t.Errorf("%s: a route is registered under a pattern this scan cannot read, so it is tested by nothing", fileSet.Position(call.Pos()))
+					return true
+				}
+				target, ok := call.Args[1].(*ast.SelectorExpr)
+				if !ok {
+					// A closure or a wrapped handler used to be skipped in
+					// silence: the route vanished from the error gate and the
+					// scope table with nothing to say it had.
+					t.Errorf("%s: %q is registered with a handler this scan cannot resolve; give it a method so both gates can see it", fileSet.Position(call.Pos()), pattern)
+					return true
+				}
+				method, path := "", pattern
+				if verb, rest, found := strings.Cut(pattern, " "); found {
+					method, path = verb, rest
+				}
+				routes = append(routes, registeredRoute{method: method, path: path, handler: target.Sel.Name})
+				return true
+			})
 		}
-		ast.Inspect(function.Body, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok || len(call.Args) != 2 {
-				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || selector.Sel.Name != "HandleFunc" {
-				return true
-			}
-			pattern, ok := stringLiteral(call.Args[0])
-			if !ok {
-				return true
-			}
-			target, ok := call.Args[1].(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			method, path := "", pattern
-			if verb, rest, found := strings.Cut(pattern, " "); found {
-				method, path = verb, rest
-			}
-			routes = append(routes, registeredRoute{method: method, path: path, handler: target.Sel.Name})
-			return true
-		})
 	}
 	if len(routes) < 100 {
 		t.Fatalf("only %d routes discovered; the Register scan is broken", len(routes))
@@ -111,15 +159,124 @@ type functionFacts struct {
 	calls  map[string]struct{}
 }
 
-// codeArguments names, for each code-emitting call, which of its arguments carry
-// an error code.
-var codeArguments = map[string][]int{
+// codeWriters names the primitives that turn a string into an error code on the
+// wire, and which of their arguments that string is. Everything else that carries
+// a code carries it *to* one of these, and is derived rather than listed: see
+// codeArguments.
+var codeWriters = map[string][]int{
 	"writeError":            {1},
 	"decodeFailure":         {0},
 	"mapServiceError":       {1},
 	"mapAdminError":         {1},
 	"mapServiceErrorExists": {1, 2},
 	"mapServiceErrorNamed":  {1, 2, 3},
+}
+
+// codeArguments names, for each code-carrying call, which of its arguments carry
+// an error code.
+//
+// This used to be codeWriters alone, hand-maintained, and a code that reached a
+// primitive through a *parameter* was recorded nowhere: the literal at the call
+// site was not a known code position, and inside the helper the argument is an
+// identifier rather than a literal. Three live codes on five routes were invisible
+// to both gates that way — `invalid_ts_oldest`/`invalid_ts_latest` passed to
+// normalizeHistoryRequest by /conversations.history, and `invalid_cursor` passed
+// to decodeListRequestFields by /admin.conversations.search,
+// /admin.conversations.getTeams, /users.list and /conversations.members — so any
+// of them could have been changed to a code the operation does not declare with
+// both gates staying green.
+//
+// So the positions are derived instead of remembered: a parameter that a function
+// hands to a known code position is itself a code position, and that rule is
+// applied to a fixpoint. A new helper written the same way is discovered on the
+// run that introduces it, and
+// TestEveryPinnedCodeLiteralInThePackageIsVisibleToTheScan fails if a code ever
+// reaches the wire by a route this derivation still cannot follow.
+func codeArguments(t *testing.T) map[string][]int {
+	t.Helper()
+	_, parsed := parseHandlerSource(t)
+	positions := make(map[string]map[int]struct{}, len(codeWriters))
+	for name, indexes := range codeWriters {
+		positions[name] = make(map[int]struct{}, len(indexes))
+		for _, index := range indexes {
+			positions[name][index] = struct{}{}
+		}
+	}
+	for changed := true; changed; {
+		changed = false
+		for _, file := range parsed {
+			for _, declaration := range file.Decls {
+				function, ok := declaration.(*ast.FuncDecl)
+				if !ok || function.Body == nil {
+					continue
+				}
+				parameters := make(map[string]int)
+				index := 0
+				for _, field := range function.Type.Params.List {
+					for _, name := range field.Names {
+						parameters[name.Name] = index
+						index++
+					}
+					if len(field.Names) == 0 {
+						index++
+					}
+				}
+				ast.Inspect(function.Body, func(node ast.Node) bool {
+					call, ok := node.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					known, ok := positions[calleeName(call.Fun)]
+					if !ok {
+						return true
+					}
+					for argument := range known {
+						if argument >= len(call.Args) {
+							continue
+						}
+						identifier, ok := call.Args[argument].(*ast.Ident)
+						if !ok {
+							continue
+						}
+						parameter, ok := parameters[identifier.Name]
+						if !ok {
+							continue
+						}
+						if positions[function.Name.Name] == nil {
+							positions[function.Name.Name] = make(map[int]struct{})
+						}
+						if _, recorded := positions[function.Name.Name][parameter]; !recorded {
+							positions[function.Name.Name][parameter] = struct{}{}
+							changed = true
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
+	derived := make(map[string][]int, len(positions))
+	for name, indexes := range positions {
+		for index := range indexes {
+			derived[name] = append(derived[name], index)
+		}
+		sort.Ints(derived[name])
+	}
+	return derived
+}
+
+// scopeArguments names the calls that *enforce* a scope, and which argument
+// carries it.
+//
+// The collection used to record every `auth.Scope…` selector appearing anywhere in
+// a handler or its callees, so it could not tell `h.authenticate(r, scope)` from a
+// scope merely mentioned in a log line or read back out of a principal after
+// authenticating on a weaker one. A handler that authenticated weakly and named a
+// strong scope anywhere satisfied the table.
+var scopeArguments = map[string][]int{
+	"authenticate":             {1},
+	"listEmoji":                {2},
+	"deleteListItemsWithScope": {2},
 }
 
 // codeReturningFunctions return a code rather than writing one, so every string
@@ -129,16 +286,26 @@ var codeReturningFunctions = map[string]struct{}{
 	"decodeErrorCode": {},
 }
 
-// handlerFacts reads every function declared in handler.go.
+// handlerFacts reads every function declared in this package's source.
 func handlerFacts(t *testing.T) map[string]functionFacts {
 	t.Helper()
 	_, parsed := parseHandlerSource(t)
+	arguments := codeArguments(t)
 	facts := make(map[string]functionFacts)
-	for _, declaration := range parsed.Decls {
-		function, ok := declaration.(*ast.FuncDecl)
-		if !ok || function.Body == nil {
-			continue
+	for _, file := range parsed {
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Body == nil {
+				continue
+			}
+			collectFunctionFacts(function, arguments, facts)
 		}
+	}
+	return facts
+}
+
+func collectFunctionFacts(function *ast.FuncDecl, arguments map[string][]int, facts map[string]functionFacts) {
+	{
 		name := function.Name.Name
 		entry, exists := facts[name]
 		if !exists {
@@ -147,22 +314,24 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 		_, returnsCode := codeReturningFunctions[name]
 		ast.Inspect(function.Body, func(node ast.Node) bool {
 			switch value := node.(type) {
-			case *ast.SelectorExpr:
-				// Any auth.Scope… named in a handler is a scope that handler can
-				// require: authenticate takes it directly, and the three
-				// scope-parameterised helpers receive it from their caller.
-				if pkg, ok := value.X.(*ast.Ident); ok && pkg.Name == "auth" && strings.HasPrefix(value.Sel.Name, "Scope") {
-					entry.scopes[value.Sel.Name] = struct{}{}
-				}
 			case *ast.CallExpr:
 				callee := calleeName(value.Fun)
 				if callee != "" {
 					entry.calls[callee] = struct{}{}
 				}
-				for _, index := range codeArguments[callee] {
+				for _, index := range arguments[callee] {
 					if index < len(value.Args) {
 						if code, ok := stringLiteral(value.Args[index]); ok && code != "" {
 							entry.codes[code] = struct{}{}
+						}
+					}
+				}
+				// A scope is recorded where it is *enforced*: the argument
+				// position of a call that refuses the request without it.
+				for _, index := range scopeArguments[callee] {
+					if index < len(value.Args) {
+						if scope, ok := scopeSelector(value.Args[index]); ok {
+							entry.scopes[scope] = struct{}{}
 						}
 					}
 				}
@@ -172,6 +341,13 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 				// inline or assembled in a local first.
 				for _, code := range envelopeCodes(value) {
 					entry.codes[code] = struct{}{}
+				}
+				// A route may also enforce a scope without authenticate: reading
+				// the principal from another authenticator and refusing with
+				// missingScopeError is how /apps.connections.open does it. The
+				// refusal is the enforcement, so the scope is recorded from it.
+				if scope, ok := missingScopeLiteral(value); ok {
+					entry.scopes[scope] = struct{}{}
 				}
 			case *ast.ReturnStmt:
 				if !returnsCode {
@@ -199,7 +375,39 @@ func handlerFacts(t *testing.T) map[string]functionFacts {
 		})
 		facts[name] = entry
 	}
-	return facts
+}
+
+// missingScopeLiteral reads `missingScopeError{needed: auth.Scope…}`.
+func missingScopeLiteral(composite *ast.CompositeLit) (string, bool) {
+	identifier, ok := composite.Type.(*ast.Ident)
+	if !ok || identifier.Name != "missingScopeError" {
+		return "", false
+	}
+	for _, element := range composite.Elts {
+		pair, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		key, ok := pair.Key.(*ast.Ident)
+		if !ok || key.Name != "needed" {
+			continue
+		}
+		return scopeSelector(pair.Value)
+	}
+	return "", false
+}
+
+// scopeSelector reads an `auth.Scope…` argument.
+func scopeSelector(expression ast.Expr) (string, bool) {
+	selector, ok := expression.(*ast.SelectorExpr)
+	if !ok {
+		return "", false
+	}
+	pkg, ok := selector.X.(*ast.Ident)
+	if !ok || pkg.Name != "auth" || !strings.HasPrefix(selector.Sel.Name, "Scope") {
+		return "", false
+	}
+	return selector.Sel.Name, true
 }
 
 // envelopeCodes reads `map[string]any{"ok": false, "error": "…"}`.
@@ -319,6 +527,7 @@ func sentinelDrivenCodes() map[string]string {
 		"hash_conflict":             "store.ErrConflict, classified by sentinel",
 		"too_many_bookmarks":        "store.ErrBookmarkLimit, classified by sentinel",
 		"socket_mode_unavailable":   "store.ErrSocketModeConnectionLimit, classified by sentinel",
+		"internal_error":            "store.ErrTransient / store.ErrMessageTimestampTaken, classified by sentinel: a storage-engine failure whose retry was exhausted, named apart from the unclassified fatal_error",
 		"invalid_arg_name":          "the invalidReason default and decodeErrorCode's argument fallback",
 		"invalid_form_data":         "decodeErrorCode's fallback for an unreadable request",
 		"invalid_json":              "decodeErrorCode's fallback for a malformed JSON document",
@@ -362,6 +571,124 @@ func sortedKeys(values map[string]struct{}) []string {
 	}
 	sort.Strings(result)
 	return result
+}
+
+// The scope collection must record what a route *enforces*, not what it mentions.
+// It used to record every auth.Scope… selector anywhere in a handler or its
+// callees, so a handler that authenticated on a weak scope and merely named a
+// strong one — reading it back off the principal to decide whether to include an
+// extra field, for instance — satisfied the scoped-route table as if it had
+// enforced it.
+func TestTheScopeCollectionRecordsEnforcementRatherThanMention(t *testing.T) {
+	const source = `package slack
+
+func (h Handler) mentionsWithoutEnforcing(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersRead)
+	if err != nil {
+		return
+	}
+	if principal.HasScope(auth.ScopeAdminUsersWrite) {
+		writeError(w, "no_permission")
+	}
+}
+`
+	parsed, err := parser.ParseFile(token.NewFileSet(), "synthetic.go", source, 0)
+	if err != nil {
+		t.Fatalf("parse the synthetic handler: %v", err)
+	}
+	facts := make(map[string]functionFacts)
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		collectFunctionFacts(function, codeWriters, facts)
+	}
+	scopes := sortedKeys(facts["mentionsWithoutEnforcing"].scopes)
+	if len(scopes) != 1 || scopes[0] != "ScopeUsersRead" {
+		t.Fatalf("the collection recorded %v; the handler enforces only ScopeUsersRead and mentions ScopeAdminUsersWrite", scopes)
+	}
+}
+
+// nonCodePinnedLiterals are the string literals in this package that happen to
+// equal a pinned Slack error code while not being one. Each entry states what the
+// literal is instead, so the exemption cannot become a place to hide a code the
+// scan cannot see.
+func nonCodePinnedLiterals() map[string]string {
+	return map[string]string{
+		"is_archived": "a member name in the conversations.* JSON response objects, not an error code",
+	}
+}
+
+// The gates can only judge what the fact collection sees, and what it sees is a
+// matter of shape: a code written as a literal at a known argument position. A
+// code that reaches the wire any other way is invisible to *both* gates, which is
+// silent — the tests stay green while an operation answers a code its pinned enum
+// does not declare.
+//
+// So the collection is checked against the source directly: every string literal
+// in this package that is a known error code — a member of the pinned union, or
+// one of the recorded deviations — must either be visible to handlerFacts or be
+// recorded below as something other than a code. This is what proves
+// codeArguments' derivation reaches the codes passed through helper parameters,
+// and it fails if a future helper, or a renamed local such as the `reason` the
+// OAuth endpoints assemble, puts one somewhere the collection cannot follow.
+func TestEveryPinnedCodeLiteralInThePackageIsVisibleToTheScan(t *testing.T) {
+	pinned := pinnedErrorCodes(t)
+	for code := range recordedNonPinnedCodes() {
+		pinned[code] = struct{}{}
+	}
+	recorded := nonCodePinnedLiterals()
+	visible := make(map[string]struct{})
+	for _, entry := range handlerFacts(t) {
+		for code := range entry.codes {
+			visible[code] = struct{}{}
+		}
+	}
+	fileSet, parsed := parseHandlerSource(t)
+	invisible := make(map[string][]string)
+	for _, file := range parsed {
+		ast.Inspect(file, func(node ast.Node) bool {
+			literal, ok := node.(*ast.BasicLit)
+			if !ok || literal.Kind != token.STRING {
+				return true
+			}
+			value, ok := stringLiteral(literal)
+			if !ok {
+				return true
+			}
+			if _, isPinned := pinned[value]; !isPinned {
+				return true
+			}
+			if _, seen := visible[value]; seen {
+				return true
+			}
+			if _, excused := recorded[value]; excused {
+				return true
+			}
+			invisible[value] = append(invisible[value], fileSet.Position(literal.Pos()).String())
+			return true
+		})
+	}
+	for _, code := range sortedKeys(func() map[string]struct{} {
+		names := make(map[string]struct{}, len(invisible))
+		for name := range invisible {
+			names[name] = struct{}{}
+		}
+		return names
+	}()) {
+		t.Errorf("the pinned error code %q appears at %v but no gate can see it emitted; give it a shape the collection reads, or record it as something other than a code", code, invisible[code])
+	}
+	// An exemption whose literal is gone is stale, and one that has become
+	// visible is simply wrong.
+	for value, reason := range recorded {
+		if _, seen := visible[value]; seen {
+			t.Errorf("%q is recorded as %q but the scan now sees it emitted; delete the entry", value, reason)
+		}
+		if !strings.Contains(handlerSource(t), strconv.Quote(value)) {
+			t.Errorf("%q is recorded as %q but no longer appears in the package; delete the entry", value, reason)
+		}
+	}
 }
 
 // reachableScopes is the transitive closure of the auth scopes a route enforces.
