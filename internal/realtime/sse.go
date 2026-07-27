@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,6 +24,51 @@ type Handler struct {
 	Authenticator  auth.Authenticator
 	RTMConnections RTMConnectionSource
 	Messages       RTMMessageService
+	// Logger records why a stream ended and which records were skipped.
+	// Without it a store outage is indistinguishable from a client disconnect.
+	Logger *slog.Logger
+	// Heartbeat is how often a quiet stream emits a comment so intermediaries
+	// do not treat it as idle. Zero selects heartbeatInterval, which is chosen
+	// against the common 60 s proxy default.
+	Heartbeat time.Duration
+	// Reauthorize is how often an open stream re-checks that its session is
+	// still valid. Zero selects reauthorizeInterval.
+	Reauthorize time.Duration
+}
+
+func (h Handler) heartbeat() time.Duration {
+	if h.Heartbeat > 0 {
+		return h.Heartbeat
+	}
+	return heartbeatInterval
+}
+
+func (h Handler) reauthorize() time.Duration {
+	if h.Reauthorize > 0 {
+		return h.Reauthorize
+	}
+	return reauthorizeInterval
+}
+
+const (
+	streamPollInterval = 250 * time.Millisecond
+	// heartbeatInterval keeps a quiet stream producing bytes well inside the
+	// 60 s idle timeout that nginx, AWS ALB and Cloud Run all default to.
+	// Without it an idle stream is severed roughly every minute.
+	heartbeatInterval = 15 * time.Second
+	// reauthorizeInterval bounds how long a revoked session keeps receiving
+	// events. The check is the same store lookup every other request performs.
+	reauthorizeInterval = 5 * time.Second
+	// clientRetryInterval is advertised to the browser as its reconnect delay,
+	// so the cadence is a deployment decision rather than a browser default.
+	clientRetryInterval = 2 * time.Second
+)
+
+func (h Handler) logger() *slog.Logger {
+	if h.Logger != nil {
+		return h.Logger
+	}
+	return slog.Default()
 }
 
 type RTMConnectionSource interface {
@@ -124,25 +171,28 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	for {
 		records, listErr := h.Source.ListEventsAfter(request.Context(), h.Workspace, after, 100)
 		if listErr != nil {
+			if request.Context().Err() == nil {
+				h.logger().Error("RTM stream ended on an event source failure", "workspace", h.Workspace, "user", connection.UserID, "error", listErr)
+			}
 			return
 		}
 		for _, record := range records {
 			after = record.Sequence
-			if record.Event.Topic == events.EphemeralMessageTopic {
-				recipientMatches, recipientErr := eventRecipient(record.Event.Payload, connection.UserID)
-				if recipientErr != nil {
-					return
-				}
-				if !recipientMatches {
-					continue
-				}
-			}
-			payload, encodeErr := encodeRTMEvent(record)
-			if encodeErr != nil {
-				// The durable stream also carries internal records whose payloads are not Slack events.
+			// The durable journal also carries internal worker records and
+			// records written before the typed payload contract; neither is a
+			// deliverable event, and neither may end the stream.
+			delivered, decodeErr := events.Deliverable(record.Event)
+			if decodeErr != nil {
 				continue
 			}
-			if websocket.Message.Send(conn, string(payload)) != nil {
+			if !addressedTo(record.Event.Topic, delivered, connection.UserID) {
+				continue
+			}
+			payload, encodeErr := delivered.Encode()
+			if encodeErr != nil {
+				continue
+			}
+			if websocket.Message.Send(conn, payload) != nil {
 				return
 			}
 		}
@@ -158,34 +208,6 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 		case <-ticker.C:
 		}
 	}
-}
-
-func eventRecipient(payload string, recipient domain.UserID) (bool, error) {
-	var value struct {
-		UserID string `json:"user_id"`
-	}
-	if err := json.Unmarshal([]byte(payload), &value); err != nil {
-		return false, err
-	}
-	if value.UserID == "" {
-		return false, errors.New("ephemeral event recipient is required")
-	}
-	return value.UserID == string(recipient), nil
-}
-
-func encodeRTMEvent(record events.Record) ([]byte, error) {
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(record.Event.Payload), &object); err != nil {
-		return nil, fmt.Errorf("RTM event payload is not JSON: %w", err)
-	}
-	if object == nil {
-		return nil, errors.New("RTM event payload must be a JSON object")
-	}
-	var eventType string
-	if err := json.Unmarshal(object["type"], &eventType); err != nil || strings.TrimSpace(eventType) == "" {
-		return nil, errors.New("RTM event payload requires a non-empty type")
-	}
-	return json.Marshal(object)
 }
 
 func handleRTMCommand(ctx context.Context, conn *websocket.Conn, connection domain.RTMConnection, messages RTMMessageService, raw string) error {
@@ -347,24 +369,69 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	}
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	_, _ = fmt.Fprint(w, ": connected\n\n")
+	// nginx buffers proxied responses by default, which withholds a stream's
+	// bytes until its buffer fills. Connection: keep-alive was meaningless
+	// here: HTTP/1.1 is persistent by default and HTTP/2 forbids the header.
+	w.Header().Set("X-Accel-Buffering", "no")
+	if _, err := fmt.Fprintf(w, "retry: %d\n\n: connected\n\n", clientRetryInterval.Milliseconds()); err != nil {
+		return
+	}
 	flusher.Flush()
-	ticker := time.NewTicker(250 * time.Millisecond)
+	ticker := time.NewTicker(streamPollInterval)
 	defer ticker.Stop()
+	lastWrite := time.Now()
+	lastAuthorized := time.Now()
 	for {
 		records, err := h.Source.ListEventsAfter(r.Context(), h.Workspace, after, 100)
 		if err != nil {
+			if r.Context().Err() == nil {
+				h.logger().Error("event stream ended on an event source failure", "workspace", h.Workspace, "user", principal.UserID, "error", err)
+			}
 			return
 		}
+		wrote := false
 		for _, record := range records {
-			if err := writeEvent(w, record, principal.UserID); err != nil {
+			after = record.Sequence
+			delivered, decodeErr := events.Deliverable(record.Event)
+			if decodeErr != nil {
+				// One undeliverable record must not end a durable stream: the
+				// client would reconnect with the same cursor, land on the same
+				// record and break the stream for every user in the workspace.
+				h.logger().Warn("event stream skipped an undeliverable record", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", decodeErr)
+				continue
+			}
+			if !addressedTo(record.Event.Topic, delivered, principal.UserID) {
+				continue
+			}
+			if err := writeEvent(w, record, delivered); err != nil {
+				if r.Context().Err() == nil {
+					h.logger().Error("event stream ended on a write failure", "workspace", h.Workspace, "user", principal.UserID, "error", err)
+				}
 				return
 			}
-			after = record.Sequence
+			wrote = true
 		}
-		if len(records) > 0 {
+		if wrote {
 			flusher.Flush()
+			lastWrite = time.Now()
+		}
+		if time.Since(lastWrite) >= h.heartbeat() {
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+			lastWrite = time.Now()
+		}
+		if time.Since(lastAuthorized) >= h.reauthorize() {
+			// A stream that authenticated once outlives its own session:
+			// sign-out, back-channel logout and administrative revocation all
+			// leave it delivering every workspace event indefinitely.
+			current, authErr := h.Authenticator.Authenticate(r)
+			if authErr != nil || current.WorkspaceID != h.Workspace || !current.HasScope(scope) {
+				h.logger().Info("event stream ended because the session is no longer authorized", "workspace", h.Workspace, "user", principal.UserID)
+				return
+			}
+			lastAuthorized = time.Now()
 		}
 		select {
 		case <-r.Context().Done():
@@ -385,29 +452,30 @@ func lastEventID(r *http.Request) (uint64, error) {
 	return strconv.ParseUint(value, 10, 64)
 }
 
-func writeEvent(w http.ResponseWriter, record events.Record, recipient domain.UserID) error {
-	if record.Event.Topic == events.EphemeralMessageTopic {
-		var payload struct {
-			UserID string `json:"user_id"`
-		}
-		if err := json.Unmarshal([]byte(record.Event.Payload), &payload); err != nil || payload.UserID == "" {
-			if err != nil {
-				return err
-			}
-			return errors.New("ephemeral event recipient is required")
-		}
-		if payload.UserID != string(recipient) {
-			return nil
-		}
+// addressedTo reports whether a decoded record may be shown to one recipient.
+// A recipient-scoped topic whose payload names no recipient is addressed to
+// nobody, so it is withheld rather than broadcast or treated as a stream error.
+func addressedTo(topic string, delivered events.Delivered, recipient domain.UserID) bool {
+	if topic != events.EphemeralMessageTopic {
+		return true
+	}
+	userID, ok := delivered.Field("user_id")
+	return ok && userID != "" && userID == string(recipient)
+}
+
+func writeEvent(w io.Writer, record events.Record, delivered events.Delivered) error {
+	encoded, err := delivered.Encode()
+	if err != nil {
+		return err
 	}
 	if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\n", record.Sequence, record.Event.Topic); err != nil {
 		return err
 	}
-	for _, line := range strings.Split(record.Event.Payload, "\n") {
+	for _, line := range strings.Split(encoded, "\n") {
 		if _, err := fmt.Fprintf(w, "data: %s\n", line); err != nil {
 			return err
 		}
 	}
-	_, err := fmt.Fprint(w, "\n")
+	_, err = fmt.Fprint(w, "\n")
 	return err
 }

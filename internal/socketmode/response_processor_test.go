@@ -71,6 +71,33 @@ func TestResponseProcessorReleasesUnprocessedResponses(t *testing.T) {
 	}
 }
 
+// The retry delay has to be measured from the failure. Measuring it from the
+// clock read that started the batch releases a slow batch's later failures into
+// the past, so the failing response is retried in a tight loop with no backoff.
+func TestResponseProcessorMeasuresRetryDelayFromTheFailure(t *testing.T) {
+	ctx := context.Background()
+	queue := memory.New()
+	batchStart := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
+	if err := queue.RecordSocketModeResponse(ctx, domain.SocketModeResponse{AppID: "A1", EnvelopeID: "env-1", Payload: `{}`, ReceivedAt: batchStart}); err != nil {
+		t.Fatal(err)
+	}
+	processor := ResponseProcessor{Queue: queue, AppID: "A1", Owner: "worker-1", BatchSize: 10, Lease: time.Minute, RetryDelay: 30 * time.Second}
+	err := processor.ProcessOnce(ctx, batchStart, func(context.Context, domain.SocketModeResponse) error {
+		return errors.New("handler failed")
+	})
+	var deliveryErr ResponseDeliveryError
+	if !errors.As(err, &deliveryErr) {
+		t.Fatalf("err=%v", err)
+	}
+	claimed, claimErr := queue.ClaimSocketModeResponses(ctx, "A1", "worker-2", 10, time.Minute)
+	if claimErr != nil {
+		t.Fatal(claimErr)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("the failed response was immediately claimable again: %+v", claimed)
+	}
+}
+
 func TestResponseProcessorRenewsLeaseDuringSlowHandler(t *testing.T) {
 	ctx := context.Background()
 	queue := &responseRenewalTrackingQueue{Store: memory.New(), renewed: make(chan struct{})}

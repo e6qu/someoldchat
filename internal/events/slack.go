@@ -1,7 +1,6 @@
 package events
 
 import (
-	"bytes"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -14,42 +13,31 @@ import (
 )
 
 // SlackEventBody converts a durable event record into the JSON envelope used
-// by Slack's HTTP Events API. The event payload is deliberately required to
-// contain the inner event object; an identifier-only domain event cannot be
-// delivered as a compatible event and therefore fails loudly.
+// by Slack's HTTP Events API. The payload is read through Broadcastable, so an
+// internal worker record, a record addressed to a single user, and a record that
+// predates the typed payload contract all fail with a sentinel the caller can
+// classify as permanent instead of being retried forever.
 func SlackEventBody(record Record, appID string) ([]byte, error) {
 	if record.Event.ID == "" || record.Event.WorkspaceID == "" || record.Event.CreatedAt.IsZero() {
-		return nil, errors.New("Slack event record is incomplete")
+		return nil, fmt.Errorf("%w: Slack event record is incomplete", ErrEventIncomplete)
 	}
 	appID = strings.TrimSpace(appID)
 	if appID == "" {
 		return nil, errors.New("Slack event app ID is required")
 	}
-	payload := bytes.TrimSpace([]byte(record.Event.Payload))
-	if len(payload) == 0 || payload[0] != '{' {
-		return nil, errors.New("Slack event payload must be a JSON object")
+	delivered, err := Broadcastable(record.Event)
+	if err != nil {
+		return nil, err
 	}
-	var object map[string]json.RawMessage
-	if err := json.Unmarshal(payload, &object); err != nil {
-		return nil, fmt.Errorf("decode Slack event payload: %w", err)
+	if delivered.Type == "event_callback" {
+		return validateSlackEventEnvelope(delivered.Object, appID, record)
 	}
-	if object == nil {
-		return nil, errors.New("Slack event payload must be a JSON object")
+	if _, ok := delivered.Object["event_ts"]; !ok {
+		return nil, fmt.Errorf("%w: Slack inner event requires event_ts", ErrPayloadMalformed)
 	}
-	if rawType, ok := object["type"]; ok {
-		var eventType string
-		if err := json.Unmarshal(rawType, &eventType); err != nil {
-			return nil, errors.New("Slack event type must be a string")
-		}
-		if eventType == "event_callback" {
-			return validateSlackEventEnvelope(object, appID, record)
-		}
-	}
-	if _, ok := object["event_ts"]; !ok {
-		return nil, errors.New("Slack inner event requires event_ts")
-	}
-	if _, ok := object["type"]; !ok {
-		return nil, errors.New("Slack inner event requires type")
+	encoded, err := delivered.Encode()
+	if err != nil {
+		return nil, err
 	}
 	envelope := map[string]any{
 		"type":       "event_callback",
@@ -57,7 +45,7 @@ func SlackEventBody(record Record, appID string) ([]byte, error) {
 		"api_app_id": appID,
 		"event_id":   string(record.Event.ID),
 		"event_time": record.Event.CreatedAt.Unix(),
-		"event":      json.RawMessage(payload),
+		"event":      json.RawMessage(encoded),
 	}
 	return json.Marshal(envelope)
 }
@@ -82,15 +70,12 @@ func validateSlackEventEnvelope(object map[string]json.RawMessage, appID string,
 	if err := json.Unmarshal(object["event_id"], &eventID); err != nil || eventID != string(record.Event.ID) {
 		return nil, errors.New("Slack event event_id does not match the durable record")
 	}
-	var event map[string]json.RawMessage
-	if err := json.Unmarshal(object["event"], &event); err != nil || event == nil {
-		return nil, errors.New("Slack event envelope event must be an object")
+	inner, err := decodeDelivered(string(object["event"]))
+	if err != nil {
+		return nil, err
 	}
-	if _, ok := event["type"]; !ok {
-		return nil, errors.New("Slack inner event requires type")
-	}
-	if _, ok := event["event_ts"]; !ok {
-		return nil, errors.New("Slack inner event requires event_ts")
+	if _, ok := inner.Object["event_ts"]; !ok {
+		return nil, fmt.Errorf("%w: Slack inner event requires event_ts", ErrPayloadMalformed)
 	}
 	return json.Marshal(object)
 }

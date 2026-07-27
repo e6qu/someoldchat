@@ -22,47 +22,82 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/scheduler"
 )
 
+// exitConfiguration and exitRuntime separate "the operator gave us something
+// impossible" from "something failed while running".
+const (
+	exitConfiguration = 2
+	exitRuntime       = 1
+)
+
 func main() {
-	backend := flag.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
-	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
-	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory")
-	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address")
-	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
-	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name")
-	workspace := flag.String("workspace", "", "workspace ID (required)")
-	deliveryURL := flag.String("delivery-url", "", "HTTP event delivery URL (required)")
-	deliveryFormat := flag.String("delivery-format", "", "delivery format: record or slack-events (required)")
-	appID := flag.String("app-id", "", "Slack application ID (required for slack-events delivery)")
-	signingSecret := flag.String("signing-secret", "", "Slack signing secret (required for slack-events delivery)")
-	owner := flag.String("owner", "", "unique worker owner ID (required)")
-	limit := flag.Int("batch-size", 100, "bounded event batch size")
-	lease := flag.Duration("lease", 30*time.Second, "durable delivery lease")
-	poll := flag.Duration("poll", 250*time.Millisecond, "poll interval")
-	flag.Parse()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if *backend == "" || *workspace == "" || *deliveryURL == "" || *deliveryFormat == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 {
+	// Every teardown runs through run's defers; main is the only place that
+	// exits, so the store is closed on every path, including the failure budget
+	// and a rejected configuration.
+	if code := run(context.Background(), logger, os.Args[1:]); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func run(ctx context.Context, logger *slog.Logger, args []string) int {
+	flags := flag.NewFlagSet("sameoldchat-worker", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	backend := flags.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
+	dsn := flags.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
+	dqliteDirectory := flags.String("dqlite-directory", "", "dqlite state directory")
+	dqliteAddress := flags.String("dqlite-address", "", "dqlite node address")
+	dqliteCluster := flags.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
+	dqliteDatabase := flags.String("dqlite-database", "", "dqlite database name")
+	workspace := flags.String("workspace", "", "workspace ID (required)")
+	deliveryURL := flags.String("delivery-url", "", "HTTP event delivery URL (required)")
+	deliveryFormat := flags.String("delivery-format", "", "delivery format: record or slack-events (required)")
+	appID := flags.String("app-id", "", "Slack application ID (required for and specific to slack-events delivery)")
+	signingSecret := flags.String("signing-secret", "", "Slack signing secret (required for and specific to slack-events delivery)")
+	owner := flags.String("owner", "", "unique worker owner ID (required)")
+	limit := flags.Int("batch-size", 100, "bounded event batch size")
+	lease := flags.Duration("lease", 30*time.Second, "durable delivery lease")
+	poll := flags.Duration("poll", 250*time.Millisecond, "poll interval")
+	// A worker that cannot reach its store must fail, not log the same error
+	// forever: a supervisor restarts a failed process and an alert fires on a
+	// restarting process, while an endlessly retrying one looks healthy while the
+	// outbox never drains.
+	failureBudget := flags.Int("max-consecutive-failures", 20, "consecutive failed poll cycles tolerated before the worker exits")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return exitConfiguration
+	}
+	if *backend == "" || *workspace == "" || *deliveryURL == "" || *deliveryFormat == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 || *failureBudget <= 0 {
 		logger.Error("worker requires explicit store, workspace, delivery URL, delivery format, owner, and positive limits")
-		os.Exit(2)
+		return exitConfiguration
 	}
 	if *deliveryFormat != "record" && *deliveryFormat != "slack-events" {
-		logger.Error("worker delivery format is unsupported", "format", *deliveryFormat)
-		os.Exit(2)
+		logger.Error("worker delivery format is unsupported", "format", *deliveryFormat, "allowed", "record, slack-events")
+		return exitConfiguration
 	}
 	if *deliveryFormat == "slack-events" && (*appID == "" || *signingSecret == "") {
 		logger.Error("slack-events delivery requires app ID and signing secret")
-		os.Exit(2)
+		return exitConfiguration
+	}
+	// record delivery signs nothing and names no application, so an app ID or a
+	// signing secret supplied with it would be accepted and never used. Silently
+	// ignoring a Slack signing secret is how a deployment believes it is signing
+	// deliveries that leave unsigned.
+	if *deliveryFormat == "record" {
+		if ignored := explicitlySet(flags, "app-id", "signing-secret"); len(ignored) != 0 {
+			logger.Error("record delivery cannot honour Slack application settings", "ignored", strings.Join(ignored, ", "), "hint", "use -delivery-format slack-events")
+			return exitConfiguration
+		}
 	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
 	if err != nil {
 		logger.Error("parse dqlite cluster", "error", err)
-		os.Exit(2)
+		return exitConfiguration
 	}
-	runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase})
-	if err != nil {
-		logger.Error("open worker store", "error", err)
-		os.Exit(1)
-	}
-	defer runtime.Closer.Close()
+	// Delivery is configured before the store is opened: it validates the
+	// destination, and a rejected destination must not leave a created database
+	// or a joined dqlite node behind.
 	var delivery outbox.Delivery
 	if *deliveryFormat == "record" {
 		delivery, err = newHTTPDelivery(*deliveryURL)
@@ -71,37 +106,99 @@ func main() {
 	}
 	if err != nil {
 		logger.Error("configure delivery", "error", err)
-		os.Exit(2)
+		return exitConfiguration
 	}
+	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase})
+	if err != nil {
+		logger.Error("open worker store", "error", err)
+		return exitRuntime
+	}
+	defer func() {
+		if err := runtime.Closer.Close(); err != nil {
+			logger.Error("close worker store", "error", err)
+		}
+	}()
 	worker, err := outbox.NewWorker(runtime.OutboxSource, *owner, *limit, *lease, delivery)
 	if err != nil {
 		logger.Error("configure outbox worker", "error", err)
-		os.Exit(2)
+		return exitConfiguration
 	}
 	scheduledWorker, err := scheduler.NewWorker(runtime.ScheduledSource, runtime.Service, *owner, *limit, *lease)
 	if err != nil {
 		logger.Error("configure scheduled worker", "error", err)
-		os.Exit(2)
+		return exitConfiguration
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	ticker := time.NewTicker(*poll)
-	defer ticker.Stop()
-	for {
-		count, err := worker.RunOnce(ctx, domain.WorkspaceID(*workspace))
+	cycle := func(cycleContext context.Context) error {
+		var failures error
+		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if err != nil {
+			failures = errors.Join(failures, err)
 			logger.Error("outbox delivery failed", "count", count, "error", err)
 		}
-		scheduledCount, scheduledErr := scheduledWorker.RunOnce(ctx, domain.WorkspaceID(*workspace))
+		scheduledCount, scheduledErr := scheduledWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if scheduledErr != nil {
+			failures = errors.Join(failures, scheduledErr)
 			logger.Error("scheduled message execution failed", "count", scheduledCount, "error", scheduledErr)
+		}
+		return failures
+	}
+	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
+}
+
+// pollWithinFailureBudget runs cycle until the context ends or the worker has
+// failed budget times in a row.
+//
+// The budget exists because the loop used to log every failure and try again
+// forever: a store that was gone, a credential that had been rotated, or a
+// destination that had been retired produced an identical line every poll
+// interval while the process stayed "up", so nothing restarted it and nothing
+// alerted. A consecutive count is the right measure rather than a total, because
+// a single failed delivery among successful ones is ordinary and must not
+// accumulate towards an exit. Context cancellation is a shutdown, not a failure.
+func pollWithinFailureBudget(ctx context.Context, logger *slog.Logger, cycle func(context.Context) error, poll time.Duration, budget int) int {
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+	consecutiveFailures := 0
+	for {
+		if ctx.Err() != nil {
+			return 0
+		}
+		err := cycle(ctx)
+		if ctx.Err() != nil {
+			return 0
+		}
+		if err != nil {
+			consecutiveFailures++
+			if consecutiveFailures >= budget {
+				logger.Error("worker exhausted its failure budget", "consecutive_failures", consecutiveFailures, "budget", budget)
+				return exitRuntime
+			}
+		} else {
+			consecutiveFailures = 0
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return 0
 		case <-ticker.C:
 		}
 	}
+}
+
+// explicitlySet names the flags the operator supplied on the command line. A
+// flag with a default cannot be distinguished from an unset one by value, so
+// rejecting a setting the selected mode cannot honour needs the parsed set.
+func explicitlySet(flags *flag.FlagSet, names ...string) []string {
+	supplied := make(map[string]bool, len(names))
+	flags.Visit(func(f *flag.Flag) { supplied[f.Name] = true })
+	found := make([]string, 0, len(names))
+	for _, name := range names {
+		if supplied[name] {
+			found = append(found, "-"+name)
+		}
+	}
+	return found
 }
 
 func newHTTPDelivery(target string) (outbox.Delivery, error) {
@@ -134,6 +231,14 @@ func validateDeliveryTarget(target string) error {
 
 type httpDoer interface {
 	Do(*http.Request) (*http.Response, error)
+}
+
+// permanentDeliveryFailure reports whether an encode failure describes the
+// record rather than the destination. Transport and status failures stay
+// retryable: a receiver that is misconfigured today may accept the same body
+// tomorrow, and dropping a committed event for it would lose data.
+func permanentDeliveryFailure(err error) bool {
+	return errors.Is(err, events.ErrPayloadInternal) || errors.Is(err, events.ErrPayloadRecipientScoped) || errors.Is(err, events.ErrPayloadMalformed) || errors.Is(err, events.ErrEventIncomplete)
 }
 
 func newHTTPDeliveryWithClient(target string, client httpDoer) (outbox.Delivery, error) {
@@ -176,6 +281,14 @@ func newSlackEventDeliveryWithClient(target, appID, signingSecret string, client
 	return func(ctx context.Context, record events.Record) error {
 		body, err := events.SlackEventBody(record, appID)
 		if err != nil {
+			// A record that cannot be encoded for Slack will never encode:
+			// it is either an internal worker record or a payload written
+			// before the typed payload contract. Retrying it forever hides the
+			// problem and stops the outbox from draining, so it is reported as
+			// permanent and the worker drops it after logging.
+			if permanentDeliveryFailure(err) {
+				return fmt.Errorf("%w: event %s topic %s: %v", outbox.ErrPermanent, record.Event.ID, record.Event.Topic, err)
+			}
 			return err
 		}
 		timestamp := time.Now().UTC()

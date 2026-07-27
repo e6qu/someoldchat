@@ -33,29 +33,54 @@ func NewWorker(source Source, owner string, limit int, lease time.Duration, deli
 	return Worker{Source: source, Owner: owner, Limit: limit, Lease: lease, Deliver: deliver}, nil
 }
 
+// ErrPermanent marks a delivery failure that retrying cannot fix, such as a
+// record whose payload can never be encoded for the destination. A delivery
+// function wraps it to say "do not hand me this record again"; the worker
+// acknowledges the record so the outbox drains, and reports the error so the
+// operator sees the record that was dropped.
+var ErrPermanent = errors.New("outbox delivery failed permanently")
+
+// RunOnce claims a batch and delivers it record by record.
+//
+// Each record is acknowledged as soon as its own delivery succeeds, so a later
+// failure in the same batch cannot re-deliver work that already reached the
+// destination. A retryable failure releases the failed record together with the
+// records still claimed behind it, so another worker can take them
+// immediately instead of waiting out the lease.
 func (w Worker) RunOnce(ctx context.Context, workspace domain.WorkspaceID) (int, error) {
 	records, err := w.Source.ClaimEvents(ctx, workspace, w.Owner, w.Limit, w.Lease)
 	if err != nil {
 		return 0, err
 	}
-	sequences := make([]uint64, 0, len(records))
+	outstanding := make([]uint64, 0, len(records))
 	for _, record := range records {
-		sequences = append(sequences, record.Sequence)
-		if err := w.deliverWithLease(ctx, sequences, record); err != nil {
+		outstanding = append(outstanding, record.Sequence)
+	}
+	delivered := 0
+	var permanent []error
+	for index, record := range records {
+		// Renewal covers every sequence this worker still owns rather than the
+		// prefix it has already processed. Renewing only the prefix lets the
+		// tail's lease expire mid-batch, which is exactly how two workers end
+		// up delivering the same event.
+		deliveryErr := w.deliverWithLease(ctx, outstanding[index:], record)
+		if deliveryErr != nil && !errors.Is(deliveryErr, ErrPermanent) {
 			retryAt := time.Now().UTC().Add(w.Lease)
-			if releaseErr := w.Source.ReleaseEvents(ctx, w.Owner, sequences, retryAt); releaseErr != nil {
-				return len(sequences), releaseErr
+			if releaseErr := w.Source.ReleaseEvents(ctx, w.Owner, outstanding[index:], retryAt); releaseErr != nil {
+				return delivered, errors.Join(deliveryErr, releaseErr)
 			}
-			return len(sequences) - 1, err
+			return delivered, deliveryErr
 		}
+		if err := w.Source.AckEvents(ctx, w.Owner, []uint64{record.Sequence}); err != nil {
+			return delivered, errors.Join(deliveryErr, err)
+		}
+		if deliveryErr != nil {
+			permanent = append(permanent, deliveryErr)
+			continue
+		}
+		delivered++
 	}
-	if len(sequences) == 0 {
-		return 0, nil
-	}
-	if err := w.Source.AckEvents(ctx, w.Owner, sequences); err != nil {
-		return len(sequences), err
-	}
-	return len(sequences), nil
+	return delivered, errors.Join(permanent...)
 }
 
 func (w Worker) deliverWithLease(ctx context.Context, sequences []uint64, record events.Record) error {
