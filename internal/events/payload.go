@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
@@ -84,26 +85,43 @@ var (
 	ErrEventIncomplete = errors.New("event record is incomplete")
 )
 
+// internalTopics is the single set of topics that exist only for an internal
+// worker. Every consumer — the payload rules here and the storage queries that
+// exclude them from a claim or a replay — must read this one set: a second copy
+// means adding a topic to one and not the other silently publishes an internal
+// record or starves the worker that exists to consume it.
+var internalTopics = []string{FileBlobDeleteTopic, UserPhotoBlobDeleteTopic}
+
 // InternalTopic reports whether a topic carries internal worker records rather
 // than events an app, a webhook or a browser may receive. The set is explicit
 // so that every consumer applies the same rule.
 func InternalTopic(topic string) bool {
-	switch topic {
-	case FileBlobDeleteTopic, UserPhotoBlobDeleteTopic:
-		return true
-	default:
-		return false
+	for _, internal := range internalTopics {
+		if topic == internal {
+			return true
+		}
 	}
+	return false
+}
+
+// InternalTopics is the same set in the form a SQL IN predicate needs. It
+// returns a copy, so a storage query cannot reorder or truncate the set every
+// other consumer reads.
+func InternalTopics() []string {
+	return append([]string(nil), internalTopics...)
 }
 
 // NewPayload builds the deliverable payload for a topic. The topic doubles as
 // the payload's "type" discriminator, so a consumer never has to infer what it
 // received.
 func NewPayload(topic string, fields ...Field) Payload {
-	if strings.TrimSpace(topic) == "" || InternalTopic(topic) {
+	if strings.TrimSpace(topic) == "" || !utf8.ValidString(topic) || InternalTopic(topic) {
 		return Payload{}
 	}
-	return Payload{topic: topic, fields: fields, shape: payloadObject}
+	// The fields are copied rather than aliased: a caller that spreads a slice it
+	// goes on to reuse would otherwise mutate a payload it has already built,
+	// which is exactly the misuse this type exists to make unrepresentable.
+	return Payload{topic: topic, fields: append([]Field(nil), fields...), shape: payloadObject}
 }
 
 // BlobKey builds an internal blob-cleanup record for an object-storage key.
@@ -252,13 +270,12 @@ func encodeObject(object map[string]json.RawMessage) (string, error) {
 	return builder.String(), nil
 }
 
+// mustEncodeString encodes a string that cannot fail to encode: json.Marshal of
+// a string never returns an error, and NewPayload rejects a topic that is not
+// valid UTF-8, so the repaired form json.Marshal would otherwise substitute can
+// never differ from Event.Topic. Deliverable relies on that equality.
 func mustEncodeString(value string) json.RawMessage {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		// json.Marshal of a string only fails on invalid UTF-8, which
-		// json.Marshal itself repairs with the replacement rune.
-		return json.RawMessage(`""`)
-	}
+	encoded, _ := json.Marshal(value)
 	return encoded
 }
 
@@ -271,12 +288,31 @@ type Delivered struct {
 	Object map[string]json.RawMessage
 }
 
+// recipientScopedTopics is the single set of topics whose payload is addressed
+// to exactly one user. Every consumer that can scope delivery must filter on
+// this set, and every consumer that cannot must refuse it; naming one member of
+// the set in a consumer instead of asking the predicate is how a second
+// recipient-scoped topic gets broadcast to a whole workspace.
+var recipientScopedTopics = []string{EphemeralMessageTopic}
+
 // RecipientScoped reports whether a topic's payload is addressed to exactly one
 // user. Such a record carries that user's content — an ephemeral message
 // carries its text, blocks and attachments — so a consumer that cannot scope
 // delivery to a recipient must not receive it at all.
 func RecipientScoped(topic string) bool {
-	return topic == EphemeralMessageTopic
+	for _, scoped := range recipientScopedTopics {
+		if topic == scoped {
+			return true
+		}
+	}
+	return false
+}
+
+// RecipientScopedTopics is the same set, for a consumer that has to enumerate
+// it. It returns a copy so no caller can shrink the set every other consumer
+// reads.
+func RecipientScopedTopics() []string {
+	return append([]string(nil), recipientScopedTopics...)
 }
 
 // Broadcastable decodes an event's stored payload for a consumer that delivers
@@ -295,14 +331,27 @@ func Broadcastable(event Event) (Delivered, error) {
 // ErrPayloadInternal for internal worker records and ErrPayloadMalformed for a
 // payload that is not a JSON object with a non-empty "type", which is what a
 // record written before the typed payload contract looks like.
+//
+// It also refuses a record whose payload "type" differs from its Topic. New
+// establishes that equality at the write boundary, but Topic and Payload are
+// separate storage columns and separate wire fields, and a producer that
+// bypasses New — a hand-built literal, or a codec that rebuilds an Event from
+// independent proto fields — can set them apart. Topic alone decides
+// internal-topic exclusion, recipient scoping and the event name a browser
+// receives, while the content a consumer acts on comes from the payload, so a
+// divergent record is a record whose security decisions were made about a
+// different event. Re-establishing the equality on read makes the divergence
+// unrepresentable at both boundaries rather than only at the writing one.
 func Deliverable(event Event) (Delivered, error) {
 	if InternalTopic(event.Topic) {
 		return Delivered{}, fmt.Errorf("%w: topic %s", ErrPayloadInternal, event.Topic)
 	}
-	return decodeDelivered(event.Payload)
+	return decodeDelivered(event.Payload, event.Topic)
 }
 
-func decodeDelivered(payload string) (Delivered, error) {
+// decodeDelivered decodes a stored payload and, when expectedTopic is not
+// empty, requires the payload to describe itself as that topic.
+func decodeDelivered(payload, expectedTopic string) (Delivered, error) {
 	trimmed := strings.TrimSpace(payload)
 	if trimmed == "" || trimmed[0] != '{' {
 		return Delivered{}, ErrPayloadMalformed
@@ -318,6 +367,9 @@ func decodeDelivered(payload string) (Delivered, error) {
 	var kind string
 	if err := json.Unmarshal(raw, &kind); err != nil || strings.TrimSpace(kind) == "" {
 		return Delivered{}, fmt.Errorf("%w: %s must be a non-empty string", ErrPayloadMalformed, payloadTypeField)
+	}
+	if expectedTopic != "" && kind != expectedTopic {
+		return Delivered{}, fmt.Errorf("%w: payload %s %q does not match record topic %q", ErrPayloadMalformed, payloadTypeField, kind, expectedTopic)
 	}
 	return Delivered{Type: kind, Object: object}, nil
 }

@@ -52,10 +52,23 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	lease := flags.Duration("lease", 30*time.Second, "durable response lease")
 	retryDelay := flags.Duration("retry-delay", time.Second, "explicit retry delay after a delivery failure")
 	poll := flags.Duration("poll", 250*time.Millisecond, "poll interval")
+	// This worker used to exit on the first error that was not a delivery
+	// failure, so one ClaimSocketModeResponses timeout during a database
+	// failover — or one failed release, which is the recovery path and is
+	// reported as a joined error rather than a ResponseDeliveryError — killed the
+	// process, while the outbox worker tolerated twenty consecutive failures for
+	// the same conditions. Both workers now apply the same policy: transient
+	// failures are tolerated up to a budget, and exhausting the budget exits so a
+	// supervisor restarts and an alert fires.
+	failureBudget := flags.Int("max-consecutive-failures", 20, "consecutive failed poll cycles tolerated before the worker exits")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
 		}
+		return exitConfiguration
+	}
+	if *failureBudget <= 0 {
+		logger.Error("Socket Mode response worker requires a positive failure budget")
 		return exitConfiguration
 	}
 	if *backend == "" || *appID == "" || strings.TrimSpace(*owner) == "" || *responseURL == "" || *limit < 1 || *lease <= 0 || *retryDelay <= 0 || *poll <= 0 {
@@ -101,24 +114,60 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	}
 	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	ticker := time.NewTicker(*poll)
+	delivered := 0
+	counted := func(handlerContext context.Context, response domain.SocketModeResponse) error {
+		if err := delivery(handlerContext, response); err != nil {
+			return err
+		}
+		delivered++
+		return nil
+	}
+	cycle := func(cycleContext context.Context) (bool, error) {
+		before := delivered
+		err := processor.ProcessOnce(cycleContext, counted)
+		if err != nil {
+			logger.Error("Socket Mode response processing failed", "error", err)
+		}
+		return delivered > before, err
+	}
+	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
+}
+
+// pollWithinFailureBudget runs cycle until the context ends or the worker has
+// failed budget times without delivering a response in between.
+//
+// Progress rather than a quiet cycle resets the counter: a failed response is
+// released with a retry deadline a full RetryDelay in the future, so the next
+// cycle claims nothing and returns no error, and resetting on that would leave
+// the budget permanently at one against a destination that is simply gone.
+//
+// This is deliberately the same policy as cmd/worker's loop of the same name.
+// The two are separate main packages, so the shared helper needs a home package
+// neither binary owns; that extraction is recorded rather than done here.
+func pollWithinFailureBudget(ctx context.Context, logger *slog.Logger, cycle func(context.Context) (bool, error), poll time.Duration, budget int) int {
+	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	consecutiveFailures := 0
 	for {
-		if workerContext.Err() != nil {
+		if ctx.Err() != nil {
 			return 0
 		}
-		if err := processor.ProcessOnce(workerContext, time.Now().UTC(), delivery); err != nil {
-			if workerContext.Err() != nil {
-				return 0
-			}
-			logger.Error("Socket Mode response processing failed", "error", err)
-			var deliveryErr socketmode.ResponseDeliveryError
-			if !errors.As(err, &deliveryErr) {
+		progressed, err := cycle(ctx)
+		if ctx.Err() != nil {
+			return 0
+		}
+		switch {
+		case err != nil:
+			consecutiveFailures++
+			if consecutiveFailures >= budget {
+				logger.Error("Socket Mode response worker exhausted its failure budget", "consecutive_failures", consecutiveFailures, "budget", budget)
 				return exitRuntime
 			}
+		case progressed:
+			consecutiveFailures = 0
 		}
 		select {
-		case <-workerContext.Done():
+		case <-ctx.Done():
 			return 0
 		case <-ticker.C:
 		}

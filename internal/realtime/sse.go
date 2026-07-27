@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,8 @@ type Handler struct {
 	// Reauthorize is how often an open stream re-checks that its session is
 	// still valid. Zero selects reauthorizeInterval.
 	Reauthorize time.Duration
+	// WriteTimeout bounds one write to one client. Zero selects writeTimeout.
+	WriteTimeout time.Duration
 }
 
 func (h Handler) heartbeat() time.Duration {
@@ -50,6 +53,13 @@ func (h Handler) reauthorize() time.Duration {
 	return reauthorizeInterval
 }
 
+func (h Handler) writeTimeout() time.Duration {
+	if h.WriteTimeout > 0 {
+		return h.WriteTimeout
+	}
+	return writeTimeout
+}
+
 const (
 	streamPollInterval = 250 * time.Millisecond
 	// heartbeatInterval keeps a quiet stream producing bytes well inside the
@@ -62,6 +72,19 @@ const (
 	// clientRetryInterval is advertised to the browser as its reconnect delay,
 	// so the cadence is a deployment decision rather than a browser default.
 	clientRetryInterval = 2 * time.Second
+	// writeTimeout bounds one write to one client. The listener deliberately sets
+	// no WriteTimeout because it also serves this stream, and delegates the
+	// per-response deadline here; without one, a client that stops reading fills
+	// the socket buffer and parks this handler inside Write for as long as the
+	// kernel keeps the connection. IdleTimeout does not apply, because the
+	// response is in flight rather than idle, and the heartbeat guarantees the
+	// handler keeps writing to a suspended tab even in a silent workspace.
+	writeTimeout = 10 * time.Second
+	// unresolvedReauthorizations bounds how many consecutive re-authorization
+	// checks may fail to reach a verdict before the stream is closed anyway. A
+	// session store that cannot answer must not disconnect every live stream, but
+	// it must not keep an unverifiable session streaming forever either.
+	unresolvedReauthorizations = 3
 )
 
 func (h Handler) logger() *slog.Logger {
@@ -373,6 +396,12 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	// bytes until its buffer fills. Connection: keep-alive was meaningless
 	// here: HTTP/1.1 is persistent by default and HTTP/2 forbids the header.
 	w.Header().Set("X-Accel-Buffering", "no")
+	control := http.NewResponseController(w)
+	if err := h.armWrite(control); err != nil {
+		h.logger().Error("event stream could not set a write deadline", "workspace", h.Workspace, "user", principal.UserID, "error", err)
+		http.Error(w, "streaming is unavailable", http.StatusServiceUnavailable)
+		return
+	}
 	if _, err := fmt.Fprintf(w, "retry: %d\n\n: connected\n\n", clientRetryInterval.Milliseconds()); err != nil {
 		return
 	}
@@ -381,6 +410,7 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 	defer ticker.Stop()
 	lastWrite := time.Now()
 	lastAuthorized := time.Now()
+	unresolved := 0
 	for {
 		records, err := h.Source.ListEventsAfter(r.Context(), h.Workspace, after, 100)
 		if err != nil {
@@ -403,10 +433,22 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			if !addressedTo(record.Event.Topic, delivered, principal.UserID) {
 				continue
 			}
-			if err := writeEvent(w, record, delivered); err != nil {
-				if r.Context().Err() == nil {
-					h.logger().Error("event stream ended on a write failure", "workspace", h.Workspace, "user", principal.UserID, "error", err)
-				}
+			// A record that cannot be re-encoded is a defect in the record, not in
+			// the client, and the RTM loop already skips it. Encoding here rather
+			// than inside the write keeps writeEvent's errors purely transport
+			// errors, so one corrupt record cannot end an SSE stream that RTM
+			// survives, and the log line names the record instead of blaming the
+			// reader.
+			encoded, encodeErr := delivered.Encode()
+			if encodeErr != nil {
+				h.logger().Warn("event stream skipped a record it could not re-encode", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
+				continue
+			}
+			if err := h.armWrite(control); err != nil {
+				return
+			}
+			if err := writeEvent(w, record.Sequence, record.Event.Topic, encoded); err != nil {
+				h.reportWriteFailure(r, principal.UserID, err)
 				return
 			}
 			wrote = true
@@ -416,7 +458,11 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			lastWrite = time.Now()
 		}
 		if time.Since(lastWrite) >= h.heartbeat() {
+			if err := h.armWrite(control); err != nil {
+				return
+			}
 			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				h.reportWriteFailure(r, principal.UserID, err)
 				return
 			}
 			flusher.Flush()
@@ -427,11 +473,29 @@ func (h Handler) stream(w http.ResponseWriter, r *http.Request, scope auth.Scope
 			// sign-out, back-channel logout and administrative revocation all
 			// leave it delivering every workspace event indefinitely.
 			current, authErr := h.Authenticator.Authenticate(r)
-			if authErr != nil || current.WorkspaceID != h.Workspace || !current.HasScope(scope) {
+			switch {
+			case authErr == nil && current.WorkspaceID == h.Workspace && current.HasScope(scope):
+				lastAuthorized = time.Now()
+				unresolved = 0
+			case authErr == nil || credentialWithdrawn(authErr):
 				h.logger().Info("event stream ended because the session is no longer authorized", "workspace", h.Workspace, "user", principal.UserID)
 				return
+			default:
+				// The authenticator reports an unusable credential and an
+				// unreachable session store with the same error, so this arm is
+				// "the check did not reach a verdict". Ending the stream here
+				// turns a sub-second store failover into a full live-delivery
+				// outage: every stream in the workspace ends within one
+				// re-authorization interval, blames the user's session in the
+				// log, and reconnects together at the advertised retry delay.
+				unresolved++
+				if unresolved >= unresolvedReauthorizations {
+					h.logger().Warn("event stream ended after repeated inconclusive re-authorization", "workspace", h.Workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
+					return
+				}
+				h.logger().Warn("event stream could not confirm its session and kept the stream open", "workspace", h.Workspace, "user", principal.UserID, "attempts", unresolved, "error", authErr)
+				lastAuthorized = time.Now()
 			}
-			lastAuthorized = time.Now()
 		}
 		select {
 		case <-r.Context().Done():
@@ -452,23 +516,63 @@ func lastEventID(r *http.Request) (uint64, error) {
 	return strconv.ParseUint(value, 10, 64)
 }
 
+// armWrite bounds the next write to this client. A ResponseWriter that cannot
+// carry a deadline — the in-memory recorder a test uses — reports
+// http.ErrNotSupported, which is not a stream failure.
+func (h Handler) armWrite(control *http.ResponseController) error {
+	if control == nil {
+		return nil
+	}
+	if err := control.SetWriteDeadline(time.Now().Add(h.writeTimeout())); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return err
+	}
+	return nil
+}
+
+// reportWriteFailure separates a reader that stopped reading from a reader that
+// went away. A stalled consumer is a capacity fact an operator has to be able to
+// see: it holds a goroutine, a connection and a poll buffer until the deadline
+// fires.
+func (h Handler) reportWriteFailure(r *http.Request, user domain.UserID, err error) {
+	if r.Context().Err() != nil {
+		return
+	}
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		h.logger().Warn("event stream dropped a consumer that stopped reading", "workspace", h.Workspace, "user", user, "timeout", h.writeTimeout())
+		return
+	}
+	h.logger().Error("event stream ended on a write failure", "workspace", h.Workspace, "user", user, "error", err)
+}
+
+// credentialWithdrawn reports whether a re-authorization failure means the
+// credential is gone rather than that the session store could not answer.
+//
+// auth.Browser maps every LookupSession failure to ErrInvalidToken and says so
+// itself, so ErrInvalidToken cannot distinguish a revoked session from a store
+// outage and must not end a stream on its own. The three sentinels here are
+// reached only after the store answered.
+func credentialWithdrawn(err error) bool {
+	return errors.Is(err, auth.ErrNoToken) || errors.Is(err, auth.ErrTokenRevoked) || errors.Is(err, auth.ErrAccountInactive)
+}
+
 // addressedTo reports whether a decoded record may be shown to one recipient.
 // A recipient-scoped topic whose payload names no recipient is addressed to
 // nobody, so it is withheld rather than broadcast or treated as a stream error.
+//
+// The predicate is asked rather than one topic being named here: a second
+// recipient-scoped topic added to events.RecipientScoped would otherwise be
+// refused correctly by Socket Mode and the webhook and broadcast to every member
+// of the workspace by this stream and by RTM.
 func addressedTo(topic string, delivered events.Delivered, recipient domain.UserID) bool {
-	if topic != events.EphemeralMessageTopic {
+	if !events.RecipientScoped(topic) {
 		return true
 	}
 	userID, ok := delivered.Field("user_id")
 	return ok && userID != "" && userID == string(recipient)
 }
 
-func writeEvent(w io.Writer, record events.Record, delivered events.Delivered) error {
-	encoded, err := delivered.Encode()
-	if err != nil {
-		return err
-	}
-	if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\n", record.Sequence, record.Event.Topic); err != nil {
+func writeEvent(w io.Writer, sequence uint64, topic, encoded string) error {
+	if _, err := fmt.Fprintf(w, "id: %d\nevent: %s\n", sequence, topic); err != nil {
 		return err
 	}
 	for _, line := range strings.Split(encoded, "\n") {
@@ -476,6 +580,6 @@ func writeEvent(w io.Writer, record events.Record, delivered events.Delivered) e
 			return err
 		}
 	}
-	_, err = fmt.Fprint(w, "\n")
+	_, err := fmt.Fprint(w, "\n")
 	return err
 }

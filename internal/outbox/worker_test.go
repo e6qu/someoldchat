@@ -287,6 +287,204 @@ func TestLeaseRenewalCoversEveryClaimedSequence(t *testing.T) {
 	}
 }
 
+// virtualClock drives both the passage of time and the renewal ticker from the
+// test goroutine. The defect being covered is in the *schedule*: a renewal that
+// only runs while one delivery is in flight never fires for deliveries shorter
+// than its interval, and no amount of sleeping distinguishes "renewed on time"
+// from "the batch finished before the first tick". Advancing time explicitly,
+// and handing the resulting tick to the worker synchronously, makes the
+// schedule the thing under test.
+type virtualClock struct {
+	mu       sync.Mutex
+	now      time.Time
+	lastTick time.Time
+	interval time.Duration
+
+	ticks   chan time.Time
+	renewed chan struct{}
+}
+
+func newVirtualClock(start time.Time) *virtualClock {
+	return &virtualClock{now: start, lastTick: start, ticks: make(chan time.Time), renewed: make(chan struct{})}
+}
+
+func (c *virtualClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *virtualClock) newTicker(interval time.Duration) (<-chan time.Time, func()) {
+	c.mu.Lock()
+	c.interval = interval
+	c.mu.Unlock()
+	return c.ticks, func() {}
+}
+
+// advance moves the clock forward, delivering every tick the interval requires
+// and waiting for the renewal it triggers to complete before time moves on.
+func (c *virtualClock) advance(step time.Duration) {
+	c.mu.Lock()
+	target := c.now.Add(step)
+	interval := c.interval
+	c.mu.Unlock()
+	for {
+		c.mu.Lock()
+		next := c.lastTick.Add(interval)
+		if next.After(target) {
+			c.mu.Unlock()
+			break
+		}
+		c.lastTick = next
+		c.now = next
+		c.mu.Unlock()
+		c.ticks <- next
+		<-c.renewed
+	}
+	c.mu.Lock()
+	c.now = target
+	c.mu.Unlock()
+}
+
+// leasedSource enforces the precondition the SQL store enforces: a renewal or an
+// acknowledgement is rejected unless the caller still holds a live lease. That
+// is the whole point — a worker that delivers under an expired lease has
+// already sent the record and cannot record that it did.
+type leasedSource struct {
+	clock *virtualClock
+
+	mu         sync.Mutex
+	records    []events.Record
+	claimed    bool
+	expiry     map[uint64]time.Time
+	acked      []uint64
+	renewCalls int
+	renewedSet [][]uint64
+}
+
+var errLeaseExpired = errors.New("lease expired before acknowledgement")
+
+func (s *leasedSource) ClaimEvents(_ context.Context, _ domain.WorkspaceID, _ string, _ int, lease time.Duration) ([]events.Record, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.claimed {
+		return nil, nil
+	}
+	s.claimed = true
+	s.expiry = make(map[uint64]time.Time, len(s.records))
+	expires := s.clock.Now().Add(lease)
+	for _, record := range s.records {
+		s.expiry[record.Sequence] = expires
+	}
+	return s.records, nil
+}
+
+func (s *leasedSource) RenewEvents(_ context.Context, _ string, sequences []uint64, lease time.Duration) error {
+	now := s.clock.Now()
+	s.mu.Lock()
+	s.renewCalls++
+	s.renewedSet = append(s.renewedSet, append([]uint64(nil), sequences...))
+	for _, sequence := range sequences {
+		if expiry, ok := s.expiry[sequence]; !ok || !expiry.After(now) {
+			s.mu.Unlock()
+			s.clock.renewed <- struct{}{}
+			return fmt.Errorf("%w: sequence %d", errLeaseExpired, sequence)
+		}
+	}
+	for _, sequence := range sequences {
+		s.expiry[sequence] = now.Add(lease)
+	}
+	s.mu.Unlock()
+	s.clock.renewed <- struct{}{}
+	return nil
+}
+
+func (s *leasedSource) AckEvents(_ context.Context, _ string, sequences []uint64) error {
+	now := s.clock.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sequence := range sequences {
+		if expiry, ok := s.expiry[sequence]; !ok || !expiry.After(now) {
+			return fmt.Errorf("%w: sequence %d", errLeaseExpired, sequence)
+		}
+	}
+	for _, sequence := range sequences {
+		delete(s.expiry, sequence)
+		s.acked = append(s.acked, sequence)
+	}
+	return nil
+}
+
+func (s *leasedSource) ReleaseEvents(_ context.Context, _ string, sequences []uint64, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sequence := range sequences {
+		delete(s.expiry, sequence)
+	}
+	return nil
+}
+
+func (s *leasedSource) counters() (int, []uint64, [][]uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.renewCalls, append([]uint64(nil), s.acked...), append([][]uint64(nil), s.renewedSet...)
+}
+
+// ClaimEvents sets one expiry for the whole batch, so the deadline the worker
+// has to beat is "the batch finishes", not "a record finishes". With the shipped
+// defaults — a hundred records, a thirty-second lease — a receiver taking 400 ms
+// per record blows through the lease three quarters of the way in, and every
+// record after that is delivered to the destination and then fails its
+// acknowledgement: a duplicate delivery for that record and an abandoned tail
+// for the rest. No delivery is ever long enough to reach a per-delivery
+// renewal's first tick, which is why the schedule has to belong to the batch.
+func TestLeaseIsRenewedBetweenRecordsSoAFastBatchOutlivesItsLease(t *testing.T) {
+	const (
+		batch       = 100
+		perRecord   = 400 * time.Millisecond
+		leaseWindow = 30 * time.Second
+	)
+	sequences := make([]uint64, 0, batch)
+	for sequence := uint64(1); sequence <= batch; sequence++ {
+		sequences = append(sequences, sequence)
+	}
+	clock := newVirtualClock(time.Unix(1700000000, 0).UTC())
+	source := &leasedSource{clock: clock, records: batchRecords(sequences...)}
+	var reached []uint64
+	worker, err := NewWorker(source, "worker-1", batch, leaseWindow, func(_ context.Context, record events.Record) error {
+		reached = append(reached, record.Sequence)
+		clock.advance(perRecord)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.Now = clock.Now
+	worker.NewTicker = clock.newTicker
+	count, err := worker.RunOnce(context.Background(), "T1")
+	renewals, acked, sets := source.counters()
+	if err != nil {
+		t.Fatalf("count=%d err=%v after %d renewals: the batch outlived its lease", count, err, renewals)
+	}
+	if renewals == 0 {
+		t.Fatalf("RenewEvents was never called across a %s batch on a %s lease", time.Duration(batch)*perRecord, leaseWindow)
+	}
+	if count != batch || len(acked) != batch {
+		t.Fatalf("delivered=%d acknowledged=%d, want %d", count, len(acked), batch)
+	}
+	if len(reached) != len(acked) {
+		t.Fatalf("%d records reached the destination but %d were acknowledged: the difference is delivered twice", len(reached), len(acked))
+	}
+	// Every renewal covers exactly the outstanding tail: never a sequence this
+	// worker has already acknowledged, which is a lease conflict against itself,
+	// and never less than the tail, which is how the tail expires mid-batch.
+	for _, set := range sets {
+		if len(set) == 0 || set[len(set)-1] != batch || set[0]+uint64(len(set))-1 != batch {
+			t.Fatalf("renewal covered %v, want the contiguous outstanding tail ending at %d", set, batch)
+		}
+	}
+}
+
 // A record that can never be delivered must leave the queue instead of being
 // claimed and failed forever with no attempt counter and no dead letter.
 func TestPermanentFailureIsAcknowledgedAndReported(t *testing.T) {

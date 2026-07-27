@@ -199,6 +199,118 @@ func TestRecipientScopedRecordsAreNotBroadcastable(t *testing.T) {
 	}
 }
 
+// Encoding a durable record to JSON is what every transport that ships the
+// record itself — rather than a payload it decoded for one recipient — does.
+// That step must fail closed, because a transport that never decodes the
+// payload cannot forget a filter it does not call: the record-format worker
+// POSTed a whole ephemeral message, text and recipient included, to a
+// third-party URL precisely because it only called json.Marshal.
+func TestMarshallingARecordRefusesEveryPayloadNoAudienceMayReceive(t *testing.T) {
+	ephemeral, err := New("Ev1", "T1", "U1", NewPayload(EphemeralMessageTopic,
+		String("channel_id", "C1"),
+		String("user_id", "U2"),
+		String("text", "SECRET-ONLY-FOR-U2"),
+	), time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	internal, err := New("Ev2", "T1", "", BlobKey(UserPhotoBlobDeleteTopic, "T1/users/U1/photo_secret"), time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A record whose Topic column and payload "type" disagree had its scoping
+	// decision made about a different event than the one it carries.
+	divergent := Event{ID: "Ev3", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0),
+		Payload: `{"type":"message.ephemeral","event_ts":"1700000000.000000","user_id":"U2","text":"SECRET-ONLY-FOR-U2"}`}
+	for name, value := range map[string]struct {
+		event    Event
+		sentinel error
+	}{
+		"recipient scoped": {ephemeral, ErrPayloadRecipientScoped},
+		"internal":         {internal, ErrPayloadInternal},
+		"divergent topic":  {divergent, ErrPayloadMalformed},
+	} {
+		body, err := json.Marshal(Record{Sequence: 1, Event: value.event})
+		if err == nil {
+			t.Fatalf("%s: a record no audience may receive was encoded: %s", name, body)
+		}
+		if !errors.Is(err, value.sentinel) {
+			t.Fatalf("%s: error=%v, want %v so the caller classifies it as permanent", name, err, value.sentinel)
+		}
+		if strings.Contains(err.Error(), "SECRET-ONLY-FOR-U2") || strings.Contains(err.Error(), "photo_secret") {
+			t.Fatalf("%s: the refusal quoted the content it withheld: %v", name, err)
+		}
+	}
+	// A record every consumer may receive still encodes, including one written
+	// before the typed payload contract, which this format has always carried.
+	ordinary, err := New("Ev4", "T1", "U1", NewPayload("message.created", String("message_id", "M1")), time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, event := range map[string]Event{
+		"produced": ordinary,
+		"legacy":   {ID: "Ev5", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: time.Unix(1700000000, 0)},
+	} {
+		body, err := json.Marshal(Record{Sequence: 2, Event: event})
+		if err != nil {
+			t.Fatalf("%s: a broadcastable record was refused: %v", name, err)
+		}
+		var round Record
+		if err := json.Unmarshal(body, &round); err != nil || round.Event.ID != event.ID || round.Event.Payload != event.Payload {
+			t.Fatalf("%s: record did not round-trip: %s err=%v", name, body, err)
+		}
+	}
+}
+
+// Topic and the payload's "type" are separate storage columns and separate wire
+// fields. Topic alone decides internal-topic exclusion, recipient scoping and
+// the browser event name, so a reader that accepts a disagreement makes those
+// three decisions about an event the record does not contain.
+func TestDeliverableRequiresThePayloadToDescribeItsOwnTopic(t *testing.T) {
+	divergent := Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created",
+		Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"only for U2"}`}
+	if _, err := Deliverable(divergent); !errors.Is(err, ErrPayloadMalformed) {
+		t.Fatalf("divergent record error=%v, want %v", err, ErrPayloadMalformed)
+	}
+	if _, err := Broadcastable(divergent); !errors.Is(err, ErrPayloadMalformed) {
+		t.Fatalf("divergent record broadcast error=%v, want %v", err, ErrPayloadMalformed)
+	}
+}
+
+// One set, one predicate. A second copy elsewhere means a topic added to one
+// and not the other is either published to apps or starves the worker that
+// exists to consume it, with no compile error either way.
+func TestInternalTopicsIsTheSameSetAsThePredicate(t *testing.T) {
+	listed := InternalTopics()
+	if len(listed) == 0 {
+		t.Fatal("the internal topic set is empty")
+	}
+	for _, topic := range listed {
+		if !InternalTopic(topic) {
+			t.Fatalf("InternalTopics lists %q but InternalTopic rejects it", topic)
+		}
+	}
+	listed[0] = "message.created"
+	if InternalTopic(InternalTopics()[0]) != true {
+		t.Fatal("a caller mutated the shared internal topic set")
+	}
+}
+
+// A payload built from a slice the caller goes on to reuse must not change
+// after it is built; the type exists so that misuse is not representable.
+func TestNewPayloadCopiesItsFields(t *testing.T) {
+	fields := []Field{String("message_id", "M1")}
+	payload := NewPayload("message.created", fields...)
+	fields[0] = String("message_id", "M2")
+	event, err := New("Ev1", "T1", "U1", payload, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(event.Payload, `"message_id":"M1"`) {
+		t.Fatalf("payload=%s, want the fields the payload was built with", event.Payload)
+	}
+}
+
 func TestSlackEventBodyRefusesIdentifierOnlyPayload(t *testing.T) {
 	record := Record{Sequence: 1, Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", Payload: "M0123", CreatedAt: time.Unix(1700000000, 0)}}
 	if _, err := SlackEventBody(record, "A1"); !errors.Is(err, ErrPayloadMalformed) {

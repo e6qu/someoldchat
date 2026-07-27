@@ -37,9 +37,22 @@ type ResponseProcessor struct {
 	BatchSize  int
 	Lease      time.Duration
 	RetryDelay time.Duration
+	// Now supplies the clock the retry deadline is measured from. It replaces a
+	// now parameter that every caller passed and the processor never read: the
+	// retry deadline is taken at the failure, so a batch-start reading is wrong,
+	// and a parameter that only validates itself invites a reader to believe the
+	// processor is clock-injectable when it is not. Nil selects the real clock.
+	Now func() time.Time
 }
 
-func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handle ResponseHandler) error {
+func (p ResponseProcessor) now() time.Time {
+	if p.Now != nil {
+		return p.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+func (p ResponseProcessor) ProcessOnce(ctx context.Context, handle ResponseHandler) error {
 	if p.Queue == nil {
 		return errors.New("Socket Mode response processor requires a queue")
 	}
@@ -52,7 +65,7 @@ func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handl
 	if p.BatchSize < 1 || p.BatchSize > 1000 {
 		return errors.New("Socket Mode response processor batch size must be between 1 and 1000")
 	}
-	if p.Lease <= 0 || p.RetryDelay <= 0 || now.IsZero() {
+	if p.Lease <= 0 || p.RetryDelay <= 0 {
 		return errors.New("Socket Mode response processor timing is invalid")
 	}
 	if handle == nil {
@@ -76,7 +89,7 @@ func (p ResponseProcessor) ProcessOnce(ctx context.Context, now time.Time, handl
 			// thousand responses and a thirty-second HTTP timeout, the
 			// batch-start reading is long past by the time a later response
 			// fails, and the release would make it immediately claimable again.
-			releaseErr := p.Queue.ReleaseSocketModeResponses(ctx, p.Owner, []domain.SocketModeResponse{value}, time.Now().UTC().Add(p.RetryDelay))
+			releaseErr := p.Queue.ReleaseSocketModeResponses(ctx, p.Owner, []domain.SocketModeResponse{value}, p.now().Add(p.RetryDelay))
 			if releaseErr != nil {
 				return errors.Join(fmt.Errorf("handle Socket Mode response %q: %w", value.EnvelopeID, err), fmt.Errorf("release Socket Mode responses after handler failure: %w", releaseErr))
 			}

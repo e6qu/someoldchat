@@ -2,14 +2,19 @@ package events
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestSlackEventBodyWrapsInnerEvent(t *testing.T) {
+	// Topic and the payload's "type" name the same event. New guarantees that at
+	// the write boundary and Deliverable now requires it on read, because Topic
+	// alone decides internal-topic exclusion, recipient scoping and the browser
+	// event name while the consumer acts on the payload.
 	body, err := SlackEventBody(Record{Sequence: 9, Event: Event{
-		ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(),
+		ID: "Ev1", WorkspaceID: "T1", Topic: "message", CreatedAt: time.Unix(1700000000, 0).UTC(),
 		Payload: `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`,
 	}}, "A1")
 	if err != nil {
@@ -28,31 +33,42 @@ func TestSlackEventBodyWrapsInnerEvent(t *testing.T) {
 	}
 }
 
-func TestSlackEventBodyPreservesAndValidatesEnvelope(t *testing.T) {
+// The contract is that a durable payload is the Slack *inner* event and
+// SlackEventBody builds the envelope around it. A stored payload that is itself
+// an envelope is a foreign record no producer in this system writes, and the
+// branch that used to accept one returned unsentinelled errors that the worker
+// classified as retryable — so such a record was re-claimed every lease period
+// forever. Every rejection here must therefore carry a sentinel the worker
+// classifies as permanent.
+func TestSlackEventBodyRejectsAForeignEnvelopePayloadPermanently(t *testing.T) {
 	payload := `{"type":"event_callback","team_id":"T1","api_app_id":"A1","event_id":"Ev1","event_time":1700000000,"event":{"type":"message","event_ts":"1700000000.000000"}}`
-	body, err := SlackEventBody(Record{Event: Event{ID: "Ev1", WorkspaceID: "T1", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: payload}}, "A1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var got, want map[string]any
-	if err := json.Unmarshal(body, &got); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal([]byte(payload), &want); err != nil {
-		t.Fatal(err)
-	}
-	if !jsonEqual(got, want) {
-		t.Fatalf("body=%s want=%s", body, payload)
-	}
-	if _, err := SlackEventBody(Record{Event: Event{ID: "Ev1", WorkspaceID: "T1", CreatedAt: time.Now().UTC(), Payload: payload}}, "A2"); err == nil || !strings.Contains(err.Error(), "does not match") {
-		t.Fatalf("mismatched app ID error=%v", err)
+	_, err := SlackEventBody(Record{Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "event_callback", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: payload}}, "A1")
+	if !errors.Is(err, ErrPayloadMalformed) {
+		t.Fatalf("foreign envelope error=%v, want %v so the worker drops it instead of retrying forever", err, ErrPayloadMalformed)
 	}
 }
 
-func jsonEqual(left, right map[string]any) bool {
-	leftBody, _ := json.Marshal(left)
-	rightBody, _ := json.Marshal(right)
-	return string(leftBody) == string(rightBody)
+// Every error SlackEventBody can return about a record must be classifiable, or
+// the caller has no way to tell "this record will never encode" from "the
+// destination is down" and retries a poisoned record forever.
+func TestSlackEventBodyErrorsAboutARecordAllCarrySentinels(t *testing.T) {
+	for name, record := range map[string]Record{
+		"identifier payload":     {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "M1"}},
+		"payload without a type": {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"text":"hello"}`}},
+		"topic disagreement":     {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"secret"}`}},
+		"missing event_ts":       {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.created"}`}},
+		"internal record":        {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: UserPhotoBlobDeleteTopic, CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "T1/users/U1/photo"}},
+		"recipient scoped":       {Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: EphemeralMessageTopic, CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.ephemeral","event_ts":"1.0","user_id":"U2","text":"secret"}`}},
+		"incomplete record":      {Event: Event{ID: "", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: `{"type":"message.created","event_ts":"1.0"}`}},
+	} {
+		_, err := SlackEventBody(record, "A1")
+		if err == nil {
+			t.Fatalf("%s: an undeliverable record was encoded", name)
+		}
+		if !errors.Is(err, ErrPayloadMalformed) && !errors.Is(err, ErrPayloadInternal) && !errors.Is(err, ErrPayloadRecipientScoped) && !errors.Is(err, ErrEventIncomplete) {
+			t.Fatalf("%s: error=%v carries no sentinel, so it is retried forever", name, err)
+		}
+	}
 }
 
 func TestSlackEventBodyRejectsIdentifierOnlyPayload(t *testing.T) {

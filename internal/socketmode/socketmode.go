@@ -52,9 +52,46 @@ type EventSource interface {
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 }
 
+// CursorStore is the legacy per-app delivery position.
+//
+// It is keyed on the application alone while domain.SocketModeConnectionLimit
+// deliberately permits ten concurrent connections per app, so every connection
+// seeds its own copy from the same row and every envelope is delivered once per
+// open connection — ten times for an app that holds the limit open during a
+// redeploy, which is what the limit exists for. Slack's Socket Mode contract
+// delivers each envelope to exactly one connection. A deployment that provides
+// an EnvelopeQueue gets that contract; this interface remains for one that has
+// not migrated yet, and is retired with the store methods behind it.
 type CursorStore interface {
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
+}
+
+// EnvelopeQueue gives each durable record to exactly one of an application's
+// connections, using the same claim/lease/acknowledge model the response
+// direction already uses. A shared cursor cannot express that: two connections
+// sitting at the same position both read the same record, and the connection
+// that acknowledges second writes a cursor that has already moved.
+//
+// The owner is the connection identifier, so a connection that disappears takes
+// no envelope with it: its claim lapses with its lease and the next connection
+// takes the record.
+type EnvelopeQueue interface {
+	// ClaimAppEvent leases the oldest record the application has not
+	// acknowledged and no connection currently holds, and reports ok=false when
+	// there is none. It applies the same visibility rules as
+	// ListAppEventsAfter: the application's installed workspaces only, and never
+	// an internal topic.
+	ClaimAppEvent(ctx context.Context, appID domain.AppID, owner string, lease time.Duration) (record events.Record, ok bool, err error)
+	// RenewAppEvent extends the lease the owner holds on a claimed record. It
+	// fails with store.ErrLeaseConflict when the owner no longer holds it.
+	RenewAppEvent(ctx context.Context, owner string, sequence uint64, lease time.Duration) error
+	// AckAppEvent records that the application is finished with the record, so
+	// no connection is offered it again.
+	AckAppEvent(ctx context.Context, owner string, sequence uint64) error
+	// ReleaseAppEvent returns a claimed record to the queue, claimable again at
+	// retryAt, so another connection takes it instead of waiting out the lease.
+	ReleaseAppEvent(ctx context.Context, owner string, sequence uint64, retryAt time.Time) error
 }
 
 type ResponseSink interface {
@@ -130,9 +167,13 @@ func (s Service) Open(ctx context.Context, appID domain.AppID) (OpenResult, erro
 }
 
 type Handler struct {
-	Store     ConnectionStore
+	Store ConnectionStore
+	// Events and Cursors are the shared-cursor delivery path. Envelopes replaces
+	// both: when it is set it is used, and each envelope reaches exactly one of
+	// the application's connections.
 	Events    EventSource
 	Cursors   CursorStore
+	Envelopes EnvelopeQueue
 	Responses ResponseSink
 	Upgrader  websocket.Upgrader
 	// Logger records connection-level failures that are handled rather than
@@ -199,13 +240,20 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(writeTimeout))
 	}
-	var cursor uint64
-	if h.Cursors != nil {
-		cursor, err = h.Cursors.GetSocketModeCursor(r.Context(), connection.AppID)
-		if err != nil {
-			closeWith(websocket.CloseInternalServerErr, "cursor store unavailable")
-			return
-		}
+	delivery, err := h.newDelivery(r.Context(), connection)
+	if err != nil {
+		closeWith(websocket.CloseInternalServerErr, "event delivery state unavailable")
+		return
+	}
+	if delivery != nil {
+		// A connection that goes away must not take an envelope with it. Handing
+		// the claim back here means the next connection sees it immediately
+		// rather than after the lease lapses.
+		defer func() {
+			if abandonErr := delivery.abandon(context.Background()); abandonErr != nil {
+				h.logger().Error("Socket Mode envelope was not returned to the queue", "connection", connection.ID, "app", connection.AppID, "error", abandonErr)
+			}
+		}()
 	}
 	connectionCount, err := h.Store.CountSocketModeConnections(r.Context(), connection.AppID)
 	if err != nil {
@@ -273,7 +321,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				closeWith(websocket.CloseProtocolError, "envelope_id is required")
 				return
 			}
-			if h.Events == nil {
+			if delivery == nil {
 				if err := writeJSON(map[string]string{"envelope_id": envelope.EnvelopeID}); err != nil {
 					return
 				}
@@ -300,51 +348,57 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			delete(pending, envelope.EnvelopeID)
-			if err := h.advanceCursor(r.Context(), connection.AppID, sequence, &cursor); err != nil {
-				closeWith(websocket.CloseInternalServerErr, "cursor store unavailable")
+			if err := delivery.consume(r.Context(), sequence); err != nil {
+				closeWith(deliveryCloseCode(err))
 				return
 			}
 		case <-ticker.C:
-			if h.Events == nil {
+			if delivery == nil {
 				continue
 			}
 			if len(pending) != 0 {
 				if time.Since(pendingSince) < envelopeTimeout {
 					continue
 				}
-				// The app never answered. The cursor has not advanced, so
-				// closing hands the envelope to the next connection instead of
-				// stalling this app's stream with no error anywhere.
-				h.logger().Warn("Socket Mode envelope was not acknowledged", "app", connection.AppID, "timeout", envelopeTimeout)
+				// The app never answered. The record is handed back rather than
+				// acknowledged, so the next connection receives it instead of
+				// this app's stream stalling with no error anywhere.
+				h.logger().Warn("Socket Mode envelope was not acknowledged", "app", connection.AppID, "connection", connection.ID, "timeout", envelopeTimeout)
 				closeWith(websocket.CloseTryAgainLater, "envelope was not acknowledged")
 				return
 			}
-			records, err := h.Events.ListAppEventsAfter(r.Context(), connection.AppID, cursor, 1)
+			record, ok, err := delivery.next(r.Context())
 			if err != nil {
 				closeWith(websocket.CloseInternalServerErr, "event source unavailable")
 				return
 			}
-			if len(records) == 0 {
+			if !ok {
 				continue
 			}
-			record := records[0]
 			encoded, err := encodeEvent(record)
 			if err != nil {
-				// An internal worker record, or a payload written before the
-				// typed payload contract, can never be delivered to an app.
-				// Closing here would leave the cursor in place and reconnect
-				// into the same record forever, so it is skipped durably and
-				// reported instead.
-				if errors.Is(err, events.ErrPayloadInternal) || errors.Is(err, events.ErrPayloadMalformed) || errors.Is(err, events.ErrPayloadRecipientScoped) {
+				// An internal worker record, a record addressed to a single user,
+				// or a payload written before the typed payload contract can never
+				// be delivered to an app. Closing here would leave the record in
+				// place and reconnect into it forever, so it is consumed durably
+				// and reported instead.
+				//
+				// A record with no identifier is reported separately and at Error:
+				// the payload may be a perfectly deliverable event, and what is
+				// wrong is the record's own identity, which no reconnect recovers.
+				if errors.Is(err, events.ErrEventIncomplete) {
+					h.logger().Error("Socket Mode dropped a record with no event ID", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
+				} else if !errors.Is(err, events.ErrPayloadInternal) && !errors.Is(err, events.ErrPayloadMalformed) && !errors.Is(err, events.ErrPayloadRecipientScoped) {
+					closeWith(websocket.CloseInternalServerErr, "event payload is invalid")
+					return
+				} else {
 					h.logger().Warn("Socket Mode skipped an undeliverable event", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
-					if cursorErr := h.advanceCursor(r.Context(), connection.AppID, record.Sequence, &cursor); cursorErr != nil {
-						closeWith(websocket.CloseInternalServerErr, "cursor store unavailable")
-						return
-					}
-					continue
 				}
-				closeWith(websocket.CloseInternalServerErr, "event payload is invalid")
-				return
+				if consumeErr := delivery.consume(r.Context(), record.Sequence); consumeErr != nil {
+					closeWith(deliveryCloseCode(consumeErr))
+					return
+				}
+				continue
 			}
 			if err := writeJSON(encoded); err != nil {
 				return
@@ -363,6 +417,16 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				closeWith(websocket.CloseInternalServerErr, "connection lease unavailable")
 				return
 			}
+			if delivery != nil {
+				if err := delivery.renew(r.Context()); err != nil {
+					// The claim is gone, so the envelope in flight belongs to
+					// another connection now. Continuing would let both deliver
+					// it.
+					h.logger().Warn("Socket Mode lost the lease on an envelope in flight", "app", connection.AppID, "connection", connection.ID, "error", err)
+					closeWith(deliveryCloseCode(err))
+					return
+				}
+			}
 		}
 	}
 }
@@ -374,17 +438,133 @@ func servingHost(r *http.Request) string {
 	return r.Host
 }
 
-func (h Handler) advanceCursor(ctx context.Context, appID domain.AppID, sequence uint64, cursor *uint64) error {
-	if sequence <= *cursor {
+// envelopeDelivery is how one connection obtains the next record and records
+// that the application is finished with it. It exists so the delivery loop does
+// not have to know whether ownership is per envelope or shared.
+type envelopeDelivery interface {
+	// next returns the record this connection should deliver, if any.
+	next(ctx context.Context) (events.Record, bool, error)
+	// consume records that the application is finished with the record, whether
+	// it acknowledged the envelope or the record was undeliverable.
+	consume(ctx context.Context, sequence uint64) error
+	// renew extends this connection's hold on the record in flight.
+	renew(ctx context.Context) error
+	// abandon returns the record in flight to the queue for another connection.
+	abandon(ctx context.Context) error
+}
+
+// envelopeLease has to outlast envelopeTimeout, or the claim lapses while the
+// handler is still waiting for the application to acknowledge the envelope it
+// was sent, and a second connection is handed a record that is already in
+// flight. It is renewed on the connection lease tick.
+const envelopeLease = 2 * envelopeTimeout
+
+func (h Handler) newDelivery(ctx context.Context, connection domain.SocketModeConnection) (envelopeDelivery, error) {
+	if h.Envelopes != nil {
+		return &claimDelivery{queue: h.Envelopes, appID: connection.AppID, owner: connection.ID}, nil
+	}
+	if h.Events == nil {
+		return nil, nil
+	}
+	delivery := &cursorDelivery{events: h.Events, cursors: h.Cursors, appID: connection.AppID}
+	if h.Cursors != nil {
+		cursor, err := h.Cursors.GetSocketModeCursor(ctx, connection.AppID)
+		if err != nil {
+			return nil, err
+		}
+		delivery.cursor = cursor
+	}
+	return delivery, nil
+}
+
+// claimDelivery gives the record to exactly one connection: the claim is the
+// ownership, and it is keyed on this connection rather than on the application.
+type claimDelivery struct {
+	queue EnvelopeQueue
+	appID domain.AppID
+	owner string
+	held  uint64
+}
+
+func (d *claimDelivery) next(ctx context.Context) (events.Record, bool, error) {
+	record, ok, err := d.queue.ClaimAppEvent(ctx, d.appID, d.owner, envelopeLease)
+	if err != nil || !ok {
+		return events.Record{}, false, err
+	}
+	d.held = record.Sequence
+	return record, true, nil
+}
+
+func (d *claimDelivery) consume(ctx context.Context, sequence uint64) error {
+	if err := d.queue.AckAppEvent(ctx, d.owner, sequence); err != nil {
+		return err
+	}
+	if d.held == sequence {
+		d.held = 0
+	}
+	return nil
+}
+
+func (d *claimDelivery) renew(ctx context.Context) error {
+	if d.held == 0 {
 		return nil
 	}
-	if h.Cursors != nil {
-		if err := h.Cursors.SetSocketModeCursor(ctx, appID, sequence); err != nil {
+	return d.queue.RenewAppEvent(ctx, d.owner, d.held, envelopeLease)
+}
+
+func (d *claimDelivery) abandon(ctx context.Context) error {
+	if d.held == 0 {
+		return nil
+	}
+	sequence := d.held
+	d.held = 0
+	return d.queue.ReleaseAppEvent(ctx, d.owner, sequence, time.Now().UTC())
+}
+
+// cursorDelivery is the shared per-application position. Every connection of an
+// application reads and writes the same row, so each of them delivers every
+// envelope; see CursorStore.
+type cursorDelivery struct {
+	events  EventSource
+	cursors CursorStore
+	appID   domain.AppID
+	cursor  uint64
+}
+
+func (d *cursorDelivery) next(ctx context.Context) (events.Record, bool, error) {
+	records, err := d.events.ListAppEventsAfter(ctx, d.appID, d.cursor, 1)
+	if err != nil || len(records) == 0 {
+		return events.Record{}, false, err
+	}
+	return records[0], true, nil
+}
+
+func (d *cursorDelivery) consume(ctx context.Context, sequence uint64) error {
+	if sequence <= d.cursor {
+		return nil
+	}
+	if d.cursors != nil {
+		if err := d.cursors.SetSocketModeCursor(ctx, d.appID, sequence); err != nil {
 			return err
 		}
 	}
-	*cursor = sequence
+	d.cursor = sequence
 	return nil
+}
+
+func (d *cursorDelivery) renew(context.Context) error { return nil }
+
+func (d *cursorDelivery) abandon(context.Context) error { return nil }
+
+// deliveryCloseCode distinguishes losing a race for an envelope from the store
+// being unable to answer. A connection that acknowledges an envelope another
+// connection already moved past has not caused a server error, and closing it
+// with one sends an SDK looking for a fault that does not exist.
+func deliveryCloseCode(err error) (int, string) {
+	if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrLeaseConflict) || errors.Is(err, store.ErrNotFound) {
+		return websocket.CloseTryAgainLater, "another connection owns this envelope"
+	}
+	return websocket.CloseInternalServerErr, "event delivery state unavailable"
 }
 
 // encodeEvent renders a durable record as a Socket Mode envelope. The payload
@@ -392,8 +572,13 @@ func (h Handler) advanceCursor(ctx context.Context, appID domain.AppID, sequence
 // a record addressed to a single user can be sent to an app, and a payload that
 // is not self-describing is refused with a sentinel the caller can act on.
 func encodeEvent(record events.Record) (map[string]any, error) {
+	// A missing identifier is a defect in the record's identity, not in its
+	// payload: the payload may be a perfectly deliverable event. Classifying it
+	// as a malformed payload made it indistinguishable from an undeliverable one
+	// everywhere the two are handled together, including the outbox worker's
+	// drop-and-acknowledge path.
 	if strings.TrimSpace(string(record.Event.ID)) == "" {
-		return nil, fmt.Errorf("%w: Socket Mode event ID is required", events.ErrPayloadMalformed)
+		return nil, fmt.Errorf("%w: Socket Mode envelope ID comes from the event ID, which is empty", events.ErrEventIncomplete)
 	}
 	delivered, err := events.Broadcastable(record.Event)
 	if err != nil {

@@ -3,11 +3,15 @@ package socketmode
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -362,6 +366,205 @@ func TestHandlerSkipsUndeliverableRecordsAndKeepsDelivering(t *testing.T) {
 	if cursor != 6 {
 		t.Fatalf("cursor=%d, want the undeliverable records skipped durably", cursor)
 	}
+}
+
+// memoryEnvelopeQueue is the store half of per-envelope ownership, with the
+// preconditions a durable implementation has to enforce: a record is offered to
+// one owner at a time, an acknowledgement and a renewal require that owner to
+// still hold the claim, and a released record is immediately claimable again.
+type memoryEnvelopeQueue struct {
+	mu      sync.Mutex
+	records []events.Record
+	acked   map[uint64]bool
+	owner   map[uint64]string
+	until   map[uint64]time.Time
+	claims  int
+}
+
+func newEnvelopeQueue(records ...events.Record) *memoryEnvelopeQueue {
+	return &memoryEnvelopeQueue{records: records, acked: map[uint64]bool{}, owner: map[uint64]string{}, until: map[uint64]time.Time{}}
+}
+
+func (q *memoryEnvelopeQueue) ClaimAppEvent(_ context.Context, _ domain.AppID, owner string, lease time.Duration) (events.Record, bool, error) {
+	now := time.Now().UTC()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, record := range q.records {
+		if q.acked[record.Sequence] {
+			continue
+		}
+		if holder, held := q.owner[record.Sequence]; held && holder != "" && q.until[record.Sequence].After(now) {
+			continue
+		}
+		q.owner[record.Sequence] = owner
+		q.until[record.Sequence] = now.Add(lease)
+		q.claims++
+		return record, true, nil
+	}
+	return events.Record{}, false, nil
+}
+
+func (q *memoryEnvelopeQueue) RenewAppEvent(_ context.Context, owner string, sequence uint64, lease time.Duration) error {
+	now := time.Now().UTC()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.owner[sequence] != owner || !q.until[sequence].After(now) {
+		return store.ErrLeaseConflict
+	}
+	q.until[sequence] = now.Add(lease)
+	return nil
+}
+
+func (q *memoryEnvelopeQueue) AckAppEvent(_ context.Context, owner string, sequence uint64) error {
+	now := time.Now().UTC()
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.owner[sequence] != owner || !q.until[sequence].After(now) {
+		return store.ErrLeaseConflict
+	}
+	q.acked[sequence] = true
+	delete(q.owner, sequence)
+	delete(q.until, sequence)
+	return nil
+}
+
+func (q *memoryEnvelopeQueue) ReleaseAppEvent(_ context.Context, owner string, sequence uint64, retryAt time.Time) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.owner[sequence] != owner {
+		return store.ErrLeaseConflict
+	}
+	delete(q.owner, sequence)
+	q.until[sequence] = retryAt
+	return nil
+}
+
+func (q *memoryEnvelopeQueue) acknowledged() []uint64 {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	result := make([]uint64, 0, len(q.acked))
+	for sequence := range q.acked {
+		result = append(result, sequence)
+	}
+	return result
+}
+
+// Slack's Socket Mode contract delivers each envelope to exactly one connection,
+// and domain.SocketModeConnectionLimit exists so an application can hold several
+// connections open across a redeploy. A position keyed on the application alone
+// cannot express that: every connection reads the same row, so an application
+// holding the limit open processes every event ten times.
+func TestEachEnvelopeReachesExactlyOneConnection(t *testing.T) {
+	const connections = 3
+	queue := newEnvelopeQueue(producedRecord(t, 4, "event-4", "message.created", events.String("message_id", "M1")))
+	registry := memory.New()
+	handler := Handler{Store: registry, Envelopes: queue, Responses: new(testResponseSink), Logger: quietLogger()}
+	received := make(chan string, connections)
+	var group sync.WaitGroup
+	for range connections {
+		client := dialHandler(t, handler, registry)
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+			var envelope struct {
+				EnvelopeID string `json:"envelope_id"`
+			}
+			if err := client.ReadJSON(&envelope); err != nil {
+				return
+			}
+			received <- envelope.EnvelopeID
+		}()
+	}
+	group.Wait()
+	close(received)
+	delivered := make([]string, 0, connections)
+	for id := range received {
+		delivered = append(delivered, id)
+	}
+	if len(delivered) != 1 {
+		t.Fatalf("envelope event-4 was delivered to %d of %d concurrent connections for the same app: %v", len(delivered), connections, delivered)
+	}
+	if delivered[0] != "event-4" {
+		t.Fatalf("delivered envelope=%q", delivered[0])
+	}
+}
+
+// A connection that goes away without acknowledging must not take the envelope
+// with it. The claim is handed back so the next connection receives the record
+// immediately rather than after the lease lapses.
+func TestAnUnacknowledgedEnvelopeReturnsToTheQueueForAnotherConnection(t *testing.T) {
+	queue := newEnvelopeQueue(producedRecord(t, 4, "event-4", "message.created", events.String("message_id", "M1")))
+	connections := memory.New()
+	handler := Handler{Store: connections, Envelopes: queue, Responses: new(testResponseSink), Logger: quietLogger()}
+	first := dialHandler(t, handler, connections)
+	_ = first.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var envelope struct {
+		EnvelopeID string `json:"envelope_id"`
+	}
+	if err := first.ReadJSON(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.EnvelopeID != "event-4" {
+		t.Fatalf("envelope=%q", envelope.EnvelopeID)
+	}
+	// The connection disappears without answering.
+	_ = first.Close()
+	second := dialHandler(t, handler, connections)
+	_ = second.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var redelivered struct {
+		EnvelopeID string `json:"envelope_id"`
+	}
+	if err := second.ReadJSON(&redelivered); err != nil {
+		t.Fatalf("the envelope was lost with the connection that never acknowledged it: %v", err)
+	}
+	if redelivered.EnvelopeID != "event-4" {
+		t.Fatalf("redelivered envelope=%q", redelivered.EnvelopeID)
+	}
+	if err := second.WriteJSON(map[string]any{"envelope_id": "event-4"}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(queue.acknowledged()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the acknowledged envelope was never recorded")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Losing a race for an envelope is not a server fault. Closing with an internal
+// error sends an SDK looking for a failure that did not happen, and #86 made
+// exactly that reachable by writing the shared position from every connection.
+func TestLosingAnEnvelopeRaceClosesBenignly(t *testing.T) {
+	if code, _ := deliveryCloseCode(store.ErrConflict); code != websocket.CloseTryAgainLater {
+		t.Fatalf("a conflicting position write closed with %d, want %d", code, websocket.CloseTryAgainLater)
+	}
+	if code, _ := deliveryCloseCode(store.ErrLeaseConflict); code != websocket.CloseTryAgainLater {
+		t.Fatalf("a lost envelope lease closed with %d, want %d", code, websocket.CloseTryAgainLater)
+	}
+	if code, _ := deliveryCloseCode(errors.New("connection refused")); code != websocket.CloseInternalServerErr {
+		t.Fatalf("an unavailable store closed with %d, want %d", code, websocket.CloseInternalServerErr)
+	}
+}
+
+// A record with no identifier has nothing wrong with its payload: the envelope
+// ID is derived from the event ID, and that is what is missing. Reporting it as
+// a malformed payload made it indistinguishable from a record that must be
+// dropped silently, in this handler and in the outbox worker alike.
+func TestARecordWithoutAnIdentifierIsReportedAsAnIncompleteRecord(t *testing.T) {
+	record := events.Record{Sequence: 1, Event: events.Event{ID: " ", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message.created","event_ts":"1.0"}`}}
+	_, err := encodeEvent(record)
+	if !errors.Is(err, events.ErrEventIncomplete) {
+		t.Fatalf("error=%v, want %v", err, events.ErrEventIncomplete)
+	}
+	if errors.Is(err, events.ErrPayloadMalformed) {
+		t.Fatalf("error=%v is still classified as a payload defect", err)
+	}
+}
+
+func quietLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
 // A client that pipelines frames used to leak the reader goroutine, the
