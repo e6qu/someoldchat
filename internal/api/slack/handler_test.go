@@ -2483,6 +2483,22 @@ func TestCreatePrivateConversation(t *testing.T) {
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"is_private":true`) || !strings.Contains(res.Body.String(), `"name":"private-room"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
+	duplicate := httptest.NewRequest(http.MethodPost, "/api/conversations.create", strings.NewReader("name=Private+Room&is_private=false"))
+	duplicate.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	duplicate.Header.Set("Authorization", "Bearer token")
+	duplicateResult := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateResult, duplicate)
+	if duplicateResult.Code != http.StatusOK || !strings.Contains(duplicateResult.Body.String(), `"error":"name_taken"`) {
+		t.Fatalf("duplicate status=%d body=%s", duplicateResult.Code, duplicateResult.Body)
+	}
+	rename := httptest.NewRequest(http.MethodPost, "/api/conversations.rename", strings.NewReader("channel=C1&name=Private+Room"))
+	rename.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rename.Header.Set("Authorization", "Bearer token")
+	renameResult := httptest.NewRecorder()
+	handler.ServeHTTP(renameResult, rename)
+	if renameResult.Code != http.StatusOK || !strings.Contains(renameResult.Body.String(), `"error":"name_taken"`) {
+		t.Fatalf("rename collision status=%d body=%s", renameResult.Code, renameResult.Body)
+	}
 }
 
 func TestJoinPublicConversation(t *testing.T) {

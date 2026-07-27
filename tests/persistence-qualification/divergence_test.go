@@ -461,6 +461,20 @@ func referentialFailuresAreSentinels(t *testing.T, open opener) {
 	if err := f.repository.CreateConversation(ctx, conversation, f.userID, f.event("create-conversation-again", "channel.created", string(conversation.ID))); !errors.Is(err, store.ErrAlreadyExists) {
 		t.Fatalf("duplicate conversation error=%v, want %v", err, store.ErrAlreadyExists)
 	}
+	nameClash := conversation
+	nameClash.ID = domain.ConversationID("C-name-clash-" + f.suffix)
+	if err := f.repository.CreateConversation(ctx, nameClash, f.userID, f.event("create-conversation-name-clash", "channel.created", string(nameClash.ID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate conversation name error=%v, want %v", err, store.ErrAlreadyExists)
+	}
+	renameTarget := conversation
+	renameTarget.ID = domain.ConversationID("C-rename-target-" + f.suffix)
+	renameTarget.Name = "rename-target-" + f.suffix
+	if err := f.repository.CreateConversation(ctx, renameTarget, f.userID, f.event("create-conversation-rename-target", "channel.created", string(renameTarget.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.RenameConversation(ctx, renameTarget.ID, conversation.Name, f.event("rename-conversation-name-clash", "channel.renamed", string(renameTarget.ID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("renaming conversation onto a taken name error=%v, want %v", err, store.ErrAlreadyExists)
+	}
 	group := domain.UserGroup{ID: domain.UserGroupID("S-dup-a-" + f.suffix), WorkspaceID: f.workspaceID, Name: "group a", Handle: "shared_handle_" + f.suffix, Creator: f.userID, UpdatedBy: f.userID, CreatedAt: time.Unix(1700000000, 0).UTC(), UpdatedAt: time.Unix(1700000000, 0).UTC(), Enabled: true}
 	if err := f.repository.CreateUserGroup(ctx, group, f.event("group-a", "usergroup.created", string(group.ID))); err != nil {
 		t.Fatal(err)

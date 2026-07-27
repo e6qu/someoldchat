@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -248,7 +249,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 84
+const schemaVersion = 85
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1874,6 +1875,23 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 85 {
+		// Channel names are workspace addresses, not display labels: creating a
+		// second channel with the same normalized name made both the browser and
+		// Slack API accept an address that could not identify one destination.
+		// Direct conversations are excluded because their stored name is
+		// deliberately the shared implementation value "direct".
+		//
+		// Releases before this constraint admitted duplicates. Rename only the
+		// later rows in each duplicate group, record every repair for operators,
+		// and then let the index make the invariant race-free in every profile.
+		if err := repairDuplicateConversationNames(ctx, db); err != nil {
+			return err
+		}
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS conversations_workspace_name ON conversations(workspace_id, name) WHERE is_direct = 0 AND is_group_direct = 0`); err != nil {
+			return fmt.Errorf("index unique conversation names: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -1888,6 +1906,95 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		return fmt.Errorf("unsupported schema version %d (want %d)", version, schemaVersion)
 	}
 	return nil
+}
+
+func repairDuplicateConversationNames(ctx context.Context, db queryExecutor) error {
+	rows, err := db.QueryContext(ctx, `
+		SELECT c.id, c.workspace_id, c.name
+		FROM conversations c
+		JOIN (
+			SELECT workspace_id, name
+			FROM conversations
+			WHERE is_direct = 0 AND is_group_direct = 0
+			GROUP BY workspace_id, name
+			HAVING COUNT(*) > 1
+		) duplicates ON duplicates.workspace_id = c.workspace_id AND duplicates.name = c.name
+		WHERE c.is_direct = 0 AND c.is_group_direct = 0
+		ORDER BY c.workspace_id, c.name, c.id`)
+	if err != nil {
+		return fmt.Errorf("find duplicate conversation names: %w", err)
+	}
+	type duplicate struct {
+		id        string
+		workspace string
+		name      string
+	}
+	values := make([]duplicate, 0)
+	for rows.Next() {
+		var value duplicate
+		if err := rows.Scan(&value.id, &value.workspace, &value.name); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan duplicate conversation name: %w", err)
+		}
+		values = append(values, value)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close duplicate conversation names: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("read duplicate conversation names: %w", err)
+	}
+	previousKey := ""
+	for _, value := range values {
+		key := value.workspace + "\x00" + value.name
+		if key != previousKey {
+			previousKey = key
+			continue
+		}
+		candidate := ""
+		for attempt := 1; ; attempt++ {
+			candidate = migrationConversationName(value.name, value.id, attempt)
+			var taken int
+			if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations WHERE workspace_id = ? AND name = ?`, value.workspace, candidate).Scan(&taken); err != nil {
+				return fmt.Errorf("check repaired conversation name %s: %w", value.id, err)
+			}
+			if taken == 0 {
+				break
+			}
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE conversations SET name = ?, name_folded = ? WHERE id = ?`, candidate, domain.FoldSearchText(candidate), value.id); err != nil {
+			return fmt.Errorf("disambiguate conversation %s: %w", value.id, err)
+		}
+		detail := fmt.Sprintf("renamed duplicate channel %q to %q before enforcing workspace name uniqueness", value.name, candidate)
+		if _, err := db.ExecContext(ctx, `INSERT INTO schema_migration_notices(kind, subject, detail, observed_at) VALUES ('conversation_name_disambiguated', ?, ?, ?) ON CONFLICT(kind, subject) DO UPDATE SET detail = excluded.detail, observed_at = excluded.observed_at`, value.id, detail, domain.NewStoredTime(time.Now())); err != nil {
+			return fmt.Errorf("record conversation name repair %s: %w", value.id, err)
+		}
+	}
+	return nil
+}
+
+func migrationConversationName(name, id string, attempt int) string {
+	suffix := "-" + strings.ToLower(strings.TrimSpace(id))
+	if attempt > 1 {
+		suffix += "-" + strconv.Itoa(attempt)
+	}
+	const maxChannelNameBytes = 80
+	limit := maxChannelNameBytes - len(suffix)
+	if limit < 1 {
+		return strings.TrimPrefix(suffix[len(suffix)-maxChannelNameBytes:], "-")
+	}
+	prefix := strings.TrimSpace(name)
+	if len(prefix) > limit {
+		prefix = prefix[:limit]
+		for prefix != "" && !utf8.ValidString(prefix) {
+			prefix = prefix[:len(prefix)-1]
+		}
+	}
+	prefix = strings.TrimRight(prefix, "-")
+	if prefix == "" {
+		prefix = "channel"
+	}
+	return prefix + suffix
 }
 
 func (s *Store) Load() (lifecycle.StateRecord, error) {
@@ -3174,7 +3281,7 @@ func (s *Store) RenameConversation(ctx context.Context, conversation domain.Conv
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE conversations SET name = ?, name_folded = ? WHERE id = ?`, name, domain.FoldSearchText(name), conversation)
 	if err != nil {
-		return domain.Conversation{}, err
+		return domain.Conversation{}, classify(err)
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {

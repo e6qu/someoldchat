@@ -1238,6 +1238,13 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	if _, exists := s.conversations[conversation.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	if !conversation.IsDirect && !conversation.IsGroupDirect {
+		for _, existing := range s.conversations {
+			if existing.WorkspaceID == conversation.WorkspaceID && !existing.IsDirect && !existing.IsGroupDirect && existing.Name == conversation.Name {
+				return store.ErrAlreadyExists
+			}
+		}
+	}
 	s.conversations[conversation.ID] = conversation
 	s.conversationTeams[conversation.ID] = map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
 	s.conversationOrg[conversation.ID] = false
@@ -1260,6 +1267,13 @@ func (s *Store) RenameConversation(_ context.Context, conversation domain.Conver
 	value, ok := s.conversations[conversation]
 	if !ok {
 		return domain.Conversation{}, store.ErrNotFound
+	}
+	if !value.IsDirect && !value.IsGroupDirect {
+		for id, existing := range s.conversations {
+			if id != conversation && existing.WorkspaceID == value.WorkspaceID && !existing.IsDirect && !existing.IsGroupDirect && existing.Name == name {
+				return domain.Conversation{}, store.ErrAlreadyExists
+			}
+		}
 	}
 	value.Name = name
 	s.conversations[conversation] = value

@@ -128,6 +128,14 @@ unique participant-set key, so concurrent `conversations.open` calls from
 different replicas converge on one conversation rather than creating
 replica-local duplicates.
 
+Named channels likewise use a durable workspace-and-name unique index. The
+service normalizes the human input once and every storage profile enforces the
+same address invariant for creation and rename, so concurrent requests cannot
+create two destinations with one channel name. The migration that introduced
+the index preserves the first existing name, deterministically disambiguates
+only later duplicates, and records each repair in
+`schema_migration_notices`.
+
 ## Runtime topology
 
 ```text

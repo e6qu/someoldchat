@@ -14,12 +14,8 @@ async function signIn(context) {
   ]);
 }
 
-// The workspace channel has to be joined before anything can be posted into it:
-// chat.postMessage now requires membership of the conversation it names, and the
-// development seed in cmd/server (seedDevelopmentCredentials, cmd/server/main.go)
-// creates the session and the API token without joining either to Cdev. Joining
-// is idempotent, so this runs before every test and states the precondition the
-// suite depends on instead of assuming it.
+// A test can leave the shared development channel, so restore the membership
+// precondition before every journey. Joining is idempotent.
 test.beforeEach(async ({ request }) => {
   const response = await request.post('/api/conversations.join', {
     headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
@@ -57,6 +53,7 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
 
   const composer = page.locator('form.composer textarea[name="text"]');
   await expect(composer).toHaveAttribute('placeholder', /general/);
+  await expect(composer).toHaveAttribute('maxlength', '40000');
 
   const message = `browser qualification ${Date.now()}`;
   await composer.fill(message);
@@ -284,6 +281,17 @@ test('channel creation is reachable and conversation shortcuts switch channels',
 
   await expect(page.locator('.channel-title')).toHaveText(`# ${name}`);
   const createdURL = page.url();
+
+  // A duplicate is rejected in place: the entered name and the open form
+  // survive, and the error belongs to the action rather than the composer.
+  await page.getByText('Add channel', { exact: false }).click();
+  await page.getByLabel('Channel name').fill(name);
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page).toHaveURL(createdURL);
+  await expect(page.getByLabel('Channel name')).toHaveValue(name);
+  await expect(page.locator('#action-feedback')).toContainText('already exists');
+  await expect(page.locator('#composer-error')).toBeHidden();
+
   await page.keyboard.press('Alt+ArrowUp');
   await expect(page).not.toHaveURL(createdURL);
   await page.keyboard.press('Alt+ArrowDown');
@@ -337,18 +345,39 @@ test('a rejected post explains itself and keeps the draft', async ({ page, conte
   await expect(error).toHaveAttribute('role', 'alert');
   await expect(error).not.toBeEmpty();
   await expect(composer).toHaveValue(doomed);
+
+  // An unrelated action failure gets its own alert and cannot erase or replace
+  // the send failure while the unsent draft is still present.
+  const sendError = await error.textContent();
+  await page.unroute('**/app/message*');
+  const target = page.locator('.message').last();
+  await page.route('**/app/pin*', (route) => route.abort());
+  await target.getByRole('button', { name: 'Pin' }).click();
+  const actionError = page.locator('#action-feedback');
+  await expect(actionError).toBeVisible();
+  await expect(actionError).not.toContainText('message was kept');
+  await expect(error).toHaveText(sendError);
+  await expect(composer).toHaveValue(doomed);
 });
 
-// The narrow layout hid both the icon and the label of every sidebar control,
-// leaving unnamed empty boxes, and removed the thread pane outright rather than
-// reflowing it.
-test('the narrow layout keeps every control named and the thread reachable', async ({ page, context, request }) => {
+// The old 64px rail gave every channel the same # glyph and every DM the same @
+// glyph. Accessible names did not help a sighted mobile reader choose one.
+test('the narrow layout exposes named navigation and keeps the thread reachable', async ({ page, context, request }) => {
   await signIn(context);
   const root = await postThroughTheAPI(request, `narrow thread ${Date.now()}`);
   await page.setViewportSize({ width: 480, height: 900 });
   await page.goto(`/app?channel=${CHANNEL}&thread=${encodeURIComponent(root.ts)}`);
 
-  const links = page.locator('.sidebar .side-link');
+  const sidebar = page.locator('#workspace-sidebar');
+  await expect(sidebar).toHaveAttribute('inert', '');
+  const toggle = page.locator('#nav-toggle');
+  await expect(toggle).toHaveAccessibleName('Open navigation');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggle).toHaveAccessibleName('Close navigation');
+  await expect(sidebar).toHaveClass(/is-open/);
+
+  const links = sidebar.locator('.side-link');
   const count = await links.count();
   expect(count).toBeGreaterThan(0);
   for (let index = 0; index < count; index += 1) {
@@ -356,18 +385,40 @@ test('the narrow layout keeps every control named and the thread reachable', asy
     const name = ((await link.getAttribute('aria-label')) ?? (await link.innerText())).trim();
     expect(name, `sidebar control ${index} has no accessible name`).not.toBe('');
   }
+  await expect(sidebar.getByText('general', { exact: true })).toBeVisible();
 
   await expect(page.getByRole('button', { name: 'Sign out' })).toHaveAttribute('aria-label', 'Sign out');
   // The thread reflows instead of disappearing.
   await expect(page.locator('#thread-messages')).toBeVisible();
 
-  // Channel creation remains reachable without expanding the 64px navigation
-  // rail into an unusably narrow form.
   await page.getByText('Add channel', { exact: false }).click();
   const channelName = page.getByLabel('Channel name');
   await expect(channelName).toBeVisible();
   const panel = await channelName.boundingBox();
-  expect(panel.x).toBeGreaterThanOrEqual(64);
+  expect(panel.x).toBeGreaterThanOrEqual(0);
+  expect(panel.x + panel.width).toBeLessThanOrEqual(480);
+
+  await page.keyboard.press('Escape');
+  await expect(sidebar).not.toHaveClass(/is-open/);
+  await expect(toggle).toBeFocused();
+});
+
+test('named mobile navigation survives without JavaScript', async ({ browser }) => {
+  const context = await browser.newContext({
+    baseURL: 'http://127.0.0.1:18080',
+    javaScriptEnabled: false,
+    viewport: { width: 480, height: 900 },
+  });
+  await signIn(context);
+  const page = await context.newPage();
+  const response = await page.goto('/app');
+  expect(response.status()).toBe(200);
+
+  await expect(page.locator('html')).not.toHaveClass(/js/);
+  await expect(page.locator('#workspace-sidebar')).toBeVisible();
+  await expect(page.locator('#workspace-sidebar').getByText('general', { exact: true })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Members' })).toBeVisible();
+  await context.close();
 });
 
 // `GET /app` is the only entry point; a template edit used to be able to take it

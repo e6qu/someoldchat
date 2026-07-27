@@ -5471,7 +5471,7 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 // is 150,000 characters — leaving room for the JSON framing around them without
 // admitting an unbounded structured body.
 const (
-	maxMessageTextRunes = 40000
+	maxMessageTextRunes = service.MaxMessageTextRunes
 	maxMessageBodyBytes = 256 << 10
 )
 
