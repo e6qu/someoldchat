@@ -58,8 +58,13 @@ or any later version. See [LICENSE](LICENSE).
 ## Development commands
 
 ```sh
-make check                  # every offline gate, including go vet
-make check-full             # everything the pull-request workflow gates on
+make check                  # every offline gate, including go vet and the activator tests
+make check-full             # adds the Terraform, vulnerability, race, load, and fuzz gates
+# check-full covers the CI `go`, `terraform`, and `scale-zero-artifacts` jobs. It
+# deliberately does not reach `sdk`, `browser`, `shauth-sso`, `dqlite`, or
+# `postgres`, or the dual-architecture edge image build, each of which needs a
+# service, a second language runtime, or a container build; run those explicitly.
+make module-startup-check   # starts the server with terraform/ecs-runtime's own outputs
 # The two ratchets compare against a base revision, so they take BASE_REF and are
 # not part of `make check`. CI runs both with the pull request's base branch.
 make contract-ratchet BASE_REF=origin/main   # Slack HTTP compatibility ledger

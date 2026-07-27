@@ -59,16 +59,17 @@ variable "blob_prefix" {
   }
 }
 
-variable "chat_mode" {
-  description = "Chat composition the task runs: local or grpc."
-  type        = string
-  default     = "local"
-
-  validation {
-    condition     = contains(["local", "grpc"], var.chat_mode)
-    error_message = "chat_mode must be local or grpc."
-  }
-}
+# There is deliberately no `chat_mode` variable. It accepted "grpc", and in grpc
+# composition cmd/server refuses every one of SAMEOLDCHAT_STORE,
+# SAMEOLDCHAT_BLOB_S3_BUCKET, SAMEOLDCHAT_BLOB_S3_PREFIX and
+# SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL — which this module's `environment` output
+# always exports — because cmd/chatd owns the store there. A task built from
+# these outputs with chat_mode = "grpc" therefore exited 2 on every start, the
+# same defect class as the session token. This module also provisions nothing a
+# distributed deployment needs: no chat gRPC address, no certificate authority,
+# and no client certificate or key. It is a local-composition module and now says
+# so, and scripts/check-terraform-module-startup.sh proves the binary accepts
+# what it exports.
 
 variable "store" {
   description = "Storage backend the task selects: memory, sqlite, postgresql, or dqlite."

@@ -68,6 +68,25 @@ func (m Messages) requireDocumentAccess(ctx context.Context, workspaceID domain.
 	return nil
 }
 
+// authorizeDocumentChannels is the check a document grant addressed to a
+// conversation must pass: you may only share a list or a canvas into a
+// conversation you can reach yourself.
+//
+// Both grant surfaces used to test only that the conversation existed in the
+// same workspace, so any member could address a private channel by identifier
+// and plant an attacker-authored document — with write access — into a
+// confidential space they are not in and cannot read. The refusal is
+// authorizeConversation's own store.ErrNotFound, so naming a private channel the
+// actor is not in is indistinguishable from naming one that does not exist.
+func (m Messages) authorizeDocumentChannels(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channelIDs []domain.ConversationID) error {
+	for _, channelID := range channelIDs {
+		if err := m.authorizeConversation(ctx, workspaceID, userID, channelID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // requireListAccess authorizes one operation on one list.
 func (m Messages) requireListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, listID domain.ListID, required documentAccess) error {
 	return m.requireDocumentAccess(ctx, workspaceID, userID, required, func(ctx context.Context, actor domain.UserID) (string, error) {
@@ -122,6 +141,20 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 		value.DescriptionBlocks = copied.DescriptionBlocks
 		value.Schema = copied.Schema
 	}
+	// The whole copy is read and every record built before the list is created, so
+	// a source too large to copy is refused before anything is written and before
+	// list.created is published, and the work one request can demand is bounded.
+	// The loop used to page the source with no cap, drawing an identifier and
+	// opening a transaction per record, for any member holding read access on any
+	// list.
+	var copiedItems []domain.ListItem
+	var copiedEvents []events.Event
+	if copyFrom != "" && includeCopiedRecords {
+		copiedItems, copiedEvents, err = m.copyListRecords(ctx, workspaceID, userID, copyFrom, id, now)
+		if err != nil {
+			return domain.List{}, err
+		}
+	}
 	event, err := listEvent(workspaceID, userID, "list.created", events.String("list_id", string(id)))
 	if err != nil {
 		return domain.List{}, err
@@ -129,33 +162,50 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	if err := m.Store.CreateList(ctx, value, event); err != nil {
 		return domain.List{}, err
 	}
-	if copyFrom != "" && includeCopiedRecords {
-		cursor := domain.Cursor("")
-		for {
-			page, err := m.Store.ListItems(ctx, workspaceID, copyFrom, domain.PageRequest{Limit: 100, Cursor: cursor}, false)
-			if err != nil {
-				return domain.List{}, err
-			}
-			for _, source := range page.Items {
-				itemID, err := domain.NewListItemID()
-				if err != nil {
-					return domain.List{}, err
-				}
-				created, err := listEvent(workspaceID, userID, "list.item.created", events.String("list_item_id", string(itemID)), events.String("list_id", string(id)))
-				if err != nil {
-					return domain.List{}, err
-				}
-				if err := m.Store.CreateListItem(ctx, domain.ListItem{ID: itemID, ListID: id, WorkspaceID: workspaceID, Fields: source.Fields, CreatedBy: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now}, created); err != nil {
-					return domain.List{}, err
-				}
-			}
-			if !page.HasMore {
-				break
-			}
-			cursor = page.NextCursor
+	for index, item := range copiedItems {
+		if err := m.Store.CreateListItem(ctx, item, copiedEvents[index]); err != nil {
+			return domain.List{}, err
 		}
 	}
 	return value, nil
+}
+
+// maxCopiedListRecords bounds lists.create with copy_from. A copy larger than
+// this is refused rather than ground through one write transaction per record.
+const maxCopiedListRecords = 1000
+
+// copyListRecords reads the source list's records and builds the records and
+// journal entries the copy will write. It performs no write of its own, so the
+// caller can refuse the whole request before it has created anything.
+func (m Messages) copyListRecords(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, copyFrom, into domain.ListID, now time.Time) ([]domain.ListItem, []events.Event, error) {
+	items := make([]domain.ListItem, 0, 100)
+	records := make([]events.Event, 0, 100)
+	cursor := domain.Cursor("")
+	for {
+		page, err := m.Store.ListItems(ctx, workspaceID, copyFrom, domain.PageRequest{Limit: 100, Cursor: cursor}, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, source := range page.Items {
+			if len(items) >= maxCopiedListRecords {
+				return nil, nil, ErrInvalidList
+			}
+			itemID, err := domain.NewListItemID()
+			if err != nil {
+				return nil, nil, err
+			}
+			created, err := listEvent(workspaceID, userID, "list.item.created", events.String("list_item_id", string(itemID)), events.String("list_id", string(into)))
+			if err != nil {
+				return nil, nil, err
+			}
+			items = append(items, domain.ListItem{ID: itemID, ListID: into, WorkspaceID: workspaceID, Fields: source.Fields, CreatedBy: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now})
+			records = append(records, created)
+		}
+		if !page.HasMore {
+			return items, records, nil
+		}
+		cursor = page.NextCursor
+	}
 }
 
 func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID, name, descriptionBlocks string, todoMode, todoModeSet bool) (domain.List, error) {
@@ -263,16 +313,32 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 	if err := json.Unmarshal([]byte(cells), &input); err != nil || len(input) == 0 {
 		return nil, ErrInvalidList
 	}
-	grouped := make(map[domain.ListItemID][]map[string]json.RawMessage)
+	// Rows are kept in the order the request names them. Iterating the grouping
+	// map directly made the returned order — and the order the writes happened in
+	// — depend on Go's map seed, so the same request produced a different answer
+	// on every call and a mid-batch failure left a different prefix each time.
+	order := make([]domain.ListItemID, 0, len(input))
+	grouped := make(map[domain.ListItemID][]map[string]json.RawMessage, len(input))
 	for _, cell := range input {
 		var rowID string
 		if err := json.Unmarshal(cell["row_id"], &rowID); err != nil || strings.TrimSpace(rowID) == "" {
 			return nil, ErrInvalidList
 		}
-		grouped[domain.ListItemID(rowID)] = append(grouped[domain.ListItemID(rowID)], cell)
+		itemID := domain.ListItemID(rowID)
+		if _, seen := grouped[itemID]; !seen {
+			order = append(order, itemID)
+		}
+		grouped[itemID] = append(grouped[itemID], cell)
 	}
-	result := make([]domain.ListItem, 0, len(grouped))
-	for itemID, cellsForItem := range grouped {
+	// Every row is read and every edit computed before any of them is written, so
+	// a batch naming a missing row or an unparseable cell is refused whole
+	// instead of committing the rows that happened to come first. The writes
+	// themselves are still one transaction per row; see the store signature
+	// UpdateListItems reported alongside this change.
+	result := make([]domain.ListItem, 0, len(order))
+	pending := make([]events.Event, 0, len(order))
+	for _, itemID := range order {
+		cellsForItem := grouped[itemID]
 		item, err := m.Store.GetListItem(ctx, workspaceID, listID, itemID)
 		if err != nil {
 			return nil, err
@@ -328,10 +394,13 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 		if err != nil {
 			return nil, err
 		}
-		if err := m.Store.UpdateListItem(ctx, item, event); err != nil {
+		result = append(result, item)
+		pending = append(pending, event)
+	}
+	for index, item := range result {
+		if err := m.Store.UpdateListItem(ctx, item, pending[index]); err != nil {
 			return nil, err
 		}
-		result = append(result, item)
 	}
 	return result, nil
 }
@@ -362,19 +431,8 @@ func (m Messages) SetListAccess(ctx context.Context, workspaceID domain.Workspac
 	if err := validateListAccess(access, channelIDs, userIDs); err != nil {
 		return err
 	}
-	if access == "owner" {
-		for _, target := range userIDs {
-			user, err := m.Store.GetUser(ctx, target)
-			if err != nil || user.WorkspaceID != workspaceID {
-				return store.ErrNotFound
-			}
-		}
-	}
-	for _, target := range channelIDs {
-		conversation, err := m.Store.GetConversation(ctx, target)
-		if err != nil || conversation.WorkspaceID != workspaceID {
-			return store.ErrNotFound
-		}
+	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, channelIDs); err != nil {
+		return err
 	}
 	for _, target := range userIDs {
 		user, err := m.Store.GetUser(ctx, target)

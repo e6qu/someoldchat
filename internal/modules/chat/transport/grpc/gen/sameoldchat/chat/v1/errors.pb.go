@@ -34,10 +34,24 @@ const (
 //
 // The key strings are part of the wire contract and must never be renamed: a
 // chat server and an HTTP server at different versions have to agree on them
-// during a rolling deployment.
+// during a rolling deployment. TestTheWireKeySetMatchesTheRecordedContract gates
+// the set against a checked-in golden file, because the keys are derived from Go
+// identifiers and a pure rename would otherwise rewrite the contract silently.
 type DomainError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// key is the first, most specific class the error matched. It is what a peer
+	// that predates `keys` reads, so it is always populated.
+	Key string `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	// keys is every class the error matched, most specific first.
+	//
+	// One error can carry several sentinels: errors.Join(store.ErrNotFound,
+	// service.ErrInvalidCanvas) is what a compensating delete produces after a
+	// rejected create, and errors.Is answers true for both in process. While the
+	// wire carried one key, the caller restored one of the two, so the same
+	// failure was channel_not_found in the monolith and invalid_arg_name across
+	// the seam. keys is additive, so an older peer that reads only `key` behaves
+	// exactly as it did.
+	Keys          []string `protobuf:"bytes,2,rep,name=keys,proto3" json:"keys,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -79,13 +93,21 @@ func (x *DomainError) GetKey() string {
 	return ""
 }
 
+func (x *DomainError) GetKeys() []string {
+	if x != nil {
+		return x.Keys
+	}
+	return nil
+}
+
 var File_sameoldchat_chat_v1_errors_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_errors_proto_rawDesc = "" +
 	"\n" +
-	" sameoldchat/chat/v1/errors.proto\x12\x13sameoldchat.chat.v1\"\x1f\n" +
+	" sameoldchat/chat/v1/errors.proto\x12\x13sameoldchat.chat.v1\"3\n" +
 	"\vDomainError\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03keyBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x12\n" +
+	"\x04keys\x18\x02 \x03(\tR\x04keysBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_errors_proto_rawDescOnce sync.Once

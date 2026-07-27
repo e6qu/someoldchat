@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"errors"
-	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -325,6 +324,23 @@ func (s *Store) SeedUser(user domain.User) error {
 		return errors.New("invalid user presence")
 	}
 	user.Email = domain.NormalizeEmail(user.Email)
+	// The SQL repositories enforce workspace-scoped e-mail uniqueness through the
+	// users_workspace_email_normalized index, so seeding a second bootstrap
+	// identity onto one address failed there and silently produced two accounts
+	// on one identity here.
+	//
+	// The other half of that schema guarantee — users.workspace_id REFERENCES
+	// workspaces(id) — is deliberately NOT enforced here yet: this helper is
+	// called from roughly two hundred and fifty fixtures that never seed a
+	// workspace, so making it referential is a repository-wide fixture change
+	// rather than a store change. Recorded as a follow-up rather than hidden.
+	if user.Email != "" {
+		for id, existing := range s.users {
+			if id != user.ID && existing.WorkspaceID == user.WorkspaceID && domain.NormalizeEmail(existing.Email) == user.Email {
+				return store.ErrAlreadyExists
+			}
+		}
+	}
 	if existing, exists := s.users[user.ID]; exists {
 		if existing.Email == "" {
 			existing.Email = user.Email
@@ -506,20 +522,17 @@ func authMethodKey(workspace domain.WorkspaceID, provider string) string {
 	return string(workspace) + "\x00" + provider
 }
 
-// GetAuthMethod reports the stored enablement of an authorization provider. A
-// provider with no row reports store.ErrNotFound: the repository holds no
-// decision for it and must not invent one. Both repositories used to synthesise
-// Enabled: true, so a provider nobody had configured read as enabled. The value
-// returned with the sentinel is disabled, so a caller that ignores the error
-// still fails closed.
+// GetAuthMethod reports the stored administrative override for an authorization
+// provider. A provider with no row reports Enabled: true and a nil error. See
+// store.Store.GetAuthMethod for the decision and the reason: absence means "no
+// administrator has turned this provider off", not "no such provider", because
+// provider existence is decided by the operator's startup configuration and
+// absence-means-disabled locks a fresh deployment out with no bootstrap path.
 func (s *Store) GetAuthMethod(_ context.Context, workspace domain.WorkspaceID, provider string) (domain.AuthMethod, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	value, ok := s.authMethods[authMethodKey(workspace, provider)]
 	if !ok {
-		// Absence means "no administrative override", matching the SQL backends.
-		// See the note on sqlstore.Store.GetAuthMethod for why this must not be
-		// inverted to fail closed.
 		return domain.AuthMethod{WorkspaceID: workspace, Provider: provider, Enabled: true}, nil
 	}
 	return value, nil
@@ -780,8 +793,15 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	if _, exists := s.users[user.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	// domain.NormalizeEmail, never strings.EqualFold. EqualFold applies full
+	// Unicode simple folding, under which U+017F (ſ) folds onto 's': this
+	// repository resolved "ſmith@x.test" to the account owning "smith@x.test"
+	// while every SQL profile kept them apart, so an attacker who could name an
+	// address at an identity provider took over the folded-onto account on the
+	// memory profile alone.
+	user.Email = domain.NormalizeEmail(user.Email)
 	for _, existing := range s.users {
-		if existing.WorkspaceID == user.WorkspaceID && strings.EqualFold(existing.Email, user.Email) {
+		if existing.WorkspaceID == user.WorkspaceID && domain.NormalizeEmail(existing.Email) == user.Email {
 			return store.ErrAlreadyExists
 		}
 	}
@@ -797,15 +817,24 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 func (s *Store) FindUserByEmail(_ context.Context, workspace domain.WorkspaceID, email string) (domain.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	// See the note in CreateUser: this comparison decides which account an
+	// identity provider's asserted address resolves to, so it must use the one
+	// canonical form and must not case-fold beyond it.
+	normalized := domain.NormalizeEmail(email)
 	for _, user := range s.users {
-		if user.WorkspaceID == workspace && !user.Deleted && strings.EqualFold(strings.TrimSpace(user.Email), strings.TrimSpace(email)) {
+		if user.WorkspaceID == workspace && !user.Deleted && domain.NormalizeEmail(user.Email) == normalized {
 			return user, nil
 		}
 	}
 	return domain.User{}, store.ErrNotFound
 }
 
-func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, event events.Event) (domain.User, error) {
+// UpdateUserProfile commits the profile change and every event given with it as
+// one unit. See store.Store.UpdateUserProfile.
+func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, changes ...events.Event) (domain.User, error) {
+	if len(changes) == 0 {
+		return domain.User{}, errors.New("a profile change requires at least one event")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	user, ok := s.users[userID]
@@ -819,7 +848,7 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 	}
 	user.Profile = profile
 	s.users[userID] = user
-	s.outbox = append(s.outbox, event)
+	s.outbox = append(s.outbox, changes...)
 	return user, nil
 }
 
@@ -1213,12 +1242,15 @@ func (s *Store) CreateConversation(_ context.Context, conversation domain.Conver
 	s.conversations[conversation.ID] = conversation
 	s.conversationTeams[conversation.ID] = map[domain.WorkspaceID]struct{}{conversation.WorkspaceID: {}}
 	s.conversationOrg[conversation.ID] = false
-	if conversation.IsPrivate {
-		if s.memberships[conversation.ID] == nil {
-			s.memberships[conversation.ID] = make(map[domain.UserID]struct{})
-		}
-		s.memberships[conversation.ID][creator] = struct{}{}
+	// The creator joins the conversation, public or private. Joining only on
+	// private conversations was invisible while membership was consulted only to
+	// decide whether a private conversation could be read; once membership
+	// governed writing, it meant a caller could create a public channel and then
+	// be refused permission to rename the channel they had just made.
+	if s.memberships[conversation.ID] == nil {
+		s.memberships[conversation.ID] = make(map[domain.UserID]struct{})
 	}
+	s.memberships[conversation.ID][creator] = struct{}{}
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -2638,9 +2670,15 @@ func (s *Store) GetIdempotentMessage(ctx context.Context, workspace domain.Works
 func (s *Store) GetMessageByCreatedAt(_ context.Context, conversation domain.ConversationID, createdAt time.Time) (domain.Message, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	// Compare instants, not their textual timestamps, and truncate both sides to
+	// the resolution a message's public identifier can express — the same key the
+	// SQL repositories now build. Returning the stored value directly handed the
+	// caller an alias into store state through domain.Message.Unfurls, which is a
+	// map; every other read here clones.
+	wanted := domain.MessageInstant(createdAt)
 	for _, message := range s.messages[conversation] {
-		if domain.NewMessageTimestamp(message.CreatedAt) == domain.NewMessageTimestamp(createdAt) {
-			return message, nil
+		if domain.MessageInstant(message.CreatedAt).Equal(wanted) {
+			return cloneMessage(message), nil
 		}
 	}
 	return domain.Message{}, store.ErrNotFound
@@ -2755,8 +2793,13 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 	return page, nil
 }
 
+// userReactionKey is an ordering key AND a keyset cursor, compared with plain
+// string comparison. It must therefore use the fixed-width encoding, exactly as
+// the SQL repositories do: time.RFC3339Nano strips trailing zeros, so ".12Z"
+// sorts after ".123456Z" and the cursor minted from the earlier row skips the
+// later ones on the next page.
 func userReactionKey(value domain.UserReaction) string {
-	return value.Message.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
+	return string(domain.NewStoredTime(value.Message.CreatedAt)) + "\x00" + string(value.Message.ID) + "\x00" + value.Reaction.Name + "\x00" + string(value.Reaction.UserID)
 }
 
 func pinKey(pin domain.Pin) string { return string(pin.Message) + "\x00" + string(pin.UserID) }
@@ -2824,8 +2867,11 @@ func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, 
 	return values, next, hasMore, nil
 }
 
+// starKey is an ordering key AND a keyset cursor. See userReactionKey: the
+// variable-width encoding reordered stars.list and made the next page skip
+// every row whose fraction was a strict extension of the cursor's.
 func starKey(value domain.Star) string {
-	return value.CreatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(value.Message.ID)
+	return string(domain.NewStoredTime(value.CreatedAt)) + "\x00" + string(value.Message.ID)
 }
 
 func (s *Store) AddStar(_ context.Context, star domain.Star, event events.Event) error {
@@ -3552,7 +3598,24 @@ func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.Workspa
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	for _, reference := range s.blobReferences(workspace) {
+		if err := visit(reference); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// blobReferences exists so the read lock is released by defer rather than by a
+// hand-placed RUnlock on every exit path. The previous shape returned early on a
+// malformed photo URL while still holding s.mu for reading, which deadlocked the
+// process permanently on the next write — and the malformed URL was reachable by
+// any member through users.profile.set. A profile photo URL this deployment did
+// not mint names no blob of ours, so it is skipped rather than treated as a
+// corrupt database.
+func (s *Store) blobReferences(workspace domain.WorkspaceID) []string {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	references := make([]string, 0)
 	for _, file := range s.files {
 		if file.WorkspaceID == workspace && !file.Deleted {
@@ -3563,33 +3626,11 @@ func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.Workspa
 		if user.WorkspaceID != workspace || user.Deleted {
 			continue
 		}
-		if user.Profile.Image24 != "" {
-			key, err := photoBlobKey(workspace, user)
-			if err != nil {
-				return err
-			}
+		if key, ok := domain.UserPhotoBlobKey(workspace, user.ID, user.Profile.Image24); ok {
 			references = append(references, key)
 		}
 	}
-	s.mu.RUnlock()
-	for _, reference := range references {
-		if err := visit(reference); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func photoBlobKey(workspace domain.WorkspaceID, user domain.User) (string, error) {
-	prefix := "/users/" + string(workspace) + "/" + string(user.ID) + "/photo/"
-	if !strings.HasPrefix(user.Profile.Image24, prefix) {
-		return "", fmt.Errorf("user %q has an invalid photo URL", user.ID)
-	}
-	token := strings.TrimPrefix(user.Profile.Image24, prefix)
-	if token == "" || strings.Contains(token, "/") {
-		return "", fmt.Errorf("user %q has an invalid photo URL", user.ID)
-	}
-	return string(workspace) + "/users/" + string(user.ID) + "/" + token, nil
+	return references
 }
 
 func (s *Store) AddRemoteFile(_ context.Context, value domain.RemoteFile, event events.Event) error {
@@ -4065,15 +4106,43 @@ func listAccessKey(value domain.ListAccess) string {
 	return string(value.ListID) + "\x00" + value.EntityType + "\x00" + value.EntityID
 }
 
-func (s *Store) CreateList(_ context.Context, value domain.List, event events.Event) error {
+func (s *Store) CreateList(ctx context.Context, value domain.List, event events.Event) error {
+	return s.CreateListWithItems(ctx, value, event, nil)
+}
+
+// CreateListWithItems creates a list and its initial items as one unit: either
+// the list, every item and every event exist, or none of them do. See
+// store.Store.CreateListWithItems.
+func (s *Store) CreateListWithItems(_ context.Context, value domain.List, event events.Event, items []store.ListItemCreation) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.lists[value.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	// Validate the whole batch before applying any of it, so a rejected item
+	// cannot leave a partially created list behind. The SQL profile gets this
+	// from its transaction; this one has to be written that way.
+	created := make(map[domain.ListItemID]domain.ListItem, len(items))
+	for _, creation := range items {
+		if creation.Item.ListID != value.ID || creation.Item.WorkspaceID != value.WorkspaceID {
+			return store.ErrInvalidArgument
+		}
+		if _, duplicate := created[creation.Item.ID]; duplicate {
+			return store.ErrAlreadyExists
+		}
+		if creation.Item.ParentItemID != "" {
+			if _, exists := created[creation.Item.ParentItemID]; !exists {
+				return store.ErrNotFound
+			}
+		}
+		created[creation.Item.ID] = creation.Item
+	}
 	s.lists[value.ID] = value
-	s.listItems[value.ID] = make(map[domain.ListItemID]domain.ListItem)
+	s.listItems[value.ID] = created
 	s.outbox = append(s.outbox, event)
+	for _, creation := range items {
+		s.outbox = append(s.outbox, creation.Event)
+	}
 	return nil
 }
 
@@ -4257,7 +4326,7 @@ func (s *Store) resolveAccessLocked(workspace domain.WorkspaceID, owner, userID 
 		default:
 			return
 		}
-		if store.AccessRank(level) > store.AccessRank(bestLevel) {
+		if store.BetterAccessGrant(entityType, entityID, level, bestType, bestID, bestLevel) {
 			bestType, bestID, bestLevel = entityType, entityID, level
 		}
 	})

@@ -29,15 +29,17 @@ func SlackEventBody(record Record, appID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if delivered.Type == "event_callback" {
-		return validateSlackEventEnvelope(delivered.Object, appID, record)
-	}
 	if _, ok := delivered.Object["event_ts"]; !ok {
 		return nil, fmt.Errorf("%w: Slack inner event requires event_ts", ErrPayloadMalformed)
 	}
 	encoded, err := delivered.Encode()
 	if err != nil {
-		return nil, err
+		// Every failure reachable from here describes the record rather than the
+		// destination, so every one of them carries a sentinel the worker
+		// classifies as permanent. An unsentinelled error would be classified
+		// retryable and re-claimed every lease period forever, which is the
+		// unbounded retry loop the typed payload contract exists to remove.
+		return nil, fmt.Errorf("%w: Slack event payload cannot be re-encoded: %v", ErrPayloadMalformed, err)
 	}
 	envelope := map[string]any{
 		"type":       "event_callback",
@@ -50,38 +52,14 @@ func SlackEventBody(record Record, appID string) ([]byte, error) {
 	return json.Marshal(envelope)
 }
 
-func validateSlackEventEnvelope(object map[string]json.RawMessage, appID string, record Record) ([]byte, error) {
-	for _, name := range []string{"team_id", "api_app_id", "event_id", "event_time", "event"} {
-		if _, ok := object[name]; !ok {
-			return nil, fmt.Errorf("Slack event envelope requires %s", name)
-		}
-	}
-	var actualAppID string
-	if err := json.Unmarshal(object["api_app_id"], &actualAppID); err != nil || strings.TrimSpace(actualAppID) == "" {
-		return nil, errors.New("Slack event api_app_id must be a non-empty string")
-	}
-	if actualAppID != appID {
-		return nil, fmt.Errorf("Slack event app ID %q does not match configured app ID %q", actualAppID, appID)
-	}
-	var teamID, eventID string
-	if err := json.Unmarshal(object["team_id"], &teamID); err != nil || teamID != string(record.Event.WorkspaceID) {
-		return nil, errors.New("Slack event team_id does not match the durable record workspace")
-	}
-	if err := json.Unmarshal(object["event_id"], &eventID); err != nil || eventID != string(record.Event.ID) {
-		return nil, errors.New("Slack event event_id does not match the durable record")
-	}
-	inner, err := decodeDelivered(string(object["event"]))
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := inner.Object["event_ts"]; !ok {
-		return nil, fmt.Errorf("%w: Slack inner event requires event_ts", ErrPayloadMalformed)
-	}
-	return json.Marshal(object)
-}
-
 // SlackSignature returns the request signature specified by Slack's signing
 // secret protocol for body and timestamp.
+//
+// The signature covers the exact bytes of the request body. A caller must sign
+// the body it sends rather than a re-encoding of it: a second json.Marshal of
+// the same document can differ in key order or spacing, and the receiver
+// recomputes the MAC over the bytes it received, so a re-encode fails at every
+// real receiver while passing any test that re-encodes the same way.
 func SlackSignature(signingSecret string, timestamp time.Time, body []byte) (string, error) {
 	signingSecret = strings.TrimSpace(signingSecret)
 	if signingSecret == "" {

@@ -379,10 +379,22 @@ func TestFilesListHonoursEveryDeclaredFilter(t *testing.T) {
 		t.Errorf("page 2 repeated page 1 (%q)", first[0])
 	}
 
-	// An unrecognised type name narrows to nothing rather than falling back to
-	// an unscoped answer.
-	if got := decodeFilesList(t, handler, "types=not-a-type"); len(got) != 0 {
-		t.Errorf("unrecognised type returned %v, want no files", got)
+	// An unrecognised type name is refused with unknown_type. This assertion used
+	// to require an empty `ok:true` list, which is the answer for "no such file"
+	// and not for "no such type" — and `unknown_type` appears in exactly one enum
+	// in the whole pinned snapshot, and it is this operation's. Requiring the
+	// empty success made the one code the snapshot is unambiguous about
+	// unreachable, so the assertion is corrected rather than relaxed.
+	response := callAPI(t, handler, http.MethodGet, "/api/files.list?types=not-a-type", "")
+	var refusal struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &refusal); err != nil {
+		t.Fatalf("decode %q: %v", response.Body, err)
+	}
+	if refusal.OK || refusal.Error != "unknown_type" {
+		t.Errorf("unrecognised type answered %q, want unknown_type", response.Body)
 	}
 }
 

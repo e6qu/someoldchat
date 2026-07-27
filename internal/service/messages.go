@@ -67,6 +67,32 @@ var (
 	// does not exist, and would hide the real reason from the operator reading the
 	// audit trail.
 	ErrNotWorkspaceAdmin = errors.New("actor is not a workspace administrator")
+
+	// ErrNotInConversation refuses an operation whose Slack contract requires the
+	// actor to be a member of the conversation it names.
+	//
+	// authorizeConversation checks membership only for a PRIVATE conversation,
+	// because a public channel is readable by every member of the workspace. That
+	// is right for a read and wrong for the ten operations whose pinned enums
+	// declare `not_in_channel` — chat.postMessage, chat.meMessage,
+	// chat.scheduleMessage, conversations.invite, conversations.kick,
+	// conversations.leave, conversations.mark, conversations.rename,
+	// conversations.setPurpose and conversations.setTopic — all of which act on
+	// the channel as one of its members. Before this, a member could post into,
+	// rename or set the topic of a public channel they had never joined, and
+	// `not_in_channel` was declared by nine enums and produced nowhere in the
+	// repository.
+	//
+	// It is distinct from store.ErrNotFound, which stays the answer for a channel
+	// the actor cannot see at all: naming a public channel proves nothing about
+	// the actor, so the refusal may say what it is.
+	ErrNotInConversation = errors.New("actor is not a member of the conversation")
+
+	// ErrLastWorkspaceOwner refuses a change that would leave a workspace with no
+	// owner. Ownership is the authority that appoints administrators, so a
+	// workspace that loses its last owner cannot appoint another and is
+	// permanently unadministrable.
+	ErrLastWorkspaceOwner = errors.New("workspace must retain an owner")
 )
 
 type Messages struct {
@@ -188,7 +214,12 @@ func (m Messages) GetAuthMethod(ctx context.Context, workspaceID domain.Workspac
 func (m Messages) SetAuthMethod(ctx context.Context, method domain.AuthMethod) error {
 	method.Provider = strings.ToLower(strings.TrimSpace(method.Provider))
 	if method.WorkspaceID == "" || method.Provider == "" {
-		return errors.New("auth method is incomplete")
+		// A bare errors.New here carried no domain class, so the chat gRPC
+		// boundary could only answer codes.Unavailable with fixed text: a caller
+		// mistake became "retry, the dependency is down" in the split deployment
+		// and an HTTP 503 to the operator. Which sign-in providers a workspace
+		// accepts is a workspace setting, which is what ErrInvalidWorkspace names.
+		return ErrInvalidWorkspace
 	}
 	return m.Store.SetAuthMethod(ctx, method)
 }
@@ -201,7 +232,9 @@ func (m Messages) CreateExternalIdentity(ctx context.Context, identity domain.Ex
 	identity.Provider = strings.ToLower(strings.TrimSpace(identity.Provider))
 	identity.Subject = strings.TrimSpace(identity.Subject)
 	if identity.WorkspaceID == "" || identity.Provider == "" || identity.Subject == "" || identity.UserID == "" {
-		return errors.New("external identity is incomplete")
+		// store.ErrInvalidArgument for the same reason as SetAuthMethod above: an
+		// unclassified error degrades to codes.Unavailable across the transport.
+		return store.ErrInvalidArgument
 	}
 	return m.Store.CreateExternalIdentity(ctx, identity)
 }
@@ -596,8 +629,20 @@ func (m Messages) ListEventsAfter(ctx context.Context, workspace domain.Workspac
 	return m.Store.ListEventsAfter(ctx, workspace, after, limit)
 }
 
+// IntegrationLogs answers team.integrationLogs, the administrative record of who
+// installed, approved, restricted or removed an app.
+//
+// Authority: requireWorkspaceAdmin. It gated on workspace membership, although
+// the disclosure is administrative and the implementation scans the workspace
+// journal from sequence zero with a user read per matching record — a request
+// any member could issue in a loop, each one costing the server a full journal
+// scan.
+//
+// The scan itself is still O(journal); it needs a store operation that filters,
+// offsets and joins in the backend. See the ListIntegrationLogs signature
+// reported with this change.
 func (m Messages) IntegrationLogs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID, changeType, serviceID, userFilter string, count, page int) (domain.IntegrationLogPage, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.IntegrationLogPage{}, err
 	}
 	appID = strings.TrimSpace(appID)
@@ -720,12 +765,30 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 }
 
 func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) error {
-	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+	actor, err := m.requireWorkspaceRole(ctx, workspaceID, actorID)
+	if err != nil {
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID {
 		return store.ErrNotFound
+	}
+	// Removal carries the same authority as demotion: it ends the target's
+	// participation entirely, so an administrator must not be able to apply it
+	// to an owner, and the last owner must not be removable.
+	membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil {
+		if membership.Role.Outranks(actor.Role) {
+			return ErrNotWorkspaceAdmin
+		}
+		if membership.Role == domain.WorkspaceRoleOwner {
+			if err := m.refuseLastOwnerChange(ctx, workspaceID, targetID); err != nil {
+				return err
+			}
+		}
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.removed", events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
@@ -735,10 +798,79 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 }
 
 func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
-	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+	actor, err := m.requireWorkspaceRole(ctx, workspaceID, actorID)
+	if err != nil {
+		return err
+	}
+	if err := m.authorizeRoleChange(ctx, workspaceID, actor, targetID, role); err != nil {
 		return err
 	}
 	return m.setWorkspaceRole(ctx, workspaceID, actorID, targetID, role)
+}
+
+// authorizeRoleChange enforces the workspace role hierarchy on a role mutation.
+//
+// Before this, "is the actor an administrator" was the only question asked, and
+// Admin and Owner answered it identically. An administrator could therefore
+// grant themselves Owner, demote the real owner, and remove them — taking a
+// workspace from its owner permanently. Three rules close that:
+//
+//   - nobody may grant a role at or above their own, so an administrator cannot
+//     mint an owner and cannot promote themselves;
+//   - nobody may change the role of someone who outranks them, so an
+//     administrator cannot demote an owner;
+//   - the last remaining owner cannot be demoted, because a workspace with no
+//     owner cannot appoint one and is permanently unadministrable.
+func (m Messages) authorizeRoleChange(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.WorkspaceMembership, targetID domain.UserID, role domain.WorkspaceRole) error {
+	// An actor may grant any role up to and including their own, so an
+	// administrator can appoint administrators but not owners. Requiring the
+	// actor to strictly outrank the granted role would stop an administrator
+	// appointing another administrator, which is ordinary workspace management.
+	if role.Rank() > actor.Role.Rank() {
+		return ErrNotWorkspaceAdmin
+	}
+	target, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	if target.Role.Outranks(actor.Role) {
+		return ErrNotWorkspaceAdmin
+	}
+	if target.Role == domain.WorkspaceRoleOwner && role != domain.WorkspaceRoleOwner {
+		return m.refuseLastOwnerChange(ctx, workspaceID, targetID)
+	}
+	return nil
+}
+
+// refuseLastOwnerChange reports ErrLastWorkspaceOwner when targetID is the only
+// active owner the workspace has.
+func (m Messages) refuseLastOwnerChange(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID) error {
+	page, err := m.Store.ListUsersByRole(ctx, workspaceID, domain.WorkspaceRoleOwner, domain.PageRequest{Limit: 2})
+	if err != nil {
+		return err
+	}
+	for _, owner := range page.Users {
+		if owner.ID != targetID && !owner.Deleted {
+			return nil
+		}
+	}
+	return ErrLastWorkspaceOwner
+}
+
+// requireWorkspaceRole is requireWorkspaceAdmin, returning the membership so a
+// caller can compare authority rather than re-reading it.
+func (m Messages) requireWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.WorkspaceMembership, error) {
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actorID)
+	if err != nil {
+		return domain.WorkspaceMembership{}, err
+	}
+	if membership.Role != domain.WorkspaceRoleAdmin && membership.Role != domain.WorkspaceRoleOwner {
+		return domain.WorkspaceMembership{}, ErrNotWorkspaceAdmin
+	}
+	return membership, nil
 }
 
 // setWorkspaceRole is the validation and write shared by the administrative
@@ -746,7 +878,11 @@ func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceI
 // authority check of its own; every caller must have decided authority first.
 func (m Messages) setWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
-		return errors.New("invalid workspace role")
+		// This is reachable from admin.users.setRole AND from the provider-driven
+		// SynchronizeExternalUserRole. As a bare errors.New it had no domain class,
+		// so the chat gRPC boundary answered codes.Unavailable with fixed text and
+		// the caller was told to retry a request that can never succeed.
+		return ErrInvalidWorkspace
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID {
@@ -1002,8 +1138,13 @@ func (m Messages) createWorkspaceUser(ctx context.Context, workspaceID domain.Wo
 	if workspaceID == "" || email == "" || !strings.Contains(email, "@") || len(email) > 320 || realName == "" || len(realName) > 200 {
 		return domain.User{}, ErrInvalidInviteRequest
 	}
+	// The role a user is created with is a workspace role, not an invite-request
+	// field; ErrInvalidWorkspace is the sentinel setWorkspaceRole and
+	// SynchronizeExternalUserRole already use for exactly this refusal, so the
+	// three places that decide "is this a role a caller may confer" now answer
+	// alike. Both sentinels map to the same client-visible code.
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin {
-		return domain.User{}, ErrInvalidInviteRequest
+		return domain.User{}, ErrInvalidWorkspace
 	}
 	if _, err := m.Store.FindUserByEmail(ctx, workspaceID, email); err == nil {
 		return domain.User{}, store.ErrAlreadyExists
@@ -1155,8 +1296,24 @@ func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return m.createView(ctx, workspaceID, actor, payload, "", "", "", "view.opened")
 }
 
+// PublishView replaces the App Home surface a workspace member sees.
+//
+// Authority: an actor may always publish to their OWN surface. Publishing to
+// SOMEONE ELSE's is a write to another member's state and requires
+// requireWorkspaceAdmin, exactly as WorkspaceMembership requires it for a read
+// of another member's state.
+//
+// It used to require workspace membership alone, so any member could replace any
+// other member's App Home with attacker-authored Block Kit — a workspace-wide
+// phishing surface delivered inside the product chrome, repeatable for every
+// user in the directory. expectedHash was no defence: the actor could read the
+// current hash or pass none at all.
 func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceID, actor, target domain.UserID, payload, expectedHash string) (domain.View, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if actor != target {
+		if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
+			return domain.View{}, err
+		}
+	} else if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
 	user, err := m.Store.GetUser(ctx, target)
@@ -1593,22 +1750,24 @@ func (m Messages) SetUserPhoto(ctx context.Context, workspaceID domain.Workspace
 		}
 		return domain.User{}, err
 	}
-	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, event)
+	// The profile change and the instruction to reclaim the replaced photo commit
+	// together. They used to be two transactions, so a crash between them left a
+	// blob nothing referenced and nothing would ever delete, and a failure of the
+	// second reported failure for a profile change that had already succeeded.
+	written := []events.Event{event}
+	if oldToken != "" {
+		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, string(workspaceID)+"/users/"+string(userID)+"/"+oldToken), time.Now().UTC())
+		if cleanupErr != nil {
+			return domain.User{}, cleanupErr
+		}
+		written = append(written, cleanup)
+	}
+	updated, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, written...)
 	if err != nil {
 		if cleanupErr := m.Blob.Delete(context.Background(), key); cleanupErr != nil {
 			return domain.User{}, errors.Join(err, fmt.Errorf("blob cleanup: %w", cleanupErr))
 		}
 		return domain.User{}, err
-	}
-	if oldToken != "" {
-		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
-		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, oldKey), time.Now().UTC())
-		if cleanupErr != nil {
-			return domain.User{}, cleanupErr
-		}
-		if cleanupErr := m.Store.AppendEvent(ctx, cleanup); cleanupErr != nil {
-			return domain.User{}, cleanupErr
-		}
 	}
 	return updated, nil
 }
@@ -1647,18 +1806,18 @@ func (m Messages) DeleteUserPhoto(ctx context.Context, workspaceID domain.Worksp
 	if err != nil {
 		return err
 	}
-	if _, err := m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, event); err != nil {
-		return err
-	}
+	// As in SetUserPhoto: the profile change and the reclamation of the removed
+	// photo are one unit, so a crash cannot leave an unreferenced blob behind.
+	written := []events.Event{event}
 	if oldToken != "" {
-		oldKey := string(workspaceID) + "/users/" + string(userID) + "/" + oldToken
-		cleanup, err := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, oldKey), time.Now().UTC())
-		if err != nil {
-			return err
+		cleanup, cleanupErr := newEvent(workspaceID, userID, events.BlobKey(events.UserPhotoBlobDeleteTopic, string(workspaceID)+"/users/"+string(userID)+"/"+oldToken), time.Now().UTC())
+		if cleanupErr != nil {
+			return cleanupErr
 		}
-		return m.Store.AppendEvent(ctx, cleanup)
+		written = append(written, cleanup)
 	}
-	return nil
+	_, err = m.Store.UpdateUserProfile(ctx, workspaceID, userID, user.Profile, written...)
+	return err
 }
 
 func (m Messages) SetUserPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence) (domain.User, error) {
@@ -1810,8 +1969,15 @@ func (m Messages) AdminCreateWorkspace(ctx context.Context, workspaceID domain.W
 	return value, nil
 }
 
+// TeamBillableInfo answers team.billableInfo, which discloses the full workspace
+// roster and each member's billing-active state.
+//
+// Authority: requireWorkspaceAdmin. It gated on workspace membership, so any
+// member could read the whole directory plus a billing fact about every other
+// member, and the unbounded form walked the workspace with a membership read per
+// user and accumulated the whole result in memory.
 func (m Messages) TeamBillableInfo(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) (domain.BillableInfo, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actorID); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
 		return domain.BillableInfo{}, err
 	}
 	if targetID != "" {
@@ -1936,7 +2102,7 @@ func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, name string) (domain.Conversation, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
 	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
@@ -1951,7 +2117,7 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 }
 
 func (m Messages) SetConversationTopic(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, topic string) (domain.Conversation, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
 	}
 	topic = strings.TrimSpace(topic)
@@ -1966,7 +2132,7 @@ func (m Messages) SetConversationTopic(ctx context.Context, workspaceID domain.W
 }
 
 func (m Messages) SetConversationPurpose(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, purpose string) (domain.Conversation, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
 	}
 	purpose = strings.TrimSpace(purpose)
@@ -2001,6 +2167,15 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
 	if err != nil || conversation.WorkspaceID != workspaceID {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	// Joining is self-service, so it is only ever available for an open channel.
+	// A private channel is joined by invitation and a direct conversation by
+	// opening it, and neither may be entered by naming an identifier. The store
+	// refuses this too, inside the write transaction, which is where the race-free
+	// enforcement belongs — but every neighbouring method states its own
+	// precondition, and this one silently depended on a backend detail.
+	if conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect {
 		return domain.Conversation{}, store.ErrNotFound
 	}
 	event, err := conversationEvent(workspaceID, "conversation.member_added", conversationID)
@@ -2186,10 +2361,17 @@ func (m Messages) AdminSetConversationTeams(ctx context.Context, workspaceID dom
 	seen := make(map[domain.WorkspaceID]struct{}, len(teams))
 	for _, teamID := range teams {
 		teamID = domain.WorkspaceID(strings.TrimSpace(string(teamID)))
-		if teamID == "" {
-			return ErrInvalidConversation
-		}
-		if _, err := m.Store.GetWorkspace(ctx, teamID); err != nil {
+		// A conversation may only be associated with a workspace this actor's
+		// authority covers. Testing existence instead accepted any workspace id on
+		// the deployment, which wrote a cross-tenant row and — because a missing
+		// workspace answered differently from a foreign one — turned the operation
+		// into an oracle any workspace administrator could use to enumerate every
+		// tenant. A foreign id and an absent id are now the same refusal.
+		//
+		// This process's topology places one workspace behind a conversation, the
+		// same fact AdminAddUserGroupTeams asserts. A multi-workspace association
+		// needs a persisted organization edge, which does not exist.
+		if teamID != workspaceID {
 			return ErrInvalidConversation
 		}
 		seen[teamID] = struct{}{}
@@ -2212,6 +2394,15 @@ func (m Messages) AdminSetConversationTeams(ctx context.Context, workspaceID dom
 func (m Messages) AdminDisconnectSharedConversation(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, conversationID domain.ConversationID, leaving []domain.WorkspaceID) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return err
+	}
+	// Every sibling administrative conversation method proves the conversation
+	// belongs to the actor's workspace before minting an event for it. This one
+	// relied on the store's own predicate, so it emitted a journal record naming a
+	// conversation that may not exist and refused in a different shape from the
+	// rest.
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return store.ErrNotFound
 	}
 	for index, team := range leaving {
 		leaving[index] = domain.WorkspaceID(strings.TrimSpace(string(team)))
@@ -2363,7 +2554,7 @@ func (m Messages) UserGroupChannels(ctx context.Context, workspaceID domain.Work
 }
 
 func (m Messages) AddUserGroupChannels(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, channels []domain.ConversationID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return err
 	}
 	value, err := m.Store.GetUserGroup(ctx, workspaceID, id)
@@ -2373,6 +2564,15 @@ func (m Messages) AddUserGroupChannels(ctx context.Context, workspaceID domain.W
 	add, err := normalizeUserGroupChannels(channels)
 	if err != nil || len(add) == 0 {
 		return ErrInvalidUserGroup
+	}
+	// A default channel list that names a conversation from another workspace, or
+	// none at all, is stored and rendered as though it were real. Every sibling
+	// that persists a conversation identifier proves it first.
+	for _, channelID := range add {
+		conversation, err := m.Store.GetConversation(ctx, channelID)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return store.ErrNotFound
+		}
 	}
 	combined := append(append([]domain.ConversationID(nil), value.Channels...), add...)
 	combined, err = normalizeUserGroupChannels(combined)
@@ -2417,7 +2617,7 @@ func (m Messages) AdminAddUserGroupTeams(ctx context.Context, workspaceID domain
 }
 
 func (m Messages) RemoveUserGroupChannels(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, channels []domain.ConversationID) error {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return err
 	}
 	value, err := m.Store.GetUserGroup(ctx, workspaceID, id)
@@ -2582,7 +2782,7 @@ func (m Messages) AdminTeamUsers(ctx context.Context, workspaceID domain.Workspa
 // instead. Workspace membership alone authorizes neither.
 func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, asConversationMember bool) (domain.Conversation, error) {
 	if asConversationMember {
-		if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 			return domain.Conversation{}, err
 		}
 	} else if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
@@ -2623,11 +2823,7 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
-	conversation, err := m.Store.GetConversation(ctx, conversationID)
-	if err != nil || conversation.WorkspaceID != workspaceID {
-		return store.ErrNotFound
-	}
-	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return err
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.member_left", events.String("channel_id", string(conversationID)), events.String("user_id", string(userID))), time.Now().UTC())
@@ -2638,7 +2834,7 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 }
 
 func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, targetID domain.UserID) error {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
@@ -2653,7 +2849,7 @@ func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain
 }
 
 func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.ReadCursor, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.ReadCursor{}, err
 	}
 	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
@@ -3009,8 +3205,16 @@ func normalizeUserGroupUsers(values []domain.UserID) ([]domain.UserID, error) {
 	return result, nil
 }
 
+// User group membership is a private-channel key: a conversation restricted with
+// admin.conversations.restrictAccess.addGroup admits exactly the members of the
+// named groups, so whoever can rewrite a group's membership can admit themselves
+// to every channel restricted to it. The mutations therefore require the same
+// authority as the restriction that reads them.
+//
+// The reads below stay at member authority: a directory of groups and their
+// members is ordinary workspace information, and @-mentioning a group needs it.
 func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, name, handle, description string) (domain.UserGroup, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
 	name = strings.TrimSpace(name)
@@ -3042,7 +3246,7 @@ func (m Messages) CreateUserGroup(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, name, handle, description string) (domain.UserGroup, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
 	value, err := m.Store.GetUserGroup(ctx, workspaceID, id)
@@ -3074,7 +3278,7 @@ func (m Messages) UpdateUserGroup(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) SetUserGroupEnabled(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, enabled bool) (domain.UserGroup, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload("usergroup.enabled_changed", events.String("usergroup_id", string(id)), events.Bool("enabled", enabled)), time.Now().UTC())
@@ -3106,7 +3310,7 @@ func (m Messages) UserGroupUsers(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) SetUserGroupUsers(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, id domain.UserGroupID, users []domain.UserID) (domain.UserGroup, error) {
-	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
 		return domain.UserGroup{}, err
 	}
 	normalized, err := normalizeUserGroupUsers(users)
@@ -3542,8 +3746,76 @@ func (m Messages) authorizeConversation(ctx context.Context, workspaceID domain.
 		if err != nil || !member {
 			return store.ErrNotFound
 		}
+		if err := m.authorizeConversationAccessGroups(ctx, workspaceID, userID, conversationID); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// requireConversationMembership is authorizeConversation plus the membership a
+// public channel does not require for a read.
+//
+// It is the check for an operation that acts on a conversation AS one of its
+// members: posting into it, renaming it, changing its topic or purpose,
+// inviting, kicking, leaving, marking it read. Those are exactly the operations
+// whose pinned enums declare `not_in_channel`; see ErrNotInConversation.
+func (m Messages) requireConversationMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return err
+	}
+	member, err := m.Store.IsConversationMember(ctx, conversationID, userID)
+	if err != nil {
+		return err
+	}
+	if !member {
+		return ErrNotInConversation
+	}
+	return nil
+}
+
+// authorizeConversationAccessGroups enforces the restriction
+// admin.conversations.restrictAccess.addGroup writes.
+//
+// The grants had a writer and a lister and no reader: an operator could restrict
+// a private channel to a user group, the API answered ok, the restriction read
+// back — and nothing consulted it, so membership alone still decided. That is
+// the same defect the list and canvas access grants had, left in place one file
+// over, and it is worse than an absent feature because the operator believes a
+// control exists.
+//
+// When a private conversation names access groups, a member must additionally
+// belong to one of them. An empty set restricts nothing, which is the state
+// every conversation starts in.
+func (m Messages) authorizeConversationAccessGroups(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) error {
+	groups, err := m.Store.ListConversationAccessGroups(ctx, workspaceID, conversationID)
+	if err != nil {
+		return err
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+	for _, groupID := range groups {
+		group, err := m.Store.GetUserGroup(ctx, workspaceID, groupID)
+		if err != nil {
+			// A restriction naming a group that can no longer be read must not
+			// resolve to "unrestricted": a deleted or unreadable group withholds
+			// access rather than granting it.
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		if !group.Enabled {
+			continue
+		}
+		for _, member := range group.Users {
+			if member == userID {
+				return nil
+			}
+		}
+	}
+	return store.ErrNotFound
 }
 
 // activeWorkspaceMembership resolves the durable membership an authority
@@ -3676,8 +3948,33 @@ func (m Messages) ProvisionExternalUser(ctx context.Context, workspaceID domain.
 // mutually authenticated TLS 1.3 connection (cmd/chatd/main.go configures
 // tls.RequireAndVerifyClientCert).
 func (m Messages) SynchronizeExternalUserRole(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID, role domain.WorkspaceRole) error {
+	// An identity provider may describe a member or an administrator. It may not
+	// appoint an owner: ownership is the authority that decides who administers
+	// the workspace, and it must not be assignable by an external claim or by
+	// anyone who can reach the internal boundary. createWorkspaceUser already
+	// refused Owner for the same reason; this path did not, so the two
+	// provisioning routes disagreed about the same concept.
+	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin {
+		return ErrInvalidWorkspace
+	}
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
 		return err
+	}
+	// Ownership is a local concept the provider cannot express: its role claim
+	// distinguishes a member from an administrator and says nothing about who
+	// owns the workspace. Writing the claim through unconditionally therefore
+	// DEMOTED an owner every time they signed in, and because only an owner may
+	// confer ownership, demoting the last one is unrecoverable — the workspace
+	// would be left permanently unadministrable by its own owner logging in.
+	//
+	// An existing owner keeps their role; the claim still governs the member and
+	// administrator distinction for everyone else.
+	membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil && membership.Role == domain.WorkspaceRoleOwner {
+		return nil
 	}
 	return m.setWorkspaceRole(ctx, workspaceID, "", targetID, role)
 }
@@ -3686,82 +3983,8 @@ func (m Messages) PostWithBlocks(ctx context.Context, workspaceID domain.Workspa
 	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, blocks, "", threadTimestamp, idempotencyKey)
 }
 
-func (m Messages) post(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	if idempotencyKey != "" {
-		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
-		if err == nil {
-			return cached, nil
-		}
-		if !errors.Is(err, store.ErrNotFound) {
-			return domain.Message{}, err
-		}
-	}
-	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	if err != nil || strings.TrimSpace(string(conversation)) == "" || (strings.TrimSpace(text) == "" && normalizedBlocks == "") {
-		return domain.Message{}, ErrInvalidMessage
-	}
-	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
-		return domain.Message{}, err
-	}
-	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
-		return domain.Message{}, err
-	}
-	threadTimestampValue := domain.MessageTimestamp("")
-	if threadTimestamp != "" {
-		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
-		if err != nil {
-			return domain.Message{}, ErrInvalidTimestamp
-		}
-		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
-		if err != nil || parent.WorkspaceID != workspaceID {
-			return domain.Message{}, store.ErrNotFound
-		}
-		threadTimestampValue = threadTimestamp
-	}
-	id, err := domain.NewMessageID()
-	if err != nil {
-		return domain.Message{}, err
-	}
-	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue, CreatedAt: time.Now().UTC().Truncate(time.Microsecond)}
-	event, err := newEvent(workspaceID, authorID, messagePayload("message.created", message), message.CreatedAt)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if err := m.Store.CreateMessage(ctx, message, event, idempotencyKey); err != nil {
-		if errors.Is(err, store.ErrIdempotencyConflict) {
-			return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
-		}
-		return domain.Message{}, err
-	}
-	return message, nil
-}
-
 func (m Messages) UpdateWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
 	return m.UpdateWithBlocksAndAttachments(ctx, workspaceID, userID, conversation, timestamp, text, blocks, "")
-}
-
-func (m Messages) update(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
-	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	if strings.TrimSpace(text) == "" && normalizedBlocks == "" {
-		return domain.Message{}, ErrInvalidMessage
-	}
-	message, err := m.messageForMutation(ctx, workspaceID, userID, conversation, timestamp)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if message.Deleted {
-		return domain.Message{}, ErrMessageAlreadyDeleted
-	}
-	message.Text = text
-	message.Blocks = normalizedBlocks
-	event, err := messageEvent(workspaceID, "message.changed", message)
-	if err != nil {
-		return domain.Message{}, err
-	}
-	if err := m.Store.UpdateMessage(ctx, message, event); err != nil {
-		return domain.Message{}, err
-	}
-	return message, nil
 }
 
 func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -3773,7 +3996,7 @@ func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domai
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, channel); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
 	text = strings.TrimSpace(text)
@@ -3858,7 +4081,7 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.Message{}, err
 	}
 	threadTimestampValue := domain.MessageTimestamp("")

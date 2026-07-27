@@ -29,8 +29,11 @@ versions_file="$(mktemp)"
 remaining_file="$(mktemp)"
 trap 'rm -f "$versions_file" "$remaining_file"' EXIT
 
+# `jq -s 'add'` over an empty stream yields null, and every consumer then
+# iterates $versions[] on it and fails with a jq type error, so the very first
+# publication of a new package failed the retention job outright.
 fetch_versions() {
-	gh api --paginate "$base?per_page=100" | jq -s 'add' >"$versions_file"
+	gh api --paginate "$base?per_page=100" | jq -s 'add // []' >"$versions_file"
 }
 
 visibility_attempts=12
@@ -50,13 +53,39 @@ for ((attempt = 1; attempt <= visibility_attempts; attempt++)); do
 	sleep 5
 done
 
-jq -r --argjson keep "$keep" -f "$(dirname "${BASH_SOURCE[0]}")/select-obsolete-container-versions.jq" "$versions_file" |
-	while IFS= read -r version_id; do
-		echo "deleting obsolete $package package version $version_id"
-		gh api --method DELETE "$base/$version_id"
-	done
+obsolete_file="$(mktemp)"
+trap 'rm -f "$versions_file" "$remaining_file" "$obsolete_file"' EXIT
+jq -r --argjson keep "$keep" -f "$(dirname "${BASH_SOURCE[0]}")/select-obsolete-container-versions.jq" "$versions_file" >"$obsolete_file"
 
-gh api --paginate "$base?per_page=100" | jq -s 'add' >"$remaining_file"
+# Nothing carrying a tag of the release under publication may be deleted, ever.
+# select-obsolete-container-versions.jq classifies any version with more than one
+# tag as unclassifiable and therefore obsolete, so aliasing the current release —
+# adding any second tag to one of its three package versions — made the release
+# being published deletable. The invariant is checked here, before the first
+# DELETE, because the post-deletion verification below would only report the loss
+# after it had happened.
+obsolete_ids="$(jq -R 'tonumber' "$obsolete_file" | jq -s -c .)"
+protected="$(jq -r --argjson ids "$obsolete_ids" --arg root "$current_tag" '
+  [$root, $root + "-amd64", $root + "-arm64"] as $current
+  | .[]
+  | select(.id as $id | $ids | index($id) != null)
+  | select([.metadata.container.tags[]? | select(. as $tag | $current | index($tag) != null)] | length > 0)
+  | "\(.id): \((.metadata.container.tags // []) | join(", "))"
+' "$versions_file")"
+if [[ -n "$protected" ]]; then
+	echo "retention selected package version(s) carrying a tag of the release under publication ($current_tag); refusing to delete anything:" >&2
+	printf '%s\n' "$protected" >&2
+	echo 'a release version must carry exactly one tag; remove the extra tag before republishing' >&2
+	exit 1
+fi
+
+while IFS= read -r version_id; do
+	[[ -n "$version_id" ]] || continue
+	echo "deleting obsolete $package package version $version_id"
+	gh api --method DELETE "$base/$version_id"
+done <"$obsolete_file"
+
+gh api --paginate "$base?per_page=100" | jq -s 'add // []' >"$remaining_file"
 
 release_count="$(jq '[.[].metadata.container.tags[]? | select(test("^[0-9a-f]{12}$"))] | unique | length' "$remaining_file")"
 if ((release_count > keep)); then

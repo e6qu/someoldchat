@@ -190,6 +190,7 @@ ENVIRONMENT = {
     "STATE_TABLE": "chat-activator",
     "IDLE_AFTER": "1800",
     "MAX_BODY_BYTES": "4194304",
+    "SCALE_DOWN_LOCK_SECONDS": "15",
 }
 
 
@@ -212,17 +213,111 @@ class ActivatorTest(unittest.TestCase):
             }
         ]
 
-    def request_event(self, method="GET", body=None, base64_encoded=False):
+    def request_event(self, method="GET", body=None, base64_encoded=False, cookies=None, headers=None):
         event = {
             "rawPath": "/login",
             "rawQueryString": "",
-            "headers": {"host": "example.test"},
+            "headers": dict(headers or {"host": "example.test"}),
             "requestContext": {"requestId": "r1", "http": {"method": method}},
         }
+        if cookies is not None:
+            event["cookies"] = cookies
         if body is not None:
             event["body"] = body
             event["isBase64Encoded"] = base64_encoded
         return event
+
+    def forwarded_header(self, name):
+        headers = self.requests[-1]["headers"]
+        for key, value in headers.items():
+            if key.lower() == name.lower():
+                return value
+        return None
+
+    def test_request_cookies_are_forwarded_to_the_application(self):
+        """Regression: payload format 2.0 carries request cookies in `cookies`, not `headers`.
+
+        Reading only `headers` forwarded every request without the SameOldChat
+        session cookie, so the application behind this Lambda was permanently
+        signed out. This is the mirror image of the Set-Cookie defect above.
+        """
+        self.activator.http.responder = lambda *_: StubResponse(200)
+
+        self.activator.handler(self.request_event(cookies=["sid=abc", "csrf=def"]), None)
+
+        self.assertEqual(self.forwarded_header("cookie"), "sid=abc; csrf=def")
+
+    def test_request_cookies_merge_with_an_existing_cookie_header_without_duplicating(self):
+        self.activator.http.responder = lambda *_: StubResponse(200)
+
+        self.activator.handler(
+            self.request_event(
+                cookies=["sid=abc", "theme=dark"],
+                headers={"host": "example.test", "Cookie": "sid=abc; locale=en"},
+            ),
+            None,
+        )
+
+        self.assertEqual(self.forwarded_header("cookie"), "sid=abc; locale=en; theme=dark")
+        self.assertIsNone(self.forwarded_header("host"), "hop-by-hop request headers are still dropped")
+
+    def test_no_cookie_header_is_invented_when_the_request_carries_none(self):
+        self.activator.http.responder = lambda *_: StubResponse(200)
+
+        self.activator.handler(self.request_event(), None)
+
+        self.assertIsNone(self.forwarded_header("cookie"))
+
+    def test_a_failed_wake_lock_release_does_not_fail_a_successful_wake(self):
+        """Regression: the conditional delete raised inside the wake `finally`, so a completed wake answered 503."""
+        self.ecs.tasks = []
+        self.activator.http.responder = lambda *_: StubResponse(200, b"ok")
+
+        original_delete = self.table.delete_item
+
+        def delete(Key, **kwargs):  # noqa: N803 - boto3 keyword spelling
+            if Key["id"] == "wake":
+                raise self.ClientError({"Error": {"Code": "ConditionalCheckFailedException"}})
+            return original_delete(Key, **kwargs)
+
+        self.table.delete_item = delete
+        started = []
+        original_run = self.ecs.run_task
+
+        def run_task(**kwargs):
+            started.append(kwargs)
+            self.ecs.tasks = [
+                {
+                    "taskArn": "arn:task/1",
+                    "attachments": [
+                        {"type": "ElasticNetworkInterface", "details": [{"name": "privateIPv4Address", "value": "10.0.0.7"}]}
+                    ],
+                }
+            ]
+            return original_run(**kwargs)
+
+        self.ecs.run_task = run_task
+
+        result = self.activator.handler(self.request_event(), None)
+
+        self.assertEqual(started and result["statusCode"], 200)
+
+    def test_the_scale_down_lock_expiry_matches_the_websocket_edge(self):
+        """The item is shared with cmd/ecs-ws-activator, whose scaleDownLockTTL is 15s.
+
+        This side wrote request_timeout + 60 on the same key, so a sweep killed
+        before its release blocked every new request and every new WebSocket
+        handshake for 85 seconds.
+        """
+        marker = self.table.items.setdefault(self.activator.LAST_REQUEST, {"id": self.activator.LAST_REQUEST, "at": 0, "expires": 0})
+        marker["expires"] = 0
+
+        self.activator.handler({"sameoldchat_maintenance": True}, None)
+
+        lock = self.table.items.get(self.activator.SCALE_DOWN_LOCK)
+        self.assertIsNone(lock, "the sweep releases the lock it took")
+        self.assertLessEqual(self.activator.SCALE_DOWN_LOCK_SECONDS, int(ENVIRONMENT["REQUEST_TIMEOUT"]))
+        self.assertEqual(self.activator.SCALE_DOWN_LOCK_SECONDS, 15)
 
     def test_duplicate_set_cookie_headers_survive_as_a_cookies_list(self):
         """Regression: dict(HTTPHeaderDict) comma-joined them into one unsplittable header."""
@@ -297,12 +392,25 @@ class ActivatorTest(unittest.TestCase):
         self.assertEqual(result["statusCode"], 503)
         self.assertEqual(self.requests, [], "no upstream call is made for an unusable event")
 
+    def test_a_refusal_carries_the_slack_error_envelope(self):
+        """docs/operations.md promises a Slack error envelope; this path answered text/plain,
+        so an official SDK raised a JSON decode error instead of surfacing an error code."""
+        event = self.request_event()
+        del event["requestContext"]["http"]["method"]
+
+        result = self.activator.handler(event, None)
+
+        self.assertEqual(result["headers"]["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(json.loads(result["body"]), {"ok": False, "error": "service_unavailable"})
+        self.assertEqual(result["headers"]["retry-after"], "1")
+
     def test_an_oversized_body_is_rejected_with_413_like_the_go_activator(self):
         oversized = base64.b64encode(b"x" * (int(ENVIRONMENT["MAX_BODY_BYTES"]) + 1)).decode()
 
         result = self.activator.handler(self.request_event("POST", oversized, base64_encoded=True), None)
 
         self.assertEqual(result["statusCode"], 413)
+        self.assertEqual(json.loads(result["body"]), {"ok": False, "error": "request_entity_too_large"})
         self.assertEqual(self.requests, [])
 
     def test_a_body_at_the_limit_is_forwarded(self):

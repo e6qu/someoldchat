@@ -30,18 +30,66 @@ STATE = dynamodb.Table(os.environ["STATE_TABLE"])
 STATE_CLIENT = dynamodb.meta.client
 IDLE_AFTER = int(os.environ["IDLE_AFTER"])
 MAX_BODY_BYTES = int(os.environ["MAX_BODY_BYTES"])
+# The `scale-down` item is shared with cmd/ecs-ws-activator, which holds it for
+# scaleDownLockTTL (15s) and documents why the expiry must be short: the release
+# is a conditional delete that can fail on a throttle or a killed task, and while
+# the item is unexpired *both* activators refuse every new request lease and
+# every new WebSocket lease. This side used to write REQUEST_TIMEOUT + 60 = 85s
+# on the same item, so a sweep killed by the Lambda timeout blocked the whole
+# deployment for 85 seconds. The value is now one shared setting, and the sweep
+# bounds its own work by it so the lock cannot outlive the work it protects.
+SCALE_DOWN_LOCK_SECONDS = int(os.environ["SCALE_DOWN_LOCK_SECONDS"])
 SCALE_DOWN_LOCK = "scale-down"
 LAST_REQUEST = "last-request"
 # Response headers whose value is per-hop or recomputed by API Gateway. Set-Cookie
 # is excluded from the header map because duplicates cannot survive a mapping;
 # it is returned through the payload format 2.0 `cookies` list instead.
 HOP_BY_HOP_RESPONSE_HEADERS = {"connection", "content-length", "transfer-encoding", "set-cookie"}
+# Request headers whose value is per-hop or recomputed for the upstream call.
+HOP_BY_HOP_REQUEST_HEADERS = {"host", "content-length", "connection", "transfer-encoding"}
 
 
-def response(status, body, retry_after=None):
-    headers = {"content-type": "text/plain; charset=utf-8"}
+def request_headers(event):
+    """Rebuilds the upstream request headers, including the session cookie.
+
+    API Gateway HTTP API payload format 2.0 delivers the request's cookies in a
+    top-level `cookies` array, not reliably as a `cookie` header — the exact
+    asymmetry the response direction already accounts for. Reading only
+    `headers` therefore forwarded every request without the SameOldChat session
+    cookie, so `internal/web` saw an anonymous request and the application behind
+    this Lambda was permanently signed out: sign-in appeared to succeed and then
+    bounced straight back to the login page.
+    """
+    headers = {k: v for k, v in (event.get("headers") or {}).items() if k.lower() not in HOP_BY_HOP_REQUEST_HEADERS}
+    cookies = [cookie for cookie in (event.get("cookies") or []) if cookie]
+    if not cookies:
+        return headers
+    # A configuration that also leaves `cookie` in the header map must not lose
+    # either source, and a cookie must not be sent twice.
+    existing = [name for name in headers if name.lower() == "cookie"]
+    present = []
+    for name in existing:
+        present.extend(pair.strip() for pair in headers.pop(name).split(";") if pair.strip())
+    for cookie in cookies:
+        if cookie not in present:
+            present.append(cookie)
+    headers["cookie"] = "; ".join(present)
+    return headers
+
+
+def response(status, error, retry_after=None):
+    """Answers a refusal with the Slack error envelope, not plain text.
+
+    docs/operations.md states that a request the activator cannot serve receives
+    "the closest compatible Slack error envelope recorded in the compatibility
+    ledger". This path answered `text/plain`, so an official Slack SDK raised a
+    JSON decode error instead of surfacing a Slack error code — which is the
+    entire point of that claim.
+    """
+    headers = {"content-type": "application/json; charset=utf-8"}
     if retry_after is not None:
         headers["retry-after"] = str(retry_after)
+    body = json.dumps({"ok": False, "error": error}, separators=(",", ":"))
     return {"statusCode": status, "headers": headers, "body": body, "isBase64Encoded": False}
 
 
@@ -106,7 +154,19 @@ def acquire_wake_lock(owner):
 
 
 def release_wake_lock(owner):
-    STATE.delete_item(Key={"id": "wake"}, ConditionExpression="owner = :owner", ExpressionAttributeValues={":owner": owner})
+    """Releases the wake lock, reporting rather than raising on failure.
+
+    This ran in a `finally` after `tasks` had been populated, so a
+    ConditionalCheckFailedException from the conditional delete escaped the inner
+    `try`, was caught by the outer handler, and turned a wake that had actually
+    succeeded into a 503. The lock carries an `expires` attribute, so a skipped
+    release is reclaimed by the next expiry rather than leaking, which is the
+    same reasoning the bottom `finally` already records.
+    """
+    try:
+        STATE.delete_item(Key={"id": "wake"}, ConditionExpression="owner = :owner", ExpressionAttributeValues={":owner": owner})
+    except ClientError as error:
+        print(json.dumps({"cleanup_error": "release wake lock: " + str(error)}))
 
 
 def start_tasks():
@@ -178,10 +238,15 @@ def stop_if_idle():
     be the invocation that closes it.
     """
     now = int(time.time())
+    # The lock excludes every new request and WebSocket lease while this runs, so
+    # the work must not outlive it. Each step checks the same deadline and gives
+    # up rather than continuing past the expiry another activator is entitled to
+    # take the lock at.
+    deadline = time.time() + SCALE_DOWN_LOCK_SECONDS
     lock_owner = "scale-down:" + str(uuid.uuid4())
     try:
         STATE.put_item(
-            Item={"id": SCALE_DOWN_LOCK, "owner": lock_owner, "expires": now + REQUEST_TIMEOUT + 60},
+            Item={"id": SCALE_DOWN_LOCK, "owner": lock_owner, "expires": now + SCALE_DOWN_LOCK_SECONDS},
             ConditionExpression="attribute_not_exists(id) OR expires < :now",
             ExpressionAttributeValues={":now": now},
         )
@@ -195,6 +260,8 @@ def stop_if_idle():
         leases = []
         scan = {"ConsistentRead": True, "FilterExpression": "begins_with(id, :prefix) AND expires > :now", "ExpressionAttributeValues": {":prefix": "lease:", ":now": int(time.time())}}
         while True:
+            if time.time() >= deadline:
+                raise ActivationError("scale-down lease scan exceeded the scale-down lock lifetime; the next sweep retries")
             page = STATE.scan(**scan)
             leases.extend(page.get("Items", []))
             last_key = page.get("LastEvaluatedKey")
@@ -204,9 +271,17 @@ def stop_if_idle():
         if leases:
             return
         for task in running_tasks():
+            if time.time() >= deadline:
+                raise ActivationError("scale-down exceeded the scale-down lock lifetime before every task was stopped; the next sweep finishes it")
             ecs.stop_task(cluster=CLUSTER, task=task["taskArn"], reason="scale-to-zero request complete")
     finally:
-        STATE.delete_item(Key={"id": SCALE_DOWN_LOCK}, ConditionExpression="owner = :owner", ExpressionAttributeValues={":owner": lock_owner})
+        try:
+            STATE.delete_item(Key={"id": SCALE_DOWN_LOCK}, ConditionExpression="owner = :owner", ExpressionAttributeValues={":owner": lock_owner})
+        except ClientError as error:
+            # The item carries `expires`, so a failed release lapses on its own
+            # within SCALE_DOWN_LOCK_SECONDS. Raising here would replace the real
+            # outcome of the sweep with a cleanup failure.
+            print(json.dumps({"cleanup_error": "release scale-down lock: " + str(error)}))
 
 
 def maintenance():
@@ -245,14 +320,14 @@ def handler(event, _context):
             else:
                 tasks = ready_tasks(min(request_deadline, time.time() + STARTUP_TIMEOUT), wait_for_tasks=True)
         if not tasks:
-            return response(503, "application did not become ready\n", retry_after=1)
+            return response(503, "service_unavailable", retry_after=1)
         request_id = event.get("requestContext", {}).get("requestId", str(uuid.uuid4()))
         index = int(hashlib.sha256(request_id.encode()).hexdigest(), 16) % len(tasks)
         _, ip = tasks[index]
         raw_path = event.get("rawPath", "/")
         query = event.get("rawQueryString", "")
         target = f"http://{ip}:{PORT}{raw_path}" + (f"?{query}" if query else "")
-        headers = {k: v for k, v in (event.get("headers") or {}).items() if k.lower() not in {"host", "content-length", "connection", "transfer-encoding"}}
+        headers = request_headers(event)
         body = event.get("body") or ""
         if event.get("isBase64Encoded"):
             body = base64.b64decode(body)
@@ -262,7 +337,7 @@ def handler(event, _context):
         # the application (internal/activator/handler.go:137). This path had no
         # cap at all, so the two activators enforced different contracts.
         if len(body) > MAX_BODY_BYTES:
-            return response(413, "request body too large\n")
+            return response(413, "request_entity_too_large")
         # An absent method must never be inferred: defaulting to GET turned a
         # mutating call into a read and answered it as a success.
         method = event.get("requestContext", {}).get("http", {}).get("method")
@@ -270,7 +345,7 @@ def handler(event, _context):
             raise ActivationError("request event carries no HTTP method")
         remaining = request_deadline - time.time()
         if remaining <= 1:
-            return response(503, "application startup consumed the request deadline\n", retry_after=1)
+            return response(503, "service_unavailable", retry_after=1)
         result = http.request(method, target, body=body, headers=headers, timeout=urllib3.Timeout(connect=min(2.0, remaining), read=remaining), retries=False, preload_content=True)
         response_body = base64.b64encode(result.data).decode()
         # dict() over a urllib3 HTTPHeaderDict comma-joins repeated keys, which
@@ -286,7 +361,7 @@ def handler(event, _context):
         return payload
     except (ActivationError, ClientError, urllib3.exceptions.HTTPError, ValueError) as error:
         print(json.dumps({"error": str(error)}))
-        return response(503, "activator could not serve the request\n", retry_after=1)
+        return response(503, "service_unavailable", retry_after=1)
     finally:
         # `finally` runs after the return value has been computed, so an
         # exception escaping here discarded a completed 200 and failed the

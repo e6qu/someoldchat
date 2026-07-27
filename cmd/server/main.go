@@ -27,99 +27,146 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 	"github.com/sameoldchat/sameoldchat/internal/realtime"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/web"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
 
-var releaseRevision = "development"
+// exitConfiguration and exitRuntime separate "the operator gave us something
+// impossible" from "something failed while running", the same way every other
+// binary in this repository does. Without the distinction an orchestrator with a
+// restart-on-runtime-failure-only policy restart-looped forever on a mistyped
+// certificate path.
+const (
+	exitConfiguration = 2
+	exitRuntime       = 1
+)
+
+// developmentReleaseRevision is the release identity of a binary built without
+// `-ldflags -X main.releaseRevision=<commit>`. It is deliberately not an
+// immutable commit, so it is the one value the release-identity check skips.
+const developmentReleaseRevision = "development"
+
+var releaseRevision = developmentReleaseRevision
 
 func main() {
-	addr := flag.String("addr", ":8080", "HTTP listen address")
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	// Every teardown runs through run's defers; main is the only place that
+	// exits. Sixteen os.Exit calls used to follow `defer runtime.Closer.Close()`,
+	// so a refused invocation left the store open, the write-ahead log created,
+	// and any dqlite cluster joined — exactly what cmd/blobgc's own comment says
+	// must never happen.
+	if code := run(context.Background(), logger, os.Args[1:]); code != 0 {
+		os.Exit(code)
+	}
+}
+
+func run(ctx context.Context, logger *slog.Logger, args []string) int {
+	flags := flag.NewFlagSet("sameoldchat", flag.ContinueOnError)
+	flags.SetOutput(os.Stderr)
+	addr := flags.String("addr", ":8080", "HTTP listen address")
 	// -chat-mode, -store, -auth-workspace, -auth-lookup-user, and -auth-public-url
 	// take an environment default like their neighbours because
 	// terraform/ecs-runtime configures a task purely from environment variables.
 	// Without these the module's documented `environment` output produced a task
 	// that exited 2 at "invalid chat composition", so following the module README
 	// yielded a crash-looping service.
-	chatMode := flag.String("chat-mode", os.Getenv("SAMEOLDCHAT_CHAT_MODE"), "chat composition: local or grpc (required)")
-	storeName := flag.String("store", os.Getenv("SAMEOLDCHAT_STORE"), "local storage backend: memory, sqlite, postgresql, or dqlite (required for -chat-mode=local)")
+	chatMode := flags.String("chat-mode", os.Getenv("SAMEOLDCHAT_CHAT_MODE"), "chat composition: local or grpc (required)")
+	storeName := flags.String("store", os.Getenv("SAMEOLDCHAT_STORE"), "local storage backend: memory, sqlite, postgresql, or dqlite (required for -chat-mode=local)")
 	// The default is deliberately empty rather than os.Getenv: the environment
 	// variable applies only to local composition (resolveDatabaseDSN), and reading
 	// it as the flag default would leak it into grpc composition, where an
 	// explicit DSN is rejected. The help text names it so `-h` still discloses it.
-	dsn := flag.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql storage; defaults to SAMEOLDCHAT_DATABASE_URL in local composition only")
-	dqliteDirectory := flag.String("dqlite-directory", "", "dqlite state directory; required for local dqlite storage")
-	dqliteAddress := flag.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
-	dqliteCluster := flag.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
-	dqliteDatabase := flag.String("dqlite-database", "", "dqlite database name; required for local dqlite storage")
-	blobDirectory := flag.String("blob-dir", "", "external blob directory for file storage")
-	blobS3Bucket := flag.String("blob-s3-bucket", os.Getenv("SAMEOLDCHAT_BLOB_S3_BUCKET"), "Amazon Simple Storage Service bucket for file storage")
-	blobS3Prefix := flag.String("blob-s3-prefix", os.Getenv("SAMEOLDCHAT_BLOB_S3_PREFIX"), "Amazon Simple Storage Service key prefix for file storage")
-	blobMaxBytes := flag.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
-	chatAddress := flag.String("chat-address", "", "distributed chat gRPC address; required for -chat-mode=grpc")
-	chatCA := flag.String("chat-ca", "", "CA certificate for distributed chat gRPC")
-	chatServerName := flag.String("chat-server-name", "", "TLS server name for distributed chat gRPC")
-	chatClientCert := flag.String("chat-client-cert", "", "client certificate for distributed chat gRPC")
-	chatClientKey := flag.String("chat-client-key", "", "client private key for distributed chat gRPC")
-	apiToken := flag.String("api-token", os.Getenv("SAMEOLDCHAT_API_TOKEN"), "API bearer token (required)")
+	dsn := flags.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql storage; defaults to SAMEOLDCHAT_DATABASE_URL in local composition only")
+	dqliteDirectory := flags.String("dqlite-directory", "", "dqlite state directory; required for local dqlite storage")
+	dqliteAddress := flags.String("dqlite-address", "", "dqlite node address; required for local dqlite storage")
+	dqliteCluster := flags.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
+	dqliteDatabase := flags.String("dqlite-database", "", "dqlite database name; required for local dqlite storage")
+	blobDirectory := flags.String("blob-dir", "", "external blob directory for file storage")
+	blobS3Bucket := flags.String("blob-s3-bucket", os.Getenv("SAMEOLDCHAT_BLOB_S3_BUCKET"), "Amazon Simple Storage Service bucket for file storage")
+	blobS3Prefix := flags.String("blob-s3-prefix", os.Getenv("SAMEOLDCHAT_BLOB_S3_PREFIX"), "Amazon Simple Storage Service key prefix for file storage")
+	blobMaxBytes := flags.Int64("blob-max-bytes", 100<<20, "maximum individual blob size")
+	chatAddress := flags.String("chat-address", "", "distributed chat gRPC address; required for -chat-mode=grpc")
+	chatCA := flags.String("chat-ca", "", "CA certificate for distributed chat gRPC")
+	chatServerName := flags.String("chat-server-name", "", "TLS server name for distributed chat gRPC")
+	chatClientCert := flags.String("chat-client-cert", "", "client certificate for distributed chat gRPC")
+	chatClientKey := flags.String("chat-client-key", "", "client private key for distributed chat gRPC")
+	apiToken := flags.String("api-token", os.Getenv("SAMEOLDCHAT_API_TOKEN"), "API bearer token (required)")
 	// -session-token is optional. It seeds one static browser session that every
 	// visitor holding the value shares, which is a development convenience and
-	// never an identity: identityConfig.validate rejects it as soon as a real
+	// never an identity: startupConfig.resolve rejects it as soon as a real
 	// identity provider is configured, because a shared bearer session bypasses
 	// every provider check, every revocation, and every workspace role.
-	sessionToken := flag.String("session-token", os.Getenv("SAMEOLDCHAT_SESSION_TOKEN"), "static development browser session token; rejected when an identity provider is configured")
-	metricsListen := flag.String("metrics-listen", os.Getenv("SAMEOLDCHAT_METRICS_LISTEN"), "operator-only listen address publishing /metrics; empty serves no metrics endpoint")
-	authWorkspace := flag.String("auth-workspace", os.Getenv("SAMEOLDCHAT_AUTH_WORKSPACE"), "workspace for external authorization (required when enabled)")
-	authLookupUser := flag.String("auth-lookup-user", os.Getenv("SAMEOLDCHAT_AUTH_LOOKUP_USER"), "existing user used to authorize external identity lookup (required when enabled)")
-	authPublicURL := flag.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks")
-	authCookieDomain := flag.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "optional parent DNS domain for SameOldChat session cookies")
-	authStateKeyHex := flag.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
-	bootstrapAdminEmail := flag.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
-	appToken := flag.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
-	appID := flag.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
-	socketHost := flag.String("socket-host", os.Getenv("SAMEOLDCHAT_SOCKET_HOST"), "public host used in Socket Mode connection URLs")
-	socketTLS := flag.Bool("socket-tls", os.Getenv("SAMEOLDCHAT_SOCKET_TLS") == "1", "use secure WebSocket URLs for Socket Mode")
-	googleClientID := flag.String("google-client-id", "", "Google OAuth client ID")
-	googleClientSecret := flag.String("google-client-secret", "", "Google OAuth client secret")
-	githubClientID := flag.String("github-client-id", "", "GitHub OAuth client ID")
-	githubClientSecret := flag.String("github-client-secret", "", "GitHub OAuth client secret")
-	entraClientID := flag.String("entra-client-id", "", "Microsoft Entra application client ID")
-	entraClientSecret := flag.String("entra-client-secret", "", "Microsoft Entra application client secret")
-	entraTenant := flag.String("entra-tenant", entraTenantDefault, "Microsoft Entra directory (tenant) identifier; multi-tenant endpoints are rejected")
-	oidcIssuer := flag.String("oidc-issuer", os.Getenv("SAMEOLDCHAT_OIDC_ISSUER"), "OpenID Connect issuer URL")
-	oidcClientID := flag.String("oidc-client-id", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_ID"), "OpenID Connect client ID")
-	oidcClientSecret := flag.String("oidc-client-secret", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_SECRET"), "OpenID Connect client secret")
-	release := flag.String("release-revision", releaseRevisionDefault(), "immutable application commit or image digest exposed to Shauth validation")
-	flag.Parse()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	resolvedDSN, err := resolveDatabaseDSN(*chatMode, *dsn)
-	if err != nil {
-		logger.Error("resolve database configuration", "error", err)
-		os.Exit(2)
-	}
-	if *socketHost == "" {
-		if *appToken != "" || *appID != "" {
-			logger.Error("-socket-host is required when Socket Mode is configured because apps.connections.open hands the value to clients")
-			os.Exit(2)
+	sessionToken := flags.String("session-token", os.Getenv("SAMEOLDCHAT_SESSION_TOKEN"), "static development browser session token; rejected when an identity provider is configured")
+	metricsListen := flags.String("metrics-listen", os.Getenv("SAMEOLDCHAT_METRICS_LISTEN"), "operator-only listen address publishing /metrics; empty serves no metrics endpoint")
+	authWorkspace := flags.String("auth-workspace", os.Getenv("SAMEOLDCHAT_AUTH_WORKSPACE"), "workspace for external authorization (required when enabled)")
+	authLookupUser := flags.String("auth-lookup-user", os.Getenv("SAMEOLDCHAT_AUTH_LOOKUP_USER"), "existing user used to authorize external identity lookup (required when enabled)")
+	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks")
+	authCookieDomain := flags.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "optional parent DNS domain for SameOldChat session cookies")
+	authStateKeyHex := flags.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
+	bootstrapAdminEmail := flags.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
+	appToken := flags.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
+	appID := flags.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
+	socketHost := flags.String("socket-host", os.Getenv("SAMEOLDCHAT_SOCKET_HOST"), "public host used in Socket Mode connection URLs")
+	socketTLS := flags.Bool("socket-tls", os.Getenv("SAMEOLDCHAT_SOCKET_TLS") == "1", "use secure WebSocket URLs for Socket Mode")
+	googleClientID := flags.String("google-client-id", "", "Google OAuth client ID")
+	googleClientSecret := flags.String("google-client-secret", "", "Google OAuth client secret")
+	githubClientID := flags.String("github-client-id", "", "GitHub OAuth client ID")
+	githubClientSecret := flags.String("github-client-secret", "", "GitHub OAuth client secret")
+	entraClientID := flags.String("entra-client-id", "", "Microsoft Entra application client ID")
+	entraClientSecret := flags.String("entra-client-secret", "", "Microsoft Entra application client secret")
+	entraTenant := flags.String("entra-tenant", entraTenantDefault, "Microsoft Entra directory (tenant) identifier; multi-tenant endpoints are rejected")
+	oidcIssuer := flags.String("oidc-issuer", os.Getenv("SAMEOLDCHAT_OIDC_ISSUER"), "OpenID Connect issuer URL")
+	oidcClientID := flags.String("oidc-client-id", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_ID"), "OpenID Connect client ID")
+	oidcClientSecret := flags.String("oidc-client-secret", os.Getenv("SAMEOLDCHAT_OIDC_CLIENT_SECRET"), "OpenID Connect client secret")
+	release := flags.String("release-revision", releaseRevisionDefault(), "immutable application commit or image digest exposed to Shauth validation")
+	// scripts/check-terraform-module-startup.sh starts this binary with exactly
+	// the environment and secret keys terraform/ecs-runtime exports and asserts
+	// it is accepted. terraform/ecs-runtime shipped an `environment` output and a
+	// `secrets` output whose combination this binary refuses, so the module was
+	// dead on arrival with every gate green; nothing could see it because no gate
+	// ever ran the binary against a module's own output.
+	checkConfiguration := flags.Bool("check-config", false, "validate the configuration and exit 0 without opening a store, dialing a peer, or binding a listener")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
 		}
-		*socketHost = socketHostDefault(*addr)
+		return exitConfiguration
 	}
 
-	mux := http.NewServeMux()
-	if *chatMode != "local" && *chatMode != "grpc" {
-		logger.Error("invalid chat composition", "mode", *chatMode, "allowed", "local, grpc")
-		os.Exit(2)
-	}
-	identity := identityConfig{
+	settings := startupConfig{
+		addr: *addr, chatMode: *chatMode, storeName: *storeName, databaseDSN: *dsn,
+		dqliteDirectory: *dqliteDirectory, dqliteAddress: *dqliteAddress, dqliteCluster: *dqliteCluster, dqliteDatabase: *dqliteDatabase,
+		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
+		chatAddress: *chatAddress, chatCA: *chatCA, chatServerName: *chatServerName, chatClientCert: *chatClientCert, chatClientKey: *chatClientKey,
 		apiToken: *apiToken, sessionToken: *sessionToken,
-		oidcIssuer: *oidcIssuer, googleClientID: *googleClientID, githubClientID: *githubClientID,
-		entraClientID: *entraClientID, entraTenant: *entraTenant,
+		authWorkspace: *authWorkspace, authLookupUser: *authLookupUser, authPublicURL: *authPublicURL, authStateKeyHex: *authStateKeyHex,
+		bootstrapAdminEmail: *bootstrapAdminEmail, appToken: *appToken, appID: *appID, socketHost: *socketHost,
+		googleClientID: *googleClientID, googleClientSecret: *googleClientSecret,
+		githubClientID: *githubClientID, githubClientSecret: *githubClientSecret,
+		entraClientID: *entraClientID, entraClientSecret: *entraClientSecret, entraTenant: *entraTenant,
+		oidcIssuer: *oidcIssuer, oidcClientID: *oidcClientID, oidcClientSecret: *oidcClientSecret,
 	}
-	if err := identity.validate(); err != nil {
-		logger.Error("invalid identity configuration", "error", err)
-		os.Exit(2)
+	resolved, err := settings.resolve()
+	if err != nil {
+		logger.Error("invalid configuration", "error", err)
+		return exitConfiguration
 	}
+	if *checkConfiguration {
+		logger.Info("configuration accepted", "chat-mode", settings.chatMode, "store", settings.storeName, "external-authorization", resolved.externalAuthorization)
+		return 0
+	}
+
+	// Signals are established before the first durable resource is opened. They
+	// used to be registered after ListenAndServe had already been started, and
+	// therefore after localchat.Open and a ten-second OpenID Connect discovery,
+	// so a SIGTERM during startup took the default disposition and killed the
+	// process with the store open.
+	applicationContext, stopSignals := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+
+	mux := http.NewServeMux()
 	// The registry is always built because the distributed chat client records
 	// into it through the transport package's dial options; it is published only
 	// on the operator listener, never on the listener that serves users.
@@ -130,106 +177,85 @@ func main() {
 	var sessionRevoker auth.SessionRevoker
 	var socketModeStore socketmode.ConnectionStore
 	var socketModeAuth auth.Authenticator
-	switch *chatMode {
+	switch settings.chatMode {
 	case "local":
-		if *chatAddress != "" || *chatCA != "" || *chatServerName != "" {
-			logger.Error("distributed chat settings supplied for local composition")
-			os.Exit(2)
-		}
-		cluster, err := localchat.ParseCluster(*dqliteCluster)
+		cluster, err := localchat.ParseCluster(settings.dqliteCluster)
 		if err != nil {
 			logger.Error("parse dqlite cluster", "error", err)
-			os.Exit(2)
+			return exitConfiguration
 		}
-		runtime, err := localchat.Open(context.Background(), localchat.Config{Backend: localchat.Backend(*storeName), DSN: resolvedDSN, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail})
+		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail})
 		if err != nil {
 			logger.Error("open local chat", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
+		defer func() {
+			if err := runtime.Closer.Close(); err != nil {
+				logger.Error("close local chat", "error", err)
+			}
+		}()
 		chatService = runtime.Service
 		socketModeStore = runtime.Store
-		if *appToken != "" || *appID != "" {
-			if *appToken == "" || *appID == "" {
-				logger.Error("Socket Mode requires both app token and app ID")
-				os.Exit(2)
-			}
+		if settings.appToken != "" {
 			appTokenStore, ok := runtime.TokenStore.(interface {
 				SeedAppToken(context.Context, string, domain.AppTokenRecord) error
 				auth.AppTokenStore
 			})
 			if !ok {
 				logger.Error("storage backend cannot seed Socket Mode app tokens")
-				os.Exit(1)
+				return exitRuntime
 			}
-			if err := appTokenStore.SeedAppToken(context.Background(), *appToken, domain.AppTokenRecord{AppID: domain.AppID(*appID), Scopes: []string{string(auth.ScopeConnectionsWrite)}}); err != nil {
+			if err := appTokenStore.SeedAppToken(applicationContext, settings.appToken, domain.AppTokenRecord{AppID: domain.AppID(settings.appID), Scopes: []string{string(auth.ScopeConnectionsWrite)}}); err != nil {
 				logger.Error("seed Socket Mode app token", "error", err)
-				os.Exit(1)
+				return exitRuntime
 			}
-			if err := runtime.Store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: domain.AppID(*appID), WorkspaceID: "Tdev", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+			if err := runtime.Store.CreateAppInstallation(applicationContext, domain.AppInstallation{AppID: domain.AppID(settings.appID), WorkspaceID: domain.WorkspaceID(resolved.workspace), Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 				logger.Error("seed Socket Mode app installation", "error", err)
-				os.Exit(1)
+				return exitRuntime
 			}
 		}
 		appTokenStore, ok := runtime.TokenStore.(auth.AppTokenStore)
 		if !ok {
 			logger.Error("storage backend cannot authenticate Socket Mode app tokens")
-			os.Exit(1)
+			return exitRuntime
 		}
 		socketModeAuth, err = auth.NewAppStored(appTokenStore)
 		if err != nil {
 			logger.Error("configure Socket Mode authenticator", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
-		if err := seedDevelopmentCredentials(context.Background(), runtime, *apiToken, *sessionToken, time.Now().UTC()); err != nil {
+		if err := seedDevelopmentCredentials(applicationContext, runtime, resolved, logger, time.Now().UTC()); err != nil {
 			logger.Error("seed development credentials", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 		authenticator, err = auth.NewStored(runtime.TokenStore)
 		if err != nil {
 			logger.Error("configure stored authenticator", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 		webAuthenticator, err = auth.NewBrowser(runtime.SessionStore)
 		if err != nil {
 			logger.Error("configure browser authenticator", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 		sessionRevoker = runtime.SessionRevoker
-		defer func() {
-			if err := runtime.Closer.Close(); err != nil {
-				logger.Error("close local chat", "error", err)
-			}
-		}()
 	case "grpc":
-		if *chatAddress == "" || *chatCA == "" || *chatServerName == "" || *chatClientCert == "" || *chatClientKey == "" {
-			logger.Error("grpc chat requires address, server CA/name, and client certificate/key")
-			os.Exit(2)
-		}
-		// bootstrapAdminEmail belongs in this list: grpc composition never calls
-		// localchat.Open, so the value was accepted and silently dropped, which
-		// made terraform/ecs-runtime's required bootstrap_admin_email inert and
-		// left administrator sign-in unreachable. cmd/chatd owns the store in this
-		// composition and takes the flag instead.
-		if *storeName != "" || resolvedDSN != "" || *dqliteDirectory != "" || *dqliteAddress != "" || *dqliteCluster != "" || *dqliteDatabase != "" || *blobDirectory != "" || *blobS3Bucket != "" || *blobS3Prefix != "" || strings.TrimSpace(*bootstrapAdminEmail) != "" {
-			logger.Error("local storage settings supplied for grpc composition", "hint", "-bootstrap-admin-email belongs on sameoldchat-chatd in grpc composition")
-			os.Exit(2)
-		}
-		caPEM, err := os.ReadFile(*chatCA)
+		caPEM, err := os.ReadFile(settings.chatCA)
 		if err != nil {
 			logger.Error("read chat gRPC CA", "error", err)
-			os.Exit(1)
+			return exitConfiguration
 		}
 		rootCAs := x509.NewCertPool()
 		if !rootCAs.AppendCertsFromPEM(caPEM) {
-			logger.Error("chat gRPC CA contains no certificates")
-			os.Exit(1)
+			logger.Error("chat gRPC CA contains no certificates", "path", settings.chatCA)
+			return exitConfiguration
 		}
-		clientCertificate, err := tls.LoadX509KeyPair(*chatClientCert, *chatClientKey)
+		clientCertificate, err := tls.LoadX509KeyPair(settings.chatClientCert, settings.chatClientKey)
 		if err != nil {
 			logger.Error("load chat gRPC client certificate", "error", err)
-			os.Exit(1)
+			return exitConfiguration
 		}
-		transportCredentials := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{clientCertificate}, RootCAs: rootCAs, ServerName: *chatServerName, MinVersion: tls.VersionTLS13})
+		transportCredentials := credentials.NewTLS(&tls.Config{Certificates: []tls.Certificate{clientCertificate}, RootCAs: rootCAs, ServerName: settings.chatServerName, MinVersion: tls.VersionTLS13})
 		// The transport package owns the options both peers must agree on: the
 		// message bounds, the keepalive that detects a half-open connection, the
 		// client-side instrumentation, and the trace propagation that keeps a
@@ -241,31 +267,30 @@ func main() {
 		// pair. It does not block, so a chat process that is still starting no
 		// longer prevents this process from starting; Connect starts the attempt
 		// immediately and GET /readyz reports the seam until it succeeds.
-		connection, err := grpc.NewClient(*chatAddress, append(chatgrpc.DialOptions(chatgrpc.Observer{Metrics: metrics, Logger: logger}), grpc.WithTransportCredentials(transportCredentials))...)
+		connection, err := grpc.NewClient(settings.chatAddress, append(chatgrpc.DialOptions(chatgrpc.Observer{Metrics: metrics, Logger: logger}), grpc.WithTransportCredentials(transportCredentials))...)
 		if err != nil {
-			logger.Error("connect chat gRPC", "error", err)
-			os.Exit(1)
+			logger.Error("connect chat gRPC", "error", err, "address", settings.chatAddress)
+			return exitConfiguration
 		}
+		defer connection.Close()
 		connection.Connect()
 		remote, tokenStore, sessionStore, remoteSessionRevoker, err := generated.ProvideChatServiceRemote(connection)
 		if err != nil {
-			_ = connection.Close()
 			logger.Error("create chat gRPC client", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 		chatService = remote
 		authenticator, err = auth.NewStored(tokenStore)
 		if err != nil {
 			logger.Error("configure stored authenticator", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 		webAuthenticator, err = auth.NewBrowser(sessionStore)
 		if err != nil {
 			logger.Error("configure stored browser authenticator", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
 		sessionRevoker = remoteSessionRevoker
-		defer connection.Close()
 	}
 	if socketModeStore == nil {
 		if value, ok := chatService.(socketmode.ConnectionStore); ok {
@@ -275,7 +300,7 @@ func main() {
 			configured, configureErr := auth.NewAppStored(value)
 			if configureErr != nil {
 				logger.Error("configure distributed Socket Mode authenticator", "error", configureErr)
-				os.Exit(1)
+				return exitRuntime
 			}
 			socketModeAuth = configured
 		}
@@ -285,113 +310,92 @@ func main() {
 	// the process, reporting a permanently broken feature as a transient outage.
 	// Incomplete configuration must fail at startup instead.
 	if socketModeStore != nil && socketModeAuth == nil {
-		logger.Error("Socket Mode connection store has no app-token authenticator", "mode", *chatMode)
-		os.Exit(1)
+		logger.Error("Socket Mode connection store has no app-token authenticator", "mode", settings.chatMode)
+		return exitRuntime
 	}
 	slackHandler, err := slack.NewHandler(chatService, authenticator)
 	if err != nil {
 		logger.Error("configure Slack API", "error", err)
-		os.Exit(1)
+		return exitRuntime
 	}
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
-		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: *socketHost, TLS: *socketTLS}, socketModeAuth)
-		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Events: chatService, Cursors: chatService, Responses: socketmode.ResponseRecorder{Store: chatService}})
+		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: resolved.socketHost, TLS: *socketTLS}, socketModeAuth)
+		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Events: chatService, Cursors: chatService, Responses: socketmode.ResponseRecorder{Store: chatService}, Logger: logger})
 	}
-	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, "Cdev", *authCookieDomain)
+	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, defaultConversation, *authCookieDomain)
 	if err != nil {
 		logger.Error("configure web", "error", err)
-		os.Exit(1)
+		return exitRuntime
 	}
-	providerCredentials := *googleClientID != "" || *googleClientSecret != "" || *githubClientID != "" || *githubClientSecret != "" || *entraClientID != "" || *entraClientSecret != "" || *oidcIssuer != "" || *oidcClientID != "" || *oidcClientSecret != ""
-	if providerCredentials {
-		if *authWorkspace == "" || *authLookupUser == "" || *authPublicURL == "" || *authStateKeyHex == "" {
-			logger.Error("external authorization requires workspace, lookup user, public URL, and state key")
-			os.Exit(2)
+	// Release identity is exposed by every deployment, not only one that
+	// configures an external provider. Nesting this under `providerCredentials`
+	// meant a deployment with, say, only an API token accepted -release-revision
+	// and never validated or exposed it, so docs/deployment.md's promise that
+	// every image exposes its immutable commit did not hold. The built-in
+	// development identity is the one value that is deliberately not a commit.
+	if settings.releaseRevision(*release) != "" {
+		if releaseErr := webHandler.SetReleaseRevision(*release); releaseErr != nil {
+			logger.Error("configure immutable release identity", "error", releaseErr, "revision", *release)
+			return exitConfiguration
 		}
-		stateKey, decodeErr := hex.DecodeString(*authStateKeyHex)
-		if decodeErr != nil || len(stateKey) < 32 {
-			// The decode error is deliberately not logged: encoding/hex reports
-			// the offending byte of the key ("invalid byte: U+007A 'z'"), which
-			// writes part of a secret into the process log.
-			logger.Error("authorization state key must contain at least 32 bytes of hex")
-			os.Exit(2)
-		}
+	}
+	if resolved.externalAuthorization {
 		providers := make([]web.ProviderConfig, 0, 4)
-		if (*googleClientID == "") != (*googleClientSecret == "") {
-			logger.Error("Google client ID and secret must be supplied together")
-			os.Exit(2)
+		if settings.googleClientID != "" {
+			providers = append(providers, web.ProviderConfig{Name: "google", ClientID: settings.googleClientID, ClientSecret: settings.googleClientSecret, AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://openidconnect.googleapis.com/v1/userinfo", Scopes: []string{"openid", "email", "profile"}})
 		}
-		if *googleClientID != "" {
-			providers = append(providers, web.ProviderConfig{Name: "google", ClientID: *googleClientID, ClientSecret: *googleClientSecret, AuthorizeURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token", UserInfoURL: "https://openidconnect.googleapis.com/v1/userinfo", Scopes: []string{"openid", "email", "profile"}})
+		if settings.githubClientID != "" {
+			providers = append(providers, web.ProviderConfig{Name: "github", ClientID: settings.githubClientID, ClientSecret: settings.githubClientSecret, AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", UserInfoURL: "https://api.github.com/user", EmailURL: "https://api.github.com/user/emails", Scopes: []string{"read:user", "user:email"}})
 		}
-		if (*githubClientID == "") != (*githubClientSecret == "") {
-			logger.Error("GitHub client ID and secret must be supplied together")
-			os.Exit(2)
+		if settings.entraClientID != "" {
+			providers = append(providers, web.ProviderConfig{Name: "entra", ClientID: settings.entraClientID, ClientSecret: settings.entraClientSecret, AuthorizeURL: "https://login.microsoftonline.com/" + settings.entraTenant + "/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/" + settings.entraTenant + "/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "profile", "email", "offline_access"}})
 		}
-		if *githubClientID != "" {
-			providers = append(providers, web.ProviderConfig{Name: "github", ClientID: *githubClientID, ClientSecret: *githubClientSecret, AuthorizeURL: "https://github.com/login/oauth/authorize", TokenURL: "https://github.com/login/oauth/access_token", UserInfoURL: "https://api.github.com/user", EmailURL: "https://api.github.com/user/emails", Scopes: []string{"read:user", "user:email"}})
-		}
-		// The tenant is validated by identityConfig.validate, which runs before any
-		// store is opened. Requiring a non-empty tenant here as well made a
-		// deployment that configures only Google fail with an Entra message once
-		// the tenant default stopped being "common".
-		if (*entraClientID == "") != (*entraClientSecret == "") {
-			logger.Error("Microsoft Entra client ID and secret must be supplied together")
-			os.Exit(2)
-		}
-		if *entraClientID != "" {
-			providers = append(providers, web.ProviderConfig{Name: "entra", ClientID: *entraClientID, ClientSecret: *entraClientSecret, AuthorizeURL: "https://login.microsoftonline.com/" + *entraTenant + "/oauth2/v2.0/authorize", TokenURL: "https://login.microsoftonline.com/" + *entraTenant + "/oauth2/v2.0/token", UserInfoURL: "https://graph.microsoft.com/oidc/userinfo", Scopes: []string{"openid", "profile", "email", "offline_access"}})
-		}
-		if (*oidcIssuer == "") != (*oidcClientID == "") || (*oidcIssuer == "") != (*oidcClientSecret == "") {
-			logger.Error("OpenID Connect issuer, client ID, and client secret must be supplied together")
-			os.Exit(2)
-		}
-		if *oidcIssuer != "" {
-			discoveryContext, cancelDiscovery := context.WithTimeout(context.Background(), 10*time.Second)
-			oidcProvider, discoveryErr := web.DiscoverOpenIDConnectProvider(discoveryContext, &http.Client{Timeout: 10 * time.Second}, *oidcIssuer, *oidcClientID, *oidcClientSecret)
+		if settings.oidcIssuer != "" {
+			discoveryContext, cancelDiscovery := context.WithTimeout(applicationContext, 10*time.Second)
+			oidcProvider, discoveryErr := web.DiscoverOpenIDConnectProvider(discoveryContext, &http.Client{Timeout: 10 * time.Second}, settings.oidcIssuer, settings.oidcClientID, settings.oidcClientSecret)
 			cancelDiscovery()
 			if discoveryErr != nil {
 				logger.Error("discover OpenID Connect provider", "error", discoveryErr)
-				os.Exit(1)
+				return exitRuntime
 			}
 			providers = append(providers, oidcProvider)
 		}
-		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(*authWorkspace), domain.UserID(*authLookupUser), *authPublicURL, *authCookieDomain, stateKey, providers)
+		loginHandler, loginErr := web.NewLoginHandler(chatService, domain.WorkspaceID(resolved.workspace), domain.UserID(resolved.lookupUser), settings.authPublicURL, *authCookieDomain, resolved.authStateKey, providers)
 		if loginErr != nil {
 			logger.Error("configure external authorization", "error", loginErr)
-			os.Exit(1)
+			return exitRuntime
 		}
 		webHandler.Login = &loginHandler
-		// Release identity is required whenever any external provider is
-		// configured, not only for OpenID Connect. Nesting this under
-		// *oidcIssuer != "" meant a deployment with, say, only GitHub sign-in
-		// accepted -release-revision and never exposed it, so
-		// docs/deployment.md's promise that every image exposes its immutable
-		// commit did not hold and release identity could not be verified.
-		if releaseErr := webHandler.SetReleaseRevision(*release); releaseErr != nil {
-			logger.Error("configure immutable release identity", "error", releaseErr, "revision", *release)
-			os.Exit(2)
-		}
 	}
 	webHandler.Register(mux)
-	sseHandler, err := realtime.NewHandler(chatService, "Tdev", webAuthenticator)
+	// The realtime handlers used to be built with the literal workspace "Tdev",
+	// so live delivery answered 403 for every deployment whose workspace is its
+	// own. -auth-workspace already names that workspace; it is the same value
+	// external authorization provisions users into.
+	sseHandler, err := realtime.NewHandler(chatService, domain.WorkspaceID(resolved.workspace), webAuthenticator)
 	if err != nil {
 		logger.Error("configure realtime", "error", err)
-		os.Exit(1)
+		return exitRuntime
 	}
+	// Without an explicit logger every operator-visible realtime and Socket Mode
+	// diagnostic — a slow-consumer drop, an inconclusive re-authorization, a
+	// record with no event identifier, an envelope returned to the queue — goes
+	// to slog.Default() instead of this process's configured handler.
+	sseHandler.Logger = logger
 	sseHandler.Register(mux)
-	rtmHandler, err := realtime.NewRTMHandler(chatService, "Tdev", chatService, chatService)
+	rtmHandler, err := realtime.NewRTMHandler(chatService, domain.WorkspaceID(resolved.workspace), chatService, chatService)
 	if err != nil {
 		logger.Error("configure RTM", "error", err)
-		os.Exit(1)
+		return exitRuntime
 	}
+	rtmHandler.Logger = logger
 	rtmHandler.RegisterRTM(mux)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
-	mux.HandleFunc("GET /readyz", readinessHandler(chatService))
+	mux.HandleFunc("GET /readyz", readinessHandler(chatService, logger, resolved.workspace, resolved.lookupUser))
 	mux.HandleFunc("GET /{$}", applicationRootHandler)
 
 	// ReadHeaderTimeout bounds the slow-header (Slowloris) window that previously
@@ -402,10 +406,17 @@ func main() {
 	// which a whole-request deadline would sever mid-stream. Per-response
 	// deadlines belong in those handlers, not on the listener.
 	server := &http.Server{
-		Addr:              *addr,
+		Addr:              settings.addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		// Every request context descends from the signal context, so a long-lived
+		// stream sees its context end the moment SIGTERM arrives. Without this the
+		// server-sent event stream at /events and the two sockets never observe
+		// the shutdown, Shutdown waits the full ten seconds for handlers that will
+		// never return on their own, and the process exits non-zero on every
+		// ordinary deploy.
+		BaseContext: func(net.Listener) context.Context { return applicationContext },
 	}
 	// Metrics are published on their own listener, never on the listener that
 	// serves users: the series describe request volumes and gRPC status codes of
@@ -425,27 +436,32 @@ func main() {
 			}
 		}()
 	}
-	logger.Info("server listening", "addr", *addr)
+	logger.Info("server listening", "addr", settings.addr)
 	serveErrors := make(chan error, 1)
 	go func() { serveErrors <- server.ListenAndServe() }()
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	defer signal.Stop(signals)
 	select {
 	case err := <-serveErrors:
-		if err != nil && err != http.ErrServerClosed {
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Error("server stopped", "error", err)
-			os.Exit(1)
+			return exitRuntime
 		}
-	case sig := <-signals:
-		logger.Info("server draining", "signal", sig.String())
+	case <-applicationContext.Done():
+		logger.Info("server draining")
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
+		// A drain that exceeds its deadline is a warning followed by Close, not a
+		// failure exit. Exiting here skipped the deferred store close and the
+		// metrics drain, so a slow client turned an ordinary deploy into an
+		// abandoned SQLite checkpoint and a non-zero exit; Close severs the
+		// remaining connections and lets every defer run.
 		if err := server.Shutdown(shutdownContext); err != nil {
-			logger.Error("server drain failed", "error", err)
-			os.Exit(1)
+			logger.Warn("server drain deadline exceeded; closing remaining connections", "error", err)
+			if err := server.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				logger.Error("server close failed", "error", err)
+			}
 		}
 	}
+	return 0
 }
 
 // entraTenantDefault is empty on purpose.
@@ -465,28 +481,88 @@ const entraTenantDefault = ""
 // in a process command line and is shared by everyone who knows it.
 const devSessionLifetime = time.Hour
 
+// defaultWorkspace and defaultLookupUser are the seeded development identities.
+// They are used only when -auth-workspace and -auth-lookup-user are not set,
+// which is the single-tenant development profile that seeds them.
+const (
+	defaultWorkspace  = "Tdev"
+	defaultLookupUser = "Udev"
+)
+
+// defaultConversation is the open channel internal/app/localchat seeds. It is
+// the channel the web application opens by default and the one the seeded
+// credentials are joined to, so the two cannot name different conversations.
+const defaultConversation = "Cdev"
+
 // multiTenantEntraTenants are the Entra endpoints that accept a sign-in from a
 // directory this deployment does not control. Each of them makes the returned
 // identity attacker-controlled, so they are rejected rather than warned about.
 var multiTenantEntraTenants = map[string]bool{"common": true, "organizations": true, "consumers": true}
 
-// identityConfig is the identity configuration of one server process. It is
-// validated before any store is opened or any listener is bound, so an
-// impossible or unsafe combination fails at startup rather than at the first
-// sign-in attempt.
-type identityConfig struct {
-	apiToken       string
-	sessionToken   string
-	oidcIssuer     string
-	googleClientID string
-	githubClientID string
-	entraClientID  string
-	entraTenant    string
+// startupConfig is the operator-supplied configuration of one server process,
+// exactly as parsed from flags and the environment.
+//
+// resolve is the whole of the configuration contract: everything that can be
+// decided without opening a store, dialing a peer, or binding a listener is
+// decided there, once, before any of those happen. `-check-config` runs resolve
+// and nothing else, so a deployment template can be verified against the binary
+// it configures instead of being discovered wrong by a crash-looping task.
+type startupConfig struct {
+	addr                string
+	chatMode            string
+	storeName           string
+	databaseDSN         string
+	dqliteDirectory     string
+	dqliteAddress       string
+	dqliteCluster       string
+	dqliteDatabase      string
+	blobDirectory       string
+	blobS3Bucket        string
+	blobS3Prefix        string
+	chatAddress         string
+	chatCA              string
+	chatServerName      string
+	chatClientCert      string
+	chatClientKey       string
+	apiToken            string
+	sessionToken        string
+	authWorkspace       string
+	authLookupUser      string
+	authPublicURL       string
+	authStateKeyHex     string
+	bootstrapAdminEmail string
+	appToken            string
+	appID               string
+	socketHost          string
+	googleClientID      string
+	googleClientSecret  string
+	githubClientID      string
+	githubClientSecret  string
+	entraClientID       string
+	entraClientSecret   string
+	entraTenant         string
+	oidcIssuer          string
+	oidcClientID        string
+	oidcClientSecret    string
+}
+
+// resolvedConfig is what a valid startupConfig yields: the derived values the
+// rest of startup consumes, so no later step re-derives or re-validates them.
+type resolvedConfig struct {
+	databaseDSN           string
+	socketHost            string
+	workspace             string
+	lookupUser            string
+	apiToken              string
+	sessionToken          string
+	authStateKey          []byte
+	scopes                []string
+	externalAuthorization bool
 }
 
 // configuredProviders names the real identity providers this process would
 // serve. It is the set that must not coexist with a static session token.
-func (c identityConfig) configuredProviders() []string {
+func (c startupConfig) configuredProviders() []string {
 	providers := make([]string, 0, 4)
 	for _, candidate := range []struct{ flag, value string }{
 		{flag: "-oidc-issuer", value: c.oidcIssuer},
@@ -501,25 +577,141 @@ func (c identityConfig) configuredProviders() []string {
 	return providers
 }
 
-func (c identityConfig) validate() error {
-	if strings.TrimSpace(c.apiToken) == "" {
-		return errors.New("-api-token is required")
+// releaseRevision reports the release identity that must be validated and
+// exposed, or "" for the built-in development identity, which deliberately is
+// not an immutable commit.
+func (c startupConfig) releaseRevision(configured string) string {
+	configured = strings.TrimSpace(configured)
+	if configured == developmentReleaseRevision {
+		return ""
 	}
+	return configured
+}
+
+func (c startupConfig) resolve() (resolvedConfig, error) {
+	resolved := resolvedConfig{workspace: defaultWorkspace, lookupUser: defaultLookupUser}
+	if c.chatMode != "local" && c.chatMode != "grpc" {
+		return resolvedConfig{}, fmt.Errorf("invalid chat composition %q: -chat-mode must be local or grpc", c.chatMode)
+	}
+	databaseDSN, err := resolveDatabaseDSN(c.chatMode, c.databaseDSN)
+	if err != nil {
+		return resolvedConfig{}, err
+	}
+	resolved.databaseDSN = databaseDSN
+	if strings.TrimSpace(c.apiToken) == "" {
+		return resolvedConfig{}, errors.New("-api-token is required")
+	}
+	resolved.apiToken = c.apiToken
+	resolved.sessionToken = c.sessionToken
 	if strings.TrimSpace(c.entraClientID) != "" {
 		tenant := strings.TrimSpace(c.entraTenant)
 		if tenant == "" {
-			return errors.New("-entra-tenant is required with -entra-client-id: it names the Microsoft Entra directory whose sign-ins this deployment accepts")
+			return resolvedConfig{}, errors.New("-entra-tenant is required with -entra-client-id: it names the Microsoft Entra directory whose sign-ins this deployment accepts")
 		}
 		if multiTenantEntraTenants[strings.ToLower(tenant)] {
-			return fmt.Errorf("-entra-tenant %q is a multi-tenant endpoint: any directory, including one an attacker owns, could sign in and present any email address; name this deployment's directory instead", tenant)
+			return resolvedConfig{}, fmt.Errorf("-entra-tenant %q is a multi-tenant endpoint: any directory, including one an attacker owns, could sign in and present any email address; name this deployment's directory instead", tenant)
 		}
 	}
 	if strings.TrimSpace(c.sessionToken) != "" {
 		if providers := c.configuredProviders(); len(providers) != 0 {
-			return fmt.Errorf("-session-token is a static browser session shared by every holder and cannot be combined with the configured identity provider (%s); remove -session-token", strings.Join(providers, ", "))
+			return resolvedConfig{}, fmt.Errorf("-session-token is a static browser session shared by every holder and cannot be combined with the configured identity provider (%s); remove -session-token", strings.Join(providers, ", "))
 		}
 	}
-	return nil
+	if (c.appToken != "") != (c.appID != "") {
+		return resolvedConfig{}, errors.New("Socket Mode requires both -app-token and -app-id")
+	}
+	resolved.socketHost = strings.TrimSpace(c.socketHost)
+	if resolved.socketHost == "" {
+		if c.appToken != "" {
+			return resolvedConfig{}, errors.New("-socket-host is required when Socket Mode is configured because apps.connections.open hands the value to clients")
+		}
+		resolved.socketHost = socketHostDefault(c.addr)
+	}
+	switch c.chatMode {
+	case "local":
+		if c.chatAddress != "" || c.chatCA != "" || c.chatServerName != "" || c.chatClientCert != "" || c.chatClientKey != "" {
+			return resolvedConfig{}, errors.New("distributed chat settings supplied for local composition")
+		}
+	case "grpc":
+		if c.chatAddress == "" || c.chatCA == "" || c.chatServerName == "" || c.chatClientCert == "" || c.chatClientKey == "" {
+			return resolvedConfig{}, errors.New("grpc chat requires address, server CA/name, and client certificate/key")
+		}
+		// Everything in this list is owned by cmd/chatd in grpc composition, so
+		// accepting it here would silently drop it. -bootstrap-admin-email is in
+		// the list because a dropped value made terraform/ecs-runtime's required
+		// bootstrap_admin_email inert and left administrator sign-in unreachable;
+		// -app-token/-app-id are in it for the identical reason, one release
+		// later: they are seeded only inside local composition, so a distributed
+		// deployment started cleanly, registered /socket-mode, and then answered
+		// every apps.connections.open with an authentication failure.
+		if local := c.localOnlySettings(); len(local) != 0 {
+			return resolvedConfig{}, fmt.Errorf("%s belong to sameoldchat-chatd in grpc composition, not to this process; supplying them here accepts and drops them", strings.Join(local, ", "))
+		}
+	}
+	if strings.TrimSpace(c.authWorkspace) != "" {
+		resolved.workspace = strings.TrimSpace(c.authWorkspace)
+	}
+	if strings.TrimSpace(c.authLookupUser) != "" {
+		resolved.lookupUser = strings.TrimSpace(c.authLookupUser)
+	}
+	resolved.externalAuthorization = c.googleClientID != "" || c.googleClientSecret != "" || c.githubClientID != "" || c.githubClientSecret != "" || c.entraClientID != "" || c.entraClientSecret != "" || c.oidcIssuer != "" || c.oidcClientID != "" || c.oidcClientSecret != ""
+	if resolved.externalAuthorization {
+		if strings.TrimSpace(c.authWorkspace) == "" || strings.TrimSpace(c.authLookupUser) == "" || strings.TrimSpace(c.authPublicURL) == "" || strings.TrimSpace(c.authStateKeyHex) == "" {
+			return resolvedConfig{}, errors.New("external authorization requires -auth-workspace, -auth-lookup-user, -auth-public-url, and -auth-state-key-hex")
+		}
+		stateKey, decodeErr := hex.DecodeString(c.authStateKeyHex)
+		if decodeErr != nil || len(stateKey) < 32 {
+			// The decode error is deliberately not reported: encoding/hex names
+			// the offending byte of the key ("invalid byte: U+007A 'z'"), which
+			// writes part of a secret into the process log.
+			return resolvedConfig{}, errors.New("-auth-state-key-hex must contain at least 32 bytes of hex")
+		}
+		resolved.authStateKey = stateKey
+		if (c.googleClientID == "") != (c.googleClientSecret == "") {
+			return resolvedConfig{}, errors.New("-google-client-id and -google-client-secret must be supplied together")
+		}
+		if (c.githubClientID == "") != (c.githubClientSecret == "") {
+			return resolvedConfig{}, errors.New("-github-client-id and -github-client-secret must be supplied together")
+		}
+		if (c.entraClientID == "") != (c.entraClientSecret == "") {
+			return resolvedConfig{}, errors.New("-entra-client-id and -entra-client-secret must be supplied together")
+		}
+		if (c.oidcIssuer == "") != (c.oidcClientID == "") || (c.oidcIssuer == "") != (c.oidcClientSecret == "") {
+			return resolvedConfig{}, errors.New("-oidc-issuer, -oidc-client-id, and -oidc-client-secret must be supplied together")
+		}
+	}
+	scopes, err := developmentScopes()
+	if err != nil {
+		return resolvedConfig{}, err
+	}
+	resolved.scopes = scopes
+	return resolved, nil
+}
+
+// localOnlySettings names every supplied setting that only local composition can
+// act on. It exists so the rejection list is one enumeration rather than a
+// growing conjunction that a new flag can be forgotten from.
+func (c startupConfig) localOnlySettings() []string {
+	settings := make([]string, 0, 12)
+	for _, candidate := range []struct{ flag, value string }{
+		{flag: "-store", value: c.storeName},
+		{flag: "-db", value: c.databaseDSN},
+		{flag: "-dqlite-directory", value: c.dqliteDirectory},
+		{flag: "-dqlite-address", value: c.dqliteAddress},
+		{flag: "-dqlite-cluster", value: c.dqliteCluster},
+		{flag: "-dqlite-database", value: c.dqliteDatabase},
+		{flag: "-blob-dir", value: c.blobDirectory},
+		{flag: "-blob-s3-bucket", value: c.blobS3Bucket},
+		{flag: "-blob-s3-prefix", value: c.blobS3Prefix},
+		{flag: "-bootstrap-admin-email", value: c.bootstrapAdminEmail},
+		{flag: "-app-token", value: c.appToken},
+		{flag: "-app-id", value: c.appID},
+	} {
+		if strings.TrimSpace(candidate.value) != "" {
+			settings = append(settings, candidate.flag)
+		}
+	}
+	return settings
 }
 
 // developmentScopes are the scopes the seeded API token and the seeded browser
@@ -539,20 +731,34 @@ func developmentScopes() ([]string, error) {
 }
 
 // seedDevelopmentCredentials seeds the development API token and, only when one
-// was supplied, the static browser session. Neither carries control-plane
-// authority and the session expires within devSessionLifetime.
-func seedDevelopmentCredentials(ctx context.Context, runtime localchat.Runtime, apiToken, sessionToken string, now time.Time) error {
-	scopes, err := developmentScopes()
-	if err != nil {
-		return err
-	}
-	if err := runtime.TokenSeeder.SeedToken(ctx, apiToken, domain.TokenRecord{WorkspaceID: "Tdev", UserID: "Udev", Scopes: scopes}); err != nil {
+// was supplied, the static browser session, and joins the seeded user to the
+// seeded conversation. Neither credential carries control-plane authority and
+// the session expires within devSessionLifetime.
+//
+// The join is not cosmetic. The service layer enforces conversation membership
+// on chat.postMessage and nine other operations, because `not_in_channel` is
+// declared by ten pinned operations and used to be emitted nowhere. Without it
+// the credentials this function seeds can authenticate and then cannot post:
+// the seeded identity was a member of the workspace and of no conversation, so
+// every write against the seeded channel answered `not_in_channel`.
+func seedDevelopmentCredentials(ctx context.Context, runtime localchat.Runtime, resolved resolvedConfig, logger *slog.Logger, now time.Time) error {
+	if err := runtime.TokenSeeder.SeedToken(ctx, resolved.apiToken, domain.TokenRecord{WorkspaceID: domain.WorkspaceID(resolved.workspace), UserID: domain.UserID(resolved.lookupUser), Scopes: resolved.scopes}); err != nil {
 		return fmt.Errorf("seed API token: %w", err)
 	}
-	if strings.TrimSpace(sessionToken) == "" {
+	// JoinConversation is idempotent (the membership insert is ON CONFLICT DO
+	// NOTHING), so this is safe on an existing database. A deployment whose
+	// workspace, user, or conversation is its own has nothing to join here, and
+	// that is reported rather than treated as a startup failure.
+	if _, err := runtime.Service.JoinConversation(ctx, domain.WorkspaceID(resolved.workspace), domain.UserID(resolved.lookupUser), defaultConversation); err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("join seeded conversation: %w", err)
+		}
+		logger.Info("seeded conversation not joined", "conversation", defaultConversation, "workspace", resolved.workspace, "user", resolved.lookupUser, "reason", "no such open conversation in this workspace")
+	}
+	if strings.TrimSpace(resolved.sessionToken) == "" {
 		return nil
 	}
-	if err := runtime.SessionSeeder.SeedSession(ctx, sessionToken, domain.SessionRecord{WorkspaceID: "Tdev", UserID: "Udev", Scopes: scopes, ExpiresAt: now.Add(devSessionLifetime)}); err != nil {
+	if err := runtime.SessionSeeder.SeedSession(ctx, resolved.sessionToken, domain.SessionRecord{WorkspaceID: domain.WorkspaceID(resolved.workspace), UserID: domain.UserID(resolved.lookupUser), Scopes: resolved.scopes, ExpiresAt: now.Add(devSessionLifetime)}); err != nil {
 		return fmt.Errorf("seed browser session: %w", err)
 	}
 	return nil
@@ -620,11 +826,16 @@ func applicationRootHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/app", http.StatusSeeOther)
 }
 
-func readinessHandler(chatService chatapi.Service) http.HandlerFunc {
+// readinessHandler probes the workspace and lookup user this deployment is
+// configured for, not a hardcoded seed pair, and logs the failure. It used to
+// probe "Tdev"/"Udev" unconditionally and discard the error, so a deployment
+// without that tenant was permanently unready with no diagnostic anywhere.
+func readinessHandler(chatService chatapi.Service, logger *slog.Logger, workspace, user string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		requestContext, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		if _, err := chatService.Conversations(requestContext, "Tdev", "Udev", domain.ConversationListRequest{Limit: 1}); err != nil {
+		if _, err := chatService.Conversations(requestContext, domain.WorkspaceID(workspace), domain.UserID(user), domain.ConversationListRequest{Limit: 1}); err != nil {
+			logger.Warn("readiness probe failed", "error", err, "workspace", workspace, "user", user)
 			w.WriteHeader(http.StatusServiceUnavailable)
 			_, _ = w.Write([]byte("not ready\n"))
 			return

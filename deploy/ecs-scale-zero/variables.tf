@@ -1,6 +1,28 @@
-variable "name" { type = string }
-variable "region" { type = string }
-variable "vpc_id" { type = string }
+# There is deliberately no `region` variable. It was the sole source for every
+# `awslogs-region` while the module already reads `data.aws_region.current`, so a
+# root module whose provider is one region and which passed another planned and
+# applied cleanly and then failed every task start with
+# `ResourceInitializationError: failed to validate logger args`, because the
+# awslogs driver targeted a region with no such log group. `terraform validate`
+# cannot see that. The provider's own region is the only value that can be right.
+
+# name is interpolated into resource names, into load-balancer names truncated to
+# 32 characters, and into secret paths; vpc_id selects the network every security
+# group is created in. Every other required variable in this file validates.
+variable "name" {
+  type = string
+  validation {
+    condition     = can(regex("^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$", var.name))
+    error_message = "name must be 2-32 lowercase alphanumeric characters or hyphens, starting and ending alphanumeric, because it is truncated into load-balancer and target-group names"
+  }
+}
+variable "vpc_id" {
+  type = string
+  validation {
+    condition     = can(regex("^vpc-[0-9a-f]{8,17}$", var.vpc_id))
+    error_message = "vpc_id must be an AWS VPC identifier of the form vpc-<hex>"
+  }
+}
 variable "private_subnet_ids" {
   type = list(string)
   validation {
@@ -26,13 +48,29 @@ variable "application_port" {
   type    = number
   default = 8080
 }
+# The HTTP tier has no Amazon ECS service and no drain: the activator Lambda
+# launches tasks with ecs:RunTask and stops them with ecs:StopTask, which sends
+# SIGTERM and then SIGKILL with no fence, no snapshot, and no manifest. README.md
+# calls exactly that "the blind shutdown scale-to-zero forbids, and on a profile
+# where the task carries the database volume it is unrecoverable data loss".
+# Nothing enforced the statelessness escape hatch, so `-store sqlite -db
+# file:/data/chat.db` was accepted here and every idle sweep destroyed the
+# database. A local-volume store is refused at plan time instead.
 variable "application_command" {
   type    = list(string)
   default = []
+  validation {
+    condition     = !can(regex("(^|[[:space:]])-(store[[:space:]=]+(sqlite|dqlite)|db[[:space:]=]|dqlite-[a-z]+[[:space:]=])", join(" ", var.application_command)))
+    error_message = "application_command must not select a task-local store: the HTTP tier is stopped with ecs:StopTask and has no drain or snapshot, so -store sqlite, -store dqlite, -db, and -dqlite-* would be unrecoverable data loss. Use -store memory or -store postgresql."
+  }
 }
 variable "application_environment" {
   type    = map(string)
   default = {}
+  validation {
+    condition     = !contains(["sqlite", "dqlite"], lower(trimspace(lookup(var.application_environment, "SAMEOLDCHAT_STORE", ""))))
+    error_message = "application_environment must not set SAMEOLDCHAT_STORE to sqlite or dqlite: the HTTP tier is stopped with ecs:StopTask and has no drain or snapshot, so a task-local store would be unrecoverable data loss. Use memory or postgresql."
+  }
 }
 variable "application_cpu" {
   type    = number
@@ -121,6 +159,22 @@ variable "request_max_body_bytes" {
   validation {
     condition     = var.request_max_body_bytes > 0
     error_message = "request_max_body_bytes must be positive"
+  }
+}
+# The `scale-down` item in aws_dynamodb_table.state is shared with
+# cmd/ecs-ws-activator, whose scaleDownLockTTL is 15 seconds. While it is
+# unexpired both activators refuse every new request lease and every new
+# WebSocket lease, so this value is the deployment's worst-case unavailability
+# after a sweep that is killed before it releases the lock. The Lambda used to
+# write request_timeout_seconds + 60 on the same item, which made that window
+# 85 seconds.
+variable "scale_down_lock_seconds" {
+  type        = number
+  default     = 15
+  description = "Expiry of the shared scale-down lock. Must equal cmd/ecs-ws-activator's scaleDownLockTTL; the idle sweep bounds its own work by it."
+  validation {
+    condition     = var.scale_down_lock_seconds >= 5 && var.scale_down_lock_seconds <= var.request_timeout_seconds && floor(var.scale_down_lock_seconds) == var.scale_down_lock_seconds
+    error_message = "scale_down_lock_seconds must be a whole number between 5 and request_timeout_seconds: the sweep bounds itself by it and the invocation that runs the sweep is bounded by the Lambda timeout"
   }
 }
 variable "lambda_reserved_concurrency" {
@@ -297,6 +351,21 @@ variable "websocket_nlb_subnet_ids" {
 variable "websocket_nlb_internal" {
   type    = bool
   default = false
+}
+# The load balancer that terminates every client WebSocket is internet-facing by
+# default and had no connection record at all, so an abuse or outage report could
+# not be reconstructed. It is optional because access logging needs an Amazon S3
+# bucket with an Elastic Load Balancing bucket policy, which this module does not
+# own; an empty value leaves logging off exactly as before.
+variable "websocket_nlb_access_logs_bucket" {
+  type        = string
+  default     = ""
+  description = "Amazon S3 bucket receiving Network Load Balancer access logs; empty disables access logging."
+}
+variable "websocket_nlb_access_logs_prefix" {
+  type        = string
+  default     = ""
+  description = "Key prefix for Network Load Balancer access logs."
 }
 variable "websocket_nlb_deletion_protection" {
   type        = bool

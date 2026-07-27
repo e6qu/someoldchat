@@ -7,8 +7,11 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -50,11 +53,129 @@ func TestErrorClassTableIsConsistent(t *testing.T) {
 	if len(errorClassesByKey) != len(errorClasses) {
 		t.Fatalf("errorClassesByKey has %d entries for %d classes", len(errorClassesByKey), len(errorClasses))
 	}
-	// codes.Unavailable must not restore a sentinel from the bare code: it is also
-	// the code an unclassified internal failure carries, so a fallback there would
-	// invent service.ErrBlobUnavailable for every storage failure.
-	if class, exists := errorClassesByCode[codes.Unavailable]; exists {
-		t.Errorf("codes.Unavailable must have no fallback class, found %q", class.key)
+}
+
+// TestNoCodeGRPCProducesItselfHasAFallbackClass is the general form of a defect
+// that was fixed once for codes.Unavailable and reintroduced for
+// codes.ResourceExhausted.
+//
+// grpc-go emits several codes on its own behalf, with no DomainError detail, for
+// conditions that have no domain cause: ResourceExhausted for a message over
+// MaxMessageBytes, Internal for a recovered panic, Unimplemented for a method a
+// peer at another version does not serve. A fallback class on any of them hands
+// the caller a sentinel the chat process never reported —
+// store.ErrSocketModeConnectionLimit for a conversations.history page that was
+// merely too large, which internal/api/slack renders as socket_mode_unavailable.
+//
+// Asserting the whole set rather than one code is the point: the previous test
+// named codes.Unavailable only, so the same mistake on a sibling code passed.
+func TestNoCodeGRPCProducesItselfHasAFallbackClass(t *testing.T) {
+	if len(libraryProducedCodes) == 0 {
+		t.Fatal("libraryProducedCodes is empty; the rule it states is not being checked")
+	}
+	for code, reason := range libraryProducedCodes {
+		if class, exists := errorClassesByCode[code]; exists {
+			t.Errorf("%s must have no fallback class, found %q: grpc-go produces %s for %s", code, class.key, code, reason)
+		}
+	}
+}
+
+// TestTheFallbackClassIsTheLastOfItsCode holds the ordering rule the table
+// documents above errorClasses: a specific sentinel precedes the general one it
+// might wrap. The general member of a code group is exactly the one that
+// restores the bare code, so the rule is checkable rather than aspirational.
+//
+// store.ErrInvalidArgument used to lead its block of 34, so classifyError
+// answered the generic class for every error that carried both, and
+// errors.Join(service.ErrInvalidMessage, store.ErrInvalidArgument) lost the
+// specific sentinel on the wire.
+func TestTheFallbackClassIsTheLastOfItsCode(t *testing.T) {
+	lastIndexOfCode := make(map[codes.Code]int, len(errorClasses))
+	for index, class := range errorClasses {
+		lastIndexOfCode[class.code] = index
+	}
+	for index, class := range errorClasses {
+		if !class.restoresCode {
+			continue
+		}
+		if last := lastIndexOfCode[class.code]; last != index {
+			t.Errorf("%q restores a bare %s but %q is declared after it; the general member of a code closes its group",
+				class.key, class.code, errorClasses[last].key)
+		}
+	}
+}
+
+// TestAnErrorCarryingTwoSentinelsRestoresBoth covers the joined error.
+//
+// internal/service/canvases.go returns errors.Join(err, cleanupErr) when a
+// compensating delete fails after a rejected create, so one error satisfies
+// errors.Is for two sentinels in process. While the wire carried one key the
+// caller restored one of them, and internal/api/slack — which tests
+// store.ErrNotFound first — answered channel_not_found in the monolith and
+// invalid_arg_name across the seam.
+func TestAnErrorCarryingTwoSentinelsRestoresBoth(t *testing.T) {
+	joined := errors.Join(store.ErrNotFound, service.ErrInvalidCanvas)
+	mapped := mapError(joined)
+	sent, ok := status.FromError(mapped)
+	if !ok {
+		t.Fatal("mapError did not produce a gRPC status")
+	}
+	restored := mapRemoteError(sent.Err())
+	for _, sentinel := range []error{store.ErrNotFound, service.ErrInvalidCanvas} {
+		if !errors.Is(joined, sentinel) {
+			t.Fatalf("the local error no longer carries %v; the case no longer provokes the class it documents", sentinel)
+		}
+		if !errors.Is(restored, sentinel) {
+			t.Errorf("the restored error lost %v: %v", sentinel, restored)
+		}
+	}
+	// A sentinel the error never carried must not appear.
+	if errors.Is(restored, service.ErrInvalidMessage) {
+		t.Errorf("the restored error invented service.ErrInvalidMessage: %v", restored)
+	}
+}
+
+// TestTheStatusMessageIsBounded keeps a classified failure inside the header
+// list bound. mapError copies err.Error() into the status message, which travels
+// in HTTP/2 trailers; an unbounded one turns a domain error into a transport
+// failure with a different class.
+func TestTheStatusMessageIsBounded(t *testing.T) {
+	mapped := mapError(fmt.Errorf("%w: %s", store.ErrInvalidArgument, strings.Repeat("x", 4*maxStatusMessageBytes)))
+	sent, _ := status.FromError(mapped)
+	if len(sent.Message()) > maxStatusMessageBytes {
+		t.Fatalf("status message is %d bytes, want at most %d", len(sent.Message()), maxStatusMessageBytes)
+	}
+	if !errors.Is(mapRemoteError(sent.Err()), store.ErrInvalidArgument) {
+		t.Fatal("bounding the message lost the classification")
+	}
+}
+
+// TestTheWireKeySetMatchesTheRecordedContract gates the key set against a
+// checked-in file.
+//
+// errors.proto states that the keys must never be renamed, and
+// TestEveryDomainSentinelIsClassified derives the expected key from the Go
+// identifier — so renaming store.ErrNotFound to store.ErrMissing made the suite
+// *demand* the key "store.missing", and a rolling deployment would then lose the
+// classification in both directions with nothing red. The golden file is what
+// makes a rename show up as a reviewed change to the contract rather than as a
+// mechanical consequence of a Go rename.
+func TestTheWireKeySetMatchesTheRecordedContract(t *testing.T) {
+	keys := make([]string, 0, len(errorClasses))
+	for _, class := range errorClasses {
+		keys = append(keys, class.key)
+	}
+	sort.Strings(keys)
+	recorded, err := os.ReadFile(filepath.Join("testdata", "error-keys.txt"))
+	if err != nil {
+		t.Fatalf("read the recorded key set: %v", err)
+	}
+	want := strings.Split(strings.TrimSpace(string(recorded)), "\n")
+	for index := range want {
+		want[index] = strings.TrimSpace(want[index])
+	}
+	if !reflect.DeepEqual(keys, want) {
+		t.Errorf("the wire key set changed.\n got: %v\nwant: %v\n\nAdding a key: append it to testdata/error-keys.txt.\nRemoving or renaming one: it is wire contract, and a rolling deployment runs both versions, so it needs a deprecation across a release rather than an edit here.", keys, want)
 	}
 }
 
@@ -223,55 +344,33 @@ func TestUnknownDetailKeyFallsBackToTheCode(t *testing.T) {
 // The expected key is derived from the declaration, so the table cannot drift
 // from the sentinel it claims to carry either.
 func TestEveryDomainSentinelIsClassified(t *testing.T) {
-	for _, pkg := range []struct {
-		name string
-		dir  string
-	}{
-		{name: "store", dir: filepath.Join("..", "..", "..", "..", "store")},
-		{name: "service", dir: filepath.Join("..", "..", "..", "..", "service")},
-		{name: "domain", dir: filepath.Join("..", "..", "..", "..", "domain")},
-	} {
-		names := exportedSentinelNames(t, pkg.dir)
-		if len(names) == 0 {
-			t.Fatalf("no sentinels discovered in %s; the source scan is broken", pkg.dir)
+	for qualified, name := range discoveredSentinels(t) {
+		key := packageOf(qualified) + "." + sentinelKey(name)
+		if reason, excluded := unclassifiedSentinels[qualified]; excluded {
+			if _, classified := errorClassesByKey[key]; classified {
+				t.Errorf("%s is both classified and excluded (%s)", qualified, reason)
+			}
+			continue
 		}
-		for _, name := range names {
-			key := pkg.name + "." + sentinelKey(name)
-			if reason, excluded := unclassifiedSentinels[pkg.name+"."+name]; excluded {
-				if _, classified := errorClassesByKey[key]; classified {
-					t.Errorf("%s.%s is both classified and excluded (%s)", pkg.name, name, reason)
-				}
-				continue
-			}
-			if _, classified := errorClassesByKey[key]; !classified {
-				t.Errorf("%s.%s crosses the seam unclassified: add {key: %q, code: ..., sentinel: %s.%s} to errorClasses, or document it in unclassifiedSentinels",
-					pkg.name, name, key, pkg.name, name)
-			}
+		if _, classified := errorClassesByKey[key]; !classified {
+			t.Errorf("%s crosses the seam unclassified: add {key: %q, code: ..., sentinel: %s} to errorClasses, or document it in unclassifiedSentinels",
+				qualified, key, qualified)
 		}
 	}
 }
 
 // unclassifiedSentinels is the documented escape hatch: a sentinel listed here
-// deliberately has no class, with the reason. It is empty because every sentinel
-// these three packages declare today can reach a chat handler, and a sentinel
-// that can reach a handler belongs in the table. An entry must name a sentinel
-// that actually exists, which TestExclusionsNameRealSentinels asserts.
-var unclassifiedSentinels = map[string]string{}
+// deliberately has no class, with the reason it cannot reach a chat handler. An
+// entry must name a sentinel that actually exists, which
+// TestExclusionsNameRealSentinels asserts.
+var unclassifiedSentinels = map[string]string{
+	"sqlstore.ErrIntegrityCheckUnsupported": "IntegrityCheck is storage maintenance, not part of chatapi.Service, so it never crosses the chat seam; classifying it would make the transport package import a storage backend",
+	"events.ErrPayloadInternal":             "a delivery filter the consumer evaluates on records it already holds (internal/socketmode), never returned by a chat RPC",
+	"events.ErrPayloadRecipientScoped":      "a delivery filter, as above",
+}
 
 func TestExclusionsNameRealSentinels(t *testing.T) {
-	discovered := make(map[string]struct{})
-	for _, pkg := range []struct {
-		name string
-		dir  string
-	}{
-		{name: "store", dir: filepath.Join("..", "..", "..", "..", "store")},
-		{name: "service", dir: filepath.Join("..", "..", "..", "..", "service")},
-		{name: "domain", dir: filepath.Join("..", "..", "..", "..", "domain")},
-	} {
-		for _, name := range exportedSentinelNames(t, pkg.dir) {
-			discovered[pkg.name+"."+name] = struct{}{}
-		}
-	}
+	discovered := discoveredSentinels(t)
 	for excluded, reason := range unclassifiedSentinels {
 		if _, exists := discovered[excluded]; !exists {
 			t.Errorf("unclassifiedSentinels names %s (%q), which no longer exists", excluded, reason)
@@ -282,36 +381,83 @@ func TestExclusionsNameRealSentinels(t *testing.T) {
 	}
 }
 
-func exportedSentinelNames(t *testing.T, dir string) []string {
+// sentinelRoots are the package trees whose exported sentinels can reach a chat
+// handler and therefore have to be classified or excluded with a reason.
+//
+// internal/events and internal/blob are here because they do reach one:
+// service.Messages.newEvent funnels every mutation through events.New, and
+// service.Messages returns a blob absence unchanged. The scan used to cover
+// store, service and domain only, so those sentinels crossed the seam as
+// codes.Unavailable with the fixed unclassified message — a caller told to retry
+// a request that can never succeed.
+var sentinelRoots = []string{"store", "service", "domain", "events", "blob"}
+
+// discoveredSentinels reads every exported Err* declaration under sentinelRoots
+// from source and returns them keyed by "package.Name".
+//
+// It descends into subdirectories, because a subpackage's sentinel crosses the
+// same seam: the scan used to skip directories, so
+// store/sqlstore.ErrIntegrityCheckUnsupported was invisible to it. It accepts
+// const as well as var, because a sentinel declared as a constant error type is
+// still a sentinel and the sibling scan in this package already accepted both —
+// two scans in one package that disagreed about what a sentinel is.
+func discoveredSentinels(t *testing.T) map[string]string {
 	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
+	discovered := make(map[string]string)
+	for _, root := range sentinelRoots {
+		before := len(discovered)
+		dir := filepath.Join("..", "..", "..", "..", root)
+		err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() {
+				if entry.Name() == "testdata" {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+				return nil
+			}
+			parsed, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+			if parseErr != nil {
+				return fmt.Errorf("parse %s: %w", path, parseErr)
+			}
+			for _, name := range exportedSentinelNames(parsed) {
+				discovered[parsed.Name.Name+"."+name] = name
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("scan %s: %v", dir, err)
+		}
+		if len(discovered) == before {
+			t.Fatalf("no sentinels discovered under %s; the source scan is broken", dir)
+		}
 	}
-	fileSet := token.NewFileSet()
+	return discovered
+}
+
+func packageOf(qualified string) string {
+	return qualified[:strings.Index(qualified, ".")]
+}
+
+func exportedSentinelNames(parsed *ast.File) []string {
 	names := make([]string, 0)
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+	for _, declaration := range parsed.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || (general.Tok != token.VAR && general.Tok != token.CONST) {
 			continue
 		}
-		parsed, err := parser.ParseFile(fileSet, filepath.Join(dir, entry.Name()), nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", entry.Name(), err)
-		}
-		for _, declaration := range parsed.Decls {
-			general, ok := declaration.(*ast.GenDecl)
-			if !ok || general.Tok != token.VAR {
+		for _, spec := range general.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok {
 				continue
 			}
-			for _, spec := range general.Specs {
-				value, ok := spec.(*ast.ValueSpec)
-				if !ok {
-					continue
-				}
-				for _, name := range value.Names {
-					if strings.HasPrefix(name.Name, "Err") && name.IsExported() {
-						names = append(names, name.Name)
-					}
+			for _, name := range value.Names {
+				if strings.HasPrefix(name.Name, "Err") && name.IsExported() {
+					names = append(names, name.Name)
 				}
 			}
 		}
@@ -322,10 +468,24 @@ func exportedSentinelNames(t *testing.T, dir string) []string {
 // sentinelKey derives the wire key from the Go identifier: ErrInvalidMessage
 // becomes invalid_message. Acronyms are listed rather than guessed, because a
 // mechanical split renders OAuth as o_auth.
+//
+// The list is an ordered slice, longest first, not a map: map iteration order is
+// random, "OIDC" contains "ID", and with ID→Id applied first OIDC became OIdC and
+// the OIDC rule stopped matching — so the key for a sentinel containing OIDC
+// would have alternated between "oidc" and "o_id_c" between runs. No sentinel
+// contains OIDC today, which is the only reason the map was deterministic.
+var sentinelAcronyms = []struct{ from, to string }{
+	{from: "OAuth", to: "Oauth"},
+	{from: "OIDC", to: "Oidc"},
+	{from: "URL", to: "Url"},
+	{from: "ID", to: "Id"},
+	{from: "IP", to: "Ip"},
+}
+
 func sentinelKey(name string) string {
 	trimmed := strings.TrimPrefix(name, "Err")
-	for acronym, replacement := range map[string]string{"OAuth": "Oauth", "OIDC": "Oidc", "URL": "Url", "ID": "Id", "IP": "Ip"} {
-		trimmed = strings.ReplaceAll(trimmed, acronym, replacement)
+	for _, acronym := range sentinelAcronyms {
+		trimmed = strings.ReplaceAll(trimmed, acronym.from, acronym.to)
 	}
 	var builder strings.Builder
 	for index, character := range trimmed {
@@ -339,4 +499,21 @@ func sentinelKey(name string) string {
 		builder.WriteRune(character)
 	}
 	return builder.String()
+}
+
+// TestSentinelKeyResolvesAcronymsInAStableOrder pins the ordering the slice
+// above exists for: a longer acronym has to be replaced before a shorter one it
+// contains, or the result depends on which rule ran first.
+func TestSentinelKeyResolvesAcronymsInAStableOrder(t *testing.T) {
+	for name, want := range map[string]string{
+		"ErrInvalidOIDCSession": "invalid_oidc_session",
+		"ErrInvalidOAuthClient": "invalid_oauth_client",
+		"ErrInvalidURLTarget":   "invalid_url_target",
+		"ErrInvalidIDToken":     "invalid_id_token",
+		"ErrInvalidMessage":     "invalid_message",
+	} {
+		if got := sentinelKey(name); got != want {
+			t.Errorf("sentinelKey(%q) = %q, want %q", name, got, want)
+		}
+	}
 }

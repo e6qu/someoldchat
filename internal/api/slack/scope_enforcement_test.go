@@ -2,8 +2,12 @@ package slack
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,10 +15,27 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
-// scopedRoute records the scope a Slack method requires. Every entry is grounded
-// in the pinned contract: the `token` parameter of each operation in
+// scopedRoute records the scope a Slack method requires.
+//
+// Most entries are the pinned `token` parameter's own words: each operation in
 // specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json states
-// "Requires scope: `…`", and this table is the transport's copy of that.
+// "Requires scope: `…`". Some are deliberate modern-scope substitutions, and the
+// header used to claim the whole table was a copy of the snapshot, which was
+// false for about forty rows. The substitutions are:
+//
+//   - chat.* uses chat:write where the snapshot says chat:write:bot /
+//     chat:write:user, which Slack replaced with the single chat:write;
+//   - conversations.* mutators use channels:manage where the snapshot says
+//     channels:write / groups:write / im:write / mpim:write, which Slack
+//     replaced with channels:manage;
+//   - files.* writes use files:write where the snapshot says files:write:user;
+//   - users.profile.get and team.profile.get use users:read where the snapshot
+//     says users.profile:read, because internal/auth declares no
+//     users.profile:read scope. That one is a gap, not a modernisation — see the
+//     follow-up recorded for internal/auth.
+//
+// Routes this repository adds and the snapshot does not describe at all
+// (/internal/…, emoji.list, slackLists.*) carry the scope this system defines.
 type scopedRoute struct {
 	method string
 	path   string
@@ -90,7 +111,6 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/chat.update", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/chat.delete", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/chat.scheduleMessage", auth.ScopeChatWrite},
-		{http.MethodGet, "/api/chat.scheduledMessages.list", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/chat.deleteScheduledMessage", auth.ScopeChatWrite},
 		{http.MethodGet, "/api/conversations.history", auth.ScopeChannelsHistory},
 		{http.MethodGet, "/api/conversations.replies", auth.ScopeChannelsHistory},
@@ -206,6 +226,19 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodGet, "/api/files/{file}", auth.ScopeFilesRead},
 		{http.MethodGet, "/api/files.getUploadURLExternal", auth.ScopeFilesWrite},
 		{http.MethodGet, "/api/files.completeUploadExternal", auth.ScopeFilesWrite},
+		// Routes that enforce a scope and were absent from this table, so nothing
+		// regression-tested them.
+		{http.MethodPost, "/internal/admin/incoming-webhooks/create", auth.ScopeAdminAppsWrite},
+		{http.MethodPost, "/internal/admin/incoming-webhooks/enable", auth.ScopeAdminAppsWrite},
+		{http.MethodGet, "/internal/slack-lists/download.csv", auth.ScopeListsRead},
+		{http.MethodGet, "/api/emoji.list", auth.ScopeEmojiRead},
+		{http.MethodGet, "/api/admin.emoji.list", auth.ScopeAdminTeamsRead},
+		{http.MethodPost, "/api/slackLists.items.delete", auth.ScopeListsWrite},
+		{http.MethodPost, "/api/slackLists.items.deleteMultiple", auth.ScopeListsWrite},
+		// apps.connections.open authenticates an app-level token through a separate
+		// authenticator, so the shared fixture cannot exercise it; the entry keeps
+		// the coverage assertion honest and TestEveryScopedMethodRejects… skips it.
+		{http.MethodPost, "/api/apps.connections.open", auth.ScopeConnectionsWrite},
 	}
 }
 
@@ -213,7 +246,15 @@ func scopedRoutes() []scopedRoute {
 // fixture knows about except the one under test, so a handler that enforces the
 // wrong scope, or no scope, fails here.
 func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
+	// apps.connections.open reads an app-level token through Handler.SocketAuth,
+	// a different authenticator from the one this fixture builds, so withholding a
+	// scope from the user token proves nothing about it. It stays in scopedRoutes
+	// so the coverage assertion below can see it.
+	separateAuthenticator := map[string]struct{}{"/api/apps.connections.open": {}}
 	for _, route := range scopedRoutes() {
+		if _, ok := separateAuthenticator[route.path]; ok {
+			continue
+		}
 		granted := make([]auth.Scope, 0, len(defaultTestScopes()))
 		for _, scope := range defaultTestScopes() {
 			if scope != route.scope {
@@ -362,4 +403,78 @@ func TestAdministrativeMutationsStillAcceptAnAdministrator(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
 		t.Fatalf("administrator was refused: status=%d body=%s", response.Code, response.Body)
 	}
+}
+
+// scopedRoutes was hand-maintained, so a route that enforced a scope and was
+// never added to it was regression-tested by nothing — seven were missing when
+// this check was written, including both internal admin webhook routes and the
+// list-CSV download. The table is still the statement of *which* scope each route
+// requires; this asserts it is complete.
+func TestScopedRoutesTableCoversEveryRouteThatEnforcesAScope(t *testing.T) {
+	facts := handlerFacts(t)
+	constants := scopeConstantNames(t)
+	listed := make(map[string]auth.Scope, 400)
+	for _, route := range scopedRoutes() {
+		listed[route.path] = route.scope
+	}
+	registered := make(map[string]struct{}, 400)
+	for _, route := range registeredRoutes(t) {
+		registered[route.path] = struct{}{}
+		scopes := reachableScopes(facts, route.handler)
+		if len(scopes) == 0 {
+			if _, ok := listed[route.path]; ok {
+				t.Errorf("%s is in scopedRoutes but enforces no scope", route.path)
+			}
+			continue
+		}
+		required, ok := listed[route.path]
+		if !ok {
+			t.Errorf("%s enforces one of %v and is absent from scopedRoutes, so nothing tests it", route.path, sortedKeys(scopes))
+			continue
+		}
+		if _, ok := scopes[constants[required]]; !ok {
+			t.Errorf("%s is listed as %s but the handler reaches %v", route.path, required, sortedKeys(scopes))
+		}
+	}
+	for path := range listed {
+		if _, ok := registered[path]; !ok {
+			t.Errorf("scopedRoutes lists %s, which Register does not register", path)
+		}
+	}
+}
+
+// scopeConstantNames reads internal/auth for the Scope… constant declarations, so
+// a scope value can be matched against the identifier the source scan sees.
+func scopeConstantNames(t *testing.T) map[auth.Scope]string {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	parsed, err := parser.ParseFile(fileSet, filepath.Join("..", "..", "auth", "auth.go"), nil, 0)
+	if err != nil {
+		t.Fatalf("parse auth.go: %v", err)
+	}
+	names := make(map[auth.Scope]string)
+	for _, declaration := range parsed.Decls {
+		general, ok := declaration.(*ast.GenDecl)
+		if !ok || general.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range general.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok || len(value.Names) != 1 || len(value.Values) != 1 {
+				continue
+			}
+			if !strings.HasPrefix(value.Names[0].Name, "Scope") {
+				continue
+			}
+			literal, ok := stringLiteral(value.Values[0])
+			if !ok {
+				continue
+			}
+			names[auth.Scope(literal)] = value.Names[0].Name
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("no auth.Scope constants discovered; the scan is broken")
+	}
+	return names
 }

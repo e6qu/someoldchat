@@ -9,7 +9,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,16 +211,139 @@ func TestSSESendsHeartbeatWhileIdle(t *testing.T) {
 // open stream. Authenticating once and never re-checking leaves a revoked
 // session receiving every workspace event indefinitely.
 func TestSSEEndsWhenTheSessionIsRevoked(t *testing.T) {
+	for name, withdrawal := range map[string]error{
+		"revoked":          auth.ErrTokenRevoked,
+		"account inactive": auth.ErrAccountInactive,
+		"credential gone":  auth.ErrNoToken,
+	} {
+		source := &countingSource{}
+		authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: withdrawal}
+		handler, err := NewHandler(source, "T1", authenticator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler.Reauthorize = time.Nanosecond
+		handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+		request := httptest.NewRequest(http.MethodGet, "/events", nil)
+		finished := make(chan struct{})
+		go func() {
+			handler.events(httptest.NewRecorder(), request)
+			close(finished)
+		}()
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s: the stream outlived its own session", name)
+		}
+		if calls := authenticator.attempts(); calls != 2 {
+			t.Fatalf("%s: authenticate calls=%d, want the stream to end on the first withdrawn credential", name, calls)
+		}
+	}
+}
+
+// The authenticator maps every session-store failure to the same error it uses
+// for an unusable credential, and says so itself. Ending a stream on that error
+// turns a one-second database failover into a full live-delivery outage: every
+// open stream in the workspace ends within one re-authorization interval, logs
+// that the user's session is no longer authorized, and reconnects together at
+// the advertised retry delay.
+func TestSSESurvivesASessionStoreThatCannotAnswer(t *testing.T) {
 	source := &countingSource{}
-	authenticator := &revokingAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1}
+	// Two inconclusive checks — a failover — then the store answers again.
+	authenticator := &scriptedAuthenticator{
+		principal:    auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}},
+		allowed:      1,
+		err:          auth.ErrInvalidToken,
+		failures:     2,
+		recoverAfter: true,
+	}
 	handler, err := NewHandler(source, "T1", authenticator)
 	if err != nil {
 		t.Fatal(err)
 	}
 	handler.Reauthorize = time.Nanosecond
 	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	request := httptest.NewRequest(http.MethodGet, "/events", nil)
-	response := httptest.NewRecorder()
+	ctx, cancel := context.WithCancel(context.Background())
+	request := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+	finished := make(chan struct{})
+	go func() {
+		handler.events(httptest.NewRecorder(), request)
+		close(finished)
+	}()
+	deadline := time.After(5 * time.Second)
+	for {
+		if authenticator.attempts() >= 6 {
+			break
+		}
+		select {
+		case <-finished:
+			cancel()
+			t.Fatalf("a session-store outage disconnected the stream after %d checks", authenticator.attempts())
+		case <-deadline:
+			cancel()
+			t.Fatalf("the stream stopped re-checking after %d attempts", authenticator.attempts())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	cancel()
+	<-finished
+}
+
+// A session that can never be confirmed must not stream forever either. The
+// bound is on consecutive inconclusive checks, so a store that stays down closes
+// the stream instead of leaving an unverifiable session live indefinitely.
+func TestSSEEndsAfterRepeatedInconclusiveReauthorization(t *testing.T) {
+	source := &countingSource{}
+	authenticator := &scriptedAuthenticator{principal: auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}}, allowed: 1, err: auth.ErrInvalidToken}
+	handler, err := NewHandler(source, "T1", authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Reauthorize = time.Nanosecond
+	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	finished := make(chan struct{})
+	go func() {
+		handler.events(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/events", nil))
+		close(finished)
+	}()
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a permanently unconfirmable session streamed forever")
+	}
+	if calls := authenticator.attempts(); calls != 1+unresolvedReauthorizations {
+		t.Fatalf("authenticate calls=%d, want %d inconclusive checks before giving up", calls, unresolvedReauthorizations)
+	}
+}
+
+// The listener sets no WriteTimeout because it also serves this stream, and
+// delegates the per-response deadline to this handler. Without one, a suspended
+// tab that stops reading fills the socket buffer and parks the handler inside
+// Write for as long as the kernel keeps the connection — one goroutine, one
+// connection and one poll buffer per stalled reader, unbounded in their number —
+// and the heartbeat guarantees the handler keeps writing even in a silent
+// workspace, so the stall is reached with no traffic at all.
+func TestSSEBoundsEveryWriteAndDropsAConsumerThatStopsReading(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	source := &scriptedSource{cancel: cancel, records: []events.Record{
+		producedRecord(1, "evt_1", "message.created", events.String("message_id", "M1")),
+	}}
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(source, "T1", authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	handler.WriteTimeout = 20 * time.Millisecond
+	request := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer token")
+	// The preamble is accepted; the first record write stalls the way a full
+	// socket buffer does, and the deadline is what turns that into a return.
+	response := &stallingRecorder{ResponseRecorder: httptest.NewRecorder(), stallAfter: 1}
 	finished := make(chan struct{})
 	go func() {
 		handler.events(response, request)
@@ -227,10 +352,81 @@ func TestSSEEndsWhenTheSessionIsRevoked(t *testing.T) {
 	select {
 	case <-finished:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the stream outlived its own session")
+		t.Fatal("a consumer that stopped reading pinned the handler indefinitely")
 	}
-	if authenticator.calls < 2 {
-		t.Fatalf("authenticate calls=%d, want the session re-checked while streaming", authenticator.calls)
+	deadlines := response.armed()
+	if len(deadlines) == 0 {
+		t.Fatal("the stream wrote to a client without ever arming a write deadline")
+	}
+	for _, deadline := range deadlines {
+		if deadline.IsZero() {
+			t.Fatal("a write deadline was cleared rather than set")
+		}
+	}
+}
+
+// http.Server.Shutdown waits for in-flight non-hijacked requests and does not
+// cancel their contexts, so a stream that only ends when its client goes away
+// makes every deploy take the full drain deadline and exit non-zero. The
+// handler's half of that contract is this: when the request context ends, the
+// stream returns promptly. The server's half is a BaseContext derived from the
+// signal context, which is what makes the request context end at all.
+func TestSSEReturnsPromptlyWhenItsRequestContextEnds(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	source := &countingSource{}
+	authenticator, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsHistory: {}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(source, "T1", authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	request := httptest.NewRequest(http.MethodGet, "/events", nil).WithContext(ctx)
+	request.Header.Set("Authorization", "Bearer token")
+	finished := make(chan struct{})
+	go func() {
+		handler.events(httptest.NewRecorder(), request)
+		close(finished)
+	}()
+	cancel()
+	select {
+	case <-finished:
+	case <-time.After(2 * streamPollInterval):
+		t.Fatal("the stream outlived its request context, so a drain would miss its deadline")
+	}
+}
+
+// One filter, one set. Naming a single recipient-scoped topic here instead of
+// asking the shared predicate is how a second such topic reaches every member of
+// a workspace: Socket Mode and the event webhook refuse it through
+// Broadcastable while this stream and RTM broadcast the recipient's own text.
+func TestAddressedToWithholdsEveryRecipientScopedTopic(t *testing.T) {
+	scoped := events.RecipientScopedTopics()
+	if len(scoped) == 0 {
+		t.Fatal("the recipient-scoped topic set is empty")
+	}
+	for _, topic := range scoped {
+		record := producedRecord(1, "evt_1", topic, events.String("user_id", "U2"), events.String("text", "only for U2"))
+		delivered, err := events.Deliverable(record.Event)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if addressedTo(topic, delivered, "U1") {
+			t.Fatalf("%s: a record addressed to U2 was shown to U1", topic)
+		}
+		if !addressedTo(topic, delivered, "U2") {
+			t.Fatalf("%s: a record addressed to U2 was withheld from U2", topic)
+		}
+	}
+	ordinary := producedRecord(2, "evt_2", "message.created", events.String("message_id", "M1"))
+	delivered, err := events.Deliverable(ordinary.Event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !addressedTo("message.created", delivered, "U1") {
+		t.Fatal("a broadcast record was withheld")
 	}
 }
 
@@ -281,18 +477,72 @@ func (r *cancellingRecorder) Write(payload []byte) (int, error) {
 	return count, err
 }
 
-type revokingAuthenticator struct {
-	principal auth.Principal
-	allowed   int
-	calls     int
+// scriptedAuthenticator answers with a principal for the first allowed calls,
+// then with err. failures bounds how many times err is returned before the
+// principal comes back, which is what a store failover looks like from here.
+type scriptedAuthenticator struct {
+	principal    auth.Principal
+	allowed      int
+	err          error
+	failures     int
+	recoverAfter bool
+
+	mu    sync.Mutex
+	calls int
 }
 
-func (a *revokingAuthenticator) Authenticate(*http.Request) (auth.Principal, error) {
+func (a *scriptedAuthenticator) Authenticate(*http.Request) (auth.Principal, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.calls++
-	if a.calls > a.allowed {
-		return auth.Principal{}, auth.ErrNotAuthenticated
+	if a.calls <= a.allowed {
+		return a.principal, nil
 	}
-	return a.principal, nil
+	if a.recoverAfter && a.calls > a.allowed+a.failures {
+		return a.principal, nil
+	}
+	return auth.Principal{}, a.err
+}
+
+func (a *scriptedAuthenticator) attempts() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.calls
+}
+
+// stallingRecorder accepts stallAfter writes and then behaves like a socket
+// whose send buffer is full and whose write deadline has passed.
+type stallingRecorder struct {
+	*httptest.ResponseRecorder
+	stallAfter int
+
+	mu        sync.Mutex
+	writes    int
+	deadlines []time.Time
+}
+
+func (r *stallingRecorder) SetWriteDeadline(deadline time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.deadlines = append(r.deadlines, deadline)
+	return nil
+}
+
+func (r *stallingRecorder) Write(payload []byte) (int, error) {
+	r.mu.Lock()
+	r.writes++
+	stalled := r.writes > r.stallAfter
+	r.mu.Unlock()
+	if stalled {
+		return 0, os.ErrDeadlineExceeded
+	}
+	return r.ResponseRecorder.Write(payload)
+}
+
+func (r *stallingRecorder) armed() []time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]time.Time(nil), r.deadlines...)
 }
 
 func TestRTMPongPreservesReplyIDAndScalarFields(t *testing.T) {

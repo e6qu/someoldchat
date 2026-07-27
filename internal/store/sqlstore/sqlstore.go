@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +22,15 @@ import (
 const schema = `
 CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquired INTEGER NOT NULL DEFAULT 0);
+-- schema_backfills is the durable progress of the column-wide data rewrites that
+-- deliberately run outside the migration transaction. See backfill.go: without a
+-- persisted cursor a crash at 80 % of a five-million-row rewrite discarded all of
+-- it, and the whole rewrite held the migration fence while it ran.
+CREATE TABLE IF NOT EXISTS schema_backfills (name TEXT PRIMARY KEY, cursor TEXT NOT NULL DEFAULT '', done INTEGER NOT NULL DEFAULT 0);
+-- schema_migration_notices is what a data migration records instead of aborting.
+-- An upgrade that stops for ever on one unparseable value, or on two accounts an
+-- older release admitted, is an upgrade with no operator remedy.
+CREATE TABLE IF NOT EXISTS schema_migration_notices (kind TEXT NOT NULL, subject TEXT NOT NULL, detail TEXT NOT NULL, observed_at TEXT NOT NULL, PRIMARY KEY (kind, subject));
 CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, domain TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', discoverability TEXT NOT NULL DEFAULT 'open', icon_url TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -65,6 +74,7 @@ CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, c
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS socket_mode_admission (app_id TEXT PRIMARY KEY, ticket INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_responses (app_id TEXT NOT NULL, envelope_id TEXT NOT NULL, payload TEXT NOT NULL, received_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (app_id, envelope_id));
 CREATE TABLE IF NOT EXISTS conversation_prefs (
@@ -233,7 +243,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 80
+const schemaVersion = 82
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -372,32 +382,84 @@ func (s *Store) ListAccessLogs(ctx context.Context, workspace domain.WorkspaceID
 // that persists in the file, and applying it on every connect makes a concurrent
 // first open fail with SQLITE_BUSY because switching journal mode needs
 // exclusive access. It is applied once, with a retry, by configure.
-var sqlitePragmas = []string{"foreign_keys(1)", "busy_timeout(5000)"}
+// sqliteDSN is the single writer of these; see the note there on why an
+// operator-supplied value of either is removed rather than shadowed.
 
 const sqliteJournalPragma = "PRAGMA journal_mode = WAL"
 
 // requiredSQLitePragmas is the enforced subset: journal_mode persists in the
 // database file, but these two are per-connection and are what the schema's
-// integrity depends on.
-var requiredSQLitePragmas = map[string]int64{"foreign_keys": 1, "busy_timeout": 5000}
+// integrity depends on. foreign_keys is an exact requirement; busy_timeout is a
+// floor, so an operator may raise it.
+const requiredBusyTimeout = 5000
 
 // sqliteDSN adds the required pragmas to a caller-supplied DSN.
+//
+// The previous version appended unconditionally and assumed the driver resolves
+// duplicate _pragma parameters last-wins. It does for foreign_keys and it does
+// NOT for busy_timeout: measured, a DSN carrying _pragma=busy_timeout(1) made
+// Open fail with "sqlite busy_timeout is 1 on connection 0, want 5000" — a
+// perfectly ordinary operator DSN refusing to start the product, with an error
+// naming an internal invariant instead of the parameter responsible.
+//
+// So the conflicting parameters are removed rather than shadowed. A
+// busy_timeout the operator set at or above the floor is kept, because raising
+// it is a legitimate tuning decision; a lower one, and any foreign_keys
+// setting at all, is dropped, because the schema's referential integrity is not
+// an operator preference.
 func sqliteDSN(dsn string) string {
-	separator := "?"
-	if strings.Contains(dsn, "?") {
-		separator = "&"
+	base, query, hasQuery := strings.Cut(dsn, "?")
+	kept := make([]string, 0)
+	operatorBusyTimeout := 0
+	if hasQuery {
+		for _, parameter := range strings.Split(query, "&") {
+			value, isPragma := strings.CutPrefix(parameter, "_pragma=")
+			if !isPragma {
+				kept = append(kept, parameter)
+				continue
+			}
+			switch {
+			case strings.HasPrefix(value, "foreign_keys("):
+			case strings.HasPrefix(value, "busy_timeout("):
+				if parsed, err := strconv.Atoi(strings.TrimSuffix(strings.TrimPrefix(value, "busy_timeout("), ")")); err == nil && parsed > operatorBusyTimeout {
+					operatorBusyTimeout = parsed
+				}
+			default:
+				kept = append(kept, parameter)
+			}
+		}
 	}
-	settings := make([]string, 0, len(sqlitePragmas))
-	for _, pragma := range sqlitePragmas {
-		settings = append(settings, "_pragma="+pragma)
+	busyTimeout := requiredBusyTimeout
+	if operatorBusyTimeout > busyTimeout {
+		busyTimeout = operatorBusyTimeout
 	}
-	return dsn + separator + strings.Join(settings, "&")
+	kept = append(kept, "_pragma=foreign_keys(1)", fmt.Sprintf("_pragma=busy_timeout(%d)", busyTimeout))
+	return base + "?" + strings.Join(kept, "&")
+}
+
+// privateInMemoryDSN reports a DSN that names an in-memory database WITHOUT
+// shared cache. SQLite gives every such connection its own private, empty
+// database, so a pooled handle over one is not one database at all: the schema
+// is created on whichever connection ran the migration and every other
+// connection sees nothing. This was found by VerifyReferentialIntegrity, which
+// probes several connections at once and hit "no such table" on the second.
+//
+// Pinning the pool to one connection is the repair that keeps the DSN meaning
+// what the caller asked for. Rewriting it to the shared-cache form would make
+// every ":memory:" open in the process collide on one database instead.
+func privateInMemoryDSN(dsn string) bool {
+	base, query, _ := strings.Cut(dsn, "?")
+	inMemory := strings.Contains(base, ":memory:") || strings.Contains(query, "mode=memory")
+	return inMemory && !strings.Contains(query, "cache=shared")
 }
 
 func Open(ctx context.Context, dsn string) (*Store, error) {
 	db, err := sql.Open("sqlite", sqliteDSN(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
+	}
+	if privateInMemoryDSN(dsn) {
+		db.SetMaxOpenConns(1)
 	}
 	s, err := fromDB(ctx, db, true, []string{sqliteJournalPragma}, sqliteMigrationLockStatement)
 	if err != nil {
@@ -421,7 +483,17 @@ func FromDB(ctx context.Context, db *sql.DB) (*Store, error) {
 }
 
 // FromDqliteDB initializes the repository against a dqlite-managed database.
-// dqlite owns connection configuration and rejects SQLite-only PRAGMA statements.
+//
+// dqlite owns connection configuration: it opens the underlying SQLite handles
+// itself, so this process cannot set a per-connection pragma on them and no
+// pragma statements are issued here. What it CAN do — and what the previous
+// version of this constructor did not do — is check the one property the shared
+// schema depends on. Passing nil pragmas skipped every startup verification, so
+// whether foreign keys were enforced on this profile was unknown: SQLite's own
+// default is OFF, and the shared qualification suite asserts that a referential
+// failure surfaces as store.ErrNotFound, which is unreachable without them.
+// VerifyReferentialIntegrity settles it by behaviour rather than by comment, and
+// fails closed if the answer is no.
 func FromDqliteDB(ctx context.Context, db *sql.DB) (*Store, error) {
 	return fromDB(ctx, db, true, nil, sqliteMigrationLockStatement)
 }
@@ -448,6 +520,12 @@ func fromDB(ctx context.Context, db *sql.DB, sqliteDialect bool, pragmas []strin
 		}
 	}
 	if err := s.Migrate(ctx); err != nil {
+		return nil, err
+	}
+	// After the schema exists, and on every profile including the two that take
+	// no pragmas. A repository whose REFERENCES clauses are inert is a repository
+	// that reports success for writes that orphan rows.
+	if err := s.VerifyReferentialIntegrity(ctx); err != nil {
 		return nil, err
 	}
 	return s, nil
@@ -483,6 +561,71 @@ func (s *Store) configure(ctx context.Context, statements ...string) error {
 // one connection proves nothing: the defect this guards against was a pragma
 // that applied to exactly one pooled connection.
 func (s *Store) VerifyConnectionSettings(ctx context.Context) error {
+	return s.onEachPooledConnection(ctx, func(index int, connection *sql.Conn) error {
+		var foreignKeys int64
+		if err := connection.QueryRowContext(ctx, "PRAGMA foreign_keys").Scan(&foreignKeys); err != nil {
+			return fmt.Errorf("read sqlite foreign_keys on connection %d: %w", index, err)
+		}
+		if foreignKeys != 1 {
+			return fmt.Errorf("sqlite foreign_keys is %d on connection %d, want 1", foreignKeys, index)
+		}
+		var busyTimeout int64
+		if err := connection.QueryRowContext(ctx, "PRAGMA busy_timeout").Scan(&busyTimeout); err != nil {
+			return fmt.Errorf("read sqlite busy_timeout on connection %d: %w", index, err)
+		}
+		// A floor, not an equality: an operator raising the timeout in the DSN is
+		// tuning, and refusing to start over it was a defect of its own.
+		if busyTimeout < requiredBusyTimeout {
+			return fmt.Errorf("sqlite busy_timeout is %d on connection %d, want at least %d", busyTimeout, index, requiredBusyTimeout)
+		}
+		return nil
+	})
+}
+
+// referentialProbeStatement violates conversation_members' foreign keys with
+// identifiers no repository path can mint. It is executed inside a transaction
+// that is always rolled back, so it can never leave a row behind.
+const referentialProbeStatement = `INSERT INTO conversation_members(conversation_id, user_id) VALUES ('__referential probe__', '__referential probe__')`
+
+// VerifyReferentialIntegrity proves, by behaviour, that the REFERENCES clauses
+// in the shared schema are enforced by the engine actually serving statements.
+//
+// It exists because the dqlite profile is constructed with no pragmas and
+// therefore skipped VerifyConnectionSettings entirely, on the strength of a
+// comment saying dqlite owns connection configuration. That left the profile's
+// referential integrity as an assumption: SQLite's own default for foreign_keys
+// is OFF, and classify's SQLITE_CONSTRAINT_FOREIGNKEY -> store.ErrNotFound path
+// is only reachable if it is ON. Either dqlite enables it and nothing said so,
+// or it does not and every REFERENCES clause on that profile was a comment.
+//
+// Reading PRAGMA foreign_keys would answer that on SQLite and is not portable —
+// PostgreSQL has no such pragma, and dqlite's statement handling is not ours to
+// assume. Attempting a write the schema must reject answers it on every engine,
+// which is why this is a probe and not a setting check.
+func (s *Store) VerifyReferentialIntegrity(ctx context.Context) error {
+	return s.onEachPooledConnection(ctx, func(index int, connection *sql.Conn) error {
+		tx, err := connection.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin referential probe on connection %d: %w", index, err)
+		}
+		_, execErr := tx.ExecContext(ctx, referentialProbeStatement)
+		if err := tx.Rollback(); err != nil && !errors.Is(err, sql.ErrTxDone) {
+			return fmt.Errorf("roll back referential probe on connection %d: %w", index, err)
+		}
+		if execErr == nil {
+			return fmt.Errorf("connection %d accepted a row referencing a missing conversation and a missing user: this storage profile does not enforce the schema's REFERENCES clauses, so every relationship in it is unguarded and store.ErrNotFound is unreachable for referential failures", index)
+		}
+		if !errors.Is(classify(execErr), store.ErrNotFound) {
+			return fmt.Errorf("connection %d rejected the referential probe with %v, which does not classify as a referential failure", index, execErr)
+		}
+		return nil
+	})
+}
+
+// onEachPooledConnection runs a check on as many simultaneously held connections
+// as the pool allows. Holding them at once is what forces the pool to open
+// distinct connections; checking one connection proves nothing about the others.
+func (s *Store) onEachPooledConnection(ctx context.Context, check func(int, *sql.Conn) error) error {
 	probes := 4
 	if limit := s.db.Stats().MaxOpenConnections; limit > 0 && limit < probes {
 		probes = limit
@@ -496,17 +639,11 @@ func (s *Store) VerifyConnectionSettings(ctx context.Context) error {
 	for index := 0; index < probes; index++ {
 		connection, err := s.db.Conn(ctx)
 		if err != nil {
-			return fmt.Errorf("acquire sqlite connection %d: %w", index, err)
+			return fmt.Errorf("acquire connection %d: %w", index, err)
 		}
 		held = append(held, connection)
-		for pragma, want := range requiredSQLitePragmas {
-			var got int64
-			if err := connection.QueryRowContext(ctx, "PRAGMA "+pragma).Scan(&got); err != nil {
-				return fmt.Errorf("read sqlite %s on connection %d: %w", pragma, index, err)
-			}
-			if got != want {
-				return fmt.Errorf("sqlite %s is %d on connection %d, want %d", pragma, got, index, want)
-			}
+		if err := check(index, connection); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -521,6 +658,45 @@ func sqliteBusy(err error) bool {
 	// so the message check stays as a fallback rather than the only signal.
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "database is locked") || strings.Contains(message, "sqlite_busy")
+}
+
+// underContention runs a write that may lose a race for the engine's write lock.
+//
+// SQLite absorbs contention inside the driver: busy_timeout makes a losing
+// writer wait up to requiredBusyTimeout before failing. The replicated profile
+// has no equivalent — it reports the contention to the caller — so a write that
+// would simply have waited on one profile failed on another. That is the same
+// operation answering differently per deployment.
+//
+// The budget is deliberately the SAME as the busy timeout the SQLite profiles
+// are configured with, so the two profiles wait equally long before giving up.
+// An earlier version of this used a handful of short retries, which is not the
+// behaviour SQLite has: it exhausted roughly a twenty-fifth of the timeout and
+// then reported contention that SQLite would have waited out.
+//
+// The budget is bounded rather than unlimited because contention is transient by
+// definition: an operation still losing after the full timeout is reporting
+// something other than contention and must surface rather than spin.
+func underContention(ctx context.Context, attempt func() error) error {
+	deadline := time.Now().Add(requiredBusyTimeout * time.Millisecond)
+	delay := time.Millisecond
+	var err error
+	for {
+		if err = attempt(); err == nil || !sqliteBusy(err) {
+			return err
+		}
+		if !time.Now().Add(delay).Before(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		if delay < 50*time.Millisecond {
+			delay *= 2
+		}
+	}
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -577,11 +753,8 @@ func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 	if value.Deleted {
 		deleted = 1
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	// Validate before opening the transaction. SeedWorkspace already does; this
+	// one opened and rolled one back for every invalid presence.
 	presence := value.Presence
 	if presence == "" {
 		presence = domain.PresenceAuto
@@ -589,6 +762,11 @@ func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return errors.New("invalid user presence")
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, value.Profile.StatusText, value.Profile.StatusEmoji, value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence); err != nil {
 		return classify(err)
 	}
@@ -660,16 +838,23 @@ func (s *Store) Migrate(ctx context.Context) error {
 	// exists to survive, so a losing creator is an expected outcome rather than
 	// an error: if the table is there afterwards, whoever created it is
 	// immaterial.
-	if _, err := connection.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquired INTEGER NOT NULL DEFAULT 0)`); err != nil {
-		if !errors.Is(classify(err), store.ErrAlreadyExists) {
-			return fmt.Errorf("create migration fence: %w", err)
+	//
+	// PostgreSQL fences with pg_advisory_xact_lock and never touches this table,
+	// so it is created and seeded only where it is the fence. Doing it on every
+	// profile cost two DDL statements and an insert on every PostgreSQL start and
+	// left a permanently unused table behind.
+	if s.migrationLockStatement == sqliteMigrationLockStatement {
+		if _, err := connection.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquired INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			if !errors.Is(classify(err), store.ErrAlreadyExists) {
+				return fmt.Errorf("create migration fence: %w", err)
+			}
+			if _, verifyErr := connection.ExecContext(ctx, `SELECT 1 FROM schema_migration_lock WHERE 1 = 0`); verifyErr != nil {
+				return fmt.Errorf("create migration fence: %w", errors.Join(err, verifyErr))
+			}
 		}
-		if _, verifyErr := connection.ExecContext(ctx, `SELECT 1 FROM schema_migration_lock WHERE 1 = 0`); verifyErr != nil {
-			return fmt.Errorf("create migration fence: %w", errors.Join(err, verifyErr))
+		if _, err := connection.ExecContext(ctx, `INSERT INTO schema_migration_lock(id, acquired) VALUES (1, 0) ON CONFLICT(id) DO NOTHING`); err != nil {
+			return fmt.Errorf("initialize migration fence: %w", err)
 		}
-	}
-	if _, err := connection.ExecContext(ctx, `INSERT INTO schema_migration_lock(id, acquired) VALUES (1, 0) ON CONFLICT(id) DO NOTHING`); err != nil {
-		return fmt.Errorf("initialize migration fence: %w", err)
 	}
 	if _, err := connection.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
@@ -692,7 +877,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("commit migration: %w", err)
 	}
 	committed = true
-	return nil
+	// Release the fence BEFORE the column-wide rewrites run. The schema is
+	// current and recorded at this point, so every other replica and every other
+	// binary can start and serve; the rewriting is chunked, resumable and
+	// idempotent, so it can be interleaved with them and with a restart. This
+	// ordering is the difference between an upgrade that is slow for one process
+	// and an upgrade that is an outage for the deployment.
+	connection.Close()
+	return s.runPendingBackfills(ctx)
 }
 
 func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
@@ -1388,7 +1580,10 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 78 {
-		if err := s.normalizeStoredTimestamps(ctx, db); err != nil {
+		// Registering the rewrite rather than performing it. The rewrite itself
+		// runs after this transaction commits and the fence is released; see
+		// backfill.go for why an upgrade must not be an outage.
+		if err := registerTimestampBackfills(ctx, db, allTimestampBackfillNames()); err != nil {
 			return err
 		}
 	}
@@ -1418,6 +1613,40 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `DELETE FROM oauth_codes`); err != nil {
 			return fmt.Errorf("discard plaintext oauth codes: %w", err)
+		}
+	}
+	if version < 81 {
+		// Step 78 rewrote every stored timestamp into the fixed-width encoding,
+		// but it re-encoded at full nanosecond resolution — so it corrected the
+		// ORDERING defect and left the RESOLUTION defect untouched.
+		//
+		// A message's timestamp is its public identifier and carries
+		// microseconds. A stored instant finer than that identifier can never be
+		// matched by a read cursor, a thread-root lookup, or a
+		// created-at lookup built from it, so a message written before
+		// domain.MessageInstant existed stays permanently unread. Truncating at
+		// write time fixed only new messages; every row already in the database
+		// kept the defect, and step 78 carried it across the upgrade intact.
+		//
+		// This is a separate step rather than an amendment to 78 because a
+		// deployment that already applied 78 will never run it again. It
+		// registers the same named backfill as 78, so a deployment upgrading
+		// from 77 rewrites the messages table once, not twice.
+		if err := registerTimestampBackfills(ctx, db, []string{messagesCreatedAtBackfill}); err != nil {
+			return err
+		}
+	}
+	if version < 82 {
+		// One row per app to serialize Socket Mode admission. The previous
+		// serializing statement wrote every live ticket of the app, which takes
+		// the single write lock on the SQLite family but takes a row lock per
+		// ticket on PostgreSQL — and concurrent admissions visited those rows in
+		// different orders, so they deadlocked. A single row per app is ordered
+		// by construction.
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS socket_mode_admission (app_id TEXT PRIMARY KEY, ticket INTEGER NOT NULL DEFAULT 0)`); err != nil {
+			if !errors.Is(classify(err), store.ErrAlreadyExists) {
+				return fmt.Errorf("create socket mode admission: %w", err)
+			}
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -1483,75 +1712,37 @@ func parseLifecycleWakeDeadline(value string) (time.Time, error) {
 	return deadline.UTC(), nil
 }
 
-// normalizeStoredTimestamps rewrites every stored timestamp into the
-// fixed-width, order-preserving encoding. It is keyed by value rather than by
-// primary key so it works for every table in storedTimestampColumns without
-// knowing its key, and it is idempotent: values that already carry the correct
-// encoding produce no UPDATE at all. It runs inside the migration transaction,
-// so a replica that loses the fencing race sees the finished result or nothing.
-func (s *Store) normalizeStoredTimestamps(ctx context.Context, db queryExecutor) error {
-	for _, target := range storedTimestampColumns {
-		if err := s.normalizeStoredTimestampColumn(ctx, db, target.table, target.column); err != nil {
-			return fmt.Errorf("normalize %s.%s timestamps: %w", target.table, target.column, err)
-		}
-	}
-	return nil
-}
-
-func (s *Store) normalizeStoredTimestampColumn(ctx context.Context, db queryExecutor, table, column string) error {
-	rows, err := db.QueryContext(ctx, `SELECT DISTINCT `+column+` FROM `+table+` WHERE `+column+` <> ''`)
-	if err != nil {
-		return err
-	}
-	type rewrite struct {
-		from string
-		to   domain.StoredTime
-	}
-	var rewrites []rewrite
-	for rows.Next() {
-		var stored string
-		if err := rows.Scan(&stored); err != nil {
-			rows.Close()
-			return err
-		}
-		normalized, changed, err := domain.NormalizeStoredTime(stored)
-		if err != nil {
-			rows.Close()
-			return err
-		}
-		if changed {
-			rewrites = append(rewrites, rewrite{from: stored, to: normalized})
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return err
-	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
-	for _, value := range rewrites {
-		if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET `+column+` = ? WHERE `+column+` = ?`, value.to, value.from); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // normalizeUserEmails moves workspace e-mail identity off the database's
 // lower() semantics and onto domain.NormalizeEmail. It rewrites stored
-// addresses into the canonical form, refuses to continue if two users in one
-// workspace would collide once normalized, and replaces the expression index
-// with a plain-column unique index so SQLite, dqlite and PostgreSQL enforce the
-// same identity.
+// addresses into the canonical form, resolves the collisions the old per-engine
+// rule allowed, and replaces the expression index with a plain-column unique
+// index so SQLite, dqlite and PostgreSQL enforce the same identity.
+//
+// Collisions are not hypothetical and they are not the operator's fault. The
+// uniqueness guard before this step was the expression index users(workspace_id,
+// lower(email)), and SQLite's and dqlite's lower() folds ASCII only — which is
+// the exact divergence domain.NormalizeEmail exists to remove. So any SQLite or
+// dqlite deployment that accepted "Ä@x.test" alongside "ä@x.test" is a
+// deployment that the release which introduced this step could not start, ever,
+// with an error that named two identifiers and stopped. There was no flag, no
+// repair mode and no supported remedy short of hand-editing the database.
+//
+// The resolution is deterministic and reversible by an administrator: the lowest
+// user identifier keeps the address, every other colliding account has its
+// address cleared, and each cleared address is recorded as a migration notice
+// naming the account that kept it. Clearing an address does not delete an
+// account or its content; it removes one sign-in path that was already ambiguous
+// on this database, and an administrator can reassign it. Refusing to start
+// removes every sign-in path for everybody.
 func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error {
 	rows, err := db.QueryContext(ctx, `SELECT id, workspace_id, email FROM users WHERE email <> '' ORDER BY id`)
 	if err != nil {
 		return fmt.Errorf("read user emails: %w", err)
 	}
 	type rewrite struct {
-		id    string
-		email string
+		id      string
+		email   string
+		cleared string
 	}
 	var rewrites []rewrite
 	owners := make(map[string]string)
@@ -1564,8 +1755,10 @@ func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error
 		normalized := domain.NormalizeEmail(email)
 		key := workspace + "\x00" + normalized
 		if existing, taken := owners[key]; taken {
-			rows.Close()
-			return fmt.Errorf("normalize user emails: users %q and %q in workspace %q share the address %q once normalized", existing, id, workspace, normalized)
+			// ORDER BY id makes "the first one seen" the lowest identifier, so
+			// the outcome does not depend on physical row order.
+			rewrites = append(rewrites, rewrite{id: id, email: "", cleared: fmt.Sprintf("%s (kept by user %q)", normalized, existing)})
+			continue
 		}
 		owners[key] = id
 		if normalized != email {
@@ -1579,17 +1772,33 @@ func (s *Store) normalizeUserEmails(ctx context.Context, db queryExecutor) error
 	if err := rows.Close(); err != nil {
 		return err
 	}
+	observed := s.now().UTC()
 	for _, value := range rewrites {
 		if _, err := db.ExecContext(ctx, `UPDATE users SET email = ? WHERE id = ?`, value.email, value.id); err != nil {
 			return fmt.Errorf("normalize user email %q: %w", value.id, err)
 		}
+		if value.cleared == "" {
+			continue
+		}
+		if err := recordMigrationNotice(ctx, db, MigrationNoticeEmailCleared, value.id, value.cleared, observed); err != nil {
+			return fmt.Errorf("record cleared user email %q: %w", value.id, err)
+		}
 	}
 	// The plain-column index is the portable identity: every backend compares the
-	// same canonical bytes. The expression index stays as a backstop that catches
-	// an ASCII case variant written by a path that skipped the normalizer; it
-	// cannot be the primary guard because SQLite's lower() folds ASCII only.
+	// same canonical bytes.
 	if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS users_workspace_email_normalized ON users(workspace_id, email) WHERE email <> ''`); err != nil {
 		return fmt.Errorf("index normalized user emails: %w", err)
+	}
+	// The lower(email) expression index was kept as "a backstop that catches an
+	// ASCII case variant written by a path that skipped the normalizer". After
+	// this change there is no such path — CreateUser, FindUserByEmail and
+	// SeedUser all normalize, and the in-memory repository does too — and keeping
+	// it left PostgreSQL applying its locale-aware lower() to the identity rule
+	// while every other profile applied strings.ToLower. That is the last
+	// per-engine identity rule in the schema, and it is exactly the divergence
+	// class this step removes everywhere else.
+	if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS users_workspace_email`); err != nil {
+		return fmt.Errorf("drop the per-engine user email index: %w", err)
 	}
 	return nil
 }
@@ -1850,7 +2059,13 @@ func (s *Store) FindUserByEmail(ctx context.Context, workspace domain.WorkspaceI
 	return value, translateNotFound(err)
 }
 
-func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, event events.Event) (domain.User, error) {
+// UpdateUserProfile commits the profile change and every event given with it in
+// one transaction. See store.Store.UpdateUserProfile for why the blob-delete
+// instruction has to travel with the change rather than after it.
+func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, changes ...events.Event) (domain.User, error) {
+	if len(changes) == 0 {
+		return domain.User{}, errors.New("a profile change requires at least one event")
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.User{}, err
@@ -1867,8 +2082,10 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 	if changed != 1 {
 		return domain.User{}, store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return domain.User{}, err
+	for _, change := range changes {
+		if err := insertOutbox(ctx, tx, change); err != nil {
+			return domain.User{}, err
+		}
 	}
 	var user domain.User
 	var deleted int
@@ -2434,13 +2651,15 @@ func (s *Store) LookupSession(ctx context.Context, token string) (domain.Session
 	return record, nil
 }
 
-// GetAuthMethod reports the stored enablement of an authorization provider. A
-// provider with no row has no stored decision, so it reports store.ErrNotFound —
-// the contract every other absent-row read in this repository already has. It
-// used to synthesise Enabled: true, which meant a provider no administrator had
-// ever configured read as enabled and an unwritten SetAuthMethod read as a
-// permission. The value returned alongside the sentinel is disabled so a caller
-// that ignores the error still fails closed.
+// GetAuthMethod reports the stored administrative override for an authorization
+// provider. A provider with no row reports Enabled: true and a nil error. See
+// store.Store.GetAuthMethod for the decision and the reason: absence means "no
+// administrator has turned this provider off", not "no such provider", because
+// provider existence is decided by the operator's startup configuration and
+// absence-means-disabled locks a fresh deployment out with no bootstrap path.
+//
+// This is the documented exception to the repository's absent-row-is-ErrNotFound
+// convention, and it is deliberate.
 func (s *Store) GetAuthMethod(ctx context.Context, workspace domain.WorkspaceID, provider string) (domain.AuthMethod, error) {
 	var enabled int
 	err := s.db.QueryRowContext(ctx, `SELECT enabled FROM auth_methods WHERE workspace_id = ? AND provider = ?`, workspace, provider).Scan(&enabled)
@@ -2692,10 +2911,11 @@ func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conv
 	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, conversation.ID, conversation.WorkspaceID); err != nil {
 		return classify(err)
 	}
-	if conversation.IsPrivate {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?)`, conversation.ID, creator); err != nil {
-			return classify(err)
-		}
+	// The creator joins the conversation, public or private. See the note on the
+	// in-memory repository: joining only private conversations left the creator
+	// of a public channel unable to act on it.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) VALUES (?, ?)`, conversation.ID, creator); err != nil {
+		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -3557,6 +3777,19 @@ func (s *Store) DisconnectConversationTeams(ctx context.Context, workspace domai
 	return tx.Commit()
 }
 
+// ListConnectedChannelInfo pages the connected channels of one workspace.
+//
+// The filters and the page bound are applied in SQL. They used to be applied in
+// Go over the result of an unbounded query, so a request for one page of one
+// channel still materialised every conversation-to-team row in the workspace
+// past the cursor — the cost of the call was the size of the workspace rather
+// than the size of the page, and the LIMIT the caller asked for did nothing to
+// protect the database.
+//
+// It is two queries because the unit of paging is a CHANNEL and the unit of the
+// join is a channel-team pair: a LIMIT on the joined rows would cut a channel's
+// team list in half. The first query bounds the page to channel identifiers, the
+// second reads the teams of exactly those channels.
 func (s *Store) ListConnectedChannelInfo(ctx context.Context, workspace domain.WorkspaceID, channels []domain.ConversationID, teams []domain.WorkspaceID, request domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error) {
 	if request.Limit <= 0 {
 		return nil, false, "", errors.New("page limit must be positive")
@@ -3565,51 +3798,70 @@ func (s *Store) ListConnectedChannelInfo(ctx context.Context, workspace domain.W
 	if err != nil {
 		return nil, false, "", err
 	}
-	channelFilter := make(map[domain.ConversationID]struct{}, len(channels))
+	channelPredicate, channelArgs := inPredicate("c.id", len(channels))
 	for _, channel := range channels {
-		channelFilter[channel] = struct{}{}
+		channelArgs = append(channelArgs, string(channel))
 	}
-	teamFilter := make(map[domain.WorkspaceID]struct{}, len(teams))
+	teamPredicate, teamArgs := inPredicate("ct.team_id", len(teams))
 	for _, team := range teams {
-		teamFilter[team] = struct{}{}
+		teamArgs = append(teamArgs, string(team))
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT c.id, ct.team_id FROM conversation_teams ct JOIN conversations c ON c.id = ct.conversation_id WHERE c.workspace_id = ? AND c.id > ? ORDER BY c.id, ct.team_id`, workspace, after)
+
+	pageArgs := append([]any{workspace, after}, channelArgs...)
+	pageArgs = append(pageArgs, teamArgs...)
+	pageArgs = append(pageArgs, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT c.id FROM conversation_teams ct JOIN conversations c ON c.id = ct.conversation_id WHERE c.workspace_id = ? AND c.id > ?`+channelPredicate+teamPredicate+` ORDER BY c.id LIMIT ?`, pageArgs...)
+	if err != nil {
+		return nil, false, "", err
+	}
+	page := make([]domain.ConversationID, 0, request.Limit+1)
+	for rows.Next() {
+		var channel string
+		if err := rows.Scan(&channel); err != nil {
+			rows.Close()
+			return nil, false, "", err
+		}
+		page = append(page, domain.ConversationID(channel))
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, false, "", err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, false, "", err
+	}
+	hasMore := len(page) > request.Limit
+	if hasMore {
+		page = page[:request.Limit]
+	}
+	if len(page) == 0 {
+		return []domain.ConnectedChannelInfo{}, false, "", nil
+	}
+
+	pagePredicate, memberArgs := inPredicate("ct.conversation_id", len(page))
+	for _, channel := range page {
+		memberArgs = append(memberArgs, string(channel))
+	}
+	memberArgs = append(memberArgs, teamArgs...)
+	rows, err = s.db.QueryContext(ctx, `SELECT ct.conversation_id, ct.team_id FROM conversation_teams ct WHERE 1 = 1`+pagePredicate+teamPredicate+` ORDER BY ct.conversation_id, ct.team_id`, memberArgs...)
 	if err != nil {
 		return nil, false, "", err
 	}
 	defer rows.Close()
-	grouped := make(map[domain.ConversationID][]domain.WorkspaceID)
+	grouped := make(map[domain.ConversationID][]domain.WorkspaceID, len(page))
 	for rows.Next() {
 		var channel, team string
 		if err := rows.Scan(&channel, &team); err != nil {
 			return nil, false, "", err
 		}
-		cid := domain.ConversationID(channel)
-		tid := domain.WorkspaceID(team)
-		if len(channelFilter) > 0 {
-			if _, ok := channelFilter[cid]; !ok {
-				continue
-			}
-		}
-		if len(teamFilter) > 0 {
-			if _, ok := teamFilter[tid]; !ok {
-				continue
-			}
-		}
-		grouped[cid] = append(grouped[cid], tid)
+		grouped[domain.ConversationID(channel)] = append(grouped[domain.ConversationID(channel)], domain.WorkspaceID(team))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, "", err
 	}
-	values := make([]domain.ConnectedChannelInfo, 0, len(grouped))
-	for channel, associated := range grouped {
-		sort.Slice(associated, func(i, j int) bool { return associated[i] < associated[j] })
-		values = append(values, domain.ConnectedChannelInfo{ChannelID: channel, InternalTeamIDs: associated, OriginalConnectedChannelID: channel, OriginalConnectedHostID: workspace})
-	}
-	sort.Slice(values, func(i, j int) bool { return values[i].ChannelID < values[j].ChannelID })
-	hasMore := len(values) > request.Limit
-	if hasMore {
-		values = values[:request.Limit]
+	values := make([]domain.ConnectedChannelInfo, 0, len(page))
+	for _, channel := range page {
+		values = append(values, domain.ConnectedChannelInfo{ChannelID: channel, InternalTeamIDs: grouped[channel], OriginalConnectedChannelID: channel, OriginalConnectedHostID: workspace})
 	}
 	var next domain.Cursor
 	if hasMore {
@@ -3619,6 +3871,28 @@ func (s *Store) ListConnectedChannelInfo(ctx context.Context, workspace domain.W
 		}
 	}
 	return values, hasMore, next, nil
+}
+
+// inPredicate builds " AND <column> IN (?, ?, …)" for a filter of the given
+// size, or the empty string when the filter is absent. It returns the argument
+// slice the caller appends its values to, so the placeholders and the arguments
+// are produced in one place.
+func inPredicate(column string, size int) (string, []any) {
+	if size == 0 {
+		return "", make([]any, 0)
+	}
+	var builder strings.Builder
+	builder.WriteString(" AND ")
+	builder.WriteString(column)
+	builder.WriteString(" IN (")
+	for index := 0; index < size; index++ {
+		if index > 0 {
+			builder.WriteString(", ")
+		}
+		builder.WriteString("?")
+	}
+	builder.WriteString(")")
+	return builder.String(), make([]any, 0, size)
 }
 
 func (s *Store) CreateOAuthClient(ctx context.Context, value domain.OAuthClient) error {
@@ -3833,16 +4107,29 @@ func (s *Store) ConsumeRTMConnection(ctx context.Context, id string) (domain.RTM
 }
 
 func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.SocketModeConnection) error {
+	return underContention(ctx, func() error { return s.createSocketModeConnectionOnce(ctx, value) })
+}
+
+func (s *Store) createSocketModeConnectionOnce(ctx context.Context, value domain.SocketModeConnection) error {
 	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
 		return errors.New("invalid Socket Mode connection")
+	}
+	if err := s.ensureSocketModeAdmissionRow(ctx, value.AppID); err != nil {
+		return err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// Same shape as ConsumeSocketModeConnection: take the admission lock before
+	// reading the count, so the count cannot be stale by the time it is acted on.
+	now := s.now().UTC()
+	if _, err := tx.ExecContext(ctx, socketModeAdmissionLockStatement, value.AppID); err != nil {
+		return err
+	}
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, value.AppID, time.Now().UTC().UnixNano()).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, value.AppID, now.UnixNano()).Scan(&active); err != nil {
 		return err
 	}
 	if active >= domain.SocketModeConnectionLimit {
@@ -3855,19 +4142,69 @@ func (s *Store) CreateSocketModeConnection(ctx context.Context, value domain.Soc
 	return tx.Commit()
 }
 
+// socketModeAdmissionLockStatement serializes admission for one app before the
+// active-connection count is read.
+//
+// Counting and then updating in a transaction whose first statement is a READ is
+// check-then-act: the transaction begins deferred, so every concurrent dialler
+// takes its read snapshot before any of them writes, every one of them sees the
+// same count, and every one of them is admitted. Measured, 64 concurrent
+// diallers against a limit of 10 admitted 11-15. Writing first takes the
+// engine's write lock before anything is read, so the count each caller reads
+// already includes every admission that committed before it.
+//
+// The write must touch exactly ONE row. An earlier version wrote every live
+// ticket of the app, which is a single lock on the SQLite family but a row lock
+// per ticket on PostgreSQL — concurrent admissions acquired those rows in
+// different orders and deadlocked, and on the replicated profile the breadth of
+// the write showed up as lock contention. One row per app is ordered by
+// construction, so admissions queue instead of colliding.
+const socketModeAdmissionLockStatement = `UPDATE socket_mode_admission SET ticket = ticket + 1 WHERE app_id = ?`
+
+// ensureSocketModeAdmissionRow creates the app's admission row if it is absent.
+// It runs outside the admission transaction: the lock statement takes no lock at
+// all when it matches no row, so the row has to exist before it runs.
+func (s *Store) ensureSocketModeAdmissionRow(ctx context.Context, appID domain.AppID) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_admission(app_id, ticket) VALUES (?, 0) ON CONFLICT(app_id) DO NOTHING`, appID)
+	return err
+}
+
 func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (domain.SocketModeConnection, error) {
+	var value domain.SocketModeConnection
+	err := underContention(ctx, func() error {
+		result, err := s.consumeSocketModeConnectionOnce(ctx, id)
+		value = result
+		return err
+	})
+	return value, err
+}
+
+func (s *Store) consumeSocketModeConnectionOnce(ctx context.Context, id string) (domain.SocketModeConnection, error) {
+	// Resolve the ticket's app before the transaction opens, so the transaction's
+	// first statement is the admission lock rather than a read.
+	var appID domain.AppID
+	if err := s.db.QueryRowContext(ctx, `SELECT app_id FROM socket_mode_connections WHERE id = ?`, id).Scan(&appID); err != nil {
+		return domain.SocketModeConnection{}, translateNotFound(err)
+	}
+	if err := s.ensureSocketModeAdmissionRow(ctx, appID); err != nil {
+		return domain.SocketModeConnection{}, err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.SocketModeConnection{}, err
 	}
 	defer tx.Rollback()
+	now := s.now().UTC()
+	if _, err := tx.ExecContext(ctx, socketModeAdmissionLockStatement, appID); err != nil {
+		return domain.SocketModeConnection{}, err
+	}
 	var value domain.SocketModeConnection
 	var expiresAt, consumedAt int64
 	if err := tx.QueryRowContext(ctx, `SELECT id, app_id, expires_at, consumed_at FROM socket_mode_connections WHERE id = ?`, id).Scan(&value.ID, &value.AppID, &expiresAt, &consumedAt); err != nil {
 		return domain.SocketModeConnection{}, translateNotFound(err)
 	}
 	value.ExpiresAt = time.Unix(0, expiresAt).UTC()
-	if consumedAt != 0 || !value.ExpiresAt.After(time.Now().UTC()) {
+	if consumedAt != 0 || !value.ExpiresAt.After(now) {
 		return domain.SocketModeConnection{}, store.ErrNotFound
 	}
 	// Consumption is what makes a connection active, so it is the only place
@@ -3875,13 +4212,13 @@ func (s *Store) ConsumeSocketModeConnection(ctx context.Context, id string) (dom
 	// ticket is issued counts nothing, because a ticket is inactive until it is
 	// dialled: an app could take unbounded tickets first and dial them all.
 	var active int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, value.AppID, time.Now().UTC().UnixNano()).Scan(&active); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM socket_mode_connections WHERE app_id = ? AND consumed_at > 0 AND expires_at > ?`, value.AppID, now.UnixNano()).Scan(&active); err != nil {
 		return domain.SocketModeConnection{}, err
 	}
 	if active >= domain.SocketModeConnectionLimit {
 		return domain.SocketModeConnection{}, store.ErrSocketModeConnectionLimit
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE socket_mode_connections SET consumed_at = ? WHERE id = ? AND consumed_at = 0`, time.Now().UTC().UnixNano(), id)
+	result, err := tx.ExecContext(ctx, `UPDATE socket_mode_connections SET consumed_at = ? WHERE id = ? AND consumed_at = 0`, now.UnixNano(), id)
 	if err != nil {
 		return domain.SocketModeConnection{}, err
 	}
@@ -4731,12 +5068,18 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 	return tx.Commit()
 }
 
+// GetMessageByCreatedAt resolves a message by the instant behind its public
+// timestamp. The lookup key is truncated with domain.MessageInstant exactly as
+// CreateMessage truncates the value it stores: the write invariant was enforced
+// and the matching read invariant was not, so the same call answered ErrNotFound
+// on the SQL profiles and returned the message on the memory profile whenever the
+// caller's instant carried sub-microsecond precision.
 func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.ConversationID, createdAt time.Time) (domain.Message, error) {
 	var message domain.Message
 	var deleted int
 	var stored string
 	var blocks, attachments, unfurls string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(createdAt)).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &attachments, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(domain.MessageInstant(createdAt))).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &attachments, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
@@ -5201,9 +5544,18 @@ func (s *Store) CreateBookmark(ctx context.Context, bookmark domain.Bookmark, ev
 }
 
 func (s *Store) GetBookmark(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID) (domain.Bookmark, error) {
+	return s.getBookmarkOn(ctx, s.db, workspace, conversation, id)
+}
+
+// getBookmarkOn reads through the caller's executor so a mutation can return the
+// row it just wrote from inside its own transaction. Committing and then reading
+// through s.db returns whatever a concurrent writer left behind: two overlapping
+// bookmarks.edit calls each returned the OTHER caller's title as the result of
+// their own write.
+func (s *Store) getBookmarkOn(ctx context.Context, db queryExecutor, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID) (domain.Bookmark, error) {
 	var bookmark domain.Bookmark
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation_id, title, type, link, emoji, entity_id, access_level, parent_id, created_at, updated_at, updated_by FROM bookmarks WHERE id = ? AND workspace_id = ? AND conversation_id = ?`, id, workspace, conversation).Scan(&bookmark.ID, &bookmark.WorkspaceID, &bookmark.Conversation, &bookmark.Title, &bookmark.Type, &bookmark.Link, &bookmark.Emoji, &bookmark.EntityID, &bookmark.AccessLevel, &bookmark.ParentID, &created, &updated, &bookmark.UpdatedBy)
+	err := db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation_id, title, type, link, emoji, entity_id, access_level, parent_id, created_at, updated_at, updated_by FROM bookmarks WHERE id = ? AND workspace_id = ? AND conversation_id = ?`, id, workspace, conversation).Scan(&bookmark.ID, &bookmark.WorkspaceID, &bookmark.Conversation, &bookmark.Title, &bookmark.Type, &bookmark.Link, &bookmark.Emoji, &bookmark.EntityID, &bookmark.AccessLevel, &bookmark.ParentID, &created, &updated, &bookmark.UpdatedBy)
 	if err := translateNotFound(err); err != nil {
 		return domain.Bookmark{}, err
 	}
@@ -5233,6 +5585,16 @@ func (s *Store) ListBookmarks(ctx context.Context, workspace domain.WorkspaceID,
 }
 
 func (s *Store) UpdateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
+	var updated domain.Bookmark
+	err := underContention(ctx, func() error {
+		value, err := s.updateBookmarkOnce(ctx, bookmark, event)
+		updated = value
+		return err
+	})
+	return updated, err
+}
+
+func (s *Store) updateBookmarkOnce(ctx context.Context, bookmark domain.Bookmark, event events.Event) (domain.Bookmark, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return domain.Bookmark{}, err
@@ -5252,10 +5614,14 @@ func (s *Store) UpdateBookmark(ctx context.Context, bookmark domain.Bookmark, ev
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.Bookmark{}, err
 	}
+	updated, err := s.getBookmarkOn(ctx, tx, bookmark.WorkspaceID, bookmark.Conversation, bookmark.ID)
+	if err != nil {
+		return domain.Bookmark{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.Bookmark{}, err
 	}
-	return s.GetBookmark(ctx, bookmark.WorkspaceID, bookmark.Conversation, bookmark.ID)
+	return updated, nil
 }
 
 func (s *Store) DeleteBookmark(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, id domain.BookmarkID, event events.Event) error {
@@ -5439,7 +5805,7 @@ func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string,
 		if err := rows.Scan(&entityType, &entityID, &level); err != nil {
 			return "", "", "", err
 		}
-		if store.AccessRank(level) > store.AccessRank(bestLevel) {
+		if store.BetterAccessGrant(entityType, entityID, level, bestType, bestID, bestLevel) {
 			bestType, bestID, bestLevel = entityType, entityID, level
 		}
 	}
@@ -6134,6 +6500,18 @@ func (s *Store) EndCall(ctx context.Context, workspace domain.WorkspaceID, id do
 		return err
 	}
 	if changed != 1 {
+		// The guarded UPDATE cannot distinguish "no such call" from "already
+		// ended", and reporting ErrNotFound for both told the caller its call had
+		// vanished when it had simply already finished. The in-memory repository
+		// reported ErrAlreadyExists for the second case all along, so the two
+		// profiles answered the same request differently.
+		var ended int64
+		if err := tx.QueryRowContext(ctx, `SELECT ended_at FROM calls WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&ended); err != nil {
+			return translateNotFound(err)
+		}
+		if ended != 0 {
+			return store.ErrAlreadyExists
+		}
 		return store.ErrNotFound
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -6470,21 +6848,19 @@ func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.Work
 		return nil, err
 	}
 	defer rows.Close()
-	prefix := "/users/" + string(workspace) + "/"
 	for rows.Next() {
 		var userID, imageURL string
 		if err := rows.Scan(&userID, &imageURL); err != nil {
 			return nil, err
 		}
-		if !strings.HasPrefix(imageURL, prefix) {
-			return nil, fmt.Errorf("user %q has an invalid photo URL", userID)
+		// users.profile.set accepts image_24 as free text, so a member can store
+		// an ordinary external avatar URL there. Failing the walk on one made
+		// blob garbage collection for the whole workspace unrunnable, and any
+		// member could trigger it from their own profile. A URL this deployment
+		// did not mint names no blob of ours, so it is not a reference.
+		if key, ok := domain.UserPhotoBlobKey(workspace, domain.UserID(userID), imageURL); ok {
+			references = append(references, key)
 		}
-		photo := strings.TrimPrefix(imageURL, prefix)
-		parts := strings.Split(photo, "/photo/")
-		if len(parts) != 2 || parts[0] != userID || parts[1] == "" || strings.Contains(parts[1], "/") {
-			return nil, fmt.Errorf("user %q has an invalid photo URL", userID)
-		}
-		references = append(references, string(workspace)+"/users/"+userID+"/"+parts[1])
 	}
 	return references, rows.Err()
 }
@@ -6506,6 +6882,13 @@ func (s *Store) AddRemoteFile(ctx context.Context, value domain.RemoteFile, even
 }
 
 func (s *Store) GetRemoteFile(ctx context.Context, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup) (domain.RemoteFile, error) {
+	return s.getRemoteFileOn(ctx, s.db, workspace, lookup)
+}
+
+// getRemoteFileOn reads through the caller's executor. See getBookmarkOn: a
+// mutation that commits and then re-reads through s.db can return a concurrent
+// writer's value as the result of its own write.
+func (s *Store) getRemoteFileOn(ctx context.Context, db queryExecutor, workspace domain.WorkspaceID, lookup domain.RemoteFileLookup) (domain.RemoteFile, error) {
 	query := `SELECT id, workspace_id, external_id, title, file_type, external_url, preview_image, indexable_contents, created_at, deleted FROM remote_files WHERE workspace_id = ? AND deleted = 0 AND id = ?`
 	args := []any{workspace, lookup.ID}
 	if lookup.ID == "" {
@@ -6515,7 +6898,7 @@ func (s *Store) GetRemoteFile(ctx context.Context, workspace domain.WorkspaceID,
 	var value domain.RemoteFile
 	var created int64
 	var deleted int
-	err := s.db.QueryRowContext(ctx, query, args...).Scan(&value.ID, &value.WorkspaceID, &value.ExternalID, &value.Title, &value.FileType, &value.ExternalURL, &value.PreviewImage, &value.IndexableContents, &created, &deleted)
+	err := db.QueryRowContext(ctx, query, args...).Scan(&value.ID, &value.WorkspaceID, &value.ExternalID, &value.Title, &value.FileType, &value.ExternalURL, &value.PreviewImage, &value.IndexableContents, &created, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.RemoteFile{}, store.ErrNotFound
 	}
@@ -6524,7 +6907,7 @@ func (s *Store) GetRemoteFile(ctx context.Context, workspace domain.WorkspaceID,
 	}
 	value.CreatedAt = time.Unix(created, 0).UTC()
 	value.Deleted = deleted != 0
-	value.SharedChannels, err = s.remoteFileShares(ctx, s.db, value.ID)
+	value.SharedChannels, err = s.remoteFileShares(ctx, db, value.ID)
 	if err != nil {
 		return domain.RemoteFile{}, err
 	}
@@ -6664,10 +7047,14 @@ func (s *Store) SetRemoteFileShares(ctx context.Context, workspace domain.Worksp
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.RemoteFile{}, err
 	}
+	shared, err := s.getRemoteFileOn(ctx, tx, workspace, domain.RemoteFileLookup{ID: id})
+	if err != nil {
+		return domain.RemoteFile{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.RemoteFile{}, err
 	}
-	return s.GetRemoteFile(ctx, workspace, domain.RemoteFileLookup{ID: id})
+	return shared, nil
 }
 
 func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.WorkspaceID, value domain.RemoteFile, event events.Event) (domain.RemoteFile, error) {
@@ -6690,10 +7077,14 @@ func (s *Store) UpdateRemoteFile(ctx context.Context, workspace domain.Workspace
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.RemoteFile{}, err
 	}
+	updated, err := s.getRemoteFileOn(ctx, tx, workspace, domain.RemoteFileLookup{ID: value.ID})
+	if err != nil {
+		return domain.RemoteFile{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return domain.RemoteFile{}, err
 	}
-	return s.GetRemoteFile(ctx, workspace, domain.RemoteFileLookup{ID: value.ID})
+	return updated, nil
 }
 
 func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Message, error) {
@@ -7088,6 +7479,19 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 }
 
 func (s *Store) CreateList(ctx context.Context, value domain.List, event events.Event) error {
+	return s.CreateListWithItems(ctx, value, event, nil)
+}
+
+// CreateListWithItems creates a list and its initial items in one transaction.
+// See store.Store.CreateListWithItems: the copy_from journey used to publish
+// list.created and then copy items one call at a time, so a failure partway left
+// a half-copied list that clients had already been told about.
+func (s *Store) CreateListWithItems(ctx context.Context, value domain.List, event events.Event, items []store.ListItemCreation) error {
+	for _, creation := range items {
+		if creation.Item.ListID != value.ID || creation.Item.WorkspaceID != value.WorkspaceID {
+			return fmt.Errorf("%w: list item %q does not belong to the list being created", store.ErrInvalidArgument, creation.Item.ID)
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -7099,6 +7503,14 @@ func (s *Store) CreateList(ctx context.Context, value domain.List, event events.
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
+	}
+	for _, creation := range items {
+		if err := insertListItem(ctx, tx, creation.Item); err != nil {
+			return err
+		}
+		if err := insertOutbox(ctx, tx, creation.Event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -7151,20 +7563,28 @@ func (s *Store) CreateListItem(ctx context.Context, value domain.ListItem, event
 		return err
 	}
 	defer tx.Rollback()
+	if err := insertListItem(ctx, tx, value); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// insertListItem is shared by the single-item creation and the bulk copy, so the
+// parent check and the column list cannot drift apart between them.
+func insertListItem(ctx context.Context, tx *sql.Tx, value domain.ListItem) error {
 	if value.ParentItemID != "" {
 		var parent string
 		if err := tx.QueryRowContext(ctx, `SELECT id FROM list_items WHERE id = ? AND list_id = ?`, value.ParentItemID, value.ListID).Scan(&parent); err != nil {
 			return translateNotFound(err)
 		}
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived))
-	if err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived)); err != nil {
 		return classify(err)
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return nil
 }
 
 func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, error) {
@@ -7469,6 +7889,13 @@ func classify(err error) error {
 		case sqlite3.SQLITE_CONSTRAINT_NOTNULL, sqlite3.SQLITE_CONSTRAINT_CHECK:
 			return store.ErrInvalidArgument
 		}
+		// The driver already told us exactly what happened and it is not one of
+		// the four classes, so the text of the message is not evidence of
+		// anything. Falling through to a substring search here reclassified a
+		// syntax error whose text quotes a UNIQUE clause as ErrAlreadyExists,
+		// which reaches the client as "the resource already exists" for a query
+		// that is simply broken.
+		return err
 	}
 	// pgx reports the SQLSTATE through this method; matching the interface keeps
 	// the shared repository free of a PostgreSQL driver import.
@@ -7482,10 +7909,14 @@ func classify(err error) error {
 		case "23502", "23514":
 			return store.ErrInvalidArgument
 		}
+		// Same reasoning: a deliberate SQLSTATE that is not one of the four —
+		// 23P01 exclusion_violation, 42601 syntax_error — must not be
+		// re-decided by its own English.
+		return err
 	}
-	// dqlite forwards constraint failures without a typed error, and SQLite
-	// reports some of them with the primary code only, so the message stays as a
-	// last resort rather than as the only signal.
+	// Only for errors that carried NO machine-readable classification at all.
+	// dqlite forwards constraint failures without a typed error, so this is the
+	// signal of last resort rather than a second opinion on a typed one.
 	message := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(message, "unique"), strings.Contains(message, "primary key"):

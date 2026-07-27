@@ -195,6 +195,9 @@ func TestIntegrationLogsRequireAuthoritativeActorEvents(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	// team.integrationLogs is an administrative read of who installed and
+	// approved every app, so the fixture has to state the authority it claims.
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	ctx := context.Background()
 	// The approval event is built the way the service builds it: an app
 	// identifier is a payload field, never the whole payload.
@@ -488,6 +491,12 @@ func TestMigrationExchangeUsesExplicitMappingsAndReportsInvalidIDs(t *testing.T)
 	}
 }
 
+// This fixture used to associate a T1 channel with the unrelated workspace T2
+// and assert that it worked, which recorded the defect as the contract: the
+// operation tested only that the named workspace EXISTED, so it wrote a
+// cross-tenant row and answered an absent id differently from a foreign one.
+// The association is now the actor's own workspace, and the foreign id is
+// refused.
 func TestConversationTeamsAreDurableAndDisconnectable(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "one"})
@@ -496,18 +505,21 @@ func TestConversationTeamsAreDurableAndDisconnectable(t *testing.T) {
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "shared"})
 	messages := Messages{Store: s}
-	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1", "T2"}, false); err != nil {
+	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1", "T2"}, false); !errors.Is(err, ErrInvalidConversation) {
+		t.Fatalf("association with the unrelated workspace T2: err=%v, want ErrInvalidConversation", err)
+	}
+	if err := messages.AdminSetConversationTeams(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1"}, false); err != nil {
 		t.Fatal(err)
 	}
 	teams, _, err := s.ListConversationTeams(context.Background(), "T1", "C1")
-	if err != nil || len(teams) != 2 {
+	if err != nil || len(teams) != 1 || teams[0] != "T1" {
 		t.Fatalf("teams=%v err=%v", teams, err)
 	}
-	if err := messages.AdminDisconnectSharedConversation(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T2"}); err != nil {
+	if err := messages.AdminDisconnectSharedConversation(context.Background(), "T1", "U1", "C1", []domain.WorkspaceID{"T1"}); err != nil {
 		t.Fatal(err)
 	}
 	teams, _, err = s.ListConversationTeams(context.Background(), "T1", "C1")
-	if err != nil || len(teams) != 1 || teams[0] != "T1" {
+	if err != nil || len(teams) != 0 {
 		t.Fatalf("after disconnect teams=%v err=%v", teams, err)
 	}
 }
@@ -858,6 +870,9 @@ func TestUserGroupChannelMembershipLifecycle(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	// A user group decides who may open a private channel restricted to it, so
+	// rewriting one is an administrative operation.
+	seedWorkspaceAdmin(t, s, "T1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	messages := Messages{Store: s}
 	ctx := context.Background()
@@ -1078,7 +1093,7 @@ type failingProfileStore struct {
 	err error
 }
 
-func (s failingProfileStore) UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, events.Event) (domain.User, error) {
+func (s failingProfileStore) UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, ...events.Event) (domain.User, error) {
 	return domain.User{}, s.err
 }
 
@@ -1141,6 +1156,7 @@ func TestPostMessagePersistsMessage(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	message, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "C1", "hello", "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -1159,6 +1175,7 @@ func TestPostWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	message, err := (Messages{Store: s}).PostWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [ { "type": "section" } ] `, "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -1191,6 +1208,7 @@ func TestUpdateAndDeleteMessageUseTypedTimestampAndOutbox(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	created, err := messages.Post(context.Background(), "T1", "U1", "C1", "before", "", "")
 	if err != nil {
@@ -1218,6 +1236,7 @@ func TestReplyStoresSlackThreadTimestamp(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	root, err := messages.Post(context.Background(), "T1", "U1", "C1", "root", "", "")
 	if err != nil {
@@ -1242,6 +1261,7 @@ func TestIdempotentPostReturnsOriginalCommittedMessage(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	first, err := messages.Post(context.Background(), "T1", "U1", "C1", "first", "", "request-1")
 	if err != nil {
@@ -1261,6 +1281,7 @@ func TestMarkReadPersistsCursorAndOutbox(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	cursor, err := messages.MarkRead(context.Background(), "T1", "U1", "C1", "1700000000.123456")
 	if err != nil {
@@ -1280,6 +1301,7 @@ func TestReactionsAreDurableAndIdempotentlyRejected(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	message, err := messages.Post(context.Background(), "T1", "U1", "C1", "hello", "", "")
 	if err != nil {
@@ -1313,6 +1335,7 @@ func TestPinsAreDurableAndScopedToConversation(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	messages := Messages{Store: s}
 	message, err := messages.Post(context.Background(), "T1", "U1", "C1", "hello", "", "")
 	if err != nil {
@@ -1379,6 +1402,7 @@ func TestSearchNormalizesTermsAndHidesPrivateConversations(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	s.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "private", IsPrivate: true})
 	messages := Messages{Store: s}
 	if _, err := messages.Post(context.Background(), "T1", "U1", "C1", "Hello durable search", "", ""); err != nil {
@@ -1416,6 +1440,7 @@ func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	value, err := (Messages{Store: s}).ScheduleMessageWithBlocks(context.Background(), "T1", "U1", "C1", "", ` [{"type":"divider"}] `, time.Now().UTC().Add(time.Hour))
 	if err != nil {
 		t.Fatal(err)
@@ -1482,6 +1507,7 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -1522,6 +1548,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)

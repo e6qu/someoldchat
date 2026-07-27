@@ -255,7 +255,14 @@ for origin in "$primary_origin" "$witness_origin"; do
 	# The browser entry point still redirects an unauthenticated visitor into the
 	# configured provider rather than answering with a bare status.
 	status=$(curl --silent --output /dev/null --write-out '%{http_code}' --header "Authorization: Basic $(printf 'shauth-validator:%s' "$validator_token" | openssl base64 -A)" "$origin/app")
-	test "$status" = 303
+	# A bare `test "$status" = 303` aborted the whole qualification with no output
+	# at all under `set -e`, so a regression here reported only a non-zero exit and
+	# named neither the origin, the expected status, nor the observed one — unlike
+	# the 401 checks above, which were rewritten with real diagnostics.
+	if test "$status" != 303; then
+		printf '%s/app answered %s for an unauthenticated visitor; expected 303 into the configured provider\n' "$origin" "$status" >&2
+		exit 1
+	fi
 done
 
 mkdir "$work_dir/validator"

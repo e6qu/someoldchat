@@ -169,9 +169,21 @@ type Browser struct{ store SessionStore }
 const SessionCookieName = "sameoldchat_session"
 
 const (
-	CSRFTokenCookieName = "sameoldchat_csrf"
 	CSRFTokenFieldName  = "_csrf"
 	CSRFTokenHeaderName = "X-SameOldChat-CSRF"
+)
+
+// CSRF failures are three distinct outcomes, and the caller has to be able to
+// tell them apart: one is a request that never came from this site, one is a
+// page that has been open longer than its session, and one is a request with no
+// session at all. They lead to different answers for a person.
+var (
+	// ErrCSRFCrossSite is a cookie-authenticated mutation whose own browser
+	// reports that it was not initiated by this origin.
+	ErrCSRFCrossSite = errors.New("request did not originate from this site")
+
+	// ErrCSRFToken is a missing or stale form token.
+	ErrCSRFToken = errors.New("CSRF token is invalid")
 )
 
 func ValidateSessionCookieDomain(domain string) error {
@@ -193,13 +205,21 @@ func SessionCookie(value string, maxAge int, domain string) *http.Cookie {
 	return &http.Cookie{Name: SessionCookieName, Value: value, Domain: strings.TrimSpace(domain), Path: "/", MaxAge: maxAge, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode}
 }
 
+// CSRFToken derives a per-session mutation token from the session secret. The
+// derivation is one-way, so a token cannot be replayed as a session, and it is
+// stable for the life of the session, so a page cannot expire before the
+// credential it was rendered for.
+//
+// There is deliberately no companion cookie. A second copy of this value in a
+// cookie proved nothing — the server derives the expected value from the
+// session cookie of the same request, so comparing a cookie against it only
+// detects a stale cookie, never an attacker — while a non-HttpOnly cookie
+// carrying `Domain=<parent>` published the token to every sibling host in the
+// deployment's domain, where `document.cookie` read it and forged a mutation
+// that SameSite=Lax happily accepted as same-site.
 func CSRFToken(sessionToken string) string {
 	digest := sha256.Sum256([]byte("sameoldchat/csrf\x00" + sessionToken))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
-}
-
-func CSRFCookie(value string, maxAge int, domain string) *http.Cookie {
-	return &http.Cookie{Name: CSRFTokenCookieName, Value: value, Domain: strings.TrimSpace(domain), Path: "/", MaxAge: maxAge, Secure: true, SameSite: http.SameSiteLaxMode}
 }
 
 // MaxFormBody bounds a form-encoded request body. A size limit is only a limit
@@ -228,14 +248,26 @@ func LimitFormBody(r *http.Request) {
 	}
 }
 
+// ValidateCSRF is the precondition of every cookie-authenticated mutation. It
+// answers two independent questions, and a request has to pass both.
+//
+//  1. Did the browser itself say this request came from this origin? Fetch
+//     metadata is set by the user agent and cannot be written by page script, so
+//     `Sec-Fetch-Site` is the only part of a cross-site request an attacker
+//     cannot forge. Rejecting anything but `same-origin`/`none` closes the whole
+//     class, including the sibling-subdomain case that SameSite=Lax permits
+//     because it calls it same-site. `Origin` is the fallback for a user agent
+//     that predates fetch metadata; a request carrying neither is not a browser
+//     request and is left to the token below.
+//  2. Does the request carry the token derived from its own session? That is
+//     what stops a request forged by a client that sets its own headers.
 func ValidateCSRF(r *http.Request) error {
 	session, err := r.Cookie(SessionCookieName)
 	if err != nil || strings.TrimSpace(session.Value) == "" {
 		return ErrNoToken
 	}
-	cookie, err := r.Cookie(CSRFTokenCookieName)
-	if err != nil || cookie.Value == "" {
-		return errors.New("CSRF token is missing")
+	if err := validateRequestSite(r); err != nil {
+		return err
 	}
 	provided := strings.TrimSpace(r.Header.Get(CSRFTokenHeaderName))
 	if provided == "" {
@@ -245,9 +277,37 @@ func ValidateCSRF(r *http.Request) error {
 		LimitFormBody(r)
 		provided = strings.TrimSpace(r.FormValue(CSRFTokenFieldName))
 	}
-	expected := CSRFToken(session.Value)
-	if !constantTimeEqual(provided, expected) || !constantTimeEqual(cookie.Value, expected) {
-		return errors.New("CSRF token is invalid")
+	if !constantTimeEqual(provided, CSRFToken(session.Value)) {
+		return ErrCSRFToken
+	}
+	return nil
+}
+
+// validateRequestSite refuses a request the browser reports as coming from
+// anywhere but this exact origin.
+//
+// `same-site` is refused as firmly as `cross-site`: a sibling host under the
+// deployment's cookie domain is same-site, sends the session cookie under
+// SameSite=Lax, and is exactly the position an attacker occupies when a
+// marketing subdomain or a dangling DNS record is compromised.
+func validateRequestSite(r *http.Request) error {
+	switch strings.ToLower(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site"))) {
+	case "same-origin", "none":
+		return nil
+	case "":
+		// No fetch metadata: fall through to Origin.
+	default:
+		return ErrCSRFCrossSite
+	}
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		// Neither header is present, so this is not a browser-originated
+		// request. A browser sends at least one of them on every POST it makes.
+		return nil
+	}
+	parsed, err := url.Parse(origin)
+	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
+		return ErrCSRFCrossSite
 	}
 	return nil
 }

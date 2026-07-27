@@ -3,12 +3,16 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +20,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -24,7 +29,6 @@ import (
 func addBrowserCookies(request *http.Request) {
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	token := auth.CSRFToken("session")
-	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: token})
 	request.Header.Set(auth.CSRFTokenHeaderName, token)
 }
 
@@ -36,6 +40,8 @@ func browserWorkspace(t *testing.T, scopes []string) (*memory.Store, *http.Serve
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer", RealName: "Ada Developer"})
 	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general", Topic: "Everything else"})
+	// Posting, and marking read, require membership of the conversation.
+	s.SeedConversationMember("Cdev", "U1")
 	if err := s.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: scopes, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +387,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
 	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("Cdev", "U1")
 	chat := service.Messages{Store: s}
 	message, err := chat.Post(ctx, "T1", "U1", "Cdev", "hello", "", "")
 	if err != nil {
@@ -436,57 +443,467 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	}
 }
 
-// TestProgressiveEnhancementKeepsTheStreamComposerAndErrors covers the defects
-// in the page script: the event stream was closed on the first submit and never
-// reopened, every event was suppressed while any form had focus, the composer
-// was never cleared, and a failure only added a CSS class that no stylesheet
-// defined.
-func TestProgressiveEnhancementKeepsTheStreamComposerAndErrors(t *testing.T) {
-	script := progressiveEnhancementScript
-	for _, expected := range []string{
-		"document.addEventListener('submit'",
-		"response.headers.get('HX-Redirect')",
-		"if(response.status===204)return ''",
-		"form.reset()",
-		"text.focus()",
-		"errorBox.hidden=false",
-		"classList.add('is-error')",
-		"addEventListener('keydown'",
-		"requestSubmit",
-		"new EventSource('/events'",
-		"last_event_id",
-		"sessionStorage",
-	} {
-		if !strings.Contains(script, expected) {
-			t.Fatalf("page script is missing %q", expected)
+// TestTheDocumentAndItsContentSecurityPolicyAgree replaces a test that grepped
+// the JavaScript source for twelve substrings.
+//
+// That test proved no behaviour: it passed on a script with no submit lock, no
+// coalescing and no stream error handling, and it would have failed on the fix
+// for any of them, because renaming a variable broke it. What it should have
+// asserted is the contract the page depends on — that the script the document
+// carries is the script the policy allows to run. A hash the policy does not
+// cover silently disables the whole client in the browser and in nothing else,
+// which is precisely the failure no unit test would otherwise see.
+func TestTheDocumentAndItsContentSecurityPolicyAgree(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello"} {
+		response := get(t, mux, target)
+		policy := response.Header().Get("Content-Security-Policy")
+		if policy == "" {
+			t.Fatalf("%s carries no content security policy", target)
+		}
+		bodies := inlineScriptBodies(response.Body.String())
+		if len(bodies) == 0 {
+			t.Fatalf("%s renders no inline script", target)
+		}
+		for _, body := range bodies {
+			digest := sha256.Sum256([]byte(body))
+			hash := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+			if !strings.Contains(policy, hash) {
+				t.Fatalf("%s serves an inline script the policy blocks: %s\npolicy=%s", target, hash, policy)
+			}
+		}
+		if strings.Contains(policy, "'unsafe-inline'; script-src") || strings.Contains(policy, "script-src 'unsafe-inline'") {
+			t.Fatalf("%s allows any inline script: %s", target, policy)
 		}
 	}
-	for _, forbidden := range []string{
-		"window.location.reload",
-		"events.close()",
-		"stream.close()",
-		"document.activeElement.form",
-	} {
-		if strings.Contains(script, forbidden) {
-			t.Fatalf("page script still contains %q", forbidden)
-		}
-	}
-	// A live event refreshes a region only when focus is not inside it, so
-	// typing in the composer no longer blocks delivery to the timeline.
-	if !strings.Contains(script, "region.contains(document.activeElement)") {
-		t.Fatalf("page script suppresses live updates too broadly: %s", script)
+}
+
+// TestTheClientNeverFetchesAnOriginItWasNotGiven pins the one property of the
+// client that no browser test can observe until it is already too late: every
+// URL it fetches with credentials has to be a path on this origin. `hx-post`
+// and `data-fragment` are not URL attributes to html/template and receive no
+// filtering, so an absolute value would become a credentialed request to
+// another host.
+func TestTheClientNeverFetchesAnOriginItWasNotGiven(t *testing.T) {
+	if !strings.Contains(progressiveEnhancementScript, "function ownPath(value){return typeof value==='string'&&value.charAt(0)==='/'&&value.charAt(1)!=='/'}") {
+		t.Fatal("the client does not constrain the URLs it fetches")
 	}
 	_, mux := browserWorkspace(t, auth.AllScopes())
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireContains(t, "page", body,
-		"Enter to send · Shift+Enter for a new line",
-		`id="composer-error"`,
-		`role="alert"`,
-		".composer.is-error{",
-	)
-	if strings.Count(body, "new EventSource(") != 1 {
-		t.Fatalf("the page opens %d event streams", strings.Count(body, "new EventSource("))
+	for _, attribute := range []string{"hx-post", "data-fragment", "data-newest"} {
+		for _, match := range regexp.MustCompile(attribute+`="([^"]*)"`).FindAllStringSubmatch(body, -1) {
+			value := match[1]
+			if value == "" {
+				continue
+			}
+			if !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") {
+				t.Fatalf("%s renders an off-origin target: %q", attribute, value)
+			}
+		}
 	}
+}
+
+// TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage covers the defect that
+// left every workspace page framable and cacheable: the sibling admin page in
+// this package set all five headers and the pages that render a conversation
+// and a live CSRF token set none, so one click in an invisible frame landed on
+// Sign out or Pin, and Back after sign-out replayed the conversation.
+func TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
+	for _, target := range []string{
+		"/app?channel=Cdev",
+		"/app/timeline?channel=Cdev",
+		"/app/members",
+		"/app/search?q=hello&channel=Cdev",
+		"/app?channel=Cmissing",
+	} {
+		header := get(t, mux, target).Header()
+		for name, expected := range map[string]string{
+			"X-Frame-Options":        "DENY",
+			"X-Content-Type-Options": "nosniff",
+			"Referrer-Policy":        "no-referrer",
+			"Cache-Control":          "no-store",
+		} {
+			if header.Get(name) != expected {
+				t.Fatalf("%s %s=%q, want %q", target, name, header.Get(name), expected)
+			}
+		}
+		if !strings.Contains(header.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+			t.Fatalf("%s is framable: %q", target, header.Get("Content-Security-Policy"))
+		}
+	}
+}
+
+// TestMutationsAreRefusedWhenTheBrowserReportsAnotherSite is the web half of
+// the CSRF fix. The token is derived from the session cookie, so a page on a
+// sibling host that could read the old, script-readable CSRF cookie held
+// everything the server checked. Fetch metadata is the part it cannot forge.
+func TestMutationsAreRefusedWhenTheBrowserReportsAnotherSite(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	for _, site := range []string{"same-site", "cross-site"} {
+		request := httptest.NewRequest(http.MethodPost, "/app/message?channel=Cdev", strings.NewReader("text=forged"))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("HX-Request", "true")
+		request.Header.Set("Sec-Fetch-Site", site)
+		addBrowserCookies(request)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("Sec-Fetch-Site=%s status=%d body=%s", site, response.Code, response.Body)
+		}
+		requireContains(t, "refusal", response.Body.String(), "not made from SameOldChat")
+	}
+	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Messages) != 0 {
+		t.Fatalf("a forged request was stored: %+v err=%v", page, err)
+	}
+	// The token is bound to the session and needs no cookie of its own, so a
+	// page open longer than any cookie lifetime still posts.
+	if header := get(t, mux, "/app?channel=Cdev").Header().Get("Set-Cookie"); strings.Contains(header, "sameoldchat_csrf") {
+		t.Fatalf("the workspace still publishes a CSRF cookie: %q", header)
+	}
+	accepted := httptest.NewRequest(http.MethodPost, "/app/message?channel=Cdev", strings.NewReader("text=hello&_csrf="+auth.CSRFToken("session")))
+	accepted.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	accepted.Header.Set("HX-Request", "true")
+	accepted.Header.Set("Sec-Fetch-Site", "same-origin")
+	accepted.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, accepted)
+	if response.Code != http.StatusOK {
+		t.Fatalf("a same-origin post with only the session cookie was refused: %d %s", response.Code, response.Body)
+	}
+}
+
+// TestPostMessageNeverRendersHistoryItCannotRead covers the authorization
+// bypass: postMessage gates on chat:write and answered a rejected post with the
+// whole workspace render, so a principal that GET /app answers with 403 read
+// the conversation, every author, the sidebar and a live CSRF token out of a
+// 400 body.
+func TestPostMessageNeverRendersHistoryItCannotRead(t *testing.T) {
+	s, mux := browserWorkspace(t, []string{string(auth.ScopeChatWrite)})
+	seedMessage(t, s, "M1", "confidential history", time.Unix(1700000000, 0).UTC())
+
+	if denied := get(t, mux, "/app?channel=Cdev"); denied.Code != http.StatusForbidden {
+		t.Fatalf("GET /app status=%d", denied.Code)
+	}
+	rejected := postForm(t, mux, "/app/message?channel=Cdev", "text=%20%20", false)
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", rejected.Code, rejected.Body)
+	}
+	requireMissing(t, "rejected post", rejected.Body.String(),
+		"confidential history",
+		`class="sidebar"`,
+		`name="_csrf"`,
+	)
+	requireContains(t, "rejected post", rejected.Body.String(), "A message needs some text", `href="/app"`)
+}
+
+// TestReadingIsSafeAndMarkingReadIsAMutation covers the round-1 finding that
+// #86 did not fix: GET /app advanced the read cursor for a channel named in the
+// query string with no token, so `<img src="/app?channel=C…">` in any message
+// silently wiped a victim's unread state under SameSite=Lax.
+func TestReadingIsSafeAndMarkingReadIsAMutation(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 0).UTC()
+	seedMessage(t, s, "M1", "hello", created)
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
+		t.Fatal("a GET advanced the read cursor")
+	}
+	// The page offers the write as a form instead, so a reader without
+	// JavaScript still has the control and every path through it is checked.
+	requireContains(t, "workspace page", body, `action="/app/read?channel=Cdev"`, `name="ts"`, ">Mark as read<")
+
+	timestamp := string(domain.NewMessageTimestamp(created))
+	unchecked := httptest.NewRequest(http.MethodPost, "/app/read?channel=Cdev", strings.NewReader("ts="+timestamp))
+	unchecked.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	unchecked.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
+	refused := httptest.NewRecorder()
+	mux.ServeHTTP(refused, unchecked)
+	if refused.Code != http.StatusForbidden {
+		t.Fatalf("mark-read without a token status=%d", refused.Code)
+	}
+	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
+		t.Fatal("a request with no CSRF token advanced the read cursor")
+	}
+
+	marked := postForm(t, mux, "/app/read?channel=Cdev", "ts="+timestamp, true)
+	if marked.Code != http.StatusNoContent {
+		t.Fatalf("mark-read status=%d body=%s", marked.Code, marked.Body)
+	}
+	cursor, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev")
+	if err != nil || cursor.LastRead != domain.MessageTimestamp(timestamp) {
+		t.Fatalf("read cursor=%+v err=%v", cursor, err)
+	}
+}
+
+// TestDeletedMessagesStopRendering covers the defect that kept a deleted
+// message on screen forever. Deletion is soft and leaves the text in place, and
+// message.deleted is a subscribed live topic, so deleting a password or a
+// customer's name refreshed it back into every open tab.
+func TestDeletedMessagesStopRendering(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 0).UTC()
+	seedMessage(t, s, "M1", "a secret nobody should keep", created)
+	seedMessage(t, s, "M2", "a message that stays", created.Add(time.Second))
+	if _, err := (service.Messages{Store: s}).Delete(context.Background(), "T1", "U1", "Cdev", domain.NewMessageTimestamp(created)); err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"/app?channel=Cdev", "/app/timeline?channel=Cdev"} {
+		response := get(t, mux, target)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", target, response.Code, response.Body)
+		}
+		requireMissing(t, target, response.Body.String(), "a secret nobody should keep")
+		requireContains(t, target, response.Body.String(), "a message that stays")
+	}
+}
+
+// TestThreadViewCarriesNoDuplicateIdentifiers covers the half of the
+// duplicate-id defect this package owns: the thread pane namespaced its anchors
+// and nothing else, so `id="reaction-<message>"` and its `for=` label existed
+// twice in one document and pointed at the wrong control.
+func TestThreadViewCarriesNoDuplicateIdentifiers(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 123456000).UTC()
+	seedMessage(t, s, "M1", "thread root", created)
+	timestamp := string(domain.NewMessageTimestamp(created))
+	reply := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: "a reply", ThreadTimestamp: domain.MessageTimestamp(timestamp), CreatedAt: created.Add(time.Second)}
+	if err := s.CreateMessage(context.Background(), reply, events.Event{ID: "EM2", WorkspaceID: "T1", Topic: "message.created", Payload: "M2", CreatedAt: reply.CreatedAt}, ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev&thread="+timestamp).Body.String()
+	seen := map[string]int{}
+	for _, match := range regexp.MustCompile(`id="([^"]+)"`).FindAllStringSubmatch(body, -1) {
+		seen[match[1]]++
+		if seen[match[1]] > 1 {
+			t.Fatalf("the document carries id=%q %d times", match[1], seen[match[1]])
+		}
+	}
+	for _, match := range regexp.MustCompile(`for="([^"]+)"`).FindAllStringSubmatch(body, -1) {
+		if seen[match[1]] != 1 {
+			t.Fatalf("label for=%q has %d targets", match[1], seen[match[1]])
+		}
+	}
+}
+
+// TestReactionChipsAreNotControlsForAReaderWhoCannotReact covers the defect
+// where a read-only guest saw chips that looked like toggles, and clicking one
+// answered a bare "forbidden".
+func TestReactionChipsAreNotControlsForAReaderWhoCannotReact(t *testing.T) {
+	s, mux := browserWorkspace(t, []string{string(auth.ScopeChannelsHistory), string(auth.ScopeReactionsRead)})
+	created := time.Unix(1700000000, 123456000).UTC()
+	seedMessage(t, s, "M1", "hello", created)
+	if err := s.AddReaction(context.Background(), domain.Reaction{Message: "M1", UserID: "U1", Name: ":wave:"}, events.Event{ID: "ER1", WorkspaceID: "T1", Topic: "reaction.added", Payload: "M1", CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "read-only chip", body, `<span class="chip" role="img" aria-label=":wave:, 1 reactions">`)
+	requireMissing(t, "read-only chip", body, `<button class="chip"`, `aria-label="Add reaction"`)
+}
+
+// TestMutationFailuresWithoutJavaScriptAreNavigablePages covers the plain-text
+// dead ends: a reader with JavaScript off landed on a white page reading
+// "that message timestamp is not valid" with no way back.
+func TestMutationFailuresWithoutJavaScriptAreNavigablePages(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
+	for _, mutation := range []struct{ target, body string }{
+		{target: "/app/pin?channel=Cdev&ts=not-a-timestamp"},
+		{target: "/app/reaction?channel=Cdev&ts=not-a-timestamp", body: "name=%3Awave%3A"},
+		{target: "/app/reaction?channel=Cdev&ts=1700000000.000000", body: "name="},
+		{target: "/app/conversation/open", body: "users="},
+	} {
+		page := postForm(t, mux, mutation.target, mutation.body, false)
+		if page.Code != http.StatusBadRequest {
+			t.Fatalf("%s status=%d body=%s", mutation.target, page.Code, page.Body)
+		}
+		if contentType := page.Header().Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+			t.Fatalf("%s answered %s with no way back: %s", mutation.target, contentType, page.Body)
+		}
+		requireContains(t, mutation.target, page.Body.String(), `<a href="/app">Back to chat</a>`)
+		if page.Header().Get("Vary") != "HX-Request" {
+			t.Fatalf("%s does not vary on the header that decides its shape", mutation.target)
+		}
+		fragment := postForm(t, mux, mutation.target, mutation.body, true)
+		if fragment.Code != http.StatusBadRequest || !strings.HasPrefix(fragment.Header().Get("Content-Type"), "text/plain") {
+			t.Fatalf("%s enhanced status=%d type=%s", mutation.target, fragment.Code, fragment.Header().Get("Content-Type"))
+		}
+	}
+}
+
+// countingChat counts the History calls one render costs.
+type countingChat struct {
+	chatapi.Service
+	calls *int
+}
+
+func (c countingChat) History(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
+	*c.calls++
+	return c.Service.History(ctx, workspace, user, conversation, request)
+}
+
+// TestTheTimelineScanIsBounded covers the unbounded read: rendering 50 messages
+// walked the whole conversation, which measured 250 service calls and 50,000
+// rows on a 50,000-message channel — once per open tab per event, and once per
+// network round trip in the distributed profile.
+//
+// The bound is what this asserts. The window it reaches is still the wrong one
+// on a conversation this long, which no amount of forward paging can fix: see
+// the follow-up recorded for store.ListMessages.
+func TestTheTimelineScanIsBounded(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
+	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("Cdev", "U1")
+	if err := s.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Unix(1700000000, 0).UTC()
+	total := timelineScan*timelineScanPages + timelineScan
+	for index := 0; index < total; index++ {
+		message := domain.Message{ID: domain.MessageID(fmt.Sprintf("M%06d", index)), WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: fmt.Sprintf("note-%06d", index), CreatedAt: base.Add(time.Duration(index) * time.Second)}
+		if err := s.CreateMessage(context.Background(), message, events.Event{ID: domain.EventID(fmt.Sprintf("E%06d", index)), WorkspaceID: "T1", Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := 0
+	authenticator, err := auth.NewBrowser(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(countingChat{Service: service.Messages{Store: s}, calls: &calls}, authenticator, s, "Cdev", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	response := get(t, mux, "/app?channel=Cdev")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d", response.Code)
+	}
+	if calls > timelineScanPages {
+		t.Fatalf("one render issued %d history calls, the budget is %d", calls, timelineScanPages)
+	}
+	body := response.Body.String()
+	// A window that is not the newest one must not be presented as though it
+	// were: no live updates, no read marker, and a notice that says so.
+	requireContains(t, "bounded page", body, "too long to open from the beginning", `data-live="false"`)
+	requireMissing(t, "bounded page", body, "Jump to the latest messages", ">Mark as read<")
+
+	calls = 0
+	if fragment := get(t, mux, "/app/timeline?channel=Cdev"); fragment.Code != http.StatusOK || calls > timelineScanPages {
+		t.Fatalf("fragment status=%d calls=%d", fragment.Code, calls)
+	}
+}
+
+// TestActionSurfacesMeetContrastInBothThemes computes the ratios rather than
+// asserting a colour literal, so the palette can change and the contract
+// cannot. Every value below was measured failing before the fix: the Send
+// button at 2.31:1 and the /me Sign out button at 1.96:1 in the dark theme, and
+// the focus ring over the light purple chrome at 1.65:1.
+func TestActionSurfacesMeetContrastInBothThemes(t *testing.T) {
+	for _, theme := range []struct {
+		name   string
+		tokens string
+	}{{name: "light", tokens: lightTokens}, {name: "dark", tokens: darkTokens}} {
+		token := func(name string) string {
+			match := regexp.MustCompile(`--` + name + `:#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b`).FindStringSubmatch(theme.tokens)
+			if match == nil {
+				t.Fatalf("%s theme has no --%s", theme.name, name)
+			}
+			value := match[1]
+			if len(value) == 3 {
+				value = string([]byte{value[0], value[0], value[1], value[1], value[2], value[2]})
+			}
+			return "#" + value
+		}
+		// The two action buttons are read out of the stylesheet, so the
+		// measurement follows the rule the browser applies rather than a token
+		// the rule might stop using.
+		resolve := func(value string) string {
+			if strings.HasPrefix(value, "var(--") {
+				return token(strings.TrimSuffix(strings.TrimPrefix(value, "var(--"), ")"))
+			}
+			if len(value) == 4 {
+				return "#" + string([]byte{value[1], value[1], value[2], value[2], value[3], value[3]})
+			}
+			return value
+		}
+		for _, pair := range []struct {
+			what       string
+			foreground string
+			background string
+			minimum    float64
+		}{
+			{what: "Send button label", foreground: resolve(declaration(t, pageStyle, ".send", "color")), background: resolve(declaration(t, pageStyle, ".send", "background")), minimum: 4.5},
+			{what: "Sign out button label", foreground: resolve(declaration(t, identityMarkup, ".button", "color")), background: resolve(declaration(t, identityMarkup, ".button", "background")), minimum: 4.5},
+			{what: "focus ring on the chrome", foreground: token("focus-chrome"), background: token("accent"), minimum: 3},
+			{what: "focus ring on the page", foreground: token("focus"), background: token("bg"), minimum: 3},
+			{what: "control border", foreground: token("field-line"), background: token("panel"), minimum: 3},
+			{what: "body text", foreground: token("text"), background: token("bg"), minimum: 4.5},
+			{what: "secondary text", foreground: token("muted"), background: token("bg"), minimum: 4.5},
+		} {
+			if ratio := contrastRatio(t, pair.foreground, pair.background); ratio < pair.minimum {
+				t.Fatalf("%s theme: %s is %.2f:1 on %s, needs %.1f:1", theme.name, pair.what, ratio, pair.background, pair.minimum)
+			}
+		}
+	}
+}
+
+// declaration reads one property out of one CSS rule.
+func declaration(t *testing.T, stylesheet, selector, property string) string {
+	t.Helper()
+	match := regexp.MustCompile(regexp.QuoteMeta(selector) + `\{([^}]*)\}`).FindStringSubmatch(stylesheet)
+	if match == nil {
+		t.Fatalf("no rule for %s", selector)
+	}
+	value := regexp.MustCompile(`(?:^|;)` + regexp.QuoteMeta(property) + `:([^;]+)`).FindStringSubmatch(match[1])
+	if value == nil {
+		t.Fatalf("%s declares no %s: %s", selector, property, match[1])
+	}
+	return strings.TrimSpace(value[1])
+}
+
+func contrastRatio(t *testing.T, foreground, background string) float64 {
+	t.Helper()
+	lighter, darker := relativeLuminance(t, foreground), relativeLuminance(t, background)
+	if darker > lighter {
+		lighter, darker = darker, lighter
+	}
+	return (lighter + 0.05) / (darker + 0.05)
+}
+
+func relativeLuminance(t *testing.T, colour string) float64 {
+	t.Helper()
+	value, err := strconv.ParseUint(strings.TrimPrefix(colour, "#"), 16, 32)
+	if err != nil {
+		t.Fatalf("colour %q: %v", colour, err)
+	}
+	channel := func(shift uint) float64 {
+		part := float64((value>>shift)&0xff) / 255
+		if part <= 0.03928 {
+			return part / 12.92
+		}
+		return math.Pow((part+0.055)/1.055, 2.4)
+	}
+	return 0.2126*channel(16) + 0.7152*channel(8) + 0.0722*channel(0)
+}
+
+// TestDeactivatedMembersAreNotOfferedAsPeople covers the defect where a
+// colleague who left six months ago was listed with no indication and offered
+// a "Message <them>" button that opened a dead conversation.
+func TestDeactivatedMembersAreNotOfferedAsPeople(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "gone", RealName: "Gone Person", Deleted: true})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "here", RealName: "Still Here"})
+	body := get(t, mux, "/app/members").Body.String()
+	requireContains(t, "members page", body, "Still Here", `name="users" value="U3"`)
+	requireMissing(t, "members page", body, "Gone Person", `name="users" value="U2"`)
 }
 
 // TestFailedPostKeepsTheDraftAndExplainsTheFailure covers the defect where a
@@ -506,8 +923,19 @@ func TestFailedPostKeepsTheDraftAndExplainsTheFailure(t *testing.T) {
 	}
 	body := plain.Body.String()
 	requireContains(t, "rejected post", body, `class="form-error" id="composer-error" role="alert"`, "A message needs some text", "<textarea")
-	if strings.Contains(body, `id="composer-error" role="alert" hidden`) {
-		t.Fatalf("the error region stayed hidden after a rejected post: %s", body)
+	// The server-rendered failure has to match the enhanced one: the error is
+	// visible, it is what the caret lands on, and the composer carries the
+	// state its own stylesheet defines.
+	region := regexp.MustCompile(`<p class="form-error" id="composer-error"[^>]*>`).FindString(body)
+	if strings.Contains(region, "hidden") {
+		t.Fatalf("the error region stayed hidden after a rejected post: %s", region)
+	}
+	if !strings.Contains(region, "autofocus") {
+		t.Fatalf("the error region is not what the caret lands on: %s", region)
+	}
+	requireContains(t, "rejected post", body, `class="composer is-error"`)
+	if strings.Contains(body, `name="text" required autofocus`) {
+		t.Fatal("the composer takes focus past the error it just rendered")
 	}
 	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Messages) != 0 {
@@ -568,7 +996,6 @@ func TestHTMXPostMessage(t *testing.T) {
 	// The browser shim sends the token as a form field, not a header: that is the
 	// path the body limit has to survive.
 	req.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
-	req.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: auth.CSRFToken("session")})
 	res := httptest.NewRecorder()
 	mux.ServeHTTP(res, req)
 	if res.Code != http.StatusOK {
@@ -596,8 +1023,10 @@ func TestHTMXPostMessage(t *testing.T) {
 	// The page is rendered from the template, not patched afterwards: the search
 	// control is a real form and there is no second, superseded event stream.
 	requireMissing(t, "index", body, `href="/me"`, `<label class="search"`)
-	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err != nil {
-		t.Fatalf("read cursor was not persisted: %v", err)
+	// Reading is a safe method and does not write; the read cursor is advanced
+	// by the explicit, CSRF-checked POST the page carries a form for.
+	if _, err := s.GetReadCursor(context.Background(), "T1", "U1", "Cdev"); err == nil {
+		t.Fatal("GET /app advanced the read cursor")
 	}
 	page, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Messages) != 1 {
@@ -1148,6 +1577,7 @@ func TestReadCursorFailureStillRendersTheConversation(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
 	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("Cdev", "U1")
 	if err := s.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -1166,7 +1596,14 @@ func TestReadCursorFailureStillRendersTheConversation(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
-	requireContains(t, "degraded page", response.Body.String(), "hello", "Unread counts are temporarily out of date.")
+	requireContains(t, "degraded page", response.Body.String(), "hello")
+	// A read-cursor outage is reported where the write happens, in a sentence
+	// that says nothing else was lost. It never blocks reading.
+	marked := postForm(t, mux, "/app/read?channel=Cdev", "ts="+string(domain.NewMessageTimestamp(time.Unix(1700000000, 0).UTC())), true)
+	if marked.Code != http.StatusServiceUnavailable {
+		t.Fatalf("mark-read status=%d body=%s", marked.Code, marked.Body)
+	}
+	requireContains(t, "mark-read failure", marked.Body.String(), "The unread marker could not be moved")
 }
 
 type readCursorOutage struct {

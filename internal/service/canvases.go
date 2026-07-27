@@ -34,9 +34,8 @@ func (m Messages) CreateCanvas(ctx context.Context, workspaceID domain.Workspace
 		return domain.Canvas{}, err
 	}
 	if channelID != "" {
-		conversation, err := m.Store.GetConversation(ctx, channelID)
-		if err != nil || conversation.WorkspaceID != workspaceID {
-			return domain.Canvas{}, store.ErrNotFound
+		if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, []domain.ConversationID{channelID}); err != nil {
+			return domain.Canvas{}, err
 		}
 	}
 	content, err := normalizeCanvasContent(documentContent)
@@ -134,11 +133,8 @@ func (m Messages) SetCanvasAccess(ctx context.Context, workspaceID domain.Worksp
 	if len(channelIDs) > 0 && access == "owner" {
 		return ErrInvalidCanvas
 	}
-	for _, channelID := range channelIDs {
-		conversation, err := m.Store.GetConversation(ctx, channelID)
-		if err != nil || conversation.WorkspaceID != workspaceID {
-			return store.ErrNotFound
-		}
+	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, channelIDs); err != nil {
+		return err
 	}
 	for _, targetID := range userIDs {
 		user, err := m.Store.GetUser(ctx, targetID)
@@ -269,7 +265,11 @@ func normalizeCanvasContent(value string) (string, error) {
 	if err := json.Unmarshal([]byte(value), &raw); err != nil || raw == nil {
 		return "", ErrInvalidCanvas
 	}
-	section := domain.CanvasSection{ID: newCanvasSectionID(), Type: stringValue(raw["type"]), Text: stringValue(raw["markdown"])}
+	sectionID, err := newCanvasSectionID()
+	if err != nil {
+		return "", err
+	}
+	section := domain.CanvasSection{ID: sectionID, Type: stringValue(raw["type"]), Text: stringValue(raw["markdown"])}
 	if section.Text == "" {
 		section.Text = stringValue(raw["text"])
 	}
@@ -308,7 +308,11 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 		if text == "" {
 			text = stringValue(raw["text"])
 		}
-		return domain.CanvasSection{ID: newCanvasSectionID(), Type: stringValue(raw["type"]), Text: text}, nil
+		sectionID, err := newCanvasSectionID()
+		if err != nil {
+			return domain.CanvasSection{}, err
+		}
+		return domain.CanvasSection{ID: sectionID, Type: stringValue(raw["type"]), Text: text}, nil
 	}
 	if change.Operation == "delete" {
 		if change.SectionID == "" {
@@ -363,12 +367,17 @@ func applyCanvasChange(document *canvasDocument, canvas *domain.Canvas, change c
 	return nil
 }
 
-func newCanvasSectionID() string {
+// newCanvasSectionID draws a section identifier. It reports an error for the
+// same reason canvasEvent does: a random-source failure is a handled condition
+// reachable from canvases.create and canvases.edit, and the panic that used to
+// stand here surfaced as an unhandled HTTP 500 four lines below the comment
+// forbidding exactly that.
+func newCanvasSectionID() (string, error) {
 	value, err := domain.PublicID("temp:C:")
 	if err != nil {
-		panic(fmt.Sprintf("generate canvas section ID: %v", err))
+		return "", fmt.Errorf("generate canvas section ID: %w", err)
 	}
-	return value
+	return value, nil
 }
 
 func stringValue(value any) string {

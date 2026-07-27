@@ -14,6 +14,21 @@ async function signIn(context) {
   ]);
 }
 
+// The workspace channel has to be joined before anything can be posted into it:
+// chat.postMessage now requires membership of the conversation it names, and the
+// development seed in cmd/server (seedDevelopmentCredentials, cmd/server/main.go)
+// creates the session and the API token without joining either to Cdev. Joining
+// is idempotent, so this runs before every test and states the precondition the
+// suite depends on instead of assuming it.
+test.beforeEach(async ({ request }) => {
+  const response = await request.post('/api/conversations.join', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL },
+  });
+  const payload = await response.json();
+  expect(payload.ok, JSON.stringify(payload)).toBe(true);
+});
+
 // Posts through the Slack-compatible API rather than the interface, so a test
 // can observe what the browser does with an event it did not itself originate.
 async function postThroughTheAPI(request, text, threadTimestamp) {
@@ -247,6 +262,92 @@ test('the workspace entry point renders without post-processing its own markup',
   await expect(form).toHaveAttribute('action', '/app/search');
   await expect(page.locator('label.search')).toHaveCount(0);
   await expect(page.locator('input[name="q"]')).toHaveCount(1);
+});
+
+// The workspace rendered no security headers at all, so it was framable — one
+// click in an invisible frame lands on Sign out or Pin — and it was stored by
+// the browser with a live CSRF token in it. The policy is also the only thing
+// that can silently disable the whole client, so this asserts the page runs
+// clean under it.
+test('the workspace is protected and its own scripts run under its policy', async ({ page, context }) => {
+  await signIn(context);
+
+  const violations = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /content security policy/i.test(message.text())) {
+      violations.push(message.text());
+    }
+  });
+
+  const response = await page.goto('/app');
+  expect(response.status()).toBe(200);
+  const headers = response.headers();
+  expect(headers['x-frame-options']).toBe('DENY');
+  expect(headers['x-content-type-options']).toBe('nosniff');
+  expect(headers['referrer-policy']).toBe('no-referrer');
+  expect(headers['cache-control']).toBe('no-store');
+  expect(headers['content-security-policy']).toContain("frame-ancestors 'none'");
+
+  // The client runs: the composer submits through fetch rather than navigating,
+  // which is only true if the inline script was allowed to execute.
+  const composer = page.locator('form.composer textarea[name="text"]');
+  const sent = `policy check ${Date.now()}`;
+  await composer.fill(sent);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.message-text').last()).toHaveText(sent);
+  await expect(page).toHaveURL(/\/app$/);
+  expect(violations, violations.join('\n')).toHaveLength(0);
+});
+
+// Nothing stopped a second submit: the button was never disabled and there was
+// no in-flight flag, so a held Enter or a double click on a slow link posted the
+// same message twice.
+test('a second submit while the first is in flight posts one message', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  await page.route('**/app/message*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await route.continue();
+  });
+
+  const composer = page.locator('form.composer textarea[name="text"]');
+  const once = `posted once ${Date.now()}`;
+  await composer.fill(once);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await composer.press('Enter');
+  await page.getByRole('button', { name: 'Send' }).click({ force: true });
+
+  await expect(page.locator('.message-text', { hasText: once })).toHaveCount(1);
+  await page.unroute('**/app/message*');
+  // The lock is released: the composer still works afterwards.
+  const after = `still working ${Date.now()}`;
+  await composer.fill(after);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page.locator('.message-text').last()).toHaveText(after);
+});
+
+// Sending from a window of older history used to store the message and then
+// refresh the historical window over it: the message appeared for a moment and
+// vanished, and the reader had no way to know it had been sent.
+test('a message sent while reading older history is not lost', async ({ page, context, request }) => {
+  await signIn(context);
+  for (let index = 0; index < 55; index += 1) {
+    await postThroughTheAPI(request, `history filler ${index} ${Date.now()}`);
+  }
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Show older messages' }).click();
+  await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'false');
+
+  const composer = page.locator('form.composer textarea[name="text"]');
+  const sent = `sent from history ${Date.now()}`;
+  await composer.fill(sent);
+  await page.getByRole('button', { name: 'Send' }).click();
+
+  // The reader is taken to the window the message is actually in.
+  await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'true');
+  await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(1);
 });
 
 // Sign-out must come last in this file. The suite runs with a single worker

@@ -795,16 +795,31 @@ func (h LoginHandler) userInfo(ctx context.Context, provider ProviderConfig, tok
 	if identity.Subject == "" && value.ID != nil {
 		identity.Subject = fmt.Sprint(value.ID)
 	}
-	if name == "entra" && identity.Email == "" {
-		// preferred_username is a directory attribute, not a proof of address
-		// ownership, so an address recovered from it is never treated as verified.
-		identity.Email = strings.ToLower(strings.TrimSpace(value.PreferredUsername))
-		identity.EmailVerified = false
+	// Whether an address is verified is provider-specific knowledge. Requiring
+	// every provider to assert `email_verified` refused GitHub for any account
+	// with a public profile address and refused Entra for everyone, because
+	// neither userinfo endpoint emits that claim at all. Each provider states
+	// address ownership in its own way, so each is read in its own way.
+	if name == "entra" {
+		if identity.Email == "" {
+			identity.Email = strings.ToLower(strings.TrimSpace(value.PreferredUsername))
+		}
+		// Entra emits no email_verified. What stands in for it is the tenant: a
+		// deployment pinned to one tenant is reading an address out of a
+		// directory that deployment's organization controls. A multi-tenant
+		// endpoint is exactly the nOAuth position — an attacker brings their own
+		// tenant and asserts any address — so an address from one is never
+		// treated as verified.
+		identity.EmailVerified = entraTenantIsPinned(provider)
 	}
-	if name == "github" && identity.Email == "" {
+	if name == "github" {
 		if provider.EmailURL == "" {
 			return externalIdentity{}, errors.New("github email endpoint is required")
 		}
+		// Always resolved through the email endpoint, which reports `verified`
+		// per address, rather than trusting /user. The profile address is public
+		// and unverified, and preferring it meant the one call that proves
+		// ownership was skipped for every account that had one.
 		identity.Email, err = h.githubEmail(ctx, provider.EmailURL, token)
 		if err != nil {
 			return externalIdentity{}, err
@@ -834,6 +849,32 @@ func assertedEmailVerified(raw json.RawMessage) bool {
 		return strings.EqualFold(strings.TrimSpace(text), "true")
 	}
 	return false
+}
+
+// entraTenantIsPinned reports whether an Entra provider is configured against a
+// single named tenant rather than one of Microsoft's multi-tenant endpoints.
+//
+// `common`, `organizations` and `consumers` accept sign-ins from any tenant,
+// including one the attacker created, so an address asserted through them proves
+// nothing. A named tenant is a directory the deploying organization administers.
+func entraTenantIsPinned(provider ProviderConfig) bool {
+	for _, endpoint := range []string{provider.AuthorizeURL, provider.TokenURL, provider.Issuer} {
+		endpoint = strings.TrimSpace(endpoint)
+		if endpoint == "" {
+			continue
+		}
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return false
+		}
+		for _, segment := range strings.Split(parsed.Path, "/") {
+			switch strings.ToLower(segment) {
+			case "common", "organizations", "consumers":
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (h LoginHandler) githubEmail(ctx context.Context, endpoint, token string) (string, error) {

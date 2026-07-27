@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Filesystem struct {
@@ -159,6 +160,53 @@ func (s Filesystem) Walk(ctx context.Context, prefix string, visit func(Object) 
 		}
 		return visit(Object{Key: filepath.ToSlash(relative), Size: info.Size(), ModTime: info.ModTime()})
 	})
+}
+
+// SweepTemporaryObjects removes staging files older than olderThan.
+//
+// Walk hides every .blob-* entry so an upload in flight cannot be classified as
+// an orphan and deleted out from under its own rename. The consequence is that a
+// process killed between os.CreateTemp and that rename leaves a full-size file no
+// audit reports and no worker reclaims, growing the blob volume without bound.
+// The age bound is what keeps this safe: a staging file younger than the grace
+// period may still belong to a live upload.
+func (s Filesystem) SweepTemporaryObjects(ctx context.Context, prefix string, olderThan time.Time) (int, error) {
+	if prefix != "" {
+		if _, err := s.safePath(prefix); err != nil {
+			return 0, err
+		}
+	}
+	root := s.root
+	if prefix != "" {
+		root = filepath.Join(root, filepath.FromSlash(prefix))
+	}
+	removed := 0
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// The tree is being written to while it is swept; an entry that
+				// vanished is one fewer thing to reclaim, not a failure.
+				return nil
+			}
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if info.IsDir() || !strings.HasPrefix(filepath.Base(path), temporaryBlobPrefix) {
+			return nil
+		}
+		if !info.ModTime().Before(olderThan) {
+			return nil
+		}
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return removeErr
+		} else if removeErr == nil {
+			removed++
+		}
+		return nil
+	})
+	return removed, err
 }
 
 func (s Filesystem) safePath(key string) (string, error) {

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
@@ -34,7 +36,8 @@ import (
 //   - sentinel is unique. Two sentinels that share a code (store.ErrAlreadyExists
 //     and service.ErrEmojiAlreadyExists) stay distinguishable because the key,
 //     not the code, restores them.
-//   - at most one class per code sets restoresCode. That class is the fallback
+//   - at most one class per code sets restoresCode, and no class whose code
+//     appears in libraryProducedCodes sets it at all. That class is the fallback
 //     for a peer old enough to send no DomainError detail; a code with no such
 //     class stays unmapped rather than restoring a sentinel that may be wrong.
 //   - every exported sentinel of internal/store, internal/service and
@@ -60,12 +63,12 @@ var errorClasses = []errorClass{
 	{key: "context.canceled", code: codes.Canceled, sentinel: context.Canceled, restoresCode: true},
 	{key: "context.deadline_exceeded", code: codes.DeadlineExceeded, sentinel: context.DeadlineExceeded, restoresCode: true},
 
-	// Validation. store.ErrInvalidArgument restores a bare InvalidArgument
-	// because it is the generic member of the class: a peer that sent no detail
-	// still yields an invalid-argument classification (HTTP 400) rather than
-	// codes.Unavailable (HTTP 503, which asks a caller to retry a request that
-	// can never succeed).
-	{key: "store.invalid_argument", code: codes.InvalidArgument, sentinel: store.ErrInvalidArgument, restoresCode: true},
+	// Validation. Every specific sentinel precedes store.ErrInvalidArgument,
+	// which closes the block: it is the generic member of the class, and this
+	// file's own ordering rule is that a specific sentinel comes first. It used
+	// to lead the block, so errors.Join(service.ErrInvalidMessage,
+	// store.ErrInvalidArgument) — the shape a compensating store failure
+	// produces — classified as the generic one and lost the specific one.
 	{key: "store.invalid_conversation_type", code: codes.InvalidArgument, sentinel: store.ErrInvalidConversationType},
 	{key: "store.invalid_invite_request", code: codes.InvalidArgument, sentinel: store.ErrInvalidInviteRequest},
 	{key: "store.invalid_app_approval", code: codes.InvalidArgument, sentinel: store.ErrInvalidAppApproval},
@@ -104,6 +107,11 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_bookmark", code: codes.InvalidArgument, sentinel: service.ErrInvalidBookmark},
 	{key: "service.invalid_canvas", code: codes.InvalidArgument, sentinel: service.ErrInvalidCanvas},
 	{key: "service.invalid_external_upload", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalUpload},
+	// The generic member of the class closes it, and it restores a bare
+	// InvalidArgument: a peer that sent no detail still yields an
+	// invalid-argument classification (HTTP 400) rather than codes.Unavailable
+	// (HTTP 503, which asks a caller to retry a request that can never succeed).
+	{key: "store.invalid_argument", code: codes.InvalidArgument, sentinel: store.ErrInvalidArgument, restoresCode: true},
 
 	// Uniqueness. The two sentinels mean different things to the Slack API:
 	// store.ErrAlreadyExists is "already_reacted" and
@@ -114,16 +122,24 @@ var errorClasses = []errorClass{
 	{key: "service.emoji_already_exists", code: codes.AlreadyExists, sentinel: service.ErrEmojiAlreadyExists},
 	{key: "store.already_exists", code: codes.AlreadyExists, sentinel: store.ErrAlreadyExists, restoresCode: true},
 
-	// Concurrency.
-	{key: "store.conflict", code: codes.Aborted, sentinel: store.ErrConflict, restoresCode: true},
+	// Concurrency. The generic member closes the group, as everywhere else.
 	{key: "store.lease_conflict", code: codes.Aborted, sentinel: store.ErrLeaseConflict},
 	{key: "store.idempotency_conflict", code: codes.Aborted, sentinel: store.ErrIdempotencyConflict},
+	{key: "store.conflict", code: codes.Aborted, sentinel: store.ErrConflict, restoresCode: true},
 
 	// Quotas. Both are a caller holding too much of a bounded resource, and both
 	// have a documented non-retryable HTTP answer (429 for Socket Mode,
 	// 400 too_many_bookmarks for bookmarks). store.ErrBookmarkLimit had no case
 	// at all before, so bookmarks.add past the limit answered 503 remotely.
-	{key: "store.socket_mode_connection_limit", code: codes.ResourceExhausted, sentinel: store.ErrSocketModeConnectionLimit, restoresCode: true},
+	//
+	// Neither restores the bare code: codes.ResourceExhausted is in
+	// libraryProducedCodes because it is also what grpc-go itself answers when a
+	// message exceeds MaxMessageBytes, with no detail attached. While
+	// store.ErrSocketModeConnectionLimit was the fallback, every oversized page
+	// on every RPC — conversations.history, files.list, search.messages — came
+	// back as socket_mode_unavailable in the split deployment and as a page in
+	// the monolith.
+	{key: "store.socket_mode_connection_limit", code: codes.ResourceExhausted, sentinel: store.ErrSocketModeConnectionLimit},
 	{key: "store.bookmark_limit", code: codes.ResourceExhausted, sentinel: store.ErrBookmarkLimit},
 
 	// Authorisation and preconditions. service.ErrNotWorkspaceAdmin shares
@@ -133,21 +149,83 @@ var errorClasses = []errorClass{
 	// means, and only one class per code may hold it.
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
 	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwned, restoresCode: true},
+	// Refusing to remove a workspace's last owner is a precondition failure, not
+	// a permission failure: the actor has the authority, and the operation is
+	// refused because the workspace would become unadministrable.
+	{key: "service.last_workspace_owner", code: codes.FailedPrecondition, sentinel: service.ErrLastWorkspaceOwner},
+	// Not being in the conversation is the refusal behind not_in_channel: the
+	// caller is a workspace member and the conversation exists, so it is neither
+	// an absence nor a permission failure.
+	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrNotInConversation},
 	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
 
-	// Absence.
+	// Absence. blob.ErrNotFound is distinct from store.ErrNotFound and reaches a
+	// caller: service.Messages converts blob.ErrUnavailable to
+	// service.ErrBlobUnavailable on every blob call but returns a blob absence
+	// unchanged (OpenUserPhoto, internal/service/messages.go), so without a class
+	// a missing object was store.ErrNotFound in one composition and
+	// codes.Unavailable in the other.
+	{key: "blob.not_found", code: codes.NotFound, sentinel: blob.ErrNotFound},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},
 
-	// Corrupt stored data. codes.Internal deliberately has no restoresCode class:
-	// it is also the code a recovered panic carries, and a panic has no domain
-	// cause to restore.
+	// Corrupt stored data and events a producer could not build. codes.Internal
+	// deliberately has no restoresCode class: it is also the code a recovered
+	// panic carries, and a panic has no domain cause to restore.
+	//
+	// The events sentinels reach a caller through service.Messages.newEvent,
+	// which every mutation funnels through: an event the service cannot build is
+	// a defect in this system, not a caller mistake, so it must not read as a
+	// retryable dependency failure.
 	{key: "domain.invalid_stored_timestamp", code: codes.Internal, sentinel: domain.ErrInvalidStoredTimestamp},
+	{key: "events.payload_required", code: codes.Internal, sentinel: events.ErrPayloadRequired},
+	{key: "events.payload_field_invalid", code: codes.Internal, sentinel: events.ErrPayloadFieldInvalid},
+	{key: "events.payload_malformed", code: codes.Internal, sentinel: events.ErrPayloadMalformed},
+	{key: "events.event_incomplete", code: codes.Internal, sentinel: events.ErrEventIncomplete},
 
 	// Dependency failure. codes.Unavailable deliberately has no restoresCode
 	// class: it is also the code an unclassified internal failure returns, and
 	// restoring service.ErrBlobUnavailable for every one of those would invent a
 	// cause. A peer that sends the detail still restores it exactly.
 	{key: "service.blob_unavailable", code: codes.Unavailable, sentinel: service.ErrBlobUnavailable},
+	{key: "blob.unavailable", code: codes.Unavailable, sentinel: blob.ErrUnavailable},
+}
+
+// libraryProducedCodes are the status codes grpc-go emits on its own behalf,
+// with no DomainError detail attached, for a condition that has no domain cause.
+//
+// No class may restore one of them from the bare code: doing so hands the caller
+// a sentinel for a failure the chat process never reported. The value is the
+// condition that produces the code, so a future entry has to say why it belongs.
+//
+// codes.Canceled and codes.DeadlineExceeded are deliberately absent. grpc-go
+// produces them too, but what it means by them *is* context.Canceled and
+// context.DeadlineExceeded, so restoring those sentinels from the bare code is
+// exact rather than invented.
+var libraryProducedCodes = map[codes.Code]string{
+	codes.ResourceExhausted: "a request or response message larger than MaxMessageBytes",
+	codes.Internal:          "a recovered panic and every transport-level protocol failure",
+	codes.Unavailable:       "a connection that could not be established, and this package's own unclassified-failure default",
+	codes.Unimplemented:     "a method the peer does not serve, which is what a rolling deployment produces",
+	codes.Unknown:           "an error that carries no status at all",
+}
+
+// maxStatusMessageBytes bounds the status message a classified failure carries.
+//
+// A status message travels in HTTP/2 trailers, which are bounded by
+// MaxHeaderListSize rather than by MaxMessageBytes, and mapError copies the
+// handler's err.Error() into it. A wrapped cause that embeds a caller-supplied
+// value would otherwise decide whether the trailer fits, turning a domain error
+// into a transport failure with a different class.
+const maxStatusMessageBytes = 2048
+
+// boundStatusMessage truncates a status message to maxStatusMessageBytes,
+// keeping the truncation visible rather than silently losing the tail.
+func boundStatusMessage(message string) string {
+	if len(message) <= maxStatusMessageBytes {
+		return message
+	}
+	const ellipsis = "…"
+	return message[:maxStatusMessageBytes-len(ellipsis)] + ellipsis
 }
 
 // unclassifiedMessage is the status message for an error with no domain class.
@@ -185,22 +263,53 @@ func init() {
 		if existing, exists := errorClassesByCode[class.code]; exists {
 			panic(fmt.Sprintf("chat gRPC code %s has two fallback classes (%q and %q)", class.code, existing.key, class.key))
 		}
+		if reason, produced := libraryProducedCodes[class.code]; produced {
+			panic(fmt.Sprintf("chat gRPC class %q may not restore the bare code %s: grpc-go produces it for %s", class.key, class.code, reason))
+		}
 		errorClassesByCode[class.code] = class
+	}
+	// Attaching the detail must be infallible, because mapError has no honest
+	// answer if it is not: a classified failure without its detail restores the
+	// wrong sentinel for every code that several classes share. Proving it once
+	// per process at startup turns a marshalling regression into an immediate,
+	// attributable failure instead of a wrong error class in production.
+	for _, class := range errorClasses {
+		if _, err := status.New(class.code, "").WithDetails(&chatv1.DomainError{Key: class.key, Keys: []string{class.key}}); err != nil {
+			panic(fmt.Sprintf("chat gRPC cannot attach the domain error detail for %q: %v", class.key, err))
+		}
 	}
 }
 
-// classifyError reports the class of a domain error, matching the table in
-// order so a specific sentinel wins over a general one it may wrap.
-func classifyError(err error) (errorClass, bool) {
+// classifyErrors reports every class an error matches, in table order, so a
+// specific sentinel precedes a general one it may wrap.
+//
+// An error can match more than one: errors.Join(store.ErrNotFound,
+// service.ErrInvalidCanvas) is the literal shape internal/service returns when a
+// compensating delete fails after a rejected create, and errors.Is is true for
+// both sentinels in process. Returning only the first put one key on the wire
+// and the caller lost the other, so canvases.create answered channel_not_found
+// in the monolith and invalid_arg_name across the seam.
+func classifyErrors(err error) []errorClass {
 	if err == nil {
-		return errorClass{}, false
+		return nil
 	}
+	var matched []errorClass
 	for _, class := range errorClasses {
 		if errors.Is(err, class.sentinel) {
-			return class, true
+			matched = append(matched, class)
 		}
 	}
-	return errorClass{}, false
+	return matched
+}
+
+// classifyError reports the first class of a domain error. The first match is
+// the one whose code the status carries; classifyErrors carries the rest.
+func classifyError(err error) (errorClass, bool) {
+	matched := classifyErrors(err)
+	if len(matched) == 0 {
+		return errorClass{}, false
+	}
+	return matched[0], true
 }
 
 // serverError is the error a handler returns. grpc-go sends its GRPCStatus, so
@@ -228,15 +337,29 @@ func mapError(err error) error {
 	if existing, ok := status.FromError(err); ok {
 		return serverError{status: existing, cause: err}
 	}
-	class, ok := classifyError(err)
-	if !ok {
+	matched := classifyErrors(err)
+	if len(matched) == 0 {
 		return serverError{status: status.New(codes.Unavailable, unclassifiedMessage), cause: err}
 	}
-	result := status.New(class.code, err.Error())
-	if detailed, detailErr := result.WithDetails(&chatv1.DomainError{Key: class.key}); detailErr == nil {
-		result = detailed
+	// The code comes from the first (most specific) class; keys carries every
+	// class the error matched so the caller restores the same set errors.Is
+	// answers in process. key repeats the first one for a peer that predates
+	// keys.
+	detail := &chatv1.DomainError{Key: matched[0].key, Keys: make([]string, 0, len(matched))}
+	for _, class := range matched {
+		detail.Keys = append(detail.Keys, class.key)
 	}
-	return serverError{status: result, cause: err}
+	result := status.New(matched[0].code, boundStatusMessage(err.Error()))
+	detailed, detailErr := result.WithDetails(detail)
+	if detailErr != nil {
+		// The detail is a fixed-shape message built from a table this package
+		// owns, so a marshalling failure is a programming error. Degrading to
+		// the bare code silently would restore the wrong sentinel for the 33
+		// classes that share codes.InvalidArgument and none at all for the codes
+		// with no fallback — the exact outcome the detail exists to prevent.
+		panic(fmt.Sprintf("chat gRPC cannot attach the domain error detail for %q: %v", matched[0].key, detailErr))
+	}
+	return serverError{status: detailed, cause: err}
 }
 
 // invalidArgument rejects a request the transport itself cannot accept: a
@@ -294,15 +417,39 @@ func mapRemoteError(err error) error {
 	return remoteDomainError{status: remoteStatus, cause: cause}
 }
 
+// restoreSentinel rebuilds the sentinels a chat handler failed with.
+//
+// The first DomainError detail decides, and no later detail is consulted: the
+// scan used to continue, so with two details the last known key won and two
+// peers that disagreed about which detail is authoritative disagreed about the
+// sentinel. A detail whose keys this build does not know falls back to the bare
+// code, which is how a newer peer's class stays classified rather than lost.
 func restoreSentinel(remoteStatus *status.Status) (error, bool) {
 	for _, detail := range remoteStatus.Details() {
 		domainError, ok := detail.(*chatv1.DomainError)
 		if !ok {
 			continue
 		}
-		if class, known := errorClassesByKey[domainError.GetKey()]; known {
-			return class.sentinel, true
+		keys := domainError.GetKeys()
+		if len(keys) == 0 {
+			keys = []string{domainError.GetKey()}
 		}
+		restored := make([]error, 0, len(keys))
+		for _, key := range keys {
+			if class, known := errorClassesByKey[key]; known {
+				restored = append(restored, class.sentinel)
+			}
+		}
+		switch len(restored) {
+		case 0:
+			// Every key is unknown to this build; the bare code is the best
+			// classification available.
+		case 1:
+			return restored[0], true
+		default:
+			return errors.Join(restored...), true
+		}
+		break
 	}
 	class, ok := errorClassesByCode[remoteStatus.Code()]
 	if !ok {

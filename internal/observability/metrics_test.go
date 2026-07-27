@@ -56,6 +56,58 @@ func TestRegistryPublishesBoundedAggregateMetrics(t *testing.T) {
 	}
 }
 
+// TestACounterAccumulatesAndAGaugeDoesNot is the difference between the two
+// kinds, and nothing asserted it: every existing test incremented a counter once,
+// so replacing `r.counters[name] += value` with `= value` — turning every counter
+// into a last-write-wins gauge — left the whole package green. A burst of
+// failures would then report 1, and rate() over any *_total series would be flat
+// through an incident.
+func TestACounterAccumulatesAndAGaugeDoesNot(t *testing.T) {
+	registry := NewRegistry()
+	registry.AddCounter("sameoldchat_failures_total", 2)
+	registry.AddCounter("sameoldchat_failures_total", 3)
+	registry.AddCounter("sameoldchat_failures_total", 1)
+	registry.SetGauge("sameoldchat_generation", 7)
+	registry.SetGauge("sameoldchat_generation", 9)
+
+	snapshot := registry.Snapshot()
+	if got := snapshot.Counters["sameoldchat_failures_total"]; got != 6 {
+		t.Errorf("counter = %d after adding 2, 3 and 1, want 6: a counter accumulates", got)
+	}
+	if got := snapshot.Gauges["sameoldchat_generation"]; got != 9 {
+		t.Errorf("gauge = %d, want the last value 9", got)
+	}
+
+	// The exposition must carry the accumulated value, not the last increment.
+	response := httptest.NewRecorder()
+	registry.Handler().ServeHTTP(response, httptest.NewRequest("GET", "/metrics", nil))
+	body, err := io.ReadAll(response.Result().Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "sameoldchat_failures_total 6") {
+		t.Errorf("metrics output %q does not expose the accumulated counter", string(body))
+	}
+}
+
+// TestADurationSummaryAccumulatesEveryObservation is the same property for the
+// summary: a count that stayed at 1 or a sum that was overwritten would make the
+// duration series describe the last request rather than the traffic.
+func TestADurationSummaryAccumulatesEveryObservation(t *testing.T) {
+	registry := NewRegistry()
+	registry.ObserveDuration("sameoldchat_rpc_duration_seconds", 250*time.Millisecond)
+	registry.ObserveDuration("sameoldchat_rpc_duration_seconds", 750*time.Millisecond)
+	registry.ObserveDuration("sameoldchat_rpc_duration_seconds", time.Second)
+
+	summary := registry.Snapshot().Durations["sameoldchat_rpc_duration_seconds"]
+	if summary.Count != 3 {
+		t.Errorf("count = %d after three observations, want 3", summary.Count)
+	}
+	if summary.SumSeconds != 2 {
+		t.Errorf("sum = %f seconds, want 2 (0.25 + 0.75 + 1)", summary.SumSeconds)
+	}
+}
+
 func TestRegistryRejectsInvalidMeasurements(t *testing.T) {
 	registry := NewRegistry()
 	for name, operation := range map[string]func(){

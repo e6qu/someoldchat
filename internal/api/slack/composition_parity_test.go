@@ -267,12 +267,17 @@ func TestEveryRestoredSentinelIsNamedFromTheSentinelNotTheStatusCode(t *testing.
 		{codes.InvalidArgument, service.ErrInvalidReaction, "invalid_name"},
 		// Two sentinels, one code. The emoji error is not in /reactions.add's enum
 		// and `already_reacted` is, so the duplicate-reaction case must not borrow it.
+		// A generic collision is now named by the calling operation, so the shared
+		// mapper answers the caller's collision code and never another operation's.
 		{codes.AlreadyExists, store.ErrAlreadyExists, "already_reacted"},
 		{codes.AlreadyExists, service.ErrEmojiAlreadyExists, "emoji_already_exists"},
 		// Three sentinels, one code. The code test answered `hash_conflict` for all
-		// of them, which shadowed the idempotency contract's `rate_limited`.
+		// of them, which shadowed the idempotency contract.
 		{codes.Aborted, store.ErrConflict, "hash_conflict"},
-		{codes.Aborted, store.ErrIdempotencyConflict, "rate_limited"},
+		// An Idempotency-Key replayed with a different body can never succeed, so
+		// it must not be reported with the one code every SDK retries on.
+		{codes.Aborted, store.ErrIdempotencyConflict, "invalid_arg_name"},
+		{codes.FailedPrecondition, service.ErrNotInConversation, "not_in_channel"},
 		{codes.PermissionDenied, service.ErrMessageNotOwned, "no_permission"},
 		{codes.PermissionDenied, service.ErrNotWorkspaceAdmin, "no_permission"},
 		{codes.FailedPrecondition, service.ErrMessageAlreadyDeleted, "message_not_found"},
@@ -282,21 +287,31 @@ func TestEveryRestoredSentinelIsNamedFromTheSentinelNotTheStatusCode(t *testing.
 	}
 	for _, testCase := range cases {
 		restored := restoredRemoteError{code: testCase.code, sentinel: testCase.sentinel}
-		if reason := mapServiceErrorNamed(restored, "channel_not_found", "invalid_name"); reason != testCase.want {
+		if reason := mapServiceErrorNamed(restored, "channel_not_found", "invalid_name", "already_reacted"); reason != testCase.want {
 			t.Errorf("%s carrying %v = %q, want %q", testCase.code, testCase.sentinel, reason, testCase.want)
 		}
 		// The same sentinel raised in process must name the same failure, or the two
 		// compositions disagree.
 		local := fmt.Errorf("wrapped: %w", testCase.sentinel)
-		if reason := mapServiceErrorNamed(local, "channel_not_found", "invalid_name"); reason != testCase.want {
+		if reason := mapServiceErrorNamed(local, "channel_not_found", "invalid_name", "already_reacted"); reason != testCase.want {
 			t.Errorf("in-process %v = %q, want %q", testCase.sentinel, reason, testCase.want)
 		}
 	}
 	// A status with no restorable sentinel must not borrow one: an unclassified
 	// remote failure is `fatal_error`, not a guess at a domain cause.
 	unclassified := status.Error(codes.Unavailable, "chat service could not complete the request")
-	if reason := mapServiceErrorNamed(unclassified, "channel_not_found", "invalid_name"); reason != "fatal_error" {
+	if reason := mapServiceErrorNamed(unclassified, "channel_not_found", "invalid_name", "already_reacted"); reason != "fatal_error" {
 		t.Errorf("unclassified remote failure = %q, want fatal_error", reason)
+	}
+	// An operation whose own enum declares no collision code must not be given
+	// another operation's. `already_reacted` appears in exactly one of the 99
+	// pinned enums, and it used to be the answer on all of them.
+	for _, collision := range []error{store.ErrAlreadyExists, restoredRemoteError{code: codes.AlreadyExists, sentinel: store.ErrAlreadyExists}} {
+		if reason := mapServiceError(collision, "channel_not_found"); reason == "already_reacted" {
+			t.Errorf("an unnamed collision borrowed reactions.add's code")
+		} else if reason != "invalid_arg_name" {
+			t.Errorf("unnamed collision = %q, want invalid_arg_name", reason)
+		}
 	}
 	if errors.Is(unclassified, store.ErrNotFound) {
 		t.Fatal("the unclassified fixture accidentally carries a sentinel")

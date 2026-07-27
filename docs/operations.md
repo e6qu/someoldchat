@@ -50,12 +50,18 @@ from re-entering service while an operator or recovery controller resolves the
 failure.
 
 An abrupt process or host crash is different from a handled hibernation
-failure. On restart, a persisted `QUIESCING`, `SNAPSHOTTING`, or `STOPPING`
-phase automatically re-enters `WAKING` and restores the newest verified
-retained snapshot at or before that fencing generation. If no verified
-snapshot can be authenticated, the stack fails closed instead of guessing;
-handled restore and integrity failures remain `FAILED` and require explicit
-operator recovery.
+failure. On restart, a persisted `QUIESCING` or `SNAPSHOTTING` phase re-enters
+`WAKING` and starts persistence **from the live volume, restoring nothing**: no
+manifest was published for that fencing generation, so every retained snapshot
+is strictly older than the data still on the active storage, and restoring one
+would destroy everything written since the last successful hibernation. "No
+snapshot exists yet" is deliberately not fatal there. An interrupted `STOPPING`
+is the single restoring case, and it restores only the manifest published for
+its own fencing generation, never an older one — `STOPPING` is the one phase
+that has already published and verified a manifest for that fence. Handled
+restore and integrity failures remain `FAILED` and require explicit operator
+recovery. See
+[scale-to-zero](../specs/scale-to-zero.md#snapshot-boundary-by-profile).
 
 ## Wake path
 
@@ -79,10 +85,17 @@ The activator returns a lightweight startup page to browsers. API requests may
 be held and replayed only within configured body, count, and deadline limits. A
 request whose body exceeds the configured maximum is rejected with HTTP 413
 before it is held. A request that cannot be held or replayed within the queue and
-deadline limits receives HTTP 503, `Retry-After`, and the closest compatible
-Slack error envelope recorded in the compatibility ledger. Both the
-provider-neutral `sameoldchat-activator` and the AWS Lambda activator in
-`deploy/ecs-scale-zero` enforce the same two contracts.
+deadline limits receives HTTP 503 and `Retry-After`. Both the provider-neutral
+`sameoldchat-activator` and the AWS Lambda activator in `deploy/ecs-scale-zero`
+enforce the same body and deadline limits.
+
+The refusal body is where the two currently differ, and the difference is
+recorded rather than glossed: the Lambda answers with the Slack error envelope
+`{"ok":false,"error":"service_unavailable"}` and `application/json`, so an
+official SDK surfaces a Slack error code. `sameoldchat-activator` still answers
+`text/plain` through `http.Error`, which an SDK reports as a JSON decode
+failure. Giving `internal/activator` the same envelope is a pending change to
+that package.
 
 ## Scheduled work while hibernated
 
@@ -227,8 +240,12 @@ If the current snapshot fails verification or restoration, the activator marks
 that generation unusable and the stack enters `FAILED`, preserving evidence and
 exposing an operator-safe status endpoint without leaking internal details
 publicly. Restoring an older retained generation is an explicit, authenticated
-operator action with its own generation and compatibility checks. It is a
-recovery selection, not an implicit implementation fallback.
+operator action with its own generation and compatibility checks
+(`POST /restore` with the selected generation, guarded by `-control-token`). It
+is a recovery selection, not an implicit implementation fallback:
+`specs/scale-to-zero.md` states that restore failure MUST NOT be converted into
+an implicit fallback, and the coordinator's automatic walk-back through older
+generations is being removed to match.
 
 The lifecycle controller rejects wake attempts while `FAILED`. An operator must
 explicitly acknowledge the failure, which advances the fencing generation and
@@ -259,8 +276,13 @@ so they are easy to miss:
 | `-wake-safety-margin` | `5m` | Measured restore time plus margin reserved before a scheduled wake deadline. Hibernation is refused with 409 and `Retry-After` when a published deadline falls inside it, and the scheduled-wake loop polls at a tenth of it. |
 | `-request-max-bytes` | `4194304` | One cap for both the spooled request body and the captured response. They must agree, so there is one flag rather than two that can diverge. |
 
-Every other activator setting is required and has no default; the process exits
-2 rather than choosing a snapshot store, key, or command for the operator. The
+Every other activator setting is required, with one deliberate exception: the
+snapshot-store settings are *conditionally* required and mutually exclusive.
+`-snapshot-root` is required for `-snapshot-store=filesystem` and refused for
+`s3`; `-snapshot-s3-bucket` is required for `-snapshot-store=s3` and refused for
+`filesystem`, and `-snapshot-s3-prefix` applies only to `s3`. Otherwise the
+process exits 2 rather than choosing a snapshot store, key, or command for the
+operator. The
 `-control-token` value is what a WebSocket edge must be given as
 `-activator-token`, and what a `/metrics` scraper must present.
 

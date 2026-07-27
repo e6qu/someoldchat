@@ -134,7 +134,6 @@ func TestAuthAdminCreatesManualUserWithCSRFAndRole(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
-	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: auth.CSRFToken("session")})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"ok":true`) || !strings.Contains(response.Body.String(), "alice@example.com") {
@@ -187,7 +186,6 @@ func adminMutationRequest(method, target, body string) *http.Request {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
-	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: auth.CSRFToken("session")})
 	return request
 }
 
@@ -236,6 +234,84 @@ func TestAuthAdminUpdatesUserLifecycle(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("role status=%d body=%s", response.Code, response.Body.String())
 	}
+}
+
+// TestAuthAdminRoleEditorTellsTheTruthAboutOwnership covers the defect where
+// the page could not represent the owner role at all. Both booleans behind the
+// two-option select were false for an owner row, so every browser
+// default-selected the first option: the page showed a workspace owner with a
+// demotion already loaded into the form, one click away, and then refused
+// role=owner so nothing could put it back.
+func TestAuthAdminRoleEditorTellsTheTruthAboutOwnership(t *testing.T) {
+	t.Run("an administrator cannot demote an owner from the page", func(t *testing.T) {
+		handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite}, domain.WorkspaceRoleAdmin)
+		store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "owner@example.com", Name: "owner"})
+		if err := store.SetWorkspaceRole(context.Background(), "T1", "U2", domain.WorkspaceRoleOwner, events.Event{}); err != nil {
+			t.Fatal(err)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, adminPageRequest())
+		body := response.Body.String()
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, body)
+		}
+		// The owner row carries no role form at all, because this actor may not
+		// write it — rather than a form pre-loaded with the demotion.
+		if strings.Contains(body, `<option value="owner"`) {
+			t.Fatalf("an administrator is offered the owner role: %s", body)
+		}
+		rows := strings.Split(body, "<tr>")
+		for _, row := range rows {
+			if !strings.Contains(row, "owner@example.com") {
+				continue
+			}
+			if strings.Contains(row, `name="action" value="role"`) {
+				t.Fatalf("an administrator is offered a role editor for the owner: %s", row)
+			}
+		}
+		// And the write is refused with an authorization answer, not an outage.
+		refused := httptest.NewRecorder()
+		handler.ServeHTTP(refused, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=U2&action=role&role=member"))
+		if refused.Code != http.StatusForbidden {
+			t.Fatalf("demotion status=%d body=%s", refused.Code, refused.Body.String())
+		}
+		membership, err := store.GetWorkspaceMembership(context.Background(), "T1", "U2")
+		if err != nil || membership.Role != domain.WorkspaceRoleOwner {
+			t.Fatalf("membership=%+v err=%v", membership, err)
+		}
+	})
+
+	t.Run("an owner sees every role with the current one selected", func(t *testing.T) {
+		handler, store := newAuthAdminTestHandlerWithRole(t, []auth.Scope{auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite}, domain.WorkspaceRoleOwner)
+		store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Email: "member@example.com", Name: "member"})
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, adminPageRequest())
+		body := response.Body.String()
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, body)
+		}
+		for _, expected := range []string{
+			`<option value="member" selected>Member</option>`,
+			`<option value="admin">Administrator</option>`,
+			`<option value="owner">Owner</option>`,
+			`<option value="owner" selected>Owner</option>`,
+		} {
+			if !strings.Contains(body, expected) {
+				t.Fatalf("the role editor is missing %q: %s", expected, body)
+			}
+		}
+		// An owner can appoint another owner, so ownership is recoverable from
+		// the page that can lose it.
+		promote := httptest.NewRecorder()
+		handler.ServeHTTP(promote, adminMutationRequest(http.MethodPost, "/api/admin.auth.users.set", "user_id=U2&action=role&role=owner"))
+		if promote.Code != http.StatusOK {
+			t.Fatalf("promotion status=%d body=%s", promote.Code, promote.Body.String())
+		}
+		membership, err := store.GetWorkspaceMembership(context.Background(), "T1", "U2")
+		if err != nil || membership.Role != domain.WorkspaceRoleOwner {
+			t.Fatalf("membership=%+v err=%v", membership, err)
+		}
+	})
 }
 
 func TestAuthAdminRejectsUnknownUserMutation(t *testing.T) {
@@ -332,7 +408,6 @@ func TestAuthAdminRendersFailuresAsHypertextForBrowsers(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "text/html,application/xhtml+xml")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
-	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: auth.CSRFToken("session")})
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 	body := response.Body.String()

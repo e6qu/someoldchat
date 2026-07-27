@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/lease"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 )
 
@@ -32,68 +33,65 @@ func NewWorker(source Source, poster chatapi.Service, owner string, limit int, l
 	return Worker{Source: source, Poster: poster, Owner: owner, Limit: limit, Lease: lease}, nil
 }
 
+// RunOnce posts every message in one claimed batch.
+//
+// A failing item no longer abandons the rest of the batch. Returning on the first
+// error left every later item claimed by this owner, so nothing could touch them
+// until the lease expired: one message that could not be posted stalled the whole
+// workspace's schedule for a lease period on every cycle, and the batch was
+// re-claimed and stalled again. Each item is now released or acknowledged in its
+// own right and the failures are reported together.
 func (w Worker) RunOnce(ctx context.Context, workspace domain.WorkspaceID) (int, error) {
 	items, err := w.Source.ClaimScheduledMessages(ctx, workspace, w.Owner, w.Limit, w.Lease)
 	if err != nil {
 		return 0, err
 	}
 	completed := 0
+	var failures error
 	for _, item := range items {
-		if err := w.postWithLease(ctx, item); err != nil {
+		if err := ctx.Err(); err != nil {
+			return completed, errors.Join(failures, err)
+		}
+		if postErr := w.postWithLease(ctx, item); postErr != nil {
+			failures = errors.Join(failures, postErr)
 			if releaseErr := w.Source.ReleaseScheduledMessage(ctx, w.Owner, item.ID, time.Now().UTC().Add(w.Lease)); releaseErr != nil {
-				return completed, releaseErr
+				failures = errors.Join(failures, releaseErr)
 			}
-			return completed, err
+			continue
 		}
 		if err := w.Source.MarkScheduledMessageDelivered(ctx, w.Owner, item.ID); err != nil {
-			return completed, err
+			failures = errors.Join(failures, err)
+			continue
 		}
 		completed++
 	}
-	return completed, nil
+	return completed, failures
 }
 
-func (w Worker) PublishWakeDeadline(ctx context.Context, publisher DeadlinePublisher, workspace domain.WorkspaceID, fence uint64) error {
-	return PublishWakeDeadline(ctx, w.Source, publisher, workspace, fence)
+func (w Worker) PublishWakeDeadline(ctx context.Context, publisher FencedDeadlinePublisher, workspaces ...domain.WorkspaceID) error {
+	return PublishEarliestWakeDeadline(ctx, w.Source, publisher, workspaces...)
 }
 
+// postWithLease posts one scheduled message while holding its lease.
+//
+// A lost lease is always reported, joined with the post's own error rather than
+// dropped in favour of it. It used to be suppressed whenever the post had also
+// failed, which is the one combination that matters most: the caller then
+// released the item for another replica believing only the post had failed,
+// while a second owner had in fact been running the same post the whole time.
+//
+// Duplicate posting is prevented by the idempotency key, which is the scheduled
+// message's own identifier: two owners that both post the same item produce one
+// message. That contract is stated here because it is what makes releasing a
+// failed item safe, and it was previously implicit.
 func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage) error {
-	postContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renewErrors := make(chan error, 1)
-	done := make(chan struct{})
-	renewDone := make(chan struct{})
-	interval := w.Lease / 3
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
-	go func() {
-		defer close(renewDone)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				if err := w.Source.RenewScheduledMessage(postContext, w.Owner, item.ID, w.Lease); err != nil {
-					cancel()
-					renewErrors <- err
-					return
-				}
-			}
-		}
-	}()
-	_, postErr := w.Poster.PostWithBlocksAndAttachments(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, "", string(item.ID))
-	cancel()
-	close(done)
-	<-renewDone
-	select {
-	case renewErr := <-renewErrors:
-		if !errors.Is(renewErr, context.Canceled) && (postErr == nil || errors.Is(postErr, context.Canceled)) {
-			return renewErr
-		}
-	default:
-	}
-	return postErr
+	return lease.While(ctx, w.Lease,
+		func(renewContext context.Context) error {
+			return w.Source.RenewScheduledMessage(renewContext, w.Owner, item.ID, w.Lease)
+		},
+		func(postContext context.Context) error {
+			_, err := w.Poster.PostWithBlocksAndAttachments(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, "", string(item.ID))
+			return err
+		},
+	)
 }

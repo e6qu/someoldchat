@@ -59,6 +59,30 @@ const (
 	WorkspaceRoleOwner  WorkspaceRole = "owner"
 )
 
+// Rank orders the workspace roles so authority can be compared rather than
+// enumerated. An unrecognised role ranks below every real one, so a corrupt or
+// future value can never be read as authority.
+//
+// The three roles were previously compared by equality at each call site, which
+// made Admin and Owner interchangeable everywhere: an administrator could grant
+// themselves Owner and demote the real owner, because "is an administrator" was
+// the only question anyone asked.
+func (r WorkspaceRole) Rank() int {
+	switch r {
+	case WorkspaceRoleOwner:
+		return 3
+	case WorkspaceRoleAdmin:
+		return 2
+	case WorkspaceRoleMember:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// Outranks reports whether r holds strictly more authority than other.
+func (r WorkspaceRole) Outranks(other WorkspaceRole) bool { return r.Rank() > other.Rank() }
+
 type WorkspaceMembership struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
@@ -377,8 +401,43 @@ func VerifyPKCE(codeChallenge, method, verifier string) bool {
 // collision reachable from sign-in. Normalizing in Go before the value reaches
 // any repository makes every profile agree by construction, and lets the
 // uniqueness index be a plain column index instead of a per-engine expression.
+//
+// The fold is strings.ToLower and deliberately NOT strings.EqualFold. Full
+// Unicode case folding maps distinct letters onto one another — U+017F LATIN
+// SMALL LETTER LONG S folds onto 's', so EqualFold("ſmith@x.test",
+// "smith@x.test") is true — which turns a lookup by an attacker-controlled
+// address into a lookup of somebody else's account. ToLower leaves U+017F
+// alone, so the two addresses stay two identities. Every comparison of a
+// workspace e-mail address, on every profile, must go through this function:
+// the in-memory repository compared with EqualFold and the SQL repositories
+// with this canonical form, so the same address resolved to different users
+// depending on the configured storage profile.
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+// UserPhotoBlobKey decodes the blob key behind a stored profile photo URL, and
+// reports whether the URL is one this deployment minted.
+//
+// users.profile.set accepts image_24 as free text, so a member can store an
+// ordinary external avatar URL there. Both repositories used to treat that as a
+// corrupt database and fail the whole WalkBlobReferences walk, which let any
+// member disable blob garbage collection for the entire workspace by editing
+// their own profile. A URL that is not one of ours simply names no blob of
+// ours, so it is not a reference — reporting false is the whole of the repair.
+//
+// The user identifier embedded in the URL must match the user the row belongs
+// to, so one member cannot mint a reference that pins another member's blob.
+func UserPhotoBlobKey(workspace WorkspaceID, user UserID, imageURL string) (string, bool) {
+	prefix := "/users/" + string(workspace) + "/" + string(user) + "/photo/"
+	if !strings.HasPrefix(imageURL, prefix) {
+		return "", false
+	}
+	token := strings.TrimPrefix(imageURL, prefix)
+	if token == "" || strings.Contains(token, "/") {
+		return "", false
+	}
+	return string(workspace) + "/users/" + string(user) + "/" + token, true
 }
 
 func NormalizeScopes(scopes []string) []string {

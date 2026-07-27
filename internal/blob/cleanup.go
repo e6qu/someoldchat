@@ -7,6 +7,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/lease"
 )
 
 type CleanupSource interface {
@@ -70,49 +71,22 @@ func (w CleanupWorker) runTopic(ctx context.Context, workspace domain.WorkspaceI
 	return completed, nil
 }
 
+// deleteWithLease deletes one object while holding its lease. A lost lease means
+// another worker is deleting the same object, which is the condition behind
+// duplicate deletion, so lease.While always surfaces it joined with the delete's
+// own error rather than dropping it in favour of one or the other.
 func (w CleanupWorker) deleteWithLease(ctx context.Context, record events.Record) error {
-	deleteContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renewErrors := make(chan error, 1)
-	done := make(chan struct{})
-	renewDone := make(chan struct{})
-	interval := w.Lease / 3
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
-	go func() {
-		defer close(renewDone)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				if err := w.Source.RenewEvents(deleteContext, w.Owner, []uint64{record.Sequence}, w.Lease); err != nil {
-					cancel()
-					renewErrors <- err
-					return
-				}
+	return lease.While(ctx, w.Lease,
+		func(renewContext context.Context) error {
+			return w.Source.RenewEvents(renewContext, w.Owner, []uint64{record.Sequence}, w.Lease)
+		},
+		func(deleteContext context.Context) error {
+			// An object that is already gone is a completed deletion, not a
+			// failure: the topic exists to make deletion idempotent.
+			if err := w.Store.Delete(deleteContext, record.Event.Payload); err != nil && !errors.Is(err, ErrNotFound) {
+				return err
 			}
-		}
-	}()
-	deleteErr := w.Store.Delete(deleteContext, record.Event.Payload)
-	if errors.Is(deleteErr, ErrNotFound) {
-		deleteErr = nil
-	}
-	cancel()
-	close(done)
-	<-renewDone
-	select {
-	case err := <-renewErrors:
-		// A lost lease means another worker is deleting the same object. That is
-		// the condition behind duplicate deletion, so it is always surfaced,
-		// joined with the delete's own error rather than dropped in favor of it.
-		if !errors.Is(err, context.Canceled) {
-			return errors.Join(err, deleteErr)
-		}
-	default:
-	}
-	return deleteErr
+			return nil
+		},
+	)
 }

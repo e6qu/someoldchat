@@ -3,6 +3,7 @@ package slack
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"errors"
@@ -24,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Handler struct {
@@ -91,6 +93,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
 	mux.HandleFunc("POST /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
 	mux.HandleFunc("POST /api/apps.uninstall", h.appsUninstall)
+	mux.HandleFunc("GET /api/apps.uninstall", h.appsUninstall)
 	mux.HandleFunc("GET /api/team.info", h.teamInfo)
 	mux.HandleFunc("POST /api/team.info", h.teamInfo)
 	mux.HandleFunc("GET /api/rtm.connect", h.rtmConnect)
@@ -352,6 +355,26 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /internal/files/external/{upload}", h.externalFileUpload)
 	mux.HandleFunc("GET /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
 	mux.HandleFunc("POST /api/files.completeUploadExternal", h.filesCompleteUploadExternal)
+	// Registered last and least specifically, so it claims only what nothing else
+	// does: an unknown method name and a verb no route declares.
+	mux.HandleFunc("/api/", h.unknownMethod)
+}
+
+// unknownMethod answers anything under /api/ that no registered route claims.
+//
+// net/http.ServeMux answered a typo with a text/plain "404 page not found" and a
+// wrong verb with a text/plain "Method Not Allowed", both at a non-200 status.
+// No Slack SDK can parse either: every one of them decodes the body as JSON and
+// keys on `ok`. Every response on /api/* has to be an envelope, so this is the
+// catch-all the mux never had. It is registered without a method and without a
+// trailing route, so it is the least specific pattern under /api/ and is reached
+// only when nothing else matches.
+//
+// `unknown_method` is not in any of the pinned enums — the snapshot describes no
+// routing failure at all — so it is recorded as a deviation. It is the name Slack
+// itself uses for this case.
+func (h Handler) unknownMethod(w http.ResponseWriter, _ *http.Request) {
+	writeError(w, "unknown_method")
 }
 
 func (h *Handler) ConfigureSocketMode(service socketmode.Service, authenticator auth.Authenticator) {
@@ -367,8 +390,20 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"ok": false, "error": "socket_mode_unavailable"})
 		return
 	}
+	// The four authentication outcomes are distinct everywhere else in this
+	// transport; collapsing them here told an app holding a revoked token that it
+	// had sent no credential, and a missing connections:write grant produced no
+	// `needed`/`provided` at all.
 	principal, err := h.SocketAuth.Authenticate(r)
-	if err != nil || !principal.HasScope(auth.ScopeConnectionsWrite) || principal.AppID == "" {
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if !principal.HasScope(auth.ScopeConnectionsWrite) {
+		writeAuthError(w, missingScopeError{needed: auth.ScopeConnectionsWrite, provided: permissionScopes(principal)})
+		return
+	}
+	if principal.AppID == "" {
 		writeError(w, "invalid_auth")
 		return
 	}
@@ -405,7 +440,7 @@ func (h Handler) history(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := normalizeHistoryRequest(fields)
+	request, err := normalizeHistoryRequest(fields, "invalid_ts_oldest", "invalid_ts_latest")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -430,7 +465,7 @@ func (h Handler) replies(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := normalizeHistoryRequest(fields)
+	request, err := normalizeHistoryRequest(fields, "invalid_arg_name", "invalid_arg_name")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -487,7 +522,11 @@ func (h historyRange) includes(timestamp string) bool {
 	return true
 }
 
-func normalizeHistoryRequest(fields map[string]string) (historyRequest, error) {
+// normalizeHistoryRequest decodes the window /conversations.history and
+// /conversations.replies share. The two operations do not share an enum:
+// history declares invalid_ts_latest and invalid_ts_oldest, replies declares
+// neither, so the caller supplies the code its own enum carries.
+func normalizeHistoryRequest(fields map[string]string, invalidOldest, invalidLatest string) (historyRequest, error) {
 	channel := strings.TrimSpace(fields["channel"])
 	if channel == "" {
 		// Both operations enumerate channel_not_found as the missing-channel error.
@@ -497,24 +536,24 @@ func normalizeHistoryRequest(fields map[string]string) (historyRequest, error) {
 	if err != nil {
 		return historyRequest{}, err
 	}
-	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
-	if cursor != "" {
-		if _, _, err := domain.DecodeMessageCursor(cursor); err != nil {
-			return historyRequest{}, decodeFailure("invalid_cursor", "cursor is not a message cursor")
-		}
+	// Neither /conversations.history nor /conversations.replies declares
+	// invalid_cursor; both declare invalid_arg_name.
+	cursor, err := decodeMessageCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		return historyRequest{}, err
 	}
 	window := historyRange{}
 	if raw := strings.TrimSpace(fields["oldest"]); raw != "" {
 		value, ok := parseSlackTimestamp(raw)
 		if !ok {
-			return historyRequest{}, decodeFailure("invalid_ts_oldest", "oldest is not a Slack timestamp")
+			return historyRequest{}, decodeFailure(invalidOldest, "oldest is not a Slack timestamp")
 		}
 		window.oldest, window.hasOldest = value, true
 	}
 	if raw := strings.TrimSpace(fields["latest"]); raw != "" {
 		value, ok := parseSlackTimestamp(raw)
 		if !ok {
-			return historyRequest{}, decodeFailure("invalid_ts_latest", "latest is not a Slack timestamp")
+			return historyRequest{}, decodeFailure(invalidLatest, "latest is not a Slack timestamp")
 		}
 		window.latest, window.hasLatest = value, true
 	}
@@ -942,8 +981,19 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	// /dialog.open declares none of invalid_arguments. It declares missing_trigger
+	// and missing_dialog for an absent argument and validation_errors for a
+	// dialog it cannot accept.
+	if strings.TrimSpace(fields["trigger_id"]) == "" {
+		writeError(w, "missing_trigger")
+		return
+	}
+	if strings.TrimSpace(fields["dialog"]) == "" {
+		writeError(w, "missing_dialog")
+		return
+	}
 	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
-		writeError(w, mapServiceError(err, "invalid_arguments"))
+		writeError(w, mapServiceError(err, "validation_errors"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1118,7 +1168,11 @@ func (h Handler) migrationExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	teamID := strings.TrimSpace(fields["team_id"])
 	if teamID != "" && domain.WorkspaceID(teamID) != principal.WorkspaceID {
-		writeError(w, "invalid_team")
+		// /migration.exchange declares not_enterprise_team, too_many_users and
+		// invalid_arg_name. `invalid_team` belongs to /admin.conversations.create
+		// and is not in this enum; a team_id naming another workspace is a rejected
+		// argument here.
+		writeError(w, "invalid_arg_name")
 		return
 	}
 	rawIDs := strings.Fields(strings.ReplaceAll(fields["users"], ",", " "))
@@ -1136,7 +1190,7 @@ func (h Handler) migrationExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.MigrationExchange(r.Context(), principal.WorkspaceID, principal.UserID, ids, toOld)
 	if err != nil {
-		writeError(w, mapServiceError(err, "invalid_arguments"))
+		writeError(w, mapServiceError(err, "invalid_arg_name"))
 		return
 	}
 	mapping := make(map[string]string, len(value.UserIDMap))
@@ -1351,7 +1405,7 @@ func (h Handler) adminUsersList(w http.ResponseWriter, r *http.Request) {
 	// second time (which is what decodeListRequest did) saw an exhausted JSON body
 	// and returned an empty map with no error, so a JSON admin.users.list silently
 	// ignored `limit` and `cursor` and answered page one with the default limit.
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -1626,9 +1680,9 @@ func (h Handler) adminInviteRequestsListStatus(w http.ResponseWriter, r *http.Re
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.AdminListInviteRequests(r.Context(), principal.WorkspaceID, principal.UserID, status, request)
@@ -1724,9 +1778,9 @@ func (h Handler) adminAppsList(w http.ResponseWriter, r *http.Request, status do
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.AdminListApps(r.Context(), principal.WorkspaceID, principal.UserID, status, request)
@@ -1786,7 +1840,8 @@ func (h Handler) adminConversationRename(w http.ResponseWriter, r *http.Request)
 	}
 	conversation, err := h.Messages.AdminRenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, name)
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		// /admin.conversations.rename declares name_taken for a collision.
+		writeError(w, mapServiceErrorExists(err, "channel_not_found", "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": conversation.ID, "channel": conversationResponse(conversation)})
@@ -1814,7 +1869,9 @@ func (h Handler) adminConversationCreate(w http.ResponseWriter, r *http.Request)
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
 	if err != nil {
-		writeError(w, mapServiceError(err, "name_taken"))
+		// The collision code belongs to the operation, not to the shared mapper:
+		// a taken name reaches here as store.ErrAlreadyExists.
+		writeError(w, mapServiceErrorExists(err, "name_taken", "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel_id": conversation.ID, "channel": conversationResponse(conversation)})
@@ -2004,9 +2061,9 @@ func (h Handler) adminConversationSearch(w http.ResponseWriter, r *http.Request)
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
 	if err != nil || strings.TrimSpace(fields["query"]) == "" {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.AdminSearchConversations(r.Context(), principal.WorkspaceID, principal.UserID, fields["query"], request)
@@ -2039,9 +2096,9 @@ func (h Handler) adminConversationGetTeams(w http.ResponseWriter, r *http.Reques
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	teams, hasMore, nextCursor, err := h.Messages.AdminConversationTeams(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel_id"])), request)
@@ -2138,9 +2195,9 @@ func (h Handler) adminConnectedChannelInfo(w http.ResponseWriter, r *http.Reques
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	channels := make([]domain.ConversationID, 0)
@@ -2464,7 +2521,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -2488,9 +2545,12 @@ func decodeConversationListFields(fields map[string]string) (domain.Conversation
 	if err != nil {
 		return domain.ConversationListRequest{}, err
 	}
-	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
-	if _, err := domain.DecodeListCursor(cursor); err != nil {
-		return domain.ConversationListRequest{}, decodeFailure("invalid_cursor", "cursor is not a list cursor")
+	// /conversations.list declares invalid_arg_name and not invalid_cursor;
+	// /users.conversations declares both, so the narrower shared code is the one
+	// both operations accept.
+	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		return domain.ConversationListRequest{}, err
 	}
 	excludeArchived, err := parseBoolField(fields["exclude_archived"])
 	if err != nil {
@@ -2570,7 +2630,9 @@ func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.Messages.SetUserPresence(r.Context(), principal.WorkspaceID, principal.UserID, presence); err != nil {
-		writeError(w, mapServiceError(err, "user_not_found"))
+		// /users.setPresence acts on the caller's own record and declares no
+		// missing-user code; it does declare fatal_error.
+		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -2650,6 +2712,13 @@ func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// /dnd.setSnooze declares missing_duration for an absent num_minutes and
+	// snooze_failed for a duration it will not apply; it declares no
+	// invalid_arguments.
+	if strings.TrimSpace(fields["num_minutes"]) == "" {
+		writeError(w, "missing_duration")
+		return
+	}
 	minutes, err := strconv.ParseInt(strings.TrimSpace(fields["num_minutes"]), 10, 64)
 	if err != nil {
 		writeError(w, "invalid_arg_name")
@@ -2657,12 +2726,20 @@ func (h Handler) dndSetSnooze(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := h.Messages.SetSnooze(r.Context(), principal.WorkspaceID, principal.UserID, minutes)
 	if err != nil {
-		writeError(w, mapServiceError(err, "invalid_arguments"))
+		writeError(w, mapServiceError(err, "snooze_failed"))
 		return
 	}
 	response := dndResponse(value, time.Now().UTC())
 	writeJSON(w, http.StatusOK, response)
 }
+
+// dndTeamInfoPage and dndTeamInfoLimit bound the membership read behind an
+// unfiltered dnd.teamInfo, which has to name every member. Reaching the bound is
+// reported as request_timeout, never as a shorter member list.
+const (
+	dndTeamInfoPage  = 200
+	dndTeamInfoLimit = 20000
+)
 
 func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeDNDRead)
@@ -2691,16 +2768,33 @@ func (h Handler) dndTeamInfo(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	} else {
-		page, listErr := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 1000})
-		if listErr != nil {
-			writeError(w, mapServiceError(listErr, "invalid_auth"))
-			return
-		}
-		for _, user := range page.Users {
-			if _, exists := seen[user.ID]; !exists {
-				seen[user.ID] = struct{}{}
-				requested = append(requested, user.ID)
+		// With no `users` argument the answer is the whole workspace. This read one
+		// page of a thousand, discarded page.NextCursor and answered ok:true, so a
+		// larger workspace was told an arbitrary subset was its full membership —
+		// the same silent truncation files.list used to commit.
+		request := domain.PageRequest{Limit: dndTeamInfoPage}
+		for read := 0; ; read += dndTeamInfoPage {
+			if read >= dndTeamInfoLimit {
+				// The bound was reached with the membership unread; a short list
+				// here is indistinguishable from a complete one.
+				writeError(w, "request_timeout")
+				return
 			}
+			page, listErr := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, request)
+			if listErr != nil {
+				writeError(w, mapServiceError(listErr, "invalid_auth"))
+				return
+			}
+			for _, user := range page.Users {
+				if _, exists := seen[user.ID]; !exists {
+					seen[user.ID] = struct{}{}
+					requested = append(requested, user.ID)
+				}
+			}
+			if !page.HasMore {
+				break
+			}
+			request.Cursor = page.NextCursor
 		}
 	}
 	sort.Slice(requested, func(left, right int) bool { return requested[left] < requested[right] })
@@ -2801,25 +2895,23 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	temporary, fields, _, mimeType, err := spoolUpload(w, r)
+	spool, fields, _, mimeType, err := spoolUpload(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
+	// Registered before the deferred authentication below, not after it: an
+	// unauthenticated caller used to leave the spool file behind on every attempt.
+	defer spool.release()
 	if deferAuth {
 		if principal, err = h.authenticate(withBearerToken(r, fields["token"]), auth.ScopeUsersProfileWrite); err != nil {
 			writeAuthError(w, err)
 			return
 		}
 	}
-	defer os.Remove(temporary.Name())
-	defer temporary.Close()
+	temporary := spool.file
 	stat, err := temporary.Stat()
 	if err != nil {
-		writeError(w, "fatal_error")
-		return
-	}
-	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
 		writeError(w, "fatal_error")
 		return
 	}
@@ -2949,9 +3041,9 @@ func (h Handler) conversationMembers(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_cursor")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
@@ -2989,7 +3081,9 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.CreateConversation(r.Context(), principal.WorkspaceID, principal.UserID, fields["name"], private)
 	if err != nil {
-		writeError(w, mapServiceError(err, "name_taken"))
+		// The collision code belongs to the operation, not to the shared mapper:
+		// a taken name reaches here as store.ErrAlreadyExists.
+		writeError(w, mapServiceErrorExists(err, "name_taken", "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -3136,7 +3230,7 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, name)
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		writeError(w, mapServiceErrorExists(err, "channel_not_found", "name_taken"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
@@ -3348,7 +3442,8 @@ func (h Handler) addReaction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AddReaction(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, name); err != nil {
-		writeError(w, mapServiceError(err, "message_not_found"))
+		// /reactions.add is the one pinned enum that declares already_reacted.
+		writeError(w, mapServiceErrorExists(err, "message_not_found", "already_reacted"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3398,7 +3493,11 @@ func (h Handler) getReactions(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
+	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	reactions, next, hasMore, err := h.Messages.Reactions(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp, domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
 		writeError(w, mapServiceError(err, "message_not_found"))
@@ -3436,17 +3535,20 @@ func (h Handler) listUserReactions(w http.ResponseWriter, r *http.Request) {
 	}
 	requested := strings.TrimSpace(fields["user"])
 	if requested != "" && requested != string(principal.UserID) {
-		writeError(w, "not_authorized")
+		// /reactions.list declares no_permission; `not_authorized` belongs to
+		// /conversations.rename and is not in this enum.
+		writeError(w, "no_permission")
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.UserReactions(r.Context(), principal.WorkspaceID, principal.UserID, request)
 	if err != nil {
-		writeError(w, mapServiceError(err, "team_not_found"))
+		// /reactions.list declares user_not_found, not team_not_found.
+		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
 	items := make([]map[string]any, 0, len(page.Items))
@@ -3583,7 +3685,8 @@ func (h Handler) addPin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AddPin(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		writeError(w, mapServiceError(err, "message_not_found"))
+		// /pins.add declares already_pinned and does not declare already_reacted.
+		writeError(w, mapServiceErrorExists(err, "message_not_found", "already_pinned"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3633,7 +3736,12 @@ func (h Handler) listPins(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	pins, next, hasMore, err := h.Messages.Pins(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
+	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	pins, next, hasMore, err := h.Messages.Pins(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
@@ -3674,7 +3782,8 @@ func (h Handler) addStar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.AddStar(r.Context(), principal.WorkspaceID, principal.UserID, channel, timestamp); err != nil {
-		writeError(w, mapServiceError(err, "message_not_found"))
+		// /stars.add declares already_starred.
+		writeError(w, mapServiceErrorExists(err, "message_not_found", "already_starred"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -3731,7 +3840,12 @@ func (h Handler) listStars(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	items, next, more, err := h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
+	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	items, next, more, err := h.Messages.Stars(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -4001,9 +4115,9 @@ func (h Handler) listReminders(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.Reminders(r.Context(), principal.WorkspaceID, principal.UserID, request)
@@ -4039,12 +4153,10 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
-	if cursor != "" {
-		if _, _, err := domain.DecodeMessageCursor(cursor); err != nil {
-			writeError(w, "invalid_arg_name")
-			return
-		}
+	cursor, err := decodeMessageCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
 	}
 	page, err := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
@@ -4122,9 +4234,9 @@ func (h Handler) remoteFilesList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.RemoteFiles(r.Context(), principal.WorkspaceID, principal.UserID, request)
@@ -4387,62 +4499,119 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
-	if err != nil {
-		writeDecodeError(w, err)
-		return
-	}
-	// Filtering happens above the repository, which has no filtered scan, so the
-	// window is read in bounded pages and narrowed here. The bound is what keeps
-	// an unscoped request from reading a whole workspace into memory.
-	collected := make([]domain.File, 0, filter.count)
-	scan := domain.PageRequest{Limit: fileFilterScanPage, Cursor: request.Cursor}
-	hasMore := false
-	for scanned := 0; scanned < fileFilterScanLimit; scanned += fileFilterScanPage {
-		page, listErr := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, scan)
-		if listErr != nil {
-			writeError(w, mapServiceError(listErr, "file_not_found"))
+	// /files.list declares user_not_found. A filter naming a user this workspace
+	// does not have is a wrong request, and answering it with an empty list told
+	// the caller the user simply owns no files.
+	if filter.user != "" {
+		if _, infoErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserID(filter.user)); infoErr != nil {
+			writeError(w, mapServiceError(infoErr, "user_not_found"))
 			return
 		}
-		for _, file := range page.Files {
-			if filter.matches(file) {
-				collected = append(collected, file)
-			}
-		}
-		hasMore = page.HasMore
-		if !page.HasMore {
-			break
-		}
-		scan.Cursor = page.NextCursor
 	}
-	selected, pageIndex := filter.slice(collected)
-	files := make([]map[string]any, 0, len(selected))
-	for _, file := range selected {
+	window, err := h.scanFiles(r.Context(), principal, filter)
+	if err != nil {
+		var bound decodeError
+		if errors.As(err, &bound) {
+			writeError(w, bound.code)
+			return
+		}
+		// /files.list declares user_not_found and no file-not-found code: the only
+		// referent this read can fail to find is the principal's own workspace
+		// membership.
+		writeError(w, mapServiceError(err, "user_not_found"))
+		return
+	}
+	files := make([]map[string]any, 0, len(window.files))
+	for _, file := range window.files {
 		files = append(files, fileResponse(file))
 	}
-	pages := (len(collected) + filter.count - 1) / filter.count
+	pages := (window.total + filter.count - 1) / filter.count
 	if pages == 0 {
 		pages = 1
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "paging": map[string]any{"count": len(files), "page": pageIndex, "pages": pages, "total": len(collected)}, "has_more": hasMore || pageIndex < pages, "response_metadata": map[string]string{"next_cursor": ""}})
+	// The pinned 200 schema is additionalProperties:false over exactly
+	// {ok, files, paging}. `has_more` and `response_metadata` used to be emitted
+	// here; neither is declared, and `has_more:true` next to a hard-coded empty
+	// `next_cursor` described a page no caller could ever reach. `paging.count`
+	// is the requested page size, as the operation's own pinned example shows
+	// (`count: 100` beside two returned files).
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "paging": map[string]any{"count": filter.count, "page": filter.page, "pages": pages, "total": window.total}})
+}
+
+// fileFilterWindow is the complete answer to one filtered files.list: the
+// requested page and the true size of the filtered collection.
+type fileFilterWindow struct {
+	files []domain.File
+	total int
+}
+
+// errFileScanBound reports that the bounded scan behind a filtered files.list ran
+// out before the collection did.
+var errFileScanBound = decodeFailure("request_timeout", "files.list could not read the whole collection within its scan bound")
+
+// scanFiles reads the workspace's files in bounded pages and applies the filter
+// above the repository, which has no filtered scan of its own.
+//
+// It keeps only the requested page plus a running count, so the memory cost is
+// proportional to `count` rather than to the workspace. That is what makes the
+// answer complete: `paging.total` and `paging.pages` describe the whole filtered
+// collection instead of whichever prefix happened to be scanned, and a file that
+// matches only past the first window is still returned.
+//
+// The scan is still bounded, because the repository cannot narrow the read. When
+// the bound is reached the collection has not been read, so there is no honest
+// success to report and /files.list's own `request_timeout` is returned. A short
+// `ok:true` is never emitted: it is indistinguishable from a complete answer.
+func (h Handler) scanFiles(ctx context.Context, principal auth.Principal, filter fileFilter) (fileFilterWindow, error) {
+	first := (filter.page - 1) * filter.count
+	last := first + filter.count
+	window := fileFilterWindow{files: make([]domain.File, 0, filter.count)}
+	scan := domain.PageRequest{Limit: fileFilterScanPage}
+	for read := 0; ; read += fileFilterScanPage {
+		if read >= fileFilterScanLimit {
+			return fileFilterWindow{}, errFileScanBound
+		}
+		page, err := h.Messages.Files(ctx, principal.WorkspaceID, principal.UserID, scan)
+		if err != nil {
+			return fileFilterWindow{}, err
+		}
+		for _, file := range page.Files {
+			if !filter.matches(file) {
+				continue
+			}
+			if window.total >= first && window.total < last {
+				window.files = append(window.files, file)
+			}
+			window.total++
+		}
+		if !page.HasMore {
+			return window, nil
+		}
+		scan.Cursor = page.NextCursor
+	}
 }
 
 // fileFilterScanPage and fileFilterScanLimit bound the repository read that
-// backs a filtered files.list. Without a bound, a narrow filter over a large
-// workspace would read every file into memory.
+// backs a filtered files.list. The bound exists because the repository exposes no
+// filtered read; it is a ceiling on the number of stored rows one call will
+// traverse, not a ceiling on the answer. Reaching it is reported as
+// request_timeout, so it can never be mistaken for a complete result.
 const (
 	fileFilterScanPage  = 200
-	fileFilterScanLimit = 2000
+	fileFilterScanLimit = 20000
 )
 
-// fileFilter carries every parameter /files.list declares. An unrecognised
-// `types` value is still refused with unknown_type, the code that operation
-// declares for exactly that case.
+// fileFilter carries every parameter /files.list declares.
 type fileFilter struct {
 	user    string
 	channel string
-	tsFrom  time.Time
-	tsTo    time.Time
+	// tsFrom and tsTo are whole microseconds since the epoch. The pinned
+	// parameters are `type: number` and both bounds are documented inclusive, so
+	// truncating the fraction dropped a file at 100.5 from `ts_to=100.9`.
+	tsFrom  int64
+	hasFrom bool
+	tsTo    int64
+	hasTo   bool
 	types   []string
 	count   int
 	page    int
@@ -4457,30 +4626,55 @@ func decodeFileFilter(fields map[string]string) (fileFilter, error) {
 	if filter.page, err = clampLimit(fields["page"], 1, 100); err != nil {
 		return fileFilter{}, err
 	}
-	if filter.tsFrom, err = optionalEpoch(fields["ts_from"]); err != nil {
+	if filter.tsFrom, filter.hasFrom, err = optionalEpoch(fields["ts_from"]); err != nil {
 		return fileFilter{}, err
 	}
-	if filter.tsTo, err = optionalEpoch(fields["ts_to"]); err != nil {
+	if filter.tsTo, filter.hasTo, err = optionalEpoch(fields["ts_to"]); err != nil {
 		return fileFilter{}, err
 	}
+	// show_files_hidden_by_limit selects truncated placeholders for files this
+	// deployment never hides, so the answer is the same either way — but it is a
+	// declared boolean, and accepting `show_files_hidden_by_limit=perhaps`
+	// silently would hide a caller's mistake.
+	if _, err := parseBoolFields(fields, "show_files_hidden_by_limit"); err != nil {
+		return fileFilter{}, decodeFailure("invalid_arg_name", "show_files_hidden_by_limit must be a boolean")
+	}
+	// unknown_type appears in exactly one enum in the whole pinned snapshot, and
+	// it is this operation's. Matching nothing for an unrecognised name answered
+	// ok:true with an empty list, which is the answer for "no such file" and not
+	// for "no such type" — and `types=images,bogus` hid the mistake entirely.
 	for _, value := range strings.Split(fields["types"], ",") {
-		if value = strings.TrimSpace(value); value != "" {
-			filter.types = append(filter.types, value)
+		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "" {
+			continue
 		}
+		if !slackFileTypeIsDeclared(value) {
+			return fileFilter{}, decodeFailure("unknown_type", value+" is not a file type")
+		}
+		filter.types = append(filter.types, value)
 	}
 	return filter, nil
 }
 
-func optionalEpoch(raw string) (time.Time, error) {
+// optionalEpoch reads a `type: number` epoch-seconds bound as whole microseconds.
+// It shares parseSlackTimestamp's fixed-point reader, which is also the basis of
+// bad_timestamp, so a negative or overflowing value is refused here exactly as it
+// is on every other timestamp path in this transport.
+func optionalEpoch(raw string) (int64, bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return time.Time{}, nil
+		return 0, false, nil
 	}
-	seconds, err := strconv.ParseInt(strings.SplitN(raw, ".", 2)[0], 10, 64)
-	if err != nil {
-		return time.Time{}, decodeFailure("invalid_arg_name", "timestamp filters are epoch seconds")
+	// A bare fraction is a legal JSON number for these parameters, but never a
+	// legal Slack `ts`, so it is normalised here rather than in the shared reader.
+	if strings.HasPrefix(raw, ".") {
+		raw = "0" + raw
 	}
-	return time.Unix(seconds, 0).UTC(), nil
+	micros, ok := parseSlackTimestamp(raw)
+	if !ok {
+		return 0, false, decodeFailure("invalid_arg_name", "timestamp filters are non-negative epoch seconds")
+	}
+	return micros, true, nil
 }
 
 func (f fileFilter) matches(file domain.File) bool {
@@ -4499,10 +4693,12 @@ func (f fileFilter) matches(file domain.File) bool {
 			return false
 		}
 	}
-	if !f.tsFrom.IsZero() && file.CreatedAt.Before(f.tsFrom) {
+	// Both bounds are declared inclusive.
+	created := file.CreatedAt.UnixMicro()
+	if f.hasFrom && created < f.tsFrom {
 		return false
 	}
-	if !f.tsTo.IsZero() && file.CreatedAt.After(f.tsTo) {
+	if f.hasTo && created > f.tsTo {
 		return false
 	}
 	if len(f.types) > 0 && !slackFileTypeMatches(f.types, file) {
@@ -4511,25 +4707,25 @@ func (f fileFilter) matches(file domain.File) bool {
 	return true
 }
 
-// slice applies the legacy count/page window the pinned operation declares.
-func (f fileFilter) slice(files []domain.File) ([]domain.File, int) {
-	start := (f.page - 1) * f.count
-	if start >= len(files) {
-		return nil, f.page
+// slackFileTypeIsDeclared reports whether a `types` name is one the pinned
+// operation names. It is the closed set the description enumerates
+// ("types=spaces,snippets", default "all"); anything else is unknown_type.
+func slackFileTypeIsDeclared(value string) bool {
+	switch value {
+	case "all", "spaces", "snippets", "images", "gdocs", "zips", "pdfs":
+		return true
+	default:
+		return false
 	}
-	end := start + f.count
-	if end > len(files) {
-		end = len(files)
-	}
-	return files[start:end], f.page
 }
 
 // slackFileTypeMatches maps the file-type filter onto the stored media type.
 // "all" matches everything; the remaining names follow the published grouping.
+// Every name reaching it is one slackFileTypeIsDeclared accepted.
 func slackFileTypeMatches(types []string, file domain.File) bool {
 	mime := strings.ToLower(file.MIMEType)
 	for _, value := range types {
-		switch strings.ToLower(value) {
+		switch value {
 		case "all":
 			return true
 		case "images":
@@ -4544,23 +4740,40 @@ func slackFileTypeMatches(types []string, file domain.File) bool {
 			if mime == "application/pdf" {
 				return true
 			}
-		case "snippets":
-			if strings.HasPrefix(mime, "text/") {
+		case "zips":
+			// An archive is an ordinary upload this system stores, so `zips` used
+			// to answer an empty list for a workspace full of them.
+			if mime == "application/zip" || mime == "application/x-zip-compressed" {
 				return true
 			}
-		case "spaces", "gdocs", "zips":
-			// Declared by the contract but not produced by this system, so they
-			// match nothing rather than being silently treated as "all".
-		default:
-			// An unrecognised name is the case unknown_type exists for; treat it
-			// as matching nothing so the caller sees an empty, correctly scoped
-			// result rather than an unscoped one.
+		case "spaces", "gdocs", "snippets":
+			// Slack Posts, Google Docs and snippets are authored inside Slack, not
+			// uploaded, and this system produces none of them. `snippets` used to
+			// match every text/* upload, which returned ordinary .txt and .csv
+			// files for a filter that asks for something else entirely.
 		}
 	}
 	return false
 }
 
 const maxUploadBytes = 100 << 20
+
+// maxUploadFieldBytes, maxUploadFields and maxUploadRequestBytes bound an upload
+// request as a whole.
+//
+// Only the per-field ceiling used to exist, and a per-part ceiling bounds nothing
+// while the number of parts is unbounded: a multipart body of repeated one-mebibyte
+// fields was read into the `fields` map without limit, and neither the multipart
+// reader nor `r.Body` was capped, so a 136 MiB request allocated several hundred
+// mebibytes of heap. Both upload routes accept a token in the body, so that whole
+// cost was payable before any credential had been checked.
+const (
+	maxUploadFieldBytes = 1 << 20
+	maxUploadFields     = 32
+	// The file itself may reach maxUploadBytes; the remainder covers the declared
+	// fields at their own ceiling plus multipart framing.
+	maxUploadRequestBytes = maxUploadBytes + (maxUploadFields+1)*maxUploadFieldBytes
+)
 
 func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 	r = promoteQueryToken(r)
@@ -4573,14 +4786,36 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	temporary, fields, filename, mimeType, err := spoolUpload(w, r)
+	spool, fields, filename, mimeType, err := spoolUpload(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
+	// The spool file is removed on every exit from here on. It used to be
+	// registered only after the deferred authentication below, so an unauthenticated
+	// caller left a file of up to maxUploadBytes on disk on every attempt and
+	// nothing ever reclaimed it.
+	defer spool.release()
 	if deferAuth {
 		if principal, err = h.authenticate(withBearerToken(r, fields["token"]), auth.ScopeFilesWrite); err != nil {
 			writeAuthError(w, err)
+			return
+		}
+	}
+	// files.upload declares channels, initial_comment and thread_ts, and
+	// files.completeUploadExternal implements exactly that sharing behaviour, but
+	// this path does not route through it. Rejecting is correct only because the
+	// alternative — accepting and dropping the arguments — would report success for
+	// a file that was never shared. /files.upload enumerates `invalid_channel`,
+	// which is the closest declared code for a sharing request it cannot honour.
+	//
+	// The check lives here and not in spoolUpload because spoolUpload is shared
+	// with users.setPhoto, whose enum declares bad_image, too_large and not_found
+	// and no invalid_channel at all — so `POST /api/users.setPhoto` carrying a
+	// `channels` field was answered with a code that operation does not declare.
+	for _, unsupported := range []string{"initial_comment", "channels", "thread_ts"} {
+		if strings.TrimSpace(fields[unsupported]) != "" {
+			writeError(w, "invalid_channel")
 			return
 		}
 	}
@@ -4588,17 +4823,7 @@ func (h Handler) fileUpload(w http.ResponseWriter, r *http.Request) {
 	// enum; /users.setPhoto declares `fatal_error` and /files.upload declares no
 	// server-side code at all, so the pinned spec does not settle files.upload and
 	// `fatal_error` is used for both to keep the two siblings consistent.
-	defer os.Remove(temporary.Name())
-	if err := temporary.Close(); err != nil {
-		writeError(w, "fatal_error")
-		return
-	}
-	source, err := os.Open(temporary.Name())
-	if err != nil {
-		writeError(w, "fatal_error")
-		return
-	}
-	defer source.Close()
+	source := spool.file
 	stat, err := source.Stat()
 	if err != nil {
 		writeError(w, "fatal_error")
@@ -4727,15 +4952,27 @@ func bodyOnlyToken(r *http.Request) bool {
 
 // promoteQueryToken moves a URL-query token into the Authorization header so the
 // authenticator never reaches r.FormValue, which would consume a multipart body.
+//
+// It runs before the body is read, so the copy keeps the body. It used to share
+// withBearerToken, which empties it: `POST /api/files.upload?token=…` carrying a
+// multipart file was answered `invalid_form_data`, because the upload had been
+// discarded before the multipart reader ever saw it.
 func promoteQueryToken(r *http.Request) *http.Request {
 	if strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
 		return r
 	}
-	return withBearerToken(r, r.URL.Query().Get("token"))
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		return r
+	}
+	clone := r.Clone(r.Context())
+	clone.Header.Set("Authorization", "Bearer "+token)
+	return clone
 }
 
 // withBearerToken returns r, or a shallow copy carrying token as a bearer header.
-// The copy's body is emptied because every caller has already consumed it.
+// The copy's body is emptied because its only caller is the deferred
+// authentication that runs after the body has already been spooled.
 func withBearerToken(r *http.Request, token string) *http.Request {
 	token = strings.TrimSpace(token)
 	if token == "" || strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")) != "" {
@@ -4747,15 +4984,33 @@ func withBearerToken(r *http.Request, token string) *http.Request {
 	return clone
 }
 
-func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]string, string, string, error) {
+// uploadSpool owns the temporary file behind one upload. release removes it, and
+// both callers register the release on the statement immediately after
+// spoolUpload returns, before any other exit can be taken.
+type uploadSpool struct{ file *os.File }
+
+func (s uploadSpool) release() {
+	if s.file == nil {
+		return
+	}
+	_ = s.file.Close()
+	_ = os.Remove(s.file.Name())
+}
+
+func spoolUpload(w http.ResponseWriter, r *http.Request) (uploadSpool, map[string]string, string, string, error) {
+	// The request is bounded as a whole before a byte of it is read. Both routes
+	// accept the token in the body, so everything below runs for an anonymous
+	// caller, and the per-part ceilings alone bounded neither the heap nor the
+	// bytes read.
+	r.Body = http.MaxBytesReader(w, r.Body, maxUploadRequestBytes)
 	temporary, err := os.CreateTemp("", "sameoldchat-upload-*")
 	if err != nil {
-		return nil, nil, "", "", err
+		return uploadSpool{}, nil, "", "", err
 	}
-	cleanup := func(uploadErr error) (*os.File, map[string]string, string, string, error) {
-		_ = temporary.Close()
-		_ = os.Remove(temporary.Name())
-		return nil, nil, "", "", uploadErr
+	spool := uploadSpool{file: temporary}
+	cleanup := func(uploadErr error) (uploadSpool, map[string]string, string, string, error) {
+		spool.release()
+		return uploadSpool{}, nil, "", "", uploadErr
 	}
 	fields := make(map[string]string)
 	filename := ""
@@ -4783,6 +5038,10 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]s
 			if _, exists := seen[name]; exists {
 				part.Close()
 				return cleanup(errors.New("duplicate multipart field"))
+			}
+			if len(seen) >= maxUploadFields {
+				part.Close()
+				return cleanup(decodeFailure("invalid_form_data", "upload declares too many fields"))
 			}
 			seen[name] = struct{}{}
 			if name == "file" || name == "image" {
@@ -4848,29 +5107,18 @@ func spoolUpload(w http.ResponseWriter, r *http.Request) (*os.File, map[string]s
 	if mimeType == "" {
 		return cleanup(errors.New("mime type is required"))
 	}
-	// files.upload declares channels, initial_comment and thread_ts, and
-	// files.completeUploadExternal implements exactly that sharing behaviour, but this
-	// path does not route through it. Rejecting is correct only because the
-	// alternative — accepting and dropping the arguments — would report success for a
-	// file that was never shared. /files.upload enumerates `invalid_channel`, which
-	// is the closest declared code for a sharing request it cannot honour.
-	for _, unsupported := range []string{"initial_comment", "channels", "thread_ts"} {
-		if strings.TrimSpace(fields[unsupported]) != "" {
-			return cleanup(decodeFailure("invalid_channel", "file sharing on upload is not supported; use files.completeUploadExternal"))
-		}
-	}
 	if _, err := temporary.Seek(0, io.SeekStart); err != nil {
 		return cleanup(err)
 	}
-	return temporary, fields, filename, mimeType, nil
+	return spool, fields, filename, mimeType, nil
 }
 
 func readUploadField(part *multipart.Part) (string, error) {
-	value, err := io.ReadAll(io.LimitReader(part, 1<<20+1))
+	value, err := io.ReadAll(io.LimitReader(part, maxUploadFieldBytes+1))
 	if err != nil {
 		return "", err
 	}
-	if len(value) > 1<<20 {
+	if len(value) > maxUploadFieldBytes {
 		return "", errors.New("multipart field exceeds size limit")
 	}
 	return string(value), nil
@@ -4944,14 +5192,44 @@ func parseBoolField(value string) (bool, error) {
 	return false, errors.New("boolean field is invalid")
 }
 
-func decodeListRequestFields(fields map[string]string) (domain.PageRequest, error) {
+// decodeCursor validates a wire list cursor and names the failure with the code
+// the calling operation declares.
+//
+// A shared decoder cannot pick the code: `invalid_cursor` appears in only 6 of
+// the 99 pinned enums, so emitting it everywhere leaked a code most operations
+// forbid, while the endpoints that skipped validation altogether let
+// domain.ErrInvalidCursor reach the service mapper — which names service.Err*
+// and store.Err* only — so `?cursor=!!!!` was answered `fatal_error`, a handled
+// input error presented as a server fault.
+func decodeCursor(raw, invalidReason string) (domain.Cursor, error) {
+	cursor := domain.Cursor(strings.TrimSpace(raw))
+	if _, err := domain.DecodeListCursor(cursor); err != nil {
+		return "", decodeFailure(invalidReason, "cursor is not a list cursor")
+	}
+	return cursor, nil
+}
+
+// decodeMessageCursor is decodeCursor for the keyset cursor the message-ordered
+// collections mint.
+func decodeMessageCursor(raw, invalidReason string) (domain.Cursor, error) {
+	cursor := domain.Cursor(strings.TrimSpace(raw))
+	if cursor == "" {
+		return "", nil
+	}
+	if _, _, err := domain.DecodeMessageCursor(cursor); err != nil {
+		return "", decodeFailure(invalidReason, "cursor is not a message cursor")
+	}
+	return cursor, nil
+}
+
+func decodeListRequestFields(fields map[string]string, invalidCursorReason string) (domain.PageRequest, error) {
 	limit, err := clampLimit(fields["limit"], 100, 200)
 	if err != nil {
 		return domain.PageRequest{}, err
 	}
-	cursor := domain.Cursor(strings.TrimSpace(fields["cursor"]))
-	if _, err := domain.DecodeListCursor(cursor); err != nil {
-		return domain.PageRequest{}, decodeFailure("invalid_cursor", "cursor is not a list cursor")
+	cursor, err := decodeCursor(fields["cursor"], invalidCursorReason)
+	if err != nil {
+		return domain.PageRequest{}, err
 	}
 	return domain.PageRequest{Limit: limit, Cursor: cursor}, nil
 }
@@ -4990,8 +5268,14 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	// /chat.unfurl declares missing_unfurls for an absent `unfurls` and
+	// invalid_arg_name only for a malformed one; the two used to be collapsed.
+	if strings.TrimSpace(fields["unfurls"]) == "" {
+		writeError(w, "missing_unfurls")
+		return
+	}
 	var rawUnfurls map[string]json.RawMessage
-	if strings.TrimSpace(fields["unfurls"]) == "" || json.Unmarshal([]byte(fields["unfurls"]), &rawUnfurls) != nil || rawUnfurls == nil {
+	if json.Unmarshal([]byte(fields["unfurls"]), &rawUnfurls) != nil || rawUnfurls == nil {
 		writeError(w, "invalid_arg_name")
 		return
 	}
@@ -5001,7 +5285,9 @@ func (h Handler) chatUnfurl(w http.ResponseWriter, r *http.Request) {
 	}
 	message, err := h.Messages.Unfurl(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), unfurls)
 	if err != nil {
-		writeError(w, mapServiceError(err, "message_not_found"))
+		// /chat.unfurl declares cannot_unfurl_url; message_not_found is not in its
+		// enum.
+		writeError(w, mapServiceError(err, "cannot_unfurl_url"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": messageResponse(message)})
@@ -5037,6 +5323,10 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if err := checkMessageLength(fields); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	attachments, attachmentErr := domain.NormalizeAttachments([]byte(fields["attachments"]))
 	if blockErr != nil || attachmentErr != nil || strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["user"]) == "" || (strings.TrimSpace(fields["text"]) == "" && blocks == "" && attachments == "") {
@@ -5061,7 +5351,50 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 }
 
+// maxMessageTextRunes and maxMessageBodyBytes bound one stored message.
+//
+// `msg_too_long` is declared by every operation that writes a message —
+// chat.postMessage, chat.postEphemeral, chat.update, chat.scheduleMessage and
+// chat.meMessage — and was emitted by none of them, because no length was ever
+// checked. An oversized body is not merely a large write: it is re-served in full
+// by every later conversations.history, conversations.replies and search.messages
+// read of that channel, so a single unbounded post turns a 51-byte GET into a
+// response of hundreds of mebibytes.
+//
+// 40,000 characters is Slack's documented ceiling for a message body, and it is
+// what msg_too_long names. The byte ceiling for `blocks`/`attachments` is derived
+// from the same published limits — 50 blocks at 3,000 characters per text object
+// is 150,000 characters — leaving room for the JSON framing around them without
+// admitting an unbounded structured body.
+const (
+	maxMessageTextRunes = 40000
+	maxMessageBodyBytes = 256 << 10
+)
+
+// checkMessageLength refuses a message body above the ceiling with the code the
+// writing operations declare.
+func checkMessageLength(fields map[string]string) error {
+	if utf8.RuneCountInString(fields["text"]) > maxMessageTextRunes {
+		return decodeFailure("msg_too_long", "message text exceeds the maximum length")
+	}
+	if len(fields["blocks"])+len(fields["attachments"]) > maxMessageBodyBytes {
+		return decodeFailure("msg_too_long", "message blocks and attachments exceed the maximum length")
+	}
+	return nil
+}
+
 func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fields map[string]string) (domain.Message, error) {
+	// The service rejects an empty channel as ErrInvalidMessage, which
+	// postMessageError renames `no_text` — so a request with text and no channel
+	// was told its text was missing. Every sibling (normalizeHistoryRequest,
+	// listPins, closeConversation) validates the channel in the handler, and
+	// /chat.postMessage and /chat.meMessage both declare channel_not_found.
+	if strings.TrimSpace(fields["channel"]) == "" {
+		return domain.Message{}, decodeFailure("channel_not_found", "channel is required")
+	}
+	if err := checkMessageLength(fields); err != nil {
+		return domain.Message{}, err
+	}
 	blocks, err := domain.NormalizeBlocks([]byte(fields["blocks"]))
 	if err != nil {
 		return domain.Message{}, service.ErrInvalidMessage
@@ -5089,6 +5422,13 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 // message body is reported as `no_text` when it carries no renderable content
 // and `invalid_blocks` when the supplied blocks or attachments are unusable.
 func postMessageError(err error) string {
+	// A refusal raised by the handler's own decoding already names the code its
+	// operation declares (msg_too_long, channel_not_found); renaming it here would
+	// discard the reason the request was refused.
+	var typed decodeError
+	if errors.As(err, &typed) {
+		return typed.code
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return "channel_not_found"
 	}
@@ -5106,6 +5446,10 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	if err := checkMessageLength(fields); err != nil {
 		writeDecodeError(w, err)
 		return
 	}
@@ -5171,6 +5515,10 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
+	if err := checkMessageLength(fields); err != nil {
+		writeDecodeError(w, err)
+		return
+	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	textValue := strings.TrimSpace(fields["text"])
 	blocks, blockErr := domain.NormalizeBlocks([]byte(fields["blocks"]))
@@ -5198,7 +5546,10 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	// /chat.scheduledMessages.list declares `security: [{slackAuth: ["none"]}]`
+	// and its token parameter reads "Requires scope: `none`". Enforcing chat:write
+	// refused a token that may read scheduled messages but not write them.
+	principal, err := h.authenticate(r, "")
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -5213,7 +5564,12 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.ScheduledMessages(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.PageRequest{Limit: limit, Cursor: domain.Cursor(strings.TrimSpace(fields["cursor"]))})
+	cursor, err := decodeCursor(fields["cursor"], "invalid_arg_name")
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	page, err := h.Messages.ScheduledMessages(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.PageRequest{Limit: limit, Cursor: cursor})
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -5314,7 +5670,7 @@ func (h Handler) listUserGroups(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -5719,9 +6075,9 @@ func (h Handler) adminTeamsRoleList(w http.ResponseWriter, r *http.Request, role
 		writeDecodeError(w, err)
 		return
 	}
-	request, err := decodeListRequestFields(fields)
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
-		writeError(w, "invalid_arg_name")
+		writeDecodeError(w, err)
 		return
 	}
 	page, err := h.Messages.AdminTeamUsers(r.Context(), principal.WorkspaceID, principal.UserID, role, request)
@@ -6000,7 +6356,18 @@ func mapAdminError(err error, notFoundReason string) string {
 }
 
 func mapServiceError(err error, notFoundReason string) string {
-	return mapServiceErrorNamed(err, notFoundReason, "invalid_arg_name")
+	return mapServiceErrorNamed(err, notFoundReason, "invalid_arg_name", "")
+}
+
+// mapServiceErrorExists names a failure for an operation whose own pinned enum
+// declares a collision code. A collision code is always operation-specific —
+// `already_reacted`, `already_pinned`, `already_starred` and `name_taken` each
+// appear in one to five of the 99 pinned enums, never in all of them — so the
+// shared mapper cannot guess one, and guessing `already_reacted` for every
+// caller reported a reaction failure from pins.add, bookmarks, usergroups, emoji,
+// invite requests, OAuth clients and external identities alike.
+func mapServiceErrorExists(err error, notFoundReason, existsReason string) string {
+	return mapServiceErrorNamed(err, notFoundReason, "invalid_arg_name", existsReason)
 }
 
 // mapServiceErrorNamed names a failure from the chat service.
@@ -6020,7 +6387,7 @@ func mapServiceError(err error, notFoundReason string) string {
 //     store.ErrIdempotencyConflict, so the code test shadowed the
 //     ErrIdempotencyConflict branch below and answered `hash_conflict` where the
 //     idempotency contract requires `rate_limited`.
-func mapServiceErrorNamed(err error, notFoundReason, invalidReason string) string {
+func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
 	if errors.Is(err, store.ErrNotFound) {
 		return notFoundReason
 	}
@@ -6038,6 +6405,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason string) strin
 	if errors.Is(err, service.ErrMessageNotOwned) || errors.Is(err, service.ErrNotWorkspaceAdmin) {
 		return "no_permission"
 	}
+	// A refusal to leave the workspace ownerless is not a permission failure —
+	// the actor holds the authority — so it must not be reported as one, or an
+	// administrator is told they lack a right they actually have.
+	if errors.Is(err, service.ErrLastWorkspaceOwner) {
+		return "cant_delete_primary_owner"
+	}
 	if errors.Is(err, service.ErrMessageAlreadyDeleted) {
 		return "message_not_found"
 	}
@@ -6047,8 +6420,26 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason string) strin
 	if errors.Is(err, service.ErrBlobUnavailable) {
 		return "file_storage_unavailable"
 	}
+	// A cursor that reaches the store unvalidated is still a client argument, not
+	// a server fault. Every route validates its own cursor now; this keeps a
+	// future one from falling through to `fatal_error`.
+	if errors.Is(err, domain.ErrInvalidCursor) {
+		return invalidReason
+	}
+	// A membership requirement the pinned contract states: 9 enums declare
+	// not_in_channel, and it was reachable from no route.
+	if errors.Is(err, service.ErrNotInConversation) {
+		return "not_in_channel"
+	}
 	if errors.Is(err, store.ErrAlreadyExists) {
-		return "already_reacted"
+		if existsReason != "" {
+			return existsReason
+		}
+		// The caller named no collision code, so this operation's enum declares
+		// none. Reporting the collision as a rejected argument is the closest
+		// code such an operation does declare; naming another operation's
+		// collision code would not be.
+		return invalidReason
 	}
 	if errors.Is(err, store.ErrConflict) {
 		return "hash_conflict"
@@ -6059,12 +6450,18 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason string) strin
 	if errors.Is(err, store.ErrInvalidInviteRequest) {
 		return invalidReason
 	}
-	// An Idempotency-Key replayed with a different body is a caller mistake, not a
-	// dependency failure. `rate_limited` is the only pinned code that describes a
-	// rejected retry, and it is declared by chat.postMessage and chat.update, the
-	// operations that accept the header.
+	// An Idempotency-Key replayed with a different body is a permanently
+	// unsatisfiable request: the recorded body will never match. It used to be
+	// reported as `rate_limited`, which is the one Slack code whose handling is
+	// defined by the HTTP layer rather than the body — python-slack-sdk's
+	// RateLimitErrorRetryHandler, node-slack-sdk's rateLimitedErrorRetryHandler
+	// and the Java SDK all key on status 429 and Retry-After. Emitted at 200 with
+	// no header it told every SDK either to retry forever or to treat a caller
+	// mistake as an opaque failure. `rate_limited` is reserved for a real limiter
+	// answering 429 with Retry-After; the conflict is named as what it is, a
+	// request argument that contradicts a previous one.
 	if errors.Is(err, store.ErrIdempotencyConflict) {
-		return "rate_limited"
+		return "invalid_arg_name"
 	}
 	// apps.connections.open is absent from the pinned snapshot; the Socket Mode
 	// connection limit reuses the recorded Socket Mode deviation code.
@@ -6183,8 +6580,28 @@ func requestCharset(header string) error {
 	return nil
 }
 
+// decodeFields reads one request's arguments from the URL query and the body.
+//
+// The query is read for every encoding, and the body overrides it. Both the JSON
+// and the multipart branches used to return before r.ParseForm ever ran, and
+// r.MultipartForm.Value deliberately excludes the URL query, so those two
+// encodings dropped every query-string argument: `POST /api/chat.postMessage
+// ?channel=C1` with a JSON body carrying only `text` was answered `no_text`,
+// naming an argument that was present because the one that was missing had been
+// discarded. Splitting arguments between the query and the payload is legal and
+// common — the pinned snapshot places `token` `in: query` for over a hundred
+// operations and `in: formData` for files.upload and users.setPhoto — so the four
+// encodings have to agree.
+//
+// The form branch reads r.PostForm rather than r.Form for the same reason: r.Form
+// merges the query into the body, so the identical argument in both places was
+// reported as a conflicting duplicate rather than resolved by the same precedence
+// every other encoding uses.
 func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, error) {
 	fields := make(map[string]string)
+	if err := collectFormValues(fields, r.URL.Query()); err != nil {
+		return nil, err
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
 	header := r.Header.Get("Content-Type")
 	if err := requestCharset(header); err != nil {
@@ -6192,7 +6609,7 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 	}
 	contentType := strings.ToLower(strings.TrimSpace(strings.SplitN(header, ";", 2)[0]))
 	if contentType == "application/json" {
-		fields, err := decodeJSONFields(r.Body)
+		body, err := decodeJSONFields(r.Body)
 		if err != nil {
 			// Every raw encoding/json failure is a malformed document; `invalid_json` is
 			// the code the pinned enums declare for it. Returning the bare error left the
@@ -6202,6 +6619,9 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 				return nil, err
 			}
 			return nil, decodeFailure("invalid_json", err.Error())
+		}
+		for name, value := range body {
+			fields[name] = value
 		}
 		return fields, nil
 	}
@@ -6239,7 +6659,7 @@ func decodeFields(w http.ResponseWriter, r *http.Request) (map[string]string, er
 	if err := r.ParseForm(); err != nil {
 		return nil, err
 	}
-	if err := collectFormValues(fields, r.Form); err != nil {
+	if err := collectFormValues(fields, r.PostForm); err != nil {
 		return nil, err
 	}
 	return fields, nil
@@ -6326,6 +6746,14 @@ func collectFormValues(fields map[string]string, source map[string][]string) err
 }
 
 func normalizeJSONScalar(value json.RawMessage) (string, error) {
+	// A JSON null is not a value. json.Unmarshal writes nothing into a string for
+	// it and reports no error, so `{"error":null}` used to decode to the empty
+	// string and read as "the argument was not sent" — which silently discards an
+	// argument /workflows.stepFailed declares required, and answers ok:true on
+	// api.test for a request that named an error.
+	if bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return "", decodeFailure("invalid_arg_name", "a JSON null is not an argument value")
+	}
 	var text string
 	if err := json.Unmarshal(value, &text); err == nil {
 		return text, nil
@@ -6339,6 +6767,10 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 		return strconv.FormatBool(scalar), nil
 	case float64:
 		return strconv.FormatFloat(scalar, 'f', -1, 64), nil
+	case []any:
+		// 83 of the 99 pinned enums declare invalid_array_arg for precisely an
+		// array supplied where a scalar argument belongs.
+		return "", decodeFailure("invalid_array_arg", "request field must not be an array")
 	default:
 		return "", decodeFailure("invalid_arg_name", "request fields must be scalar values")
 	}
@@ -6349,13 +6781,16 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // one negated and one positive, differing only by "profile" — so adding a name to
 // one and not the other silently changed how a value decoded.
 //
-// `error` is absent because it has no single shape: api.test and
-// functions.completeError take a plain string, and treating it as structured
-// JSON made `{"error":"my_error"}` echo back the quoted `"\"my_error\""` while
-// the equivalent form-encoded request echoed `my_error`. But workflows.stepFailed
-// takes an object carrying a message, so flattening every `error` broke it for
-// every official SDK. It is decided by the value's own shape instead — see
-// normalizeJSONField.
+// `error` is absent because it has no single shape. Exactly two operations in the
+// pinned snapshot take an `error` argument: /api.test declares it `type: string`,
+// and /workflows.stepFailed declares it `type: string`, `required: true`, with a
+// description that reads "A JSON-based object with a `message` property". So the
+// same argument name carries a bare string on one operation and a JSON object on
+// the other, and the name alone cannot decide. Treating it as structured JSON
+// made `{"error":"my_error"}` echo back the quoted `"\"my_error\""` while the
+// equivalent form-encoded request echoed `my_error`; flattening it always broke
+// workflows.stepFailed for every official SDK. It is decided by the value's own
+// shape instead — see normalizeJSONField.
 func isStructuredField(name string) bool {
 	switch name {
 	case "unfurls", "metadata", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment":
@@ -6379,10 +6814,9 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 		if err := json.Unmarshal(value, &profile); err != nil || profile == nil {
 			return "", decodeFailure("json_not_object", "profile must be a JSON object")
 		}
-	case name == "error" && jsonIsComposite(value):
-		// api.test takes a string here and workflows.stepFailed takes an object,
-		// so the name alone cannot decide. A composite value is forwarded
-		// verbatim; a scalar is flattened, which also keeps the form-encoded and
+	case name == "error" && jsonIsObject(value):
+		// An object is forwarded verbatim, which is what workflows.stepFailed
+		// needs; anything else is flattened, which keeps the form-encoded and
 		// JSON-encoded forms of the scalar case identical.
 	default:
 		return normalizeJSONScalar(value)
@@ -6394,14 +6828,20 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 	return compact.String(), nil
 }
 
-// jsonIsComposite reports whether a raw JSON value is an object or an array,
-// i.e. one that cannot survive being flattened into a form value.
-func jsonIsComposite(value json.RawMessage) bool {
+// jsonIsObject reports whether a raw JSON value is an object, the one shape that
+// cannot survive being flattened into a form value and that a declared `error`
+// argument may legitimately carry.
+//
+// It used to accept an array as well, so `{"error":[1]}` was forwarded verbatim
+// and echoed back as the error code `[1]`. Both operations declare `error` as
+// `type: string`, and 83 of the 99 pinned enums declare invalid_array_arg for
+// exactly the case of an array where a scalar belongs.
+func jsonIsObject(value json.RawMessage) bool {
 	for _, b := range value {
 		switch b {
 		case ' ', '\t', '\n', '\r':
 			continue
-		case '{', '[':
+		case '{':
 			return true
 		default:
 			return false
@@ -6540,10 +6980,6 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		body := map[string]any{"ok": false, "error": "missing_scope", "needed": string(missing.needed)}
 		body["provided"] = strings.Join(missing.provided, ",")
 		writeJSON(w, http.StatusOK, body)
-		return
-	}
-	if errors.Is(err, auth.ErrMissingScope) {
-		writeError(w, "missing_scope")
 		return
 	}
 	// The four authentication outcomes are distinct members of the same pinned
@@ -6707,7 +7143,11 @@ func (h Handler) listItems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	request, err := pageRequest(fields["limit"], fields["cursor"])
+	// slackLists.items.list used to be the one list decoder that skipped cursor
+	// validation entirely (a tampered cursor reached the store and was reported as
+	// list_not_found) and the one clamping `limit` to 1000 where every sibling
+	// clamps to 200. It reads the shared decoder now, and pageRequest is gone.
+	request, err := decodeListRequestFields(fields, "invalid_arg_name")
 	if err != nil {
 		writeDecodeError(w, err)
 		return
@@ -6971,14 +7411,6 @@ func clampLimit(raw string, fallback, maximum int) (int, error) {
 		return maximum, nil
 	}
 	return value, nil
-}
-
-func pageRequest(limit, cursor string) (domain.PageRequest, error) {
-	value, err := clampLimit(limit, 100, 1000)
-	if err != nil {
-		return domain.PageRequest{}, err
-	}
-	return domain.PageRequest{Limit: value, Cursor: domain.Cursor(cursor)}, nil
 }
 
 // parseSlackTimestamp reads a Slack `ts` ("seconds.microseconds") into whole

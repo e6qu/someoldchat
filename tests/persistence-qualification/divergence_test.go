@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -453,5 +456,567 @@ func seedHelpersRejectInvalidInput(t *testing.T, open opener) {
 	}
 	if _, err := f.repository.SetUserPresence(ctx, f.workspaceID, f.userID, domain.Presence("elsewhere"), f.event("bad-presence", "user.presence_changed", string(f.userID))); err == nil {
 		t.Fatal("an invalid presence was stored")
+	}
+}
+
+// socketModeAdmissionIsAtomicUnderConcurrency drives the real race rather than
+// asserting the fixed code back to itself. Consumption is what makes a Socket
+// Mode connection active, so it is where the concurrency limit is enforced; the
+// SQL repositories read the active count and then wrote in a transaction whose
+// first statement was that read, so every concurrent dialler saw the same count
+// and every one of them was admitted. Measured before the repair: 64 diallers
+// against a limit of 10 admitted between 11 and 15.
+//
+// The load test that was supposed to cover this exercised only the in-memory
+// profile, where a single mutex makes the check-then-act atomic by accident,
+// which is exactly why the SQL profiles' version survived.
+func socketModeAdmissionIsAtomicUnderConcurrency(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	appID := domain.AppID("A-admission-" + f.suffix)
+	dialers := 64
+	for index := 0; index < dialers; index++ {
+		connection := domain.SocketModeConnection{ID: fmt.Sprintf("socket-admission-%d-%s", index, f.suffix), AppID: appID, ExpiresAt: time.Now().UTC().Add(time.Hour)}
+		if err := f.repository.CreateSocketModeConnection(ctx, connection); err != nil {
+			// Ticket issuance is itself bounded; stop at the bound and dial what
+			// was issued, which is still far more than the limit.
+			dialers = index
+			break
+		}
+	}
+	if dialers <= domain.SocketModeConnectionLimit {
+		t.Fatalf("only %d tickets were issued, which cannot exceed the limit of %d", dialers, domain.SocketModeConnectionLimit)
+	}
+
+	var admitted, limited int64
+	failures := make(chan error, dialers)
+	var group sync.WaitGroup
+	start := make(chan struct{})
+	for index := 0; index < dialers; index++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			<-start
+			_, err := f.repository.ConsumeSocketModeConnection(ctx, fmt.Sprintf("socket-admission-%d-%s", index, f.suffix))
+			switch {
+			case err == nil:
+				atomic.AddInt64(&admitted, 1)
+			case errors.Is(err, store.ErrSocketModeConnectionLimit):
+				atomic.AddInt64(&limited, 1)
+			default:
+				failures <- err
+			}
+		}(index)
+	}
+	close(start)
+	group.Wait()
+	close(failures)
+
+	// Every dialer is either admitted or told the limit was reached. Anything
+	// else is the repository leaking its own contention to the caller: reading
+	// the count and then writing in the same transaction makes the losing writer
+	// fail with an engine-level snapshot conflict, which a dialer cannot act on
+	// and which is not the reason it was refused.
+	for err := range failures {
+		t.Errorf("a dialer was refused with %v, want either admission or %v", err, store.ErrSocketModeConnectionLimit)
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+	if admitted > int64(domain.SocketModeConnectionLimit) {
+		t.Fatalf("%d of %d concurrent dialers were admitted, want at most %d", admitted, dialers, domain.SocketModeConnectionLimit)
+	}
+	// And the slots are actually filled: an admission that loses a race must be
+	// refused for a reason the caller can retry on, not silently dropped.
+	if admitted != int64(domain.SocketModeConnectionLimit) {
+		t.Fatalf("%d of %d concurrent dialers were admitted, want the full %d", admitted, dialers, domain.SocketModeConnectionLimit)
+	}
+	if admitted+limited != int64(dialers) {
+		t.Fatalf("%d admitted plus %d limited does not account for %d dialers", admitted, limited, dialers)
+	}
+	active, err := f.repository.CountSocketModeConnections(ctx, appID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if active != int(admitted) {
+		t.Fatalf("counted %d active connections, want the %d that were admitted", active, admitted)
+	}
+}
+
+// blobReferencesTolerateAnArbitraryProfilePhotoURL covers a defect any workspace
+// member could trigger from their own profile: users.profile.set accepts
+// image_24 as free text, and both repositories treated a URL they did not mint
+// as a corrupt database and failed the whole walk. On the in-memory profile the
+// failing return happened while the read lock was held, so blob garbage
+// collection did not merely fail — it left the lock held and deadlocked every
+// subsequent write to the repository, permanently.
+func blobReferencesTolerateAnArbitraryProfilePhotoURL(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	profile := domain.UserProfile{DisplayName: "divergence", Image24: "https://example.test/avatar.png"}
+	if _, err := f.repository.UpdateUserProfile(ctx, f.workspaceID, f.userID, profile, f.event("photo", "user.profile_changed", string(f.userID))); err != nil {
+		t.Fatal(err)
+	}
+
+	visited := make([]string, 0)
+	if err := f.repository.WalkBlobReferences(ctx, f.workspaceID, func(reference string) error {
+		visited = append(visited, reference)
+		return nil
+	}); err != nil {
+		t.Fatalf("a profile photo URL this deployment did not mint stopped blob garbage collection: %v", err)
+	}
+	for _, reference := range visited {
+		if strings.Contains(reference, "example.test") {
+			t.Fatalf("an external avatar URL was reported as a blob reference: %q", reference)
+		}
+	}
+
+	// And the repository is still usable. A held lock is invisible until the next
+	// writer arrives, so the walk returning is not on its own proof of anything.
+	done := make(chan error, 1)
+	go func() {
+		_, err := f.repository.SetUserPresence(ctx, f.workspaceID, f.userID, domain.PresenceAway, f.event("presence", "user.presence_changed", string(f.userID)))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the repository deadlocked after walking blob references: the walk returned while still holding its lock")
+	}
+}
+
+// emailIdentityIsNotUnicodeCaseFolded pins which canonical form the profiles
+// agree on. The in-memory repository compared addresses with strings.EqualFold,
+// which applies full Unicode simple folding: U+017F LATIN SMALL LETTER LONG S
+// folds onto 's', so "ſmith@x.test" resolved to the account owning
+// "smith@x.test". That is an account takeover through an identity provider's
+// asserted address, and it existed on exactly one storage profile.
+func emailIdentityIsNotUnicodeCaseFolded(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	victim := domain.User{ID: domain.UserID("U-fold-victim-" + f.suffix), WorkspaceID: f.workspaceID, Email: "smith-" + f.suffix + "@x.test", Name: "victim"}
+	if err := f.repository.CreateUser(ctx, victim, domain.WorkspaceMembership{WorkspaceID: f.workspaceID, UserID: victim.ID, Role: domain.WorkspaceRoleMember, Active: true}, f.event("fold-victim", "user.created", string(victim.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	confusable := "ſmith-" + f.suffix + "@x.test"
+	found, err := f.repository.FindUserByEmail(ctx, f.workspaceID, confusable)
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("looking up %q resolved to %+v err=%v, want %v: a Unicode case fold must not map one identity onto another", confusable, found, err, store.ErrNotFound)
+	}
+
+	// ASCII case and surrounding space are still folded, on every profile.
+	loaded, err := f.repository.FindUserByEmail(ctx, f.workspaceID, "  SMITH-"+f.suffix+"@X.TEST  ")
+	if err != nil || loaded.ID != victim.ID {
+		t.Fatalf("case-insensitive lookup returned %+v err=%v, want %s", loaded, err, victim.ID)
+	}
+	if loaded.Email != domain.NormalizeEmail(victim.Email) {
+		t.Fatalf("stored address %q, want the canonical %q", loaded.Email, domain.NormalizeEmail(victim.Email))
+	}
+}
+
+// starsPageInChronologicalOrder is the round-one ordering defect in the one
+// place it survived. The in-memory repository built its star cursor key with
+// time.RFC3339Nano, which strips trailing zeros from the fraction, so a star at
+// .120000 encoded as "…:00.12Z", one at .123456 as "…:00.123456Z", and
+// 'Z' (0x5A) > '3' (0x33) put the earlier star after the later one — and the
+// cursor minted from the ".12Z" key skipped every ".1234xx" row on the next page.
+func starsPageInChronologicalOrder(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	base := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
+	instants := trailingZeroFractions(base)
+	for index, instant := range instants {
+		message := f.message(t, ctx, fmt.Sprintf("star-message-%d", index), instant)
+		star := domain.Star{Conversation: f.channelID, UserID: f.userID, Message: message, CreatedAt: instant}
+		if err := f.repository.AddStar(ctx, star, f.event(fmt.Sprintf("star-%d", index), "star.added", string(message.ID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page, _, _, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, domain.PageRequest{Limit: len(instants) + 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != len(instants) {
+		t.Fatalf("listed %d stars, want %d", len(page), len(instants))
+	}
+	for index := 1; index < len(page); index++ {
+		if page[index].CreatedAt.Before(page[index-1].CreatedAt) {
+			t.Fatalf("star %d (%s) sorted before %d (%s)", index, page[index].CreatedAt, index-1, page[index-1].CreatedAt)
+		}
+	}
+
+	// Walk one at a time: the same key is the keyset cursor, so a broken encoding
+	// shows up as a skipped or repeated identifier rather than as a wrong order.
+	seen := make(map[domain.MessageID]struct{}, len(instants))
+	request := domain.PageRequest{Limit: 1}
+	for {
+		single, next, hasMore, err := f.repository.ListStars(ctx, f.workspaceID, f.userID, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, star := range single {
+			if _, repeated := seen[star.Message.ID]; repeated {
+				t.Fatalf("keyset pagination repeated %q", star.Message.ID)
+			}
+			seen[star.Message.ID] = struct{}{}
+		}
+		if !hasMore {
+			break
+		}
+		request.Cursor = next
+		if len(seen) > len(instants) {
+			t.Fatal("keyset pagination did not terminate")
+		}
+	}
+	if len(seen) != len(instants) {
+		t.Fatalf("keyset pagination visited %d stars, want all %d", len(seen), len(instants))
+	}
+}
+
+// messagesResolveByTheirOwnCreationInstant pins the read half of the invariant
+// CreateMessage enforces on the write side. A message is stored truncated to the
+// microsecond its public timestamp can express; the SQL repositories did not
+// truncate the LOOKUP key, so the same call answered ErrNotFound there and
+// returned the message in memory.
+func messagesResolveByTheirOwnCreationInstant(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	// 789 nanoseconds past a microsecond boundary: precision the message's own
+	// identifier cannot carry.
+	created := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
+	message := f.message(t, ctx, "instant", created)
+
+	found, err := f.repository.GetMessageByCreatedAt(ctx, f.channelID, created)
+	if err != nil || found.ID != message.ID {
+		t.Fatalf("lookup by the creating instant returned %+v err=%v, want %s", found, err, message.ID)
+	}
+	truncated, err := f.repository.GetMessageByCreatedAt(ctx, f.channelID, domain.MessageInstant(created))
+	if err != nil || truncated.ID != message.ID {
+		t.Fatalf("lookup by the truncated instant returned %+v err=%v, want %s", truncated, err, message.ID)
+	}
+	if _, err := f.repository.GetMessageByCreatedAt(ctx, f.channelID, created.Add(time.Second)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("lookup at a different instant error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// listsAreCreatedWithTheirItemsOrNotAtAll pins the unit of work the copy_from
+// journey needs. Creating the list, announcing it, and then copying items one
+// call at a time left a half-copied list that clients had already been told
+// about, with no cleanup path.
+func listsAreCreatedWithTheirItemsOrNotAtAll(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1700000000, 0).UTC()
+	listID := domain.ListID("F-copy-" + f.suffix)
+	list := domain.List{ID: listID, WorkspaceID: f.workspaceID, OwnerID: f.userID, Name: "copied", Schema: "[]", CreatedAt: now, UpdatedAt: now}
+	item := func(name string) domain.ListItem {
+		return domain.ListItem{ID: domain.ListItemID(name + "-" + f.suffix), ListID: listID, WorkspaceID: f.workspaceID, Fields: "[]", CreatedBy: f.userID, UpdatedBy: f.userID, CreatedAt: now, UpdatedAt: now}
+	}
+
+	// One item in the batch belongs to a different list, so the whole creation
+	// must fail and leave nothing behind.
+	stray := item("stray")
+	stray.ListID = domain.ListID("F-other-" + f.suffix)
+	if err := f.repository.CreateListWithItems(ctx, list, f.event("list-bad", "list.created", string(listID)), []store.ListItemCreation{
+		{Item: item("keep"), Event: f.event("item-keep-bad", "list.item.created", "keep")},
+		{Item: stray, Event: f.event("item-stray", "list.item.created", "stray")},
+	}); err == nil {
+		t.Fatal("a batch naming an item of another list was accepted")
+	}
+	if _, err := f.repository.GetList(ctx, f.workspaceID, listID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a rejected creation left the list behind: err=%v", err)
+	}
+
+	// The whole batch, committed together.
+	creations := []store.ListItemCreation{
+		{Item: item("one"), Event: f.event("item-one", "list.item.created", "one")},
+		{Item: item("two"), Event: f.event("item-two", "list.item.created", "two")},
+	}
+	if err := f.repository.CreateListWithItems(ctx, list, f.event("list-good", "list.created", string(listID)), creations); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.repository.GetList(ctx, f.workspaceID, listID); err != nil {
+		t.Fatal(err)
+	}
+	items, err := f.repository.ListItems(ctx, f.workspaceID, listID, domain.PageRequest{Limit: 10}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items.Items) != len(creations) {
+		t.Fatalf("copied %d items, want %d", len(items.Items), len(creations))
+	}
+}
+
+// profileChangesCommitWithEveryEventTheyCarry pins the other unit of work: a
+// photo replacement changes the profile AND instructs the cleanup worker to
+// retire the bytes the old profile referenced. Appending the second through a
+// separate call left a window in which the profile no longer names the old blob
+// and nothing has been told to delete it.
+func profileChangesCommitWithEveryEventTheyCarry(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	announcement := f.event("profile", "user.profile_changed", string(f.userID))
+	cleanup := f.event("cleanup", events.UserPhotoBlobDeleteTopic, string(f.workspaceID)+"/users/"+string(f.userID)+"/old")
+	if _, err := f.repository.UpdateUserProfile(ctx, f.workspaceID, f.userID, domain.UserProfile{DisplayName: "changed"}, announcement, cleanup); err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := f.repository.ClaimEventsForTopic(ctx, f.workspaceID, events.UserPhotoBlobDeleteTopic, "cleanup-worker", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 1 || claimed[0].Event.ID != cleanup.ID {
+		t.Fatalf("cleanup events=%+v, want exactly the one committed with the profile change", claimed)
+	}
+	// A profile change with no event at all is not a change anybody can observe.
+	if _, err := f.repository.UpdateUserProfile(ctx, f.workspaceID, f.userID, domain.UserProfile{DisplayName: "silent"}); err == nil {
+		t.Fatal("a profile change with no event was accepted")
+	}
+}
+
+// resolvedAccessNamesOneGrantDeterministically pins the half of the access
+// contract the port promises and neither repository kept: "the returned value
+// names the grant that decided the outcome, so a caller can report why access
+// was allowed". Both kept the first grant of the highest rank they happened to
+// see — over a randomised Go map in one and a query with no ORDER BY in the
+// other — so a user holding the same level through two channels got a different
+// answer on successive identical calls.
+func resolvedAccessNamesOneGrantDeterministically(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1700000000, 0).UTC()
+	owner := domain.UserID("U-owner-" + f.suffix)
+	if err := f.repository.SeedUser(ctx, domain.User{ID: owner, WorkspaceID: f.workspaceID, Email: "owner-" + f.suffix + "@example.com", Name: "owner"}); err != nil {
+		t.Fatal(err)
+	}
+	listID := domain.ListID("F-grants-" + f.suffix)
+	if err := f.repository.CreateList(ctx, domain.List{ID: listID, WorkspaceID: f.workspaceID, OwnerID: owner, Name: "grants", Schema: "[]", CreatedAt: now, UpdatedAt: now}, f.event("grant-list", "list.created", string(listID))); err != nil {
+		t.Fatal(err)
+	}
+	// Two channels the subject belongs to, both granting the same level, so the
+	// only thing distinguishing them is the tie-break.
+	channels := []domain.ConversationID{domain.ConversationID("C-grant-b-" + f.suffix), domain.ConversationID("C-grant-a-" + f.suffix)}
+	for index, channel := range channels {
+		if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: f.workspaceID, Name: fmt.Sprintf("grant-%d", index)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SeedConversationMember(ctx, channel, f.userID); err != nil {
+			t.Fatal(err)
+		}
+		if err := f.repository.SetListAccess(ctx, domain.ListAccess{ListID: listID, EntityType: "channel", EntityID: string(channel), Access: store.AccessWrite}, f.event(fmt.Sprintf("grant-%d", index), "list.access_set", string(listID))); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	first, err := f.repository.GetListAccess(ctx, listID, f.userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Access != store.AccessWrite {
+		t.Fatalf("resolved level=%q, want %q", first.Access, store.AccessWrite)
+	}
+	for attempt := 0; attempt < 40; attempt++ {
+		again, err := f.repository.GetListAccess(ctx, listID, f.userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if again.EntityType != first.EntityType || again.EntityID != first.EntityID {
+			t.Fatalf("attempt %d named grant %s/%s, first call named %s/%s: the reported reason for access is not stable", attempt, again.EntityType, again.EntityID, first.EntityType, first.EntityID)
+		}
+	}
+}
+
+// mutationsReturnTheValueTheyWrote covers the post-commit re-read. A mutation
+// that commits and then reads the row back through the pool returns whatever a
+// concurrent writer left behind, so two overlapping bookmarks.edit calls each
+// received the OTHER caller's title as the result of their own write.
+func mutationsReturnTheValueTheyWrote(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	now := time.Unix(1700000000, 0).UTC()
+	bookmark := domain.Bookmark{ID: domain.BookmarkID("Bk-race-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID, Title: "initial", Type: "link", Link: "https://example.test", CreatedAt: now, UpdatedAt: now, UpdatedBy: f.userID}
+	if err := f.repository.CreateBookmark(ctx, bookmark, f.event("bookmark", "bookmark.created", string(bookmark.ID))); err != nil {
+		t.Fatal(err)
+	}
+
+	const writers = 4
+	const rounds = 40
+	mismatches := make(chan string, writers*rounds)
+	var group sync.WaitGroup
+	for writer := 0; writer < writers; writer++ {
+		group.Add(1)
+		go func(writer int) {
+			defer group.Done()
+			for round := 0; round < rounds; round++ {
+				title := fmt.Sprintf("writer-%d-round-%d", writer, round)
+				update := bookmark
+				update.Title = title
+				update.UpdatedAt = now
+				returned, err := f.repository.UpdateBookmark(ctx, update, f.event(fmt.Sprintf("edit-%d-%d", writer, round), "bookmark.updated", string(bookmark.ID)))
+				if err != nil {
+					mismatches <- err.Error()
+					return
+				}
+				if returned.Title != title {
+					mismatches <- fmt.Sprintf("a writer that stored %q was handed back %q", title, returned.Title)
+					return
+				}
+			}
+		}(writer)
+	}
+	group.Wait()
+	close(mismatches)
+	for message := range mismatches {
+		t.Fatalf("a mutation did not return the value it wrote: %s", message)
+	}
+}
+
+// endingAnAlreadyEndedCallIsAConflict pins one of the last error-code
+// divergences between the profiles: the SQL repositories reported ErrNotFound
+// for a call that had already finished, because their guarded UPDATE could not
+// tell that apart from a call that does not exist, while the in-memory
+// repository reported ErrAlreadyExists. The caller was told its call had
+// vanished.
+func endingAnAlreadyEndedCallIsAConflict(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	call := domain.Call{ID: domain.CallID("call-end-" + f.suffix), WorkspaceID: f.workspaceID, ExternalUniqueID: "ext-" + f.suffix, JoinURL: "https://example.test/join", CreatedBy: f.userID, StartedAt: time.Unix(1700000000, 0).UTC()}
+	if err := f.repository.CreateCall(ctx, call, f.event("call", "call.created", string(call.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.EndCall(ctx, f.workspaceID, call.ID, 30, f.event("call-end", "call.ended", string(call.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.repository.EndCall(ctx, f.workspaceID, call.ID, 30, f.event("call-end-again", "call.ended", string(call.ID))); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("ending an already ended call error=%v, want %v", err, store.ErrAlreadyExists)
+	}
+	if err := f.repository.EndCall(ctx, f.workspaceID, domain.CallID("call-missing-"+f.suffix), 30, f.event("call-missing", "call.ended", "missing")); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ending a call that does not exist error=%v, want %v", err, store.ErrNotFound)
+	}
+}
+
+// connectedChannelPagesAreFilteredAndBounded covers a repository method the
+// suite did not reach at all. The SQL implementation selected every
+// conversation-to-team row in the workspace past the cursor and then applied the
+// channel filter, the team filter and the page limit in Go, so the cost of one
+// page was the size of the workspace; the in-memory implementation filtered and
+// paged differently, and nothing compared the two.
+func connectedChannelPagesAreFilteredAndBounded(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	partners := []domain.WorkspaceID{domain.WorkspaceID("T-partner-a-" + f.suffix), domain.WorkspaceID("T-partner-b-" + f.suffix)}
+	for _, partner := range partners {
+		if err := f.repository.SeedWorkspace(ctx, domain.Workspace{ID: partner, Name: "partner"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	channels := make([]domain.ConversationID, 0, 5)
+	// The fixture's own channel is connected to its own workspace, so the
+	// assertions below are scoped to the channels this contract creates.
+	expected := make(map[domain.ConversationID]int, 5)
+	for index := 0; index < 5; index++ {
+		channel := domain.ConversationID(fmt.Sprintf("C-connected-%d-%s", index, f.suffix))
+		if err := f.repository.SeedConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: f.workspaceID, Name: fmt.Sprintf("connected-%d", index)}); err != nil {
+			t.Fatal(err)
+		}
+		// Even channels reach both partners, odd channels only the first.
+		reach := partners
+		if index%2 == 1 {
+			reach = partners[:1]
+		}
+		if err := f.repository.SetConversationTeams(ctx, f.workspaceID, channel, reach, false, f.event(fmt.Sprintf("connect-%d", index), "conversation.teams_set", string(channel))); err != nil {
+			t.Fatal(err)
+		}
+		channels = append(channels, channel)
+		expected[channel] = len(reach)
+	}
+
+	// Page through everything two at a time and require every channel exactly
+	// once, in identifier order, with its full team list intact.
+	seen := make([]domain.ConversationID, 0, len(channels))
+	all := make([]domain.ConversationID, 0, len(channels)+1)
+	request := domain.PageRequest{Limit: 2}
+	for {
+		page, hasMore, next, err := f.repository.ListConnectedChannelInfo(ctx, f.workspaceID, nil, nil, request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page) > request.Limit {
+			t.Fatalf("a page of %d exceeded the requested limit of %d", len(page), request.Limit)
+		}
+		for _, info := range page {
+			if want, ours := expected[info.ChannelID]; ours {
+				if len(info.InternalTeamIDs) != want {
+					t.Fatalf("channel %s reported %d teams, want %d: paging must not cut a channel's team list", info.ChannelID, len(info.InternalTeamIDs), want)
+				}
+				seen = append(seen, info.ChannelID)
+			}
+			all = append(all, info.ChannelID)
+		}
+		if !hasMore {
+			break
+		}
+		request.Cursor = next
+		if len(all) > len(channels)+8 {
+			t.Fatalf("paging did not terminate: %v", all)
+		}
+	}
+	if len(seen) != len(channels) {
+		t.Fatalf("paged %d channels, want %d: %v", len(seen), len(channels), seen)
+	}
+	for index := 1; index < len(all); index++ {
+		if all[index] <= all[index-1] {
+			t.Fatalf("connected channels are not in identifier order: %v", all)
+		}
+	}
+
+	// The team filter selects channels, not just their team lists.
+	filtered, _, _, err := f.repository.ListConnectedChannelInfo(ctx, f.workspaceID, nil, partners[1:], domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filtered) != 3 {
+		t.Fatalf("filtering by the second partner returned %d channels (%+v), want the 3 that reach it", len(filtered), filtered)
+	}
+	for _, info := range filtered {
+		if len(info.InternalTeamIDs) != 1 || info.InternalTeamIDs[0] != partners[1] {
+			t.Fatalf("channel %s reported %v, want only the filtered team", info.ChannelID, info.InternalTeamIDs)
+		}
+	}
+
+	// And the channel filter narrows to exactly the named channels.
+	named, _, _, err := f.repository.ListConnectedChannelInfo(ctx, f.workspaceID, channels[:2], nil, domain.PageRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(named) != 2 || named[0].ChannelID != channels[0] || named[1].ChannelID != channels[1] {
+		t.Fatalf("filtering by channel returned %+v, want %v", named, channels[:2])
 	}
 }

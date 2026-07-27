@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet workflow-check container-check module-docs-check task-flags-check dependency-check vuln-check contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -162,13 +162,29 @@ fmt-check:
 		exit 1; \
 	fi
 
+# Build-tagged code is analysed too. `go vet ./...` analyses one build
+# configuration, so internal/store/postgres's tagged tests and internal/web's
+# postgres-tagged tests were analysed by nothing at all while CI built and ran
+# them: a vet-class defect there shipped with every gate green. The dqlite
+# variant needs libdqlite headers, which only the CI dqlite job has, so it is a
+# separate target that job runs.
 vet:
 	GOCACHE=$(GOCACHE) go vet ./...
+	GOCACHE=$(GOCACHE) go vet -tags postgres ./...
+
+vet-dqlite:
+	GOCACHE=$(GOCACHE) go vet -tags dqlite ./...
 
 # specs/dependency-policy.md requires govulncheck for Go source as a mandatory
-# control on every dependency-changing change; no workflow ran it.
+# control on every dependency-changing change; no workflow ran it. The tag
+# blind spot is the same one `vet` had: github.com/canonical/go-dqlite is reached
+# only under the dqlite tag, so the default scan never sees it.
 vuln-check:
 	GOCACHE=$(GOCACHE) go run golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION) ./...
+	GOCACHE=$(GOCACHE) go run golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION) -tags postgres ./...
+
+vuln-check-dqlite:
+	GOCACHE=$(GOCACHE) go run golang.org/x/vuln/cmd/govulncheck@v$(GOVULNCHECK_VERSION) -tags dqlite ./...
 
 # Pin syntax for workflow actions, container images, apt packages, Terraform
 # versions and providers, and pinned generators is enforced by the
@@ -182,9 +198,16 @@ container-check: dependency-check
 	./scripts/check-container-publication.sh
 
 # Terraform validate never reads a README and terraform plan needs credentials,
-# so a module example that omits a required variable was invisible to every gate.
+# so a module example that omits a required variable — or passes one the module
+# does not declare — was invisible to every gate.
 module-docs-check:
 	./scripts/check-terraform-module-docs.sh
+
+# terraform/ecs-runtime exported an environment and a secret set cmd/server
+# refuses, so following its README produced a crash-looping service with every
+# gate green: nothing ever started the binary against a module's own output.
+module-startup-check:
+	GOCACHE=$(GOCACHE) ./scripts/check-terraform-module-startup.sh
 
 # `terraform validate` treats a container command as an opaque list of strings and
 # no Go test reads a .tf file, so deploy/ecs-scale-zero passed three flags
@@ -250,11 +273,33 @@ shauth-sso-qualification:
 	@test -n "$(SHAUTH_SOURCE_DIR)" || { echo 'SHAUTH_SOURCE_DIR is required' >&2; exit 1; }
 	./scripts/test-shauth-sso.sh
 
-check: fmt-check vet workflow-check container-check module-docs-check task-flags-check dependency-check contract-check sdk-inventory-check proto-lint generated-check test
+# The Terraform job of the pull-request workflow, reachable from `make`. Neither
+# `check` nor `check-full` reached it, so a commit that left a module
+# `terraform fmt`-dirty or invalid passed every local gate and failed CI. It
+# needs the provider registry for `terraform init`, which is why it is not in
+# `check`.
+terraform-check:
+	@set -eu; \
+	for directory in deploy/ecs-scale-zero terraform/ecs-runtime; do \
+		( cd "$$directory" && terraform fmt -check -recursive && terraform init -backend=false -input=false >/dev/null && terraform validate ); \
+	done
 
-# Everything the pull-request workflow gates on, so a green local run and a
-# green CI run mean the same thing.
-check-full: check vuln-check test-race test-load test-transport-load test-fuzz build-static
+# The activator Lambda is shipped verbatim by deploy/ecs-scale-zero and is the
+# public front door of that profile. No make target ran its tests at all.
+activator-check:
+	python3 -m compileall -q deploy/ecs-scale-zero/activator.py
+	python3 deploy/ecs-scale-zero/activator_test.py
+
+check: fmt-check vet workflow-check container-check module-docs-check module-startup-check task-flags-check dependency-check contract-check sdk-inventory-check proto-lint generated-check activator-check test
+
+# Everything the pull-request workflow gates on that does not need a service, a
+# second language runtime, or a container build: the `go`, `terraform`, and
+# `scale-zero-artifacts` jobs. It deliberately does not reach the `sdk`,
+# `browser`, `shauth-sso`, `dqlite`, or `postgres` jobs, or the dual-architecture
+# edge image build in `scale-zero-artifacts`, each of which needs something this
+# target cannot assume is installed. It used to claim it covered everything,
+# while reaching neither `terraform fmt` nor the activator tests.
+check-full: check terraform-check vuln-check test-race test-load test-transport-load test-fuzz build-static
 
 clean:
 	rm -rf bin .cache coverage.out dist deploy/ecs-scale-zero/.terraform terraform/ecs-runtime/.terraform \

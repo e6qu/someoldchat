@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/observability"
@@ -15,15 +16,12 @@ var ErrRecoveryRequired = errors.New("lifecycle recovery requires an explicit op
 // specs/scale-to-zero.md lists as an idle-eligibility precondition.
 var ErrWakeDeadlineWithinSafetyWindow = errors.New("scheduled wake deadline falls within the wake safety window")
 
-// errRestoreStage marks a failure of the restore stage specifically, so the
-// documented recovery policy can walk back to an older known-good generation
-// without also retrying failures that no other snapshot would fix.
-var errRestoreStage = errors.New("snapshot restore stage failed")
-
-// maxRestoreGenerations bounds the "select older compatible known-good
-// generations in order" recovery policy. The budget is spent before the stack
-// is declared FAILED.
-const maxRestoreGenerations = 4
+// ErrGenerationNotRestorable reports that the generation an operator selected is
+// not a verified known-good snapshot. It is a distinct sentinel because
+// specs/scale-to-zero.md requires the operator's selection to carry its own
+// compatibility checks: silently restoring the nearest older generation instead
+// would be the implicit fallback the same paragraph forbids.
+var ErrGenerationNotRestorable = errors.New("selected snapshot generation is not verified and known-good")
 
 type RuntimeDriver interface {
 	Inspect(context.Context, uint64) error
@@ -125,54 +123,75 @@ func (c Coordinator) Hibernate(ctx context.Context, fence uint64) (Manifest, err
 // WakeAt performs the fenced restore/start work after an outer activator has
 // acquired the wake generation. It deliberately does not activate the
 // controller; the outer owner completes that transition after this returns.
+//
+// The restore decision is read from durable snapshot authority, never from the
+// state name. WAKING means two incompatible things — "the volume was released,
+// the published snapshot is the only copy" and "an interrupted hibernation is
+// being resumed, the volume is strictly newer than every snapshot" — and nothing
+// in the fencing generation distinguishes them. The flag does.
+//
+// A snapshot that cannot be selected or verified is terminal: specs/scale-to-zero.md
+// requires restore failure to enter FAILED and an older generation to be chosen
+// by an explicit operator action, so no fallback is attempted here.
 func (c Coordinator) WakeAt(ctx context.Context, fence uint64) error {
 	started := time.Now()
 	defer func() { c.Metrics.ObserveDuration("sameoldchat_wake_duration", time.Since(started)) }()
-	state, generation := c.Controller.Snapshot()
-	if state != StateWaking || generation != fence {
+	metadata := c.Controller.Metadata()
+	if metadata.State != StateWaking || metadata.Generation != fence {
 		return ErrInvalidTransition
+	}
+	if !metadata.SnapshotAuthoritative {
+		live, err := c.Snapshots.LiveState(ctx, fence)
+		if err != nil {
+			return err
+		}
+		c.Metrics.AddCounter("sameoldchat_recovery_from_live_volume_total", 1)
+		return c.wakeAtManifest(ctx, fence, live, false)
 	}
 	manifest, err := c.Snapshots.Current(ctx, fence)
 	if err != nil {
-		// A missing or unverifiable current.json is exactly the case the
-		// recovery policy exists for: fall back to the newest generation that
-		// verifies rather than declaring the stack unrecoverable.
 		c.Metrics.AddCounter("sameoldchat_snapshot_selection_failures_total", 1)
-		older, selectErr := c.Snapshots.LastVerified(ctx, fence)
-		if selectErr != nil {
-			return errors.Join(err, selectErr)
-		}
-		c.Metrics.AddCounter("sameoldchat_restore_selected_older_generation_total", 1)
-		manifest = older
+		return err
 	}
-	return c.wakeFromSnapshot(ctx, fence, manifest)
+	return c.wakeAtManifest(ctx, fence, manifest, true)
 }
 
-// wakeFromSnapshot restores the selected generation and, when the restore
-// itself fails, walks back through older known-good generations within a
-// bounded budget, as specs/scale-to-zero.md requires.
-func (c Coordinator) wakeFromSnapshot(ctx context.Context, fence uint64, manifest Manifest) error {
-	var failures error
-	for attempt := 0; attempt < maxRestoreGenerations; attempt++ {
-		err := c.wakeAtManifest(ctx, fence, manifest, true)
-		if err == nil {
-			return nil
-		}
-		failures = errors.Join(failures, err)
-		if !errors.Is(err, errRestoreStage) || ctx.Err() != nil || manifest.Generation <= 1 {
-			return failures
-		}
-		older, selectErr := c.Snapshots.LastVerified(ctx, manifest.Generation-1)
-		if selectErr != nil {
-			return errors.Join(failures, selectErr)
-		}
-		if older.Generation == 0 || older.Generation >= manifest.Generation {
-			return failures
-		}
-		c.Metrics.AddCounter("sameoldchat_restore_selected_older_generation_total", 1)
-		manifest = older
+// RestoreAt performs the explicit operator-selected restore that
+// specs/scale-to-zero.md mandates in place of an implicit fallback. The caller
+// must already own the fence through Controller.BeginOperatorRestore, which is
+// the transition that records the operator's consent to overwrite the volume.
+//
+// The selection is exact: a generation that is not itself verified and
+// known-good is refused rather than rounded down to the nearest one that is.
+func (c Coordinator) RestoreAt(ctx context.Context, fence, generation uint64) error {
+	started := time.Now()
+	defer func() { c.Metrics.ObserveDuration("sameoldchat_wake_duration", time.Since(started)) }()
+	if generation == 0 {
+		return ErrGenerationNotRestorable
 	}
-	return failures
+	metadata := c.Controller.Metadata()
+	if metadata.State != StateWaking || metadata.Generation != fence {
+		return ErrInvalidTransition
+	}
+	if !metadata.SnapshotAuthoritative {
+		// BeginOperatorRestore is what records the operator's consent. Reaching
+		// here without it means the caller took an ordinary wake fence and is
+		// about to write a snapshot over a volume nobody agreed to lose.
+		return ErrInvalidTransition
+	}
+	manifest, err := c.Snapshots.LastVerified(ctx, generation)
+	if err != nil {
+		c.Metrics.AddCounter("sameoldchat_snapshot_selection_failures_total", 1)
+		return err
+	}
+	if manifest.Generation != generation {
+		return fmt.Errorf("%w: generation %d", ErrGenerationNotRestorable, generation)
+	}
+	// specs/scale-to-zero.md requires operator-selected restore generation counts
+	// to be published. The old counter meant "an implicit fallback happened",
+	// which is no longer a thing that can occur.
+	c.Metrics.AddCounter("sameoldchat_operator_selected_restore_total", 1)
+	return c.wakeAtManifest(ctx, fence, manifest, true)
 }
 
 // wakeAtManifest runs the fenced startup path. When restore is false the
@@ -185,7 +204,7 @@ func (c Coordinator) wakeAtManifest(ctx context.Context, fence uint64, manifest 
 	if restore {
 		if err := c.runStage(ctx, "restore", func() error { return c.Snapshots.Restore(ctx, manifest) }); err != nil {
 			c.Metrics.AddCounter("sameoldchat_restore_failures_total", 1)
-			return errors.Join(errRestoreStage, err)
+			return err
 		}
 	}
 	if err := c.runStage(ctx, "start_persistence", func() error { return c.Driver.StartPersistence(ctx, fence, manifest) }); err != nil {
@@ -224,7 +243,7 @@ func (c Coordinator) Recover(ctx context.Context) error {
 		}
 		return c.Controller.Activate(fence)
 	case StateQuiescing, StateSnapshot, StateStopping:
-		return c.recoverInterruptedHibernate(ctx, state, fence)
+		return c.recoverInterruptedHibernate(ctx, fence)
 	case StateFailed:
 		return ErrRecoveryRequired
 	default:
@@ -235,46 +254,25 @@ func (c Coordinator) Recover(ctx context.Context) error {
 // recoverInterruptedHibernate restarts the stack after a crash between
 // QUIESCING and HIBERNATED.
 //
-// In QUIESCING and SNAPSHOTTING this cycle never published a manifest, so the
-// database on the active volume is strictly newer than every snapshot at or
-// before the fence. Restoring one would permanently destroy every change made
-// since the previous hibernation, so recovery starts persistence from the
-// volume and restores nothing. "No snapshot exists yet" is therefore not fatal
-// either: a crash during the very first hibernation recovers normally.
+// It carries no restore policy of its own. BeginRecovery persists WAKING while
+// preserving durable snapshot authority, and WakeAt then makes the same decision
+// it makes for any other WAKING record. That is the point: recovery used to
+// decide by inspecting the state name it was called with, so the decision was
+// lost the moment WAKING was persisted, and a second crash inside recovery
+// restored an old snapshot over the live volume with no operator involved.
 //
-// STOPPING is the one interrupted state that already created, verified, and
-// published a manifest for this exact fence, and specs/scale-to-zero.md allows
-// the active volume to be released after publication, so that one generation is
-// restorable. An older generation still is not, for the reason above.
-func (c Coordinator) recoverInterruptedHibernate(ctx context.Context, state State, fence uint64) error {
-	manifest, restore, err := c.recoveryState(ctx, state, fence)
-	if err != nil {
-		return errors.Join(err, c.Controller.Fail(fence))
-	}
+// The two cases the flag encodes here are the ones the states already implied.
+// QUIESCING and SNAPSHOTTING published no manifest for this fence, so the volume
+// is strictly newer than every snapshot and nothing is restored — "no snapshot
+// exists yet" is therefore not fatal, and a crash during the very first
+// hibernation recovers normally. STOPPING has a verified manifest for this exact
+// fence and may already have released the volume, so it restores it.
+func (c Coordinator) recoverInterruptedHibernate(ctx context.Context, fence uint64) error {
 	if err := c.Controller.BeginRecovery(fence); err != nil {
 		return err
 	}
-	if err := c.wakeAtManifest(ctx, fence, manifest, restore); err != nil {
+	if err := c.WakeAt(ctx, fence); err != nil {
 		return errors.Join(err, c.Controller.Fail(fence))
 	}
 	return c.Controller.Activate(fence)
-}
-
-func (c Coordinator) recoveryState(ctx context.Context, state State, fence uint64) (Manifest, bool, error) {
-	if state == StateStopping {
-		manifest, err := c.Snapshots.LastVerified(ctx, fence)
-		switch {
-		case err == nil && manifest.Generation == fence:
-			return manifest, true, nil
-		case err != nil && !errors.Is(err, ErrNoVerifiedSnapshot):
-			return Manifest{}, false, err
-		}
-		c.Metrics.AddCounter("sameoldchat_recovery_published_snapshot_missing_total", 1)
-	}
-	live, err := c.Snapshots.LiveState(ctx, fence)
-	if err != nil {
-		return Manifest{}, false, err
-	}
-	c.Metrics.AddCounter("sameoldchat_recovery_from_live_volume_total", 1)
-	return live, false, nil
 }

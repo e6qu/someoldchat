@@ -28,6 +28,10 @@ func uploadService(t *testing.T) (service.Messages, context.Context) {
 	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "load"})
 	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	// Completion shares the file into C1 and posts a comment there, which is a
+	// chat.postMessage: the uploader has to be a member of the channel, exactly as
+	// the pinned not_in_channel contract requires.
+	repository.SeedConversationMember("C1", "U1")
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1<<20)
 	if err != nil {
 		t.Fatal(err)

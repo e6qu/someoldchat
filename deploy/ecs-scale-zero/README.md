@@ -13,10 +13,20 @@ the original HTTP request. When no request is active, the application has zero
 running tasks.
 
 Configure the AWS provider in the parent configuration and call this directory as a child module. The module intentionally does not configure a provider itself.
+There is deliberately no `region` input: the module reads `data.aws_region.current`
+for every `awslogs-region` and dashboard widget. A separate input could disagree
+with the provider's region, and a root module that passed the wrong one planned
+and applied cleanly and then failed every task start with
+`ResourceInitializationError: failed to validate logger args`, because the log
+group was created in one region and the awslogs driver targeted another.
 
-Every variable below has no default and is therefore required; the WebSocket
-tier is part of this module, not an optional add-on, so a call that omits those
-variables fails `terraform plan` with "No value for required variable".
+Every variable shown in the example below is required; the WebSocket tier is
+part of this module, not an optional add-on, so a call that omits those
+variables fails `terraform plan` with "No value for required variable". The
+module has roughly thirty further variables that do have defaults; see
+[`variables.tf`](variables.tf). `make module-docs-check` verifies both
+directions of this example: every variable without a default appears, and no
+argument names a variable the module does not declare.
 
 ```hcl
 provider "aws" { region = "eu-central-1" }
@@ -25,7 +35,6 @@ module "chat" {
   source = "./deploy/ecs-scale-zero"
 
   name                      = "sameoldchat"
-  region                    = "eu-central-1"
   vpc_id                    = var.vpc_id
   private_subnet_ids        = var.private_subnet_ids
   lambda_subnet_ids         = var.lambda_subnet_ids
@@ -61,7 +70,7 @@ There is deliberately no Application Load Balancer and no Amazon ECS service
 managing the application task count. The task definition is launched
 directly so the zero-task state is real. The activator is the always-available
 HTTP entry point; the application is stateless and must keep durable state in
-its configured store.
+its configured store, which the variable validations below now enforce.
 
 This module implements request-triggered ECS task activation and scale-down.
 It does not deploy `sameoldchat-activator` or perform the provider-neutral
@@ -70,6 +79,19 @@ operations require a separately deployed lifecycle activator configured with
 the explicit `-snapshot-store s3` settings and permissions to use the selected
 snapshot bucket. The Lambda activator is not a substitute for that lifecycle
 component.
+
+Stated plainly, because it is the constraint the HTTP tier lives under: the
+Lambda's idle sweep stops application tasks with `ecs:StopTask`, which sends
+`SIGTERM` and then `SIGKILL` after the stop timeout. There is no fence, no
+drain, no snapshot, and no manifest — it is the ungated stop that
+[WebSockets](#websockets) below calls "the blind shutdown scale-to-zero
+forbids". That is safe only because the HTTP tier keeps no state in the task,
+and the module now enforces it rather than asking for it: `application_command`
+and `application_environment` reject `-store sqlite`, `-store dqlite`, `-db`,
+`-dqlite-*`, and `SAMEOLDCHAT_STORE=sqlite|dqlite` at plan time. Use
+`-store memory` or `-store postgresql`. Giving the HTTP tier the same
+lifecycle-activator delegation the WebSocket tier has would lift the
+restriction, and is not part of this module today.
 
 The WebSocket tier is not merely compatible with that lifecycle activator, it
 **requires** one: the edge delegates every wake and hibernate decision to it
@@ -84,7 +106,12 @@ client socket for its whole lifetime. See [WebSockets](#websockets) below.
 The image should be immutable (prefer a digest), contain `/readyz`, and start the server without migrations or other work that is not required for serving requests. `application_task_role_arn` is deliberately required: the application’s AWS permissions must be explicit.
 
 `alarm_topic_arn` is required and receives alarms for activator errors and
-loss of all healthy WebSocket edge targets. The module also creates a
+loss of all healthy WebSocket edge targets. The edge target group's health check
+is `GET /healthz` with a `200-299` matcher: `cmd/ecs-ws-activator` answers 204
+and `internal/activator` answers 200, and an exact `200` made every edge target
+permanently unhealthy, which with `deployment_minimum_healthy_percent = 100` and
+the deployment circuit breaker meant the service never converged and the alarm
+fired continuously. The module also creates a
 CloudWatch dashboard with activator, ECS task, and Network Load Balancer
 metrics.
 

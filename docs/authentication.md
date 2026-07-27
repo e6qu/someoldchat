@@ -48,6 +48,10 @@ For container deployment, `SAMEOLDCHAT_API_TOKEN`,
 `SAMEOLDCHAT_SESSION_TOKEN`, `SAMEOLDCHAT_AUTH_STATE_KEY_HEX`,
 `SAMEOLDCHAT_OIDC_ISSUER`, `SAMEOLDCHAT_OIDC_CLIENT_ID`, and
 `SAMEOLDCHAT_OIDC_CLIENT_SECRET` provide the corresponding flag defaults.
+`SAMEOLDCHAT_SESSION_TOKEN` and any configured provider are mutually exclusive
+and the server exits 2 when both are present, so a deployment with single
+sign-on must not set it; `terraform/ecs-runtime` therefore creates no
+session-token secret at all.
 `SAMEOLDCHAT_AUTH_COOKIE_DOMAIN` optionally scopes SameOldChat's own session
 cookies to a parent DNS hostname used only by this SameOldChat deployment. It
 must never be set to a parent shared with unrelated relying applications;

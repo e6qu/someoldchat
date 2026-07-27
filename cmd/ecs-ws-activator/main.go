@@ -46,10 +46,14 @@ type activator struct {
 	// specs/scale-to-zero.md: hibernation is eligible only after it elapses
 	// with no live streams.
 	idleTimeout time.Duration
-	origin      string
-	logger      *slog.Logger
-	upgrader    websocket.Upgrader
-	mu          sync.Mutex
+	// streamTimeout bounds how long a proxied WebSocket may go without any
+	// evidence that its peer is alive. Both legs are pinged at nine tenths of it
+	// and closed when the pong does not arrive.
+	streamTimeout time.Duration
+	origin        string
+	logger        *slog.Logger
+	upgrader      websocket.Upgrader
+	mu            sync.Mutex
 }
 
 type ecsClient interface {
@@ -121,11 +125,13 @@ func run(logger *slog.Logger) int {
 	// non-browser clients, and the failure appears as an unexplained handshake
 	// rejection rather than as bad configuration.
 	origin := flag.String("allowed-origin", "", "exact allowed browser Origin, scheme and authority (required)")
+	streamTimeout := flag.Duration("stream-timeout", time.Minute, "maximum time a proxied WebSocket may go without a pong or a frame before it is closed")
 	flag.Parse()
 	configured := settings{
 		listen: *listen, cluster: *cluster, service: *service, family: *family, port: *port,
 		table: *table, startup: *startup, leaseTTL: *leaseTTL, idleTimeout: *idleTimeout,
 		activatorURL: *activatorURL, activatorToken: *activatorToken, origin: *origin,
+		streamTimeout: *streamTimeout,
 	}.trimmed()
 	if err := configured.validate(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -140,7 +146,8 @@ func run(logger *slog.Logger) int {
 		ecs: ecs.NewFromConfig(cfg), dynamo: dynamodb.NewFromConfig(cfg),
 		control: httpControlPlane{base: strings.TrimSuffix(configured.activatorURL, "/"), token: configured.activatorToken, client: &http.Client{Timeout: 30 * time.Second}},
 		cluster: configured.cluster, service: configured.service, family: configured.family,
-		port: configured.port, table: configured.table, startWait: configured.startup, leaseTTL: configured.leaseTTL, idleTimeout: configured.idleTimeout, origin: configured.origin, logger: logger,
+		port: configured.port, table: configured.table, startWait: configured.startup, leaseTTL: configured.leaseTTL, idleTimeout: configured.idleTimeout,
+		streamTimeout: configured.streamTimeout, origin: configured.origin, logger: logger,
 		upgrader: websocket.Upgrader{ReadBufferSize: 32 << 10, WriteBufferSize: 32 << 10, CheckOrigin: func(r *http.Request) bool {
 			// A client that sends no Origin is not a browser; the SDK and Socket
 			// Mode clients are in that group. A browser must match exactly.
@@ -148,7 +155,7 @@ func run(logger *slog.Logger) int {
 		}},
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("GET /healthz", health)
 	mux.HandleFunc("GET /", a.handle)
 	applicationContext, stopApplication := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopApplication()
@@ -177,6 +184,24 @@ func run(logger *slog.Logger) int {
 	return 0
 }
 
+// health answers the load balancer's HTTP probe.
+//
+// It must answer 200. The NLB target group in deploy/ecs-scale-zero declares
+// `matcher = "200"`, which accepts that status and no other, so the 204 this
+// route used to return made every edge task permanently unhealthy: with
+// deployment_minimum_healthy_percent = 100 and the deployment circuit breaker
+// enabled, the service could never converge, no WebSocket traffic was ever
+// served, and the unhealthy-target alarm fired continuously.
+//
+// The body matches the lifecycle activator's own GET /healthz
+// (internal/activator/handler.go), so an operator polling either edge sees the
+// same shape.
+func health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
 // settings is the configuration of one activator process. It is validated as a
 // whole, before any AWS client is built or any listener is bound, so an
 // incomplete command line fails at startup with the names of what is missing.
@@ -190,6 +215,7 @@ type settings struct {
 	startup        time.Duration
 	leaseTTL       time.Duration
 	idleTimeout    time.Duration
+	streamTimeout  time.Duration
 	activatorURL   string
 	activatorToken string
 	origin         string
@@ -228,6 +254,7 @@ func (s settings) validate() error {
 		{flag: "-startup-timeout", empty: s.startup <= 0},
 		{flag: "-lease-ttl", empty: s.leaseTTL <= 0},
 		{flag: "-idle-timeout", empty: s.idleTimeout <= 0},
+		{flag: "-stream-timeout", empty: s.streamTimeout <= 0},
 		{flag: "-activator-url", empty: s.activatorURL == ""},
 		{flag: "-activator-token", empty: s.activatorToken == ""},
 		// An empty allowed origin is not a permissive default: it rejects every
@@ -330,9 +357,29 @@ func (a *activator) handle(w http.ResponseWriter, r *http.Request) {
 	backendConn.SetReadLimit(maxWebSocketMessageBytes)
 	clientConn.SetReadLimit(maxWebSocketMessageBytes)
 
-	errorsCh := make(chan error, 2)
-	go proxyMessages(errorsCh, clientConn, backendConn)
-	go proxyMessages(errorsCh, backendConn, clientConn)
+	writeWait := a.streamTimeout / 6
+	if writeWait <= 0 {
+		writeWait = time.Second
+	}
+	clientSide := &peer{conn: clientConn, writeWait: writeWait}
+	backendSide := &peer{conn: backendConn, writeWait: writeWait}
+	pingPeriod := a.streamTimeout * 9 / 10
+	if pingPeriod <= 0 {
+		pingPeriod = time.Second
+	}
+	errorsCh := make(chan error, 4)
+	for _, side := range []*peer{clientSide, backendSide} {
+		if err := side.watch(a.streamTimeout); err != nil {
+			a.logger.Error("arm websocket liveness", "error", err)
+			return
+		}
+	}
+	proxyDone := make(chan struct{})
+	defer close(proxyDone)
+	go clientSide.keepalive(proxyDone, errorsCh, pingPeriod)
+	go backendSide.keepalive(proxyDone, errorsCh, pingPeriod)
+	go proxyMessages(errorsCh, clientSide, backendSide, a.streamTimeout)
+	go proxyMessages(errorsCh, backendSide, clientSide, a.streamTimeout)
 	select {
 	case err := <-errorsCh:
 		if err != nil && !isNormalWebSocketClose(err) {
@@ -740,14 +787,86 @@ func (a *activator) fail(w http.ResponseWriter, err error) {
 	http.Error(w, "websocket activation unavailable", http.StatusServiceUnavailable)
 }
 
-func proxyMessages(errorsCh chan<- error, from, to *websocket.Conn) {
+// peer owns one side of a proxied stream.
+//
+// Gorilla permits one concurrent writer per connection, and this proxy now has
+// two: the goroutine forwarding the other side's frames, and the keepalive that
+// pings this side. The mutex is what makes both legal on the same connection;
+// without it the added pings would corrupt the frame stream.
+type peer struct {
+	conn      *websocket.Conn
+	writeMu   sync.Mutex
+	writeWait time.Duration
+}
+
+func (p *peer) send(messageType int, payload []byte) error {
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	if err := p.conn.SetWriteDeadline(time.Now().Add(p.writeWait)); err != nil {
+		return err
+	}
+	return p.conn.WriteMessage(messageType, payload)
+}
+
+// watch arms the liveness contract for the side this peer reads.
+//
+// Neither leg had a read or write deadline and neither generated pings, while
+// renewLeaseLoop extended the connection lease regardless of peer health. One
+// half-open client — a laptop lid closed on a train, an NLB idle-timeout on a
+// silent flow — therefore pinned a lease forever and held the whole application
+// service awake at full replica cost, which is precisely the outcome
+// scale-to-zero exists to prevent. A missed pong now closes the stream, releases
+// the lease, and lets the stack hibernate.
+func (p *peer) watch(pongWait time.Duration) error {
+	if err := p.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+		return err
+	}
+	p.conn.SetPongHandler(func(string) error { return p.conn.SetReadDeadline(time.Now().Add(pongWait)) })
+	// The default ping handler replies on the connection directly, which would
+	// bypass the write mutex the keepalive relies on.
+	p.conn.SetPingHandler(func(payload string) error {
+		if err := p.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			return err
+		}
+		err := p.send(websocket.PongMessage, []byte(payload))
+		if errors.Is(err, websocket.ErrCloseSent) {
+			return nil
+		}
+		return err
+	})
+	return nil
+}
+
+func (p *peer) keepalive(done <-chan struct{}, errorsCh chan<- error, pingPeriod time.Duration) {
+	ticker := time.NewTicker(pingPeriod)
+	defer ticker.Stop()
 	for {
-		messageType, message, err := from.ReadMessage()
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			if err := p.send(websocket.PingMessage, nil); err != nil {
+				errorsCh <- err
+				return
+			}
+		}
+	}
+}
+
+func proxyMessages(errorsCh chan<- error, from, to *peer, pongWait time.Duration) {
+	for {
+		messageType, message, err := from.conn.ReadMessage()
 		if err != nil {
 			errorsCh <- err
 			return
 		}
-		if err := to.WriteMessage(messageType, message); err != nil {
+		// Traffic is liveness too: a busy stream must not be closed just because
+		// the pong for an unsent ping has not arrived.
+		if err := from.conn.SetReadDeadline(time.Now().Add(pongWait)); err != nil {
+			errorsCh <- err
+			return
+		}
+		if err := to.send(messageType, message); err != nil {
 			errorsCh <- err
 			return
 		}

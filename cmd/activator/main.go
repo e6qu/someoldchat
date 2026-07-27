@@ -195,6 +195,8 @@ func run(logger *slog.Logger) int {
 	mux.Handle("GET /metrics", metrics.Handler())
 	mux.HandleFunc("POST /hibernate", hibernateHandler(controller, coordinator, logger))
 	mux.HandleFunc("POST /recover", recoverHandler(controller, logger))
+	mux.HandleFunc("POST /restore", restoreHandler(controller, coordinator, logger))
+	mux.HandleFunc("POST /wake-deadline", wakeDeadlineHandler(controller, logger))
 	// No WriteTimeout: this listener proxies application responses, including
 	// long-lived streams. ReadHeaderTimeout and IdleTimeout bound the header and
 	// connection lifetimes an unauthenticated client can hold open.
@@ -311,6 +313,111 @@ func hibernateHandler(controller *lifecycle.Controller, coordinator lifecycle.Co
 				http.Error(w, "hibernation failed", http.StatusBadGateway)
 				return
 			}
+			w.WriteHeader(http.StatusNoContent)
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+// wakeDeadlineHandler receives the earliest necessary wake time from the running
+// stack, which specs/scale-to-zero.md requires it to publish before shutdown.
+//
+// The consume side already existed — scheduledWakeLoop wakes on it and Hibernate
+// refuses inside its safety window — but the value was never produced by anything
+// in production, so a hibernated stack fired a due scheduled message only when
+// unrelated traffic happened to wake it. The application and the activator are
+// different processes with different stores, so the hint crosses the same
+// authenticated control boundary as every other lifecycle operation.
+//
+// The write is fenced. A worker that belongs to a generation the stack has moved
+// past must not be able to reinstate a deadline the current generation cleared.
+func wakeDeadlineHandler(controller *lifecycle.Controller, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		fence, err := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("generation")), 10, 64)
+		if err != nil {
+			http.Error(w, "wake deadline requires a generation query parameter", http.StatusBadRequest)
+			return
+		}
+		// An absent deadline clears the hint. That is the ordinary case once the
+		// scheduled work has run, and leaving a served deadline behind would
+		// refuse every later hibernation inside its safety window.
+		var deadline time.Time
+		if raw := strings.TrimSpace(r.URL.Query().Get("deadline")); raw != "" {
+			deadline, err = time.Parse(time.RFC3339Nano, raw)
+			if err != nil {
+				http.Error(w, "wake deadline must be an RFC 3339 timestamp", http.StatusBadRequest)
+				return
+			}
+		}
+		if err := controller.SetWakeDeadline(fence, deadline); err != nil {
+			if errors.Is(err, lifecycle.ErrStaleFence) {
+				w.Header().Set("Retry-After", "5")
+				http.Error(w, "wake deadline generation is stale", http.StatusConflict)
+				return
+			}
+			logger.Error("publish wake deadline", "error", err, "generation", fence)
+			http.Error(w, "wake deadline unavailable", http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// restoreHandler is the explicit, authenticated selection of an older known-good
+// snapshot generation that specs/scale-to-zero.md requires. The coordinator no
+// longer walks back through generations by itself: a silent rollback to data
+// hours or days old, reported as a healthy ACTIVE stack, is the same class of
+// surprise as restoring over a live volume.
+//
+// It is the only route that can overwrite an active volume whose contents no
+// snapshot holds, so the generation is named by the operator, is checked to be
+// verified and known-good in its own right, and is fenced by its own generation.
+func restoreHandler(controller *lifecycle.Controller, coordinator lifecycle.Coordinator, logger *slog.Logger) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		generation, err := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("generation")), 10, 64)
+		if err != nil || generation == 0 {
+			http.Error(w, "restore requires a positive generation query parameter", http.StatusBadRequest)
+			return
+		}
+		state, fence := controller.Snapshot()
+		if state != lifecycle.StateFailed && state != lifecycle.StateHibernated {
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, "an operator restore requires a failed or hibernated stack", http.StatusConflict)
+			return
+		}
+		restoreFence, err := controller.BeginOperatorRestore(fence)
+		if err != nil {
+			logger.Error("begin operator restore", "error", err, "generation", generation)
+			http.Error(w, "restore unavailable", http.StatusConflict)
+			return
+		}
+		result := make(chan error, 1)
+		go func() {
+			// The work outlives the request context deliberately: a client that
+			// times out must not cancel a restore that owns the fence, exactly as
+			// it must not cancel a shared wake.
+			if err := coordinator.RestoreAt(context.Background(), restoreFence, generation); err != nil {
+				result <- errors.Join(err, controller.Fail(restoreFence))
+				return
+			}
+			result <- controller.Activate(restoreFence)
+		}()
+		select {
+		case err := <-result:
+			if errors.Is(err, lifecycle.ErrGenerationNotRestorable) || errors.Is(err, lifecycle.ErrNoVerifiedSnapshot) {
+				// The operator named a generation this deployment cannot restore.
+				// That is a handled answer about the request, not a server fault.
+				logger.Error("operator restore rejected", "error", err, "generation", generation)
+				http.Error(w, "selected generation is not a verified known-good snapshot", http.StatusConflict)
+				return
+			}
+			if err != nil {
+				logger.Error("operator restore failed", "error", err, "generation", generation)
+				http.Error(w, "restore failed", http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("X-Lifecycle-Generation", strconv.FormatUint(restoreFence, 10))
 			w.WriteHeader(http.StatusNoContent)
 		case <-r.Context().Done():
 			return
