@@ -167,11 +167,11 @@ entries:
     kind: go-module
     canonical: google.golang.org/grpc
     source: https://github.com/grpc/grpc-go
-    version: v1.82.0
-    revision: bd239854f0ab7f1ee63457d47f7c1d2675e1f736
-    published_at: 2026-06-30T13:47:03Z
-    evidence: https://proxy.golang.org/google.golang.org/grpc/@v/v1.82.0.info
-    checksum: h1:vguDnZUPjE26w09A63VoxZPnvPjB5Riyc0mkXPFmAIU=
+    version: v1.82.1
+    revision: ebd8f06a09426fbece97157c95c3917abff28f4e
+    published_at: 2026-07-15T23:31:12Z
+    evidence: https://proxy.golang.org/google.golang.org/grpc/@v/v1.82.1.info
+    checksum: h1:NnAxzGRA0677vCa4BUkOAnO5+FfQqVl9iUXeD0IqcGE=
     provenance: vcs-tag
     license: Apache-2.0
     purpose: distributed module transport
