@@ -230,9 +230,30 @@ for process_id in "$primary_pid" "$witness_pid"; do
 	fi
 done
 
+# The provider's validator credential must not authenticate anything here. The
+# Web API signals a rejected credential the way the pinned contract and every
+# official SDK expect — HTTP 200 with {"ok":false,"error":"invalid_auth"} —
+# because a 4xx makes an SDK retry a request that can never succeed. Asserting
+# the status alone therefore said nothing about whether the credential was
+# accepted; the envelope is what carries the refusal.
 for origin in "$primary_origin" "$witness_origin"; do
-	status=$(curl --silent --output /dev/null --write-out '%{http_code}' --header "Authorization: Bearer ${validator_token}" "$origin/api/auth.test")
-	test "$status" = 401
+	body=$(curl --silent --header "Authorization: Bearer ${validator_token}" "$origin/api/auth.test")
+	case "$body" in
+	*'"ok":false'*) ;;
+	*)
+		printf 'the Shauth validator credential was accepted by %s/api/auth.test: %s\n' "$origin" "$body" >&2
+		exit 1
+		;;
+	esac
+	case "$body" in
+	*'"error":"invalid_auth"'* | *'"error":"not_authed"'*) ;;
+	*)
+		printf '%s/api/auth.test refused the validator credential without naming an authentication failure: %s\n' "$origin" "$body" >&2
+		exit 1
+		;;
+	esac
+	# The browser entry point still redirects an unauthenticated visitor into the
+	# configured provider rather than answering with a bare status.
 	status=$(curl --silent --output /dev/null --write-out '%{http_code}' --header "Authorization: Basic $(printf 'shauth-validator:%s' "$validator_token" | openssl base64 -A)" "$origin/app")
 	test "$status" = 303
 done

@@ -1,6 +1,6 @@
 module github.com/sameoldchat/sameoldchat
 
-go 1.26.0
+go 1.26.5
 
 require modernc.org/sqlite v1.53.0
 
