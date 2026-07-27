@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -278,17 +278,34 @@ shauth-sso-qualification:
 # `terraform fmt`-dirty or invalid passed every local gate and failed CI. It
 # needs the provider registry for `terraform init`, which is why it is not in
 # `check`.
-terraform-check:
+terraform-check: module-example-check
 	@set -eu; \
 	for directory in deploy/ecs-scale-zero terraform/ecs-runtime; do \
 		( cd "$$directory" && terraform fmt -check -recursive && terraform init -backend=false -input=false >/dev/null && terraform validate ); \
 	done
+
+# module-docs-check compares argument names, which is all a name comparison can
+# decide: it never evaluated a module's own `validation` blocks and never checked
+# a type, so a README could document the one call the module exists to forbid.
+# This runs the example through terraform itself, which is why it lives here and
+# not in `check`: it needs the provider registry.
+module-example-check:
+	./scripts/check-terraform-module-examples.sh
 
 # The activator Lambda is shipped verbatim by deploy/ecs-scale-zero and is the
 # public front door of that profile. No make target ran its tests at all.
 activator-check:
 	python3 -m compileall -q deploy/ecs-scale-zero/activator.py
 	python3 deploy/ecs-scale-zero/activator_test.py
+
+# The dqlite build configuration reached by no local gate at all: `vet` and
+# `vuln-check` analyse the default and postgres configurations, so a vet-class
+# or vulnerability-class defect in internal/store/dqlite was invisible to
+# `check` and to `check-full` alike, and visible only inside the CI dqlite job.
+# It needs the libdqlite headers, which is why it is its own target rather than
+# part of `check`; the CI job runs the same four targets, and the publication
+# contract requires that job to run them.
+check-dqlite: build-dqlite vet-dqlite vuln-check-dqlite test-dqlite
 
 check: fmt-check vet workflow-check container-check module-docs-check module-startup-check task-flags-check dependency-check contract-check sdk-inventory-check proto-lint generated-check activator-check test
 
@@ -298,7 +315,8 @@ check: fmt-check vet workflow-check container-check module-docs-check module-sta
 # `browser`, `shauth-sso`, `dqlite`, or `postgres` jobs, or the dual-architecture
 # edge image build in `scale-zero-artifacts`, each of which needs something this
 # target cannot assume is installed. It used to claim it covered everything,
-# while reaching neither `terraform fmt` nor the activator tests.
+# while reaching neither `terraform fmt` nor the activator tests. `check-dqlite`
+# is the fifth: run it on a machine that has the libdqlite headers.
 check-full: check terraform-check vuln-check test-race test-load test-transport-load test-fuzz build-static
 
 clean:

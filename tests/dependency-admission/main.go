@@ -53,9 +53,25 @@ type dependency struct {
 func main() {
 	path := flag.String("file", defaultInventoryPath, "dependency inventory path")
 	asOf := flag.String("as-of", "", "UTC evaluation time in RFC3339 format; defaults to the current time")
+	// scripts/check-container-publication.sh runs this binary with
+	// -checks=workflow. That script is the publication gate and it does not read
+	// the dependency inventory, but it does have to prove that every repository
+	// gate really runs against the commit under publication — which is a
+	// question about the structure of ci.yml, not about a dependency.
+	checks := flag.String("checks", "all", "which checks to run: all, or workflow for the workflow structure contract only")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		fail(errors.New("dependencycheck does not accept positional arguments"))
+	}
+	switch *checks {
+	case "all":
+	case "workflow":
+		if err := validateWorkflowStructure("."); err != nil {
+			fail(err)
+		}
+		return
+	default:
+		fail(fmt.Errorf("unknown -checks value %q; want all or workflow", *checks))
 	}
 
 	evaluationTime := time.Now().UTC()
@@ -232,6 +248,9 @@ func validateRepository(root string, value inventory) error {
 		}
 	}
 	if err := validateWorkflowPins(root, workflowFiles, byID); err != nil {
+		return err
+	}
+	if err := validateWorkflowStructure(root); err != nil {
 		return err
 	}
 	if err := validateDockerfiles(root, byID); err != nil {
@@ -416,9 +435,6 @@ func validateWorkflowPins(root string, paths []string, byID map[string]dependenc
 			if err := validateWorkflowImage(path, index+1, line, byID); err != nil {
 				return err
 			}
-			if err := validateWorkflowRunner(path, index+1, line); err != nil {
-				return err
-			}
 		}
 		if err := validateAptPins(path, lines); err != nil {
 			return err
@@ -430,7 +446,6 @@ func validateWorkflowPins(root string, paths []string, byID map[string]dependenc
 var (
 	workflowVersionKeyPattern = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?([A-Za-z0-9_.-]*[Vv]ersion)[\t ]*:[\t ]*(.+?)[\t ]*$`)
 	workflowImageKeyPattern   = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?image[\t ]*:[\t ]*(.+?)[\t ]*$`)
-	workflowRunnerKeyPattern  = regexp.MustCompile(`^[\t ]*(?:-[\t ]+)?(runs-on|runner)[\t ]*:[\t ]*(.+?)[\t ]*$`)
 	floatingRunnerPattern     = regexp.MustCompile(`(^|[^a-z0-9])latest([^a-z0-9]|$)`)
 	exactVersionPattern       = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 	aptPackagePattern         = regexp.MustCompile(`^[a-z0-9][a-z0-9.+-]*$`)
@@ -460,31 +475,369 @@ func validateWorkflowVersionKey(path string, lineNumber int, line string) error 
 	return nil
 }
 
-// validateWorkflowRunner rejects a floating runner label.
+// ---------------------------------------------------------------------------
+// Workflow structure
+//
+// Everything below reads the workflow as YAML rather than as lines. Both rules
+// it enforces were defeated by the text they were matching rather than by the
+// thing they were about:
+//
+//   - the floating-runner rule required `runs-on:` and its value on one line, so
+//     writing the identical selection as a YAML sequence
+//     ("runs-on:\n  - ubuntu-latest") passed the gate and actionlint alike;
+//   - the publication gate's "ci.yml must run make <target>" list was collected
+//     with `grep -oE '\bmake +...'` over the raw file, so a YAML comment reading
+//     "# we used to run make test here" satisfied it. Every one of the twenty
+//     required targets defeated the same way, and whole jobs — terraform,
+//     dqlite, postgres, the edge-architecture assertion — could be deleted with
+//     the gate green.
+//
+// A target is now required of a *named job's* `steps[*].run`, which is a
+// command the runner executes: a comment is not a command, a deleted step is
+// not a command, and a deleted job has no steps at all.
+// ---------------------------------------------------------------------------
+
+type workflowDocument struct {
+	Jobs map[string]workflowJob `yaml:"jobs"`
+}
+
+type workflowJob struct {
+	Name     string           `yaml:"name"`
+	RunsOn   interface{}      `yaml:"runs-on"`
+	Uses     string           `yaml:"uses"`
+	Steps    []workflowStep   `yaml:"steps"`
+	Strategy workflowStrategy `yaml:"strategy"`
+}
+
+type workflowStrategy struct {
+	Matrix interface{} `yaml:"matrix"`
+}
+
+type workflowStep struct {
+	Name string `yaml:"name"`
+	Run  string `yaml:"run"`
+	Uses string `yaml:"uses"`
+}
+
+func parseWorkflow(path string) (workflowDocument, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return workflowDocument{}, fmt.Errorf("read workflow %q: %w", path, err)
+	}
+	var document workflowDocument
+	if err := yaml.Unmarshal(body, &document); err != nil {
+		return workflowDocument{}, fmt.Errorf("decode workflow %q: %w", path, err)
+	}
+	if len(document.Jobs) == 0 {
+		return workflowDocument{}, fmt.Errorf("workflow %q declares no jobs", path)
+	}
+	return document, nil
+}
+
+func validateWorkflowStructure(root string) error {
+	paths, err := workflowPaths(root)
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		document, err := parseWorkflow(path)
+		if err != nil {
+			return err
+		}
+		for name, job := range document.Jobs {
+			if err := validateJobRunner(path, name, job); err != nil {
+				return err
+			}
+		}
+	}
+	return validateIntegrationWorkflowGates(root)
+}
+
+// validateJobRunner rejects a floating runner label wherever the job's runner
+// selection actually comes from.
 //
 // specs/dependency-policy.md states plainly that "floating tags, branches,
 // wildcard ranges, and `latest` are forbidden", and `runs-on: ubuntu-latest` is
 // exactly that: GitHub moves the label between operating-system images, so the
 // toolchain a green run was produced on is not the toolchain the next run uses.
-// Six jobs across the two workflows used it while five others named an exact
-// image, and scripts/check-container-publication.sh asserted the *presence* of
-// `runner: ubuntu-latest`, so the gate enforced the policy violation. Nothing
-// inspected `runs-on` at all.
-func validateWorkflowRunner(path string, lineNumber int, line string) error {
-	match := workflowRunnerKeyPattern.FindStringSubmatch(line)
-	if match == nil {
-		return nil
+//
+// A selection this cannot resolve is an error rather than a skip. The previous
+// rule skipped every `${{ ... }}` value and every sequence item, which is how
+// the two shapes that bypass it entirely came to exist.
+func validateJobRunner(path, name string, job workflowJob) error {
+	if job.RunsOn == nil {
+		// A job that calls a reusable workflow selects its runner there, and
+		// that workflow is checked on its own.
+		if strings.TrimSpace(job.Uses) != "" {
+			return nil
+		}
+		return fmt.Errorf("workflow %s job %q selects no runner", path, name)
 	}
-	value := unquoteYAMLScalar(match[2])
-	// A matrix reference resolves to another line in the same workflow, which is
-	// checked on its own.
-	if value == "" || strings.Contains(value, "${{") {
-		return nil
+	labels, err := resolveRunnerLabels(job.RunsOn, job.Strategy.Matrix)
+	if err != nil {
+		return fmt.Errorf("workflow %s job %q: %w", path, name, err)
 	}
-	if floatingRunnerPattern.MatchString(strings.ToLower(value)) {
-		return fmt.Errorf("workflow %s:%d selects runner %q, which is a floating label; name an exact runner image such as ubuntu-24.04", path, lineNumber, value)
+	if len(labels) == 0 {
+		return fmt.Errorf("workflow %s job %q resolves to no runner label", path, name)
+	}
+	for _, label := range labels {
+		if floatingRunnerPattern.MatchString(strings.ToLower(label)) {
+			return fmt.Errorf("workflow %s job %q selects runner %q, which is a floating label; name an exact runner image such as ubuntu-24.04", path, name, label)
+		}
 	}
 	return nil
+}
+
+var matrixReferencePattern = regexp.MustCompile(`\$\{\{\s*matrix\.([A-Za-z0-9_.-]+)\s*\}\}`)
+
+// resolveRunnerLabels flattens a runs-on value — a scalar, a sequence, or a
+// matrix reference — into the concrete labels a run would use.
+func resolveRunnerLabels(value, matrix interface{}) ([]string, error) {
+	switch typed := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if !strings.Contains(trimmed, "${{") {
+			return []string{trimmed}, nil
+		}
+		match := matrixReferencePattern.FindStringSubmatch(trimmed)
+		if match == nil || matrixReferencePattern.ReplaceAllString(trimmed, "") != "" {
+			return nil, fmt.Errorf("runner selection %q is an expression this check cannot resolve; select the runner from a matrix value or name it directly", trimmed)
+		}
+		resolved, err := resolveMatrixPath(matrix, strings.Split(match[1], "."))
+		if err != nil {
+			return nil, fmt.Errorf("runner selection %q: %w", trimmed, err)
+		}
+		return resolved, nil
+	case []interface{}:
+		var labels []string
+		for _, item := range typed {
+			resolved, err := resolveRunnerLabels(item, matrix)
+			if err != nil {
+				return nil, err
+			}
+			labels = append(labels, resolved...)
+		}
+		return labels, nil
+	default:
+		return nil, fmt.Errorf("runner selection %v is neither a label nor a list of labels", value)
+	}
+}
+
+// resolveMatrixPath returns every scalar a matrix expression can take. A matrix
+// axis is a list, so `matrix.arch.runner` yields one label per included object.
+func resolveMatrixPath(node interface{}, path []string) ([]string, error) {
+	if len(path) == 0 {
+		text, ok := node.(string)
+		if !ok {
+			return nil, fmt.Errorf("matrix value %v is not a label", node)
+		}
+		return []string{strings.TrimSpace(text)}, nil
+	}
+	switch typed := node.(type) {
+	case []interface{}:
+		var values []string
+		for _, item := range typed {
+			resolved, err := resolveMatrixPath(item, path)
+			if err != nil {
+				return nil, err
+			}
+			values = append(values, resolved...)
+		}
+		return values, nil
+	case map[interface{}]interface{}:
+		child, ok := typed[path[0]]
+		if !ok {
+			return nil, fmt.Errorf("matrix declares no %q", path[0])
+		}
+		return resolveMatrixPath(child, path[1:])
+	case map[string]interface{}:
+		child, ok := typed[path[0]]
+		if !ok {
+			return nil, fmt.Errorf("matrix declares no %q", path[0])
+		}
+		return resolveMatrixPath(child, path[1:])
+	default:
+		return nil, fmt.Errorf("matrix declares no %q", path[0])
+	}
+}
+
+// integrationJobGates is the contract scripts/check-container-publication.sh
+// enforces: no container may be built from a commit these gates have not run
+// against. Each target is required of the job that runs it, so deleting a whole
+// job is as visible as deleting one step.
+var integrationJobGates = map[string][]string{
+	"go": {
+		"fmt-check", "vet", "workflow-check", "container-check", "module-docs-check",
+		"module-startup-check", "task-flags-check", "dependency-check", "contract-check",
+		"sdk-inventory-check", "generated-check", "proto-lint", "vuln-check",
+		"test", "test-race", "test-load", "test-transport-load", "test-fuzz", "build-static",
+	},
+	"scale-zero-artifacts": {"activator-check"},
+	"sdk":                  {"sdk-qualification"},
+	"browser":              {"browser-qualification"},
+	"shauth-sso":           {"shauth-sso-qualification"},
+	"dqlite":               {"build-dqlite", "vet-dqlite", "vuln-check-dqlite", "test-dqlite"},
+	"postgres":             {"test-postgres"},
+}
+
+// integrationJobCommands names the gates a job runs without make. The Terraform
+// job is the whole of the deployment's static validation and ran none of its
+// three commands through the Makefile, so requiring only make targets would
+// have let it be deleted.
+var integrationJobCommands = map[string][]string{
+	"terraform": {
+		"terraform fmt -check -recursive",
+		"terraform init -backend=false -input=false",
+		"terraform validate",
+		"./scripts/check-terraform-module-examples.sh",
+	},
+}
+
+// integrationJobEvidence is content a job's commands must still contain. The
+// dual-architecture edge build and the assertion that each build really
+// produced its own architecture exist because an arm64-only image survived
+// every gate; both were deletable with the publication gate green.
+var integrationJobEvidence = map[string][][]string{
+	"scale-zero-artifacts": {
+		{"linux/amd64", "linux/arm64"},
+		{"x86-64", "aarch64"},
+	},
+}
+
+func validateIntegrationWorkflowGates(root string) error {
+	path := root + "/.github/workflows/ci.yml"
+	document, err := parseWorkflow(path)
+	if err != nil {
+		return err
+	}
+	targets, err := makefileTargets(root)
+	if err != nil {
+		return err
+	}
+	for job, required := range integrationJobGates {
+		declared, ok := document.Jobs[job]
+		if !ok {
+			return fmt.Errorf("workflow %s declares no job %q, so the gates it runs would not be verified before a container is published", path, job)
+		}
+		commands := jobCommands(declared)
+		invoked := makeTargetsInvoked(commands)
+		for _, target := range required {
+			if _, ok := targets[target]; !ok {
+				return fmt.Errorf("the publication contract requires 'make %s', which the Makefile does not define", target)
+			}
+			if _, ok := invoked[target]; !ok {
+				return fmt.Errorf("workflow %s job %q must run 'make %s' before a commit can be published", path, job, target)
+			}
+		}
+	}
+	for job, required := range integrationJobCommands {
+		declared, ok := document.Jobs[job]
+		if !ok {
+			return fmt.Errorf("workflow %s declares no job %q", path, job)
+		}
+		commands := strings.Join(jobCommands(declared), "\n")
+		for _, command := range required {
+			if !strings.Contains(commands, command) {
+				return fmt.Errorf("workflow %s job %q must run %q", path, job, command)
+			}
+		}
+	}
+	for job, evidence := range integrationJobEvidence {
+		declared, ok := document.Jobs[job]
+		if !ok {
+			return fmt.Errorf("workflow %s declares no job %q", path, job)
+		}
+		commands := jobCommands(declared)
+		for _, group := range evidence {
+			if !anyCommandContainsAll(commands, group) {
+				return fmt.Errorf("workflow %s job %q no longer runs a command naming all of %v", path, job, group)
+			}
+		}
+	}
+	return nil
+}
+
+// jobCommands returns every shell command a job runs, with shell comments
+// removed. A comment mentioning a gate is not that gate running.
+func jobCommands(job workflowJob) []string {
+	commands := make([]string, 0, len(job.Steps))
+	for _, step := range job.Steps {
+		script := strings.TrimSpace(step.Run)
+		if script == "" {
+			continue
+		}
+		lines := strings.Split(script, "\n")
+		kept := make([]string, 0, len(lines))
+		for _, line := range lines {
+			kept = append(kept, stripShellComment(line))
+		}
+		commands = append(commands, strings.Join(kept, "\n"))
+	}
+	return commands
+}
+
+func stripShellComment(line string) string {
+	for index := 0; index < len(line); index++ {
+		if line[index] != '#' {
+			continue
+		}
+		if index == 0 || line[index-1] == ' ' || line[index-1] == '\t' {
+			return strings.TrimRight(line[:index], " \t")
+		}
+	}
+	return line
+}
+
+var makeInvocationPattern = regexp.MustCompile(`\bmake +([a-z][a-z0-9 _-]*)`)
+
+// makeTargetsInvoked collects every target named on a make command line. A
+// trailing VARIABLE=value argument is uppercase and stops the match, so
+// `make contract-ratchet BASE_REF=...` contributes contract-ratchet only.
+func makeTargetsInvoked(commands []string) map[string]struct{} {
+	invoked := map[string]struct{}{}
+	for _, command := range commands {
+		for _, match := range makeInvocationPattern.FindAllStringSubmatch(command, -1) {
+			for _, field := range strings.Fields(match[1]) {
+				invoked[field] = struct{}{}
+			}
+		}
+	}
+	return invoked
+}
+
+func anyCommandContainsAll(commands []string, needles []string) bool {
+	for _, command := range commands {
+		matched := true
+		for _, needle := range needles {
+			if !strings.Contains(command, needle) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+var makefileTargetPattern = regexp.MustCompile(`(?m)^([a-z][a-z0-9-]*):`)
+
+// makefileTargets is the set of targets the Makefile defines, so a required
+// gate cannot be a name that does not exist.
+func makefileTargets(root string) (map[string]struct{}, error) {
+	body, err := os.ReadFile(root + "/Makefile")
+	if err != nil {
+		return nil, fmt.Errorf("read Makefile: %w", err)
+	}
+	targets := map[string]struct{}{}
+	for _, match := range makefileTargetPattern.FindAllStringSubmatch(string(body), -1) {
+		targets[match[1]] = struct{}{}
+	}
+	if len(targets) == 0 {
+		return nil, errors.New("the Makefile declares no targets; the publication gate list would verify nothing")
+	}
+	return targets, nil
 }
 
 func validateWorkflowImage(path string, lineNumber int, line string, byID map[string]dependency) error {

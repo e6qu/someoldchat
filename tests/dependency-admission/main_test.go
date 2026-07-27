@@ -189,25 +189,78 @@ func validInventory() inventory {
 // specs/dependency-policy.md forbids `latest`. Six workflow jobs used
 // `runs-on: ubuntu-latest` while five named an exact image, and nothing
 // inspected `runs-on` at all.
-func TestValidateWorkflowRunnerRejectsFloatingLabels(t *testing.T) {
-	for _, line := range []string{
-		"    runs-on: ubuntu-latest",
-		"    runs-on: macos-latest",
-		"            runner: ubuntu-latest",
-		"        - runner: windows-latest",
+//
+// The rule then matched lines, so the identical selection written as a YAML
+// sequence bypassed it entirely — proved with actionlint agreeing the workflow
+// was valid and GitHub honouring it. Every case below is now decided from the
+// parsed document, and a selection this cannot resolve is refused rather than
+// skipped, which is what let the sequence form through in the first place.
+func TestValidateJobRunnerRejectsFloatingLabelsInEveryShape(t *testing.T) {
+	parse := func(t *testing.T, document string) workflowJob {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "workflow.yml")
+		if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := parseWorkflow(path)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		return parsed.Jobs["job"]
+	}
+	for name, document := range map[string]string{
+		"scalar":            "jobs:\n  job:\n    runs-on: ubuntu-latest\n    steps: []\n",
+		"sequence":          "jobs:\n  job:\n    runs-on:\n      - ubuntu-latest\n    steps: []\n",
+		"flow sequence":     "jobs:\n  job:\n    runs-on: [ubuntu-latest]\n    steps: []\n",
+		"matrix reference":  "jobs:\n  job:\n    runs-on: ${{ matrix.os }}\n    strategy:\n      matrix:\n        os: [ubuntu-latest]\n    steps: []\n",
+		"matrix object":     "jobs:\n  job:\n    runs-on: ${{ matrix.arch.runner }}\n    strategy:\n      matrix:\n        arch:\n          - runner: ubuntu-latest\n    steps: []\n",
+		"unresolvable":      "jobs:\n  job:\n    runs-on: ${{ vars.RUNNER }}\n    steps: []\n",
+		"absent selection":  "jobs:\n  job:\n    steps: []\n",
+		"missing matrix":    "jobs:\n  job:\n    runs-on: ${{ matrix.os }}\n    steps: []\n",
+		"non-label runs-on": "jobs:\n  job:\n    runs-on: 24\n    steps: []\n",
 	} {
-		if err := validateWorkflowRunner("workflow.yml", 1, line); err == nil {
-			t.Errorf("validateWorkflowRunner(%q) accepted a floating runner label", line)
+		if err := validateJobRunner("workflow.yml", "job", parse(t, document)); err == nil {
+			t.Errorf("%s: a runner selection that is floating or unresolvable was accepted", name)
 		}
 	}
-	for _, line := range []string{
-		"    runs-on: ubuntu-24.04",
-		"            runner: ubuntu-24.04-arm",
-		"    runs-on: ${{ matrix.arch.runner }}",
-		"    name: latest release",
+	for name, document := range map[string]string{
+		"scalar":            "jobs:\n  job:\n    runs-on: ubuntu-24.04\n    steps: []\n",
+		"sequence":          "jobs:\n  job:\n    runs-on:\n      - ubuntu-24.04\n      - self-hosted\n    steps: []\n",
+		"matrix object":     "jobs:\n  job:\n    runs-on: ${{ matrix.arch.runner }}\n    strategy:\n      matrix:\n        arch:\n          - runner: ubuntu-24.04\n          - runner: ubuntu-24.04-arm\n    steps: []\n",
+		"reusable workflow": "jobs:\n  job:\n    uses: ./.github/workflows/ci.yml\n",
 	} {
-		if err := validateWorkflowRunner("workflow.yml", 1, line); err != nil {
-			t.Errorf("validateWorkflowRunner(%q) = %v, want acceptance", line, err)
+		if err := validateJobRunner("workflow.yml", "job", parse(t, document)); err != nil {
+			t.Errorf("%s: %v, want acceptance", name, err)
 		}
+	}
+}
+
+// TestAGateIsNotSatisfiedByAComment covers the miss that defeated the whole
+// publication contract: the required-target list was collected with grep over
+// the raw ci.yml, so deleting `run: make test` and leaving the comment
+// "# we used to run make test here" published a container with no tests run.
+func TestAGateIsNotSatisfiedByAComment(t *testing.T) {
+	commands := jobCommands(workflowJob{Steps: []workflowStep{
+		{Run: "# we used to run make test here\nmake vet"},
+		{Run: "echo done"},
+	}})
+	invoked := makeTargetsInvoked(commands)
+	if _, ok := invoked["test"]; ok {
+		t.Fatal("a shell comment satisfied a required gate")
+	}
+	if _, ok := invoked["vet"]; !ok {
+		t.Fatal("a real make invocation was not collected")
+	}
+	// A step that does not exist runs nothing at all.
+	if len(makeTargetsInvoked(jobCommands(workflowJob{}))) != 0 {
+		t.Fatal("a job with no steps invoked a gate")
+	}
+}
+
+// The repository's own workflows are the fixture that keeps the contract
+// honest: it must hold at HEAD.
+func TestTheRepositoryWorkflowsSatisfyTheStructureContract(t *testing.T) {
+	if err := validateWorkflowStructure("../.."); err != nil {
+		t.Fatalf("workflow structure contract: %v", err)
 	}
 }

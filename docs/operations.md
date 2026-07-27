@@ -245,7 +245,11 @@ operator action with its own generation and compatibility checks
 is a recovery selection, not an implicit implementation fallback:
 `specs/scale-to-zero.md` states that restore failure MUST NOT be converted into
 an implicit fallback, and the coordinator's automatic walk-back through older
-generations is being removed to match.
+generations has been removed to match: `POST /restore` with an explicit
+generation is now the only way an older generation is selected, and it refuses
+any generation but the one the operator named. This paragraph said the removal
+"is being removed" for a release after it had happened, so a reader of the
+shipped documentation was told the implicit fallback was still live.
 
 The lifecycle controller rejects wake attempts while `FAILED`. An operator must
 explicitly acknowledge the failure, which advances the fencing generation and

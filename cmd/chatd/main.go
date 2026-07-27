@@ -115,6 +115,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("TLS client CA contains no certificates", "path", *clientCAFile)
 		return exitConfiguration
 	}
+	if err := refuseSelfIssuedClientAuthority(tlsCertificate, clientCAs); err != nil {
+		logger.Error("TLS client CA also issued this server's own certificate", "error", err, "client-ca", *clientCAFile, "certificate", *certFile)
+		return exitConfiguration
+	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
 	if err != nil {
 		logger.Error("parse dqlite cluster", "error", err)
@@ -287,4 +291,48 @@ func metricsListener(addr string, metrics *observability.Registry) *http.Server 
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics.Handler())
 	return &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 120 * time.Second}
+}
+
+// refuseSelfIssuedClientAuthority rejects a configuration in which the
+// authority that decides *who may connect to chatd* also issued the certificate
+// that says *which server chatd is*.
+//
+// docs/modules.md gave one `ca.crt` to both `-tls-client-ca` here and
+// `-chat-ca` on the HTTP process, which is the shape this refuses. With one
+// authority, every certificate it issues authenticates as a client to the whole
+// internal data plane — including this server's own certificate, so anything
+// that holds the server key is a privileged client of the service it is
+// serving. Two authorities make the two roles independent, and a document
+// cannot be the only thing enforcing that.
+//
+// The test is exact rather than advisory: the server leaf is verified against
+// the client pool with client authentication as its extended key usage. A
+// separate client CA cannot verify it, so a correct deployment cannot trip
+// this, and a shared CA always does.
+func refuseSelfIssuedClientAuthority(certificate tls.Certificate, clientCAs *x509.CertPool) error {
+	if len(certificate.Certificate) == 0 {
+		return errors.New("server certificate carries no leaf")
+	}
+	leaf := certificate.Leaf
+	if leaf == nil {
+		parsed, err := x509.ParseCertificate(certificate.Certificate[0])
+		if err != nil {
+			return fmt.Errorf("parse server certificate: %w", err)
+		}
+		leaf = parsed
+	}
+	intermediates := x509.NewCertPool()
+	for _, encoded := range certificate.Certificate[1:] {
+		if parsed, err := x509.ParseCertificate(encoded); err == nil {
+			intermediates.AddCert(parsed)
+		}
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         clientCAs,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+	}); err != nil {
+		return nil
+	}
+	return errors.New("this server's own certificate would be accepted as a client certificate; issue clients from a separate authority and give -tls-client-ca only that authority")
 }

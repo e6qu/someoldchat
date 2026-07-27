@@ -266,10 +266,8 @@ func (h LoginHandler) providerLogoutComplete(w http.ResponseWriter, r *http.Requ
 }
 
 func signedOut(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
+	secureHeaders(w, entryContentSecurityPolicy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Header().Set("X-Content-Type-Options", "nosniff")
 	message := "Your SameOldChat and organization sign-in sessions have ended."
 	if r.URL.Query().Get("global") == "failed" {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -358,6 +356,7 @@ func (h LoginHandler) backchannelLogout(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h LoginHandler) login(w http.ResponseWriter, _ *http.Request) {
+	secureHeaders(w, entryContentSecurityPolicy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · SameOldChat</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f8f8fa;color:#1d1c1d;font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(420px,calc(100% - 32px));padding:32px;background:#fff;border:1px solid #ddd;border-radius:12px;box-shadow:0 12px 32px #1d1c1d18}h1{margin-top:0}.provider{display:block;margin:12px 0;padding:12px 16px;border-radius:6px;background:#611f69;color:#fff;text-align:center;text-decoration:none;font-weight:700}</style></head><body><main class="card"><h1>Sign in to SameOldChat</h1><p>Choose your organization’s authorization source.</p>`+h.providerLinks()+`</main></body></html>`)
 }

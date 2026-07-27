@@ -206,28 +206,23 @@ for trigger in 'push:' 'branches: [main]' 'workflow_call:'; do
 	fi
 done
 
-# The gate set is compared name by name, not by substring. `grep -Fq "test"`
-# matched `make test-load`, so the entire unit-test step could be deleted and a
-# container still published; and the list omitted module-docs-check,
-# module-startup-check, task-flags-check, vuln-check, test-race, test-load,
-# test-fuzz and build-static, every one of which could be deleted from ci.yml
-# with this contract still passing. Both were proved by deleting them.
+# The gate set is checked against the *parsed* workflow, in
+# tests/dependency-admission (validateIntegrationWorkflowGates).
 #
-# Every target named on a `make` command line anywhere in ci.yml is collected,
-# including the ones inside `run: |` blocks, and matched exactly. A target must
-# therefore be present as its own word, so `test` is no longer satisfied by
-# `test-load`. Trailing VARIABLE=value arguments are uppercase and stop the
-# match, so `make contract-ratchet BASE_REF=...` contributes `contract-ratchet`.
-integration_gates="$(grep -oE '\bmake +[a-z][a-z0-9 -]*' "$integration" | sed -E 's/^make +//' | tr ' ' '\n' | grep -v '^$' | sort -u)"
-for gate in \
-	fmt-check vet workflow-check container-check module-docs-check module-startup-check task-flags-check \
-	dependency-check contract-check sdk-inventory-check generated-check proto-lint vuln-check \
-	activator-check test test-race test-load test-transport-load test-fuzz build-static; do
-	if ! printf '%s\n' "$integration_gates" | grep -Fxq -- "$gate"; then
-		echo "ci.yml must run 'make $gate' before a commit can be published" >&2
-		exit 1
-	fi
-done
+# It used to be collected here with `grep -oE '\bmake +[a-z][a-z0-9 -]*'` over
+# the raw file. That matched inside YAML comments, `echo` strings and `name:`
+# fields, so deleting the step
+#
+#     - name: Run tests
+#       run: make test
+#
+# and leaving behind "# we used to run make test here" published a container
+# with no tests run — and every one of the twenty required targets defeated the
+# same way. Deleting a whole job (terraform, dqlite, postgres) or the
+# edge-architecture assertion was invisible for the same reason. Each target is
+# now required of the named job's `steps[*].run`, which is a command the runner
+# executes: a comment is not a command, and a deleted job has no steps.
+GOCACHE="${GOCACHE:-$root/.cache/go-build}" GOWORK=off go run "$root/tests/dependency-admission" -checks=workflow
 
 "$root/scripts/test-extract-buildkit-sbom.sh"
 

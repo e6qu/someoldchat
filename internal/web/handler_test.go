@@ -26,10 +26,21 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+// addBrowserCookies makes a request look like the one a current browser sends.
+//
+// Sec-Fetch-Site is part of that shape and it is set here rather than in the
+// two tests that care: without it every request in this package travelled the
+// "neither Sec-Fetch-Site nor Origin, so this is not a browser" fall-through in
+// auth.validateRequestSite, and the branch a real browser takes was exercised
+// by exactly one test. A caller that is deliberately testing another site sets
+// the header first, and this leaves it alone.
 func addBrowserCookies(request *http.Request) {
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "session"})
 	token := auth.CSRFToken("session")
 	request.Header.Set(auth.CSRFTokenHeaderName, token)
+	if request.Header.Get("Sec-Fetch-Site") == "" {
+		request.Header.Set("Sec-Fetch-Site", "same-origin")
+	}
 }
 
 // browserWorkspace seeds the smallest workspace a browser journey needs and
@@ -478,6 +489,48 @@ func TestTheDocumentAndItsContentSecurityPolicyAgree(t *testing.T) {
 	}
 }
 
+// TestTheInlineScriptParserRefusesWhatItCannotHash covers the shared blind spot
+// of the policy builder and the test above: both read the document through
+// inlineScriptBodies, which searched for the literal "<script>". A future
+// `<script type="module">` would have been invisible to both, so the policy
+// would omit its hash, the test would stay green, and the browser would block
+// the script. A tag this cannot hash is now a build-time failure.
+func TestTheInlineScriptParserRefusesWhatItCannotHash(t *testing.T) {
+	for _, document := range []string{
+		`<body><script type="module">alert(1)</script></body>`,
+		`<body><script defer>alert(1)</script></body>`,
+		`<body><script src="/x.js"></script></body>`,
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Fatalf("inlineScriptBodies silently skipped a script it cannot hash: %s", document)
+				}
+			}()
+			inlineScriptBodies(document)
+		}()
+	}
+	if bodies := inlineScriptBodies(`<script>one</script>text<script>two</script>`); len(bodies) != 2 || bodies[0] != "one" || bodies[1] != "two" {
+		t.Fatalf("plain inline scripts no longer parse: %q", bodies)
+	}
+}
+
+// TestNewActivityIsAnnouncedForTheRegionItLandedIn covers two defects in the
+// live-status announcement. messageCount() counted `#timeline .message` while
+// refresh() re-renders every live region, so a reply arriving in an open thread
+// pane — the one region that is live unconditionally — measured zero arrivals
+// and was never announced. And the "New activity is available" fallback ran
+// only when *no* region was live, so a reader in older history with a thread
+// open (thread live, timeline not) got neither the count nor the fallback.
+func TestNewActivityIsAnnouncedForTheRegionItLandedIn(t *testing.T) {
+	requireContains(t, "client", progressiveEnhancementScript,
+		`function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}`,
+		`var behind=document.querySelectorAll('[data-fragment]:not([data-live="true"])').length>0;`,
+		`if(behind)announce('New activity is available in this conversation.');`,
+	)
+	requireMissing(t, "client", progressiveEnhancementScript, `document.querySelectorAll('#timeline .message')`)
+}
+
 // TestTheClientNeverFetchesAnOriginItWasNotGiven pins the one property of the
 // client that no browser test can observe until it is already too late: every
 // URL it fetches with credentials has to be a path on this origin. `hx-post`
@@ -508,17 +561,18 @@ func TestTheClientNeverFetchesAnOriginItWasNotGiven(t *testing.T) {
 // this package set all five headers and the pages that render a conversation
 // and a live CSRF token set none, so one click in an invisible frame landed on
 // Sign out or Pin, and Back after sign-out replayed the conversation.
+//
+// It used to visit successful pages and one 404 only, which is how three whole
+// classes of response kept answering with no headers at all: every fragment
+// failure and every insufficient-scope refusal (bare http.Error), and the two
+// signed-out entry pages, /login and /signed-out — the second of which carries
+// a "Sign in with Shauth" link, so framing it starts an authorization flow the
+// victim did not choose. Failures are now covered alongside successes.
 func TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	seedMessage(t, s, "M1", "hello", time.Unix(1700000000, 0).UTC())
-	for _, target := range []string{
-		"/app?channel=Cdev",
-		"/app/timeline?channel=Cdev",
-		"/app/members",
-		"/app/search?q=hello&channel=Cdev",
-		"/app?channel=Cmissing",
-	} {
-		header := get(t, mux, target).Header()
+	requireProtected := func(target string, header http.Header) {
+		t.Helper()
 		for name, expected := range map[string]string{
 			"X-Frame-Options":        "DENY",
 			"X-Content-Type-Options": "nosniff",
@@ -531,6 +585,61 @@ func TestWorkspacePagesCarryTheSameProtectionAsTheAdminPage(t *testing.T) {
 		}
 		if !strings.Contains(header.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
 			t.Fatalf("%s is framable: %q", target, header.Get("Content-Security-Policy"))
+		}
+	}
+	for _, target := range []string{
+		"/app?channel=Cdev",
+		"/app/timeline?channel=Cdev",
+		"/app/members",
+		"/app/search?q=hello&channel=Cdev",
+		"/app?channel=Cmissing",
+		// Failures. Each of these answered with a bare line of text and no
+		// header at all.
+		"/app/timeline?channel=Cmissing",
+		"/app/timeline?channel=Cdev&thread=not-a-timestamp",
+		"/app?channel=Cdev&before=not-a-cursor",
+		"/signed-out",
+	} {
+		requireProtected(target, get(t, mux, target).Header())
+	}
+
+	// An insufficient scope is refused by writeAuthError, which is the same
+	// bare-text path.
+	_, limited := browserWorkspace(t, []string{string(auth.ScopeChatWrite)})
+	response := get(t, limited, "/app/timeline?channel=Cdev")
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("insufficient scope status=%d", response.Code)
+	}
+	requireProtected("/app/timeline with no history scope", response.Header())
+}
+
+// TestTheSignedOutEntryPagesAreNotFramable covers /login, which is only
+// registered when a provider is configured and therefore is not reachable from
+// browserWorkspace.
+func TestTheSignedOutEntryPagesAreNotFramable(t *testing.T) {
+	login, err := NewLoginHandler(service.Messages{Store: memory.New()}, "T1", "U1", "https://chat.example.test", "", []byte(strings.Repeat("k", 32)), []ProviderConfig{{
+		Name: "oidc", Issuer: "https://auth.example.test", ClientID: "sameoldchat", ClientSecret: "secret",
+		AuthorizeURL: "https://auth.example.test/oauth2/auth", TokenURL: "https://auth.example.test/oauth2/token",
+		UserInfoURL: "https://auth.example.test/userinfo", Scopes: []string{"openid"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	login.Register(mux)
+	for _, target := range []string{"/login"} {
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d", target, response.Code)
+		}
+		header := response.Header()
+		if header.Get("X-Frame-Options") != "DENY" || !strings.Contains(header.Get("Content-Security-Policy"), "frame-ancestors 'none'") {
+			t.Fatalf("%s is framable: X-Frame-Options=%q CSP=%q", target, header.Get("X-Frame-Options"), header.Get("Content-Security-Policy"))
+		}
+		if header.Get("X-Content-Type-Options") != "nosniff" {
+			t.Fatalf("%s does not forbid sniffing", target)
 		}
 	}
 }
@@ -745,15 +854,10 @@ func (c countingChat) History(ctx context.Context, workspace domain.WorkspaceID,
 	return c.Service.History(ctx, workspace, user, conversation, request)
 }
 
-// TestTheTimelineScanIsBounded covers the unbounded read: rendering 50 messages
-// walked the whole conversation, which measured 250 service calls and 50,000
-// rows on a 50,000-message channel — once per open tab per event, and once per
-// network round trip in the distributed profile.
-//
-// The bound is what this asserts. The window it reaches is still the wrong one
-// on a conversation this long, which no amount of forward paging can fix: see
-// the follow-up recorded for store.ListMessages.
-func TestTheTimelineScanIsBounded(t *testing.T) {
+// truncatedWorkspace seeds a conversation one page longer than the whole scan
+// budget, which is the only state in which historyView.Truncated is set.
+func truncatedWorkspace(t *testing.T, calls *int) *http.ServeMux {
+	t.Helper()
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
@@ -763,24 +867,88 @@ func TestTheTimelineScanIsBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := time.Unix(1700000000, 0).UTC()
-	total := timelineScan*timelineScanPages + timelineScan
-	for index := 0; index < total; index++ {
+	for index := 0; index < timelineScan*timelineScanPages+timelineScan; index++ {
 		message := domain.Message{ID: domain.MessageID(fmt.Sprintf("M%06d", index)), WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: fmt.Sprintf("note-%06d", index), CreatedAt: base.Add(time.Duration(index) * time.Second)}
 		if err := s.CreateMessage(context.Background(), message, events.Event{ID: domain.EventID(fmt.Sprintf("E%06d", index)), WorkspaceID: "T1", Topic: "message.created", Payload: string(message.ID), CreatedAt: message.CreatedAt}, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
-	calls := 0
 	authenticator, err := auth.NewBrowser(s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(countingChat{Service: service.Messages{Store: s}, calls: &calls}, authenticator, s, "Cdev", "")
+	var service chatapi.Service = service.Messages{Store: s}
+	if calls != nil {
+		service = countingChat{Service: service, calls: calls}
+	}
+	handler, err := NewHandler(service, authenticator, s, "Cdev", "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
+	return mux
+}
+
+// TestATruncatedTimelineIsNeverPresentedAsCurrent covers the defect the scan
+// bound introduced. Past timelineScan*timelineScanPages messages the walk gives
+// up in the same place whatever cursor it is given, so there is no reachable
+// newest window at all — and the page presented the window it did reach as if
+// it were current: it offered NewestURL (which is the URL that produced this
+// very window), the client navigated there after every post, and the message
+// the reader had just sent disappeared with no error. The truncation warning
+// also lived on the page rather than in the region, so the first /app/timeline
+// refresh replaced the messages and left a stale window with nothing to say so.
+//
+// Observed before the fix, against this exact seed:
+//
+//	/app          data-newest="/app?channel=Cdev"  (the same window)
+//	/app          notice "Search for a message to reach recent history" — which lands here
+//	/app/timeline no truncation warning at all
+//
+// The scan bound itself is asserted by TestTheTimelineScanIsBounded below.
+func TestATruncatedTimelineIsNeverPresentedAsCurrent(t *testing.T) {
+	mux := truncatedWorkspace(t, nil)
+
+	page := get(t, mux, "/app?channel=Cdev")
+	if page.Code != http.StatusOK {
+		t.Fatalf("status=%d", page.Code)
+	}
+	body := page.Body.String()
+	requireContains(t, "truncated page", body,
+		truncationNotice,
+		`data-live="false"`,
+		`data-truncated="true"`,
+		`data-newest=""`,
+	)
+	// Every one of these leads back to this same window, so none is offered.
+	requireMissing(t, "truncated page", body,
+		"Jump to the latest messages",
+		">Mark as read<",
+		"Search for a message to reach recent history",
+		`data-newest="/app?channel=Cdev"`,
+	)
+
+	// The region owns the warning, so a forced refresh cannot drop it.
+	fragment := get(t, mux, "/app/timeline?channel=Cdev")
+	if fragment.Code != http.StatusOK {
+		t.Fatalf("fragment status=%d", fragment.Code)
+	}
+	requireContains(t, "truncated fragment", fragment.Body.String(), truncationNotice)
+
+	// A thread pane in the same conversation is a complete window of its own
+	// and must not inherit the warning.
+	thread := get(t, mux, "/app/timeline?channel=Cdev&thread=1700000000.000000")
+	requireMissing(t, "thread fragment", thread.Body.String(), truncationNotice)
+}
+
+// TestTheTimelineScanIsBounded covers the unbounded read: rendering 50 messages
+// walked the whole conversation, which measured 250 service calls and 50,000
+// rows on a 50,000-message channel — once per open tab per event, and once per
+// network round trip in the distributed profile.
+func TestTheTimelineScanIsBounded(t *testing.T) {
+	calls := 0
+	mux := truncatedWorkspace(t, &calls)
 
 	response := get(t, mux, "/app?channel=Cdev")
 	if response.Code != http.StatusOK {
@@ -789,11 +957,6 @@ func TestTheTimelineScanIsBounded(t *testing.T) {
 	if calls > timelineScanPages {
 		t.Fatalf("one render issued %d history calls, the budget is %d", calls, timelineScanPages)
 	}
-	body := response.Body.String()
-	// A window that is not the newest one must not be presented as though it
-	// were: no live updates, no read marker, and a notice that says so.
-	requireContains(t, "bounded page", body, "too long to open from the beginning", `data-live="false"`)
-	requireMissing(t, "bounded page", body, "Jump to the latest messages", ">Mark as read<")
 
 	calls = 0
 	if fragment := get(t, mux, "/app/timeline?channel=Cdev"); fragment.Code != http.StatusOK || calls > timelineScanPages {

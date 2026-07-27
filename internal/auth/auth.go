@@ -305,8 +305,40 @@ func validateRequestSite(r *http.Request) error {
 		// request. A browser sends at least one of them on every POST it makes.
 		return nil
 	}
+	return validateOrigin(origin, r)
+}
+
+// validateOrigin compares a serialised origin, not just its host.
+//
+// Comparing parsed.Host alone accepted four values a browser never sends and an
+// attacker can: "ftp://host" and "//host" (no scheme, or a scheme that is not a
+// web origin), "http://host" against a TLS request (a downgrade), and
+// "https://user@host" (userinfo, which is not part of an origin at all and
+// hides the real authority from a reader). None of them was a bypass — the
+// token still gates — but each one turned a value the specification calls
+// malformed into a pass.
+func validateOrigin(origin string, r *http.Request) error {
 	parsed, err := url.Parse(origin)
-	if err != nil || parsed.Host == "" || !strings.EqualFold(parsed.Host, r.Host) {
+	if err != nil || parsed.Host == "" || parsed.User != nil || parsed.Opaque != "" {
+		return ErrCSRFCrossSite
+	}
+	// RFC 6454 serialises an origin as scheme "://" host [":" port] and nothing
+	// else, so any path, query, or fragment means this is not an origin.
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" {
+		return ErrCSRFCrossSite
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+	case "http":
+		// A request this process itself terminated over TLS cannot have come
+		// from an http origin on the same host.
+		if r.TLS != nil {
+			return ErrCSRFCrossSite
+		}
+	default:
+		return ErrCSRFCrossSite
+	}
+	if !strings.EqualFold(parsed.Host, r.Host) {
 		return ErrCSRFCrossSite
 	}
 	return nil

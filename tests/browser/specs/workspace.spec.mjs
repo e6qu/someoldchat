@@ -350,6 +350,49 @@ test('a message sent while reading older history is not lost', async ({ page, co
   await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(1);
 });
 
+// The test above covers the reachable half of `data-live="false"`: an ordinary
+// page of older history, where the newest window exists and the client can
+// navigate to it. The other half is a conversation longer than the timeline
+// scan budget, where *no* window is the newest one — the walk gives up in the
+// same place whatever cursor it is given, so navigating lands back on the same
+// stale window and the message the reader just sent disappears with no error.
+// That was the regression the fix above introduced.
+//
+// The state is produced by the server only past timelineScan*timelineScanPages
+// messages, which is 10,050 sequential posts through this API and minutes of
+// wall clock per run; internal/web's TestATruncatedTimelineIsNeverPresentedAsCurrent
+// covers the server half against the real handler. What that Go test cannot
+// observe is the client, so the server's answer is rewritten here and only the
+// client's behaviour is asserted: it must not append the message to a region a
+// refresh will drop, must not navigate, and must say what happened.
+test('a message sent into a conversation whose newest window cannot be reached says so', async ({ page, context }) => {
+  await signIn(context);
+  await page.route('**/app?**', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.text())
+      .replace('data-truncated="false"', 'data-truncated="true"')
+      .replace(/data-newest="[^"]*"/, 'data-newest=""');
+    await route.fulfill({ response, body });
+  });
+
+  await page.goto('/app?channel=Cdev');
+  await expect(page.locator('form.composer')).toHaveAttribute('data-truncated', 'true');
+
+  const composer = page.locator('form.composer textarea[name="text"]');
+  const sent = `sent into a truncated conversation ${Date.now()}`;
+  const before = await page.locator('#timeline .message').count();
+  await composer.fill(sent);
+  await page.getByRole('button', { name: 'Send' }).click();
+
+  // The reader is told, rather than shown a message that is not in this window.
+  await expect(page.locator('#live-status')).toHaveText(/cannot reach the newest part of this conversation/);
+  await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(0);
+  await expect(page.locator('#timeline .message')).toHaveCount(before);
+  // The composer is cleared, so the reader knows the message was accepted.
+  await expect(composer).toHaveValue('');
+  await page.unroute('**/app?**');
+});
+
 // Sign-out must come last in this file. The suite runs with a single worker
 // against one server holding one static browser session, so revoking it ends
 // every session the remaining tests would use. Placing this earlier makes every

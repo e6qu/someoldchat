@@ -6,6 +6,27 @@ retrieved_at: 2026-07-13T00:00:00Z
 # claim until its immutable artifact digest, provenance, and executable suite
 # are recorded. The current Go contract tests do not substitute for these
 # suites.
+#
+# What `qualified` covers, precisely:
+#
+#   - the Web API surface: genuine end to end. An official client calls this
+#     product's own methods and parses this product's own responses.
+#   - the Socket Mode and real-time *transports*: genuine. An official client
+#     opens the socket this product hands it, receives the frames, acknowledges
+#     them, and parses the envelope.
+#
+# What it does not cover is the event *surface*. The Slack-shaped envelopes the
+# transport suites deliver are planted by the fixture
+# (tests/official-sdk-qualification/node-web-api/fixture/main.go), which writes
+# {"type":"event_callback",...,"event":{"type":"message",...}} and
+# {"type":"message",...} under the internal topic message.created. The real
+# producer, internal/service, emits identifiers only
+# ({"type":"message.created","message_id":...,"channel_id":...,"user_id":...,
+# "ts":...}); no component translates a record into a Slack envelope. So the
+# suites prove the transports deliver what an official client parses, and not
+# that this product can produce one from its own records. See the events-api
+# decision in specs/compatibility.yaml. Every entry whose suite is driven by a
+# fixture-supplied envelope says so in its note.
 status: qualified
 
 sdks:
@@ -31,6 +52,10 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: node-socket-mode
     ecosystem: npm
     package: '@slack/socket-mode'
@@ -42,6 +67,10 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: node-rtm-api
     ecosystem: npm
     package: '@slack/rtm-api'
@@ -53,6 +82,10 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-rtm-api/qualification.mjs
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: python-slack-sdk
     ecosystem: pypi
     package: slack-sdk
@@ -75,6 +108,10 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: python-socket-mode
     ecosystem: pypi
     package: slack-sdk
@@ -86,6 +123,10 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/python-socket-mode/qualification.py
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client
@@ -108,6 +149,10 @@ sdks:
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/SocketModeQualification.java
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: deno-slack-runtime
     ecosystem: deno
     package: deno-slack-runtime
@@ -130,6 +175,10 @@ bolt:
     sha256: 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: bolt-python
     ecosystem: pypi
     package: slack-bolt
@@ -139,6 +188,10 @@ bolt:
     sha256: 738d1ca5e7c7039b6e18103d29267ced6e18c2517053eff18991fdd593acce5c
     suite: passed
     suite_path: tests/official-sdk-qualification/python-bolt/qualification.py
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.
   - id: bolt-java
     ecosystem: maven
     package: com.slack.api:bolt
@@ -148,3 +201,7 @@ bolt:
     sha256: 9c298264096ba9343e55260361fcc54035a673ecc03ce5dfcee32899a6e9eca0
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/BoltQualification.java
+    note: >-
+      Event-surface suite. The Slack envelope it parses is planted by
+      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
+      from an internal record; this qualifies the transport, not the event surface.

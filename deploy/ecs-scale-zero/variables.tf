@@ -171,10 +171,23 @@ variable "request_max_body_bytes" {
 variable "scale_down_lock_seconds" {
   type        = number
   default     = 15
-  description = "Expiry of the shared scale-down lock. Must equal cmd/ecs-ws-activator's scaleDownLockTTL; the idle sweep bounds its own work by it."
+  description = "Expiry of the scale-down lock the Lambda shares with cmd/ecs-ws-activator. Pinned to that binary's scaleDownLockTTL, which is a constant with no flag, so this is not operator-settable today."
   validation {
-    condition     = var.scale_down_lock_seconds >= 5 && var.scale_down_lock_seconds <= var.request_timeout_seconds && floor(var.scale_down_lock_seconds) == var.scale_down_lock_seconds
-    error_message = "scale_down_lock_seconds must be a whole number between 5 and request_timeout_seconds: the sweep bounds itself by it and the invocation that runs the sweep is bounded by the Lambda timeout"
+    # This used to accept anything from 5 up to request_timeout_seconds while
+    # the description said it "must equal cmd/ecs-ws-activator's
+    # scaleDownLockTTL" — a constant of 15 seconds that binary exposes through
+    # no flag. Setting 60 was accepted, and the two processes then held the same
+    # DynamoDB `scale-down` item for different durations, violating the stated
+    # invariant with every gate green. An invariant a variable's own description
+    # states must be enforced by the variable, not by the reader.
+    #
+    # Follow-up, and the only thing that makes this settable again: give
+    # cmd/ecs-ws-activator a -scale-down-lock-ttl flag, pass
+    # var.scale_down_lock_seconds in the container command below — where
+    # scripts/check-task-definition-flags.sh will then see it — and widen this
+    # condition to the range the sweep can bound itself by.
+    condition     = var.scale_down_lock_seconds == 15
+    error_message = "scale_down_lock_seconds must be 15: it is one half of a lock shared with cmd/ecs-ws-activator, whose scaleDownLockTTL is the constant 15s and takes no flag, so any other value makes the two processes hold the same item for different durations"
   }
 }
 variable "lambda_reserved_concurrency" {
