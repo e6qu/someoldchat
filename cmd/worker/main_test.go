@@ -38,7 +38,7 @@ func TestHTTPDeliveryUsesStableEventIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := delivery(context.Background(), events.Record{Sequence: 1, Event: events.Event{ID: domain.EventID("evt_1"), Topic: "message.created"}}); err != nil {
+	if err := delivery(context.Background(), events.Record{Sequence: 1, Event: producedEvent(t, "evt_1", "message.created", events.String("message_id", "M1"))}); err != nil {
 		t.Fatal(err)
 	}
 	if gotID != "evt_1" {
@@ -76,6 +76,25 @@ func TestRecordDeliveryNeverShipsARecordNoAudienceMayReceive(t *testing.T) {
 	}{
 		"recipient scoped": {events.Record{Sequence: 1, Event: ephemeral}, events.ErrPayloadRecipientScoped, "SECRET-ONLY-FOR-U2"},
 		"internal":         {events.Record{Sequence: 2, Event: internal}, events.ErrPayloadInternal, "photo_secret"},
+		// The record this format ships is rebuilt from independent parts at the
+		// seam codec, so its topic is exactly the field that can understate what
+		// it carries. Judging the topic alone POSTed one user's whole message to
+		// a third-party URL under topic message.created.
+		"recipient-scoped payload under an ordinary topic": {events.Record{Sequence: 3, Event: events.Event{
+			ID: "evt_3", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(),
+			Payload: `{"type":"` + events.EphemeralMessageTopic + `","event_ts":"1700000000.000000","user_id":"U2","text":"SECRET-ONLY-FOR-U2"}`,
+		}}, events.ErrPayloadRecipientScoped, "SECRET-ONLY-FOR-U2"},
+		"internal payload under an ordinary topic": {events.Record{Sequence: 4, Event: events.Event{
+			ID: "evt_4", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(),
+			Payload: `{"type":"` + events.UserPhotoBlobDeleteTopic + `","event_ts":"1700000000.000000","key":"T1/users/U1/photo_secret"}`,
+		}}, events.ErrPayloadInternal, "photo_secret"},
+		// A payload written before the typed payload contract is an opaque
+		// internal identifier with no meaning outside this system. Every other
+		// transport in the product refuses it; this one shipped it as the event
+		// body.
+		"payload that describes nothing": {events.Record{Sequence: 5, Event: events.Event{
+			ID: "evt_5", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(), Payload: "M0123456789",
+		}}, events.ErrPayloadMalformed, "M0123456789"},
 	} {
 		delivery, err := newHTTPDeliveryWithClient("https://delivery.invalid/events", &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
 			body, _ := io.ReadAll(request.Body)
@@ -94,6 +113,59 @@ func TestRecordDeliveryNeverShipsARecordNoAudienceMayReceive(t *testing.T) {
 		}
 		if strings.Contains(deliveryErr.Error(), value.secret) {
 			t.Fatalf("%s: the refusal quoted the content it withheld: %v", name, deliveryErr)
+		}
+	}
+}
+
+// producedEvent builds a record the way the service builds one.
+func producedEvent(t *testing.T, id domain.EventID, topic string, fields ...events.Field) events.Event {
+	t.Helper()
+	event, err := events.New(id, "T1", "U1", events.NewPayload(topic, fields...), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
+
+// Both delivery formats read one rule about one question: may this record be
+// handed to an audience. They were separate implementations of it, and the
+// record format's copy refused a payload carrying a Slack event type — which is
+// the shape every official client parses and the shape the qualification
+// fixtures store. The worker classifies that refusal as permanent, so the same
+// binary that delivers the record under -delivery-format slack-events
+// acknowledged it out of the outbox and destroyed it under -delivery-format
+// record.
+func TestBothDeliveryFormatsAcceptTheSameRecords(t *testing.T) {
+	compatibility := []events.Record{
+		{Sequence: 1, Event: events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(),
+			Payload: `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`}},
+		{Sequence: 2, Event: producedEvent(t, "evt_2", "message.created", events.String("message_id", "M1"))},
+	}
+	for _, record := range compatibility {
+		var recordBody []byte
+		recordDelivery, err := newHTTPDeliveryWithClient("https://delivery.invalid/events", &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+			recordBody, _ = io.ReadAll(request.Body)
+			return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		slackDelivery, err := newSlackEventDeliveryWithClient("https://delivery.invalid/events", "A1", "signing-secret", &http.Client{Transport: roundTripperFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		recordErr := recordDelivery(context.Background(), record)
+		slackErr := slackDelivery(context.Background(), record)
+		if (recordErr == nil) != (slackErr == nil) {
+			t.Fatalf("%s: record format = %v, slack-events format = %v: one format destroys what the other delivers", record.Event.ID, recordErr, slackErr)
+		}
+		if recordErr != nil {
+			t.Fatalf("%s: a committed event was permanently dropped by the record format: %v", record.Event.ID, recordErr)
+		}
+		if len(recordBody) == 0 {
+			t.Fatalf("%s: nothing was delivered", record.Event.ID)
 		}
 	}
 }

@@ -218,17 +218,24 @@ func TestMarshallingARecordRefusesEveryPayloadNoAudienceMayReceive(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A record whose Topic column and payload "type" disagree had its scoping
-	// decision made about a different event than the one it carries.
-	divergent := Event{ID: "Ev3", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0),
+	// A record filed under an ordinary topic whose payload describes itself as
+	// recipient-scoped is refused for what it carries, not for what it is filed
+	// as: the topic is exactly the field a rebuilt record can lie about.
+	hidden := Event{ID: "Ev3", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0),
 		Payload: `{"type":"message.ephemeral","event_ts":"1700000000.000000","user_id":"U2","text":"SECRET-ONLY-FOR-U2"}`}
+	// A payload written before the typed payload contract is an opaque
+	// identifier with no meaning outside this system. Encoding it POSTed that
+	// identifier to a third-party URL as the event body while every other
+	// transport refused the same record.
+	legacy := Event{ID: "Ev5", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: time.Unix(1700000000, 0)}
 	for name, value := range map[string]struct {
 		event    Event
 		sentinel error
 	}{
-		"recipient scoped": {ephemeral, ErrPayloadRecipientScoped},
-		"internal":         {internal, ErrPayloadInternal},
-		"divergent topic":  {divergent, ErrPayloadMalformed},
+		"recipient scoped":               {ephemeral, ErrPayloadRecipientScoped},
+		"internal":                       {internal, ErrPayloadInternal},
+		"recipient-scoped payload":       {hidden, ErrPayloadRecipientScoped},
+		"payload that describes nothing": {legacy, ErrPayloadMalformed},
 	} {
 		body, err := json.Marshal(Record{Sequence: 1, Event: value.event})
 		if err == nil {
@@ -241,15 +248,16 @@ func TestMarshallingARecordRefusesEveryPayloadNoAudienceMayReceive(t *testing.T)
 			t.Fatalf("%s: the refusal quoted the content it withheld: %v", name, err)
 		}
 	}
-	// A record every consumer may receive still encodes, including one written
-	// before the typed payload contract, which this format has always carried.
+	// A record every consumer may receive still encodes, including one whose
+	// payload carries a Slack event type — which is what an official client
+	// must parse, and what refusing this format's records used to destroy.
 	ordinary, err := New("Ev4", "T1", "U1", NewPayload("message.created", String("message_id", "M1")), time.Unix(1700000000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
 	for name, event := range map[string]Event{
-		"produced": ordinary,
-		"legacy":   {ID: "Ev5", WorkspaceID: "T1", Topic: "message.created", Payload: "M1", CreatedAt: time.Unix(1700000000, 0)},
+		"produced":      ordinary,
+		"compatibility": {ID: "Ev6", WorkspaceID: "T1", Topic: "message.created", Payload: `{"type":"message","channel":"C1","text":"hello"}`, CreatedAt: time.Unix(1700000000, 0)},
 	} {
 		body, err := json.Marshal(Record{Sequence: 2, Event: event})
 		if err != nil {

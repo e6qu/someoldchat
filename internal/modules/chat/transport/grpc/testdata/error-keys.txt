@@ -58,5 +58,7 @@ store.invalid_argument
 store.invalid_conversation_type
 store.invalid_invite_request
 store.lease_conflict
+store.message_timestamp_taken
 store.not_found
 store.socket_mode_connection_limit
+store.transient

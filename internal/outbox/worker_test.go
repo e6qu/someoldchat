@@ -10,6 +10,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -539,4 +540,158 @@ func (s *lateRenewalFailureSource) AckEvents(context.Context, string, []uint64) 
 
 func (s *lateRenewalFailureSource) ReleaseEvents(context.Context, string, []uint64, time.Time) error {
 	return nil
+}
+
+// releaseRaceSource forces the interleaving the release paths have to survive:
+// a renewal tick that fires while the worker is handing records back.
+//
+// The store rejects a renewal for a sequence the caller no longer holds, which
+// is what makes an un-narrowed hold observable: the worker renews records it
+// has just released and the store answers with a lease conflict against the
+// worker's own bookkeeping.
+type releaseRaceSource struct {
+	mu       sync.Mutex
+	renewed  [][]uint64
+	released map[uint64]bool
+
+	ticks chan time.Time
+}
+
+func (s *releaseRaceSource) ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error) {
+	return batchRecords(1, 2, 3), nil
+}
+
+func (s *releaseRaceSource) RenewEvents(_ context.Context, _ string, sequences []uint64, _ time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.renewed = append(s.renewed, append([]uint64(nil), sequences...))
+	for _, sequence := range sequences {
+		if s.released[sequence] {
+			return store.ErrLeaseConflict
+		}
+	}
+	return nil
+}
+
+func (s *releaseRaceSource) AckEvents(context.Context, string, []uint64) error { return nil }
+
+func (s *releaseRaceSource) ReleaseEvents(_ context.Context, _ string, sequences []uint64, _ time.Time) error {
+	s.mu.Lock()
+	if s.released == nil {
+		s.released = map[uint64]bool{}
+	}
+	for _, sequence := range sequences {
+		s.released[sequence] = true
+	}
+	s.mu.Unlock()
+	// The tick arrives while the release is in flight. A release that narrows
+	// the hold under the renewal lock makes the renewal wait and then find
+	// nothing left to renew; one that does not lets the renewal read a set the
+	// worker has already given up.
+	s.ticks <- time.Now()
+	return nil
+}
+
+func (s *releaseRaceSource) renewals() [][]uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([][]uint64(nil), s.renewed...)
+}
+
+// A record handed back to the queue is not this worker's any more. Renewing it
+// asks the store to extend a lease the worker has just dropped, which the store
+// refuses — so the worker records a lost lease it inflicted on itself, and the
+// only reason that does not surface today is that a delivery error happens to
+// take precedence on this path.
+func TestReleasingRecordsNarrowsTheLeaseHold(t *testing.T) {
+	source := &releaseRaceSource{ticks: make(chan time.Time)}
+	deliveryErr := errors.New("destination refused the record")
+	worker, err := NewWorker(source, "worker-1", 10, 30*time.Millisecond, func(_ context.Context, record events.Record) error {
+		if record.Sequence == 2 {
+			return deliveryErr
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.NewTicker = func(time.Duration) (<-chan time.Time, func()) { return source.ticks, func() {} }
+	delivered, err := worker.RunOnce(context.Background(), "T1")
+	if !errors.Is(err, deliveryErr) {
+		t.Fatalf("RunOnce error=%v, want the delivery failure", err)
+	}
+	if delivered != 1 {
+		t.Fatalf("delivered=%d, want 1", delivered)
+	}
+	for _, renewal := range source.renewals() {
+		for _, sequence := range renewal {
+			if sequence == 2 || sequence == 3 {
+				t.Fatalf("the worker renewed %d after releasing it: renewals=%v", sequence, source.renewals())
+			}
+		}
+	}
+}
+
+// blockingRenewalSource answers a renewal only when the renewal's own context
+// ends, which is what a degraded database does.
+type blockingRenewalSource struct {
+	ticks chan time.Time
+	done  chan struct{}
+}
+
+func (s *blockingRenewalSource) ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error) {
+	return batchRecords(1), nil
+}
+
+func (s *blockingRenewalSource) RenewEvents(ctx context.Context, _ string, _ []uint64, _ time.Duration) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (s *blockingRenewalSource) AckEvents(context.Context, string, []uint64) error { return nil }
+
+func (s *blockingRenewalSource) ReleaseEvents(context.Context, string, []uint64, time.Time) error {
+	return nil
+}
+
+// A renewal that cannot complete within its own interval has already failed:
+// the lease it is renewing expires three intervals in, and every record the
+// worker delivers after that is delivered without a lease and claimable by
+// another worker at the same time. The renewal has to be bounded, so the
+// cancellation machinery runs before the lease lapses rather than after.
+func TestASlowRenewalIsBoundedByItsOwnInterval(t *testing.T) {
+	source := &blockingRenewalSource{ticks: make(chan time.Time), done: make(chan struct{})}
+	const lease = 30 * time.Millisecond
+	worker, err := NewWorker(source, "worker-1", 10, lease, func(ctx context.Context, _ events.Record) error {
+		// The delivery outlives the lease, which is the case the renewal exists
+		// for.
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(20 * lease):
+			return nil
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.NewTicker = func(time.Duration) (<-chan time.Time, func()) { return source.ticks, func() {} }
+	go func() { source.ticks <- time.Now() }()
+	started := time.Now()
+	finished := make(chan error, 1)
+	go func() {
+		_, err := worker.RunOnce(context.Background(), "T1")
+		finished <- err
+	}()
+	select {
+	case err := <-finished:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("RunOnce error=%v, want the renewal to fail with %v once it outlives its interval", err, context.DeadlineExceeded)
+		}
+		if elapsed := time.Since(started); elapsed >= lease {
+			t.Fatalf("the renewal took %v to fail, which is past the %v lease it was renewing", elapsed, lease)
+		}
+	case <-time.After(10 * lease):
+		t.Fatalf("an unbounded renewal outlived the %v lease it was renewing and the batch is still running", lease)
+	}
 }

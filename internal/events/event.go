@@ -3,7 +3,6 @@ package events
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -51,36 +50,19 @@ type Record struct {
 // record: the browser event stream and the RTM socket both write
 // Delivered.Encode() for one authenticated recipient.
 //
-// A payload written before the typed payload contract — a bare identifier — is
-// still encoded, because refusing it here would silently drop committed events
-// that this format has always carried. Deliverable is where that record is
-// refused for a consumer that must parse it.
+// The refusal is Broadcastable itself rather than a second implementation of
+// the same rule. It used to be a copy, and the copy is how the two halves came
+// to disagree in both directions at once: this one refused a payload carrying a
+// Slack event type — permanently dropping, under -delivery-format record, every
+// event the same binary delivered under -delivery-format slack-events — while
+// admitting a bare identifier that every other consumer refuses, so an opaque
+// internal ID was POSTed to a third-party URL as an event body. Delegating
+// makes the divergence unrepresentable rather than merely tested for.
 func (e Event) MarshalJSON() ([]byte, error) {
-	if err := e.refuseBroadcast(); err != nil {
+	if _, err := Broadcastable(e); err != nil {
 		return nil, err
 	}
 	// wire drops the method set, so encoding the copy cannot recurse.
 	type wire Event
 	return json.Marshal(wire(e))
-}
-
-func (e Event) refuseBroadcast() error {
-	if InternalTopic(e.Topic) {
-		return fmt.Errorf("%w: topic %s", ErrPayloadInternal, e.Topic)
-	}
-	if RecipientScoped(e.Topic) {
-		return fmt.Errorf("%w: topic %s", ErrPayloadRecipientScoped, e.Topic)
-	}
-	delivered, err := decodeDelivered(e.Payload, "")
-	if err != nil {
-		return nil
-	}
-	// Equality with Topic is the whole check: Topic has already been tested
-	// against both refusal sets above, so a payload that describes itself as the
-	// same event is covered by those tests, and one that does not is a record
-	// whose refusal decision was made about a different event.
-	if delivered.Type != e.Topic {
-		return fmt.Errorf("%w: payload %s %q does not match record topic %q", ErrPayloadMalformed, payloadTypeField, delivered.Type, e.Topic)
-	}
-	return nil
 }

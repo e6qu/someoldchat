@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -120,6 +121,12 @@ var errorClasses = []errorClass{
 	// split deployment, so the specific sentinel is listed first and the generic
 	// one restores the bare code.
 	{key: "service.emoji_already_exists", code: codes.AlreadyExists, sentinel: service.ErrEmojiAlreadyExists},
+	// A message's Slack-style timestamp is its public identifier, so a second
+	// message on the same microsecond would be permanently unaddressable. The
+	// repository refuses it and internal/service retries with the next
+	// microsecond; the class exists because a refusal that escapes that retry is
+	// a uniqueness failure, not an unavailable dependency.
+	{key: "store.message_timestamp_taken", code: codes.AlreadyExists, sentinel: store.ErrMessageTimestampTaken},
 	{key: "store.already_exists", code: codes.AlreadyExists, sentinel: store.ErrAlreadyExists, restoresCode: true},
 
 	// Concurrency. The generic member closes the group, as everywhere else.
@@ -188,6 +195,12 @@ var errorClasses = []errorClass{
 	// cause. A peer that sends the detail still restores it exactly.
 	{key: "service.blob_unavailable", code: codes.Unavailable, sentinel: service.ErrBlobUnavailable},
 	{key: "blob.unavailable", code: codes.Unavailable, sentinel: blob.ErrUnavailable},
+	// A serialization failure, a deadlock victim, a lock timeout or a lost
+	// leader is exactly what codes.Unavailable means: retry the same request.
+	// Without a class it reached the caller as raw driver text under the
+	// unclassified default, which asks for the same retry while telling the
+	// caller nothing it can act on.
+	{key: "store.transient", code: codes.Unavailable, sentinel: store.ErrTransient},
 }
 
 // libraryProducedCodes are the status codes grpc-go emits on its own behalf,
@@ -225,7 +238,15 @@ func boundStatusMessage(message string) string {
 		return message
 	}
 	const ellipsis = "…"
-	return message[:maxStatusMessageBytes-len(ellipsis)] + ellipsis
+	// The bound is in bytes and the message is text, so the cut is moved back to
+	// a rune boundary: truncating inside a multi-byte rune produces a status
+	// message that is not valid UTF-8, which grpc-go silently repairs with
+	// U+FFFD on the wire and internal/web renders into a browser.
+	kept := message[:maxStatusMessageBytes-len(ellipsis)]
+	for len(kept) > 0 && !utf8.ValidString(kept) {
+		kept = kept[:len(kept)-1]
+	}
+	return kept + ellipsis
 }
 
 // unclassifiedMessage is the status message for an error with no domain class.
@@ -302,14 +323,62 @@ func classifyErrors(err error) []errorClass {
 	return matched
 }
 
-// classifyError reports the first class of a domain error. The first match is
-// the one whose code the status carries; classifyErrors carries the rest.
+// codeSeverity ranks a status code by how restrictive the answer it carries is.
+//
+// An error can match several classes at once — errors.Join(store.ErrNotFound,
+// service.ErrInvalidCanvas) is what internal/service returns when a
+// compensating delete fails after a rejected create — and exactly one code and
+// one key go on the wire. Taking them from the first matching row made the
+// answer depend on the *order of the table*, whose first block is validation,
+// so a refusal that was genuinely an absence or a denial was transported as
+// HTTP 400: the caller was told to fix an argument for a channel that does not
+// exist, or for an operation it is not allowed to perform.
+//
+// The rank is what the answer commits to. A denial and an absence each state
+// something specific about the request that a validation failure does not, so
+// they outrank it; a conflict states that the request was well formed and lost
+// a race. Everything else keeps validation's rank, which leaves the table order
+// deciding between equals exactly as before.
+var codeSeverity = map[codes.Code]int{
+	codes.PermissionDenied:   60,
+	codes.Unauthenticated:    60,
+	codes.NotFound:           50,
+	codes.FailedPrecondition: 40,
+	codes.Aborted:            40,
+	codes.AlreadyExists:      40,
+	codes.ResourceExhausted:  30,
+}
+
+const defaultCodeSeverity = 20
+
+func severityOf(code codes.Code) int {
+	if rank, known := codeSeverity[code]; known {
+		return rank
+	}
+	return defaultCodeSeverity
+}
+
+// primaryClass is the class whose code and key the status carries: the most
+// restrictive of the matched classes, with table order breaking a tie so a
+// specific sentinel still precedes the generic member of its own block.
+func primaryClass(matched []errorClass) errorClass {
+	primary := matched[0]
+	for _, class := range matched[1:] {
+		if severityOf(class.code) > severityOf(primary.code) {
+			primary = class
+		}
+	}
+	return primary
+}
+
+// classifyError reports the class of a domain error that decides its status
+// code. classifyErrors carries the rest.
 func classifyError(err error) (errorClass, bool) {
 	matched := classifyErrors(err)
 	if len(matched) == 0 {
 		return errorClass{}, false
 	}
-	return matched[0], true
+	return primaryClass(matched), true
 }
 
 // serverError is the error a handler returns. grpc-go sends its GRPCStatus, so
@@ -341,15 +410,18 @@ func mapError(err error) error {
 	if len(matched) == 0 {
 		return serverError{status: status.New(codes.Unavailable, unclassifiedMessage), cause: err}
 	}
-	// The code comes from the first (most specific) class; keys carries every
-	// class the error matched so the caller restores the same set errors.Is
-	// answers in process. key repeats the first one for a peer that predates
-	// keys.
-	detail := &chatv1.DomainError{Key: matched[0].key, Keys: make([]string, 0, len(matched))}
+	// The code comes from the most restrictive matched class; keys carries every
+	// class the error matched, in table order, so a caller that reads keys
+	// restores the same set errors.Is answers in process. key repeats the class
+	// that decided the code, for a peer that predates keys: a key that named a
+	// different class than the code would leave that peer with the two halves
+	// of one answer disagreeing.
+	primary := primaryClass(matched)
+	detail := &chatv1.DomainError{Key: primary.key, Keys: make([]string, 0, len(matched))}
 	for _, class := range matched {
 		detail.Keys = append(detail.Keys, class.key)
 	}
-	result := status.New(matched[0].code, boundStatusMessage(err.Error()))
+	result := status.New(primary.code, boundStatusMessage(err.Error()))
 	detailed, detailErr := result.WithDetails(detail)
 	if detailErr != nil {
 		// The detail is a fixed-shape message built from a table this package
@@ -357,7 +429,7 @@ func mapError(err error) error {
 		// the bare code silently would restore the wrong sentinel for the 33
 		// classes that share codes.InvalidArgument and none at all for the codes
 		// with no fallback — the exact outcome the detail exists to prevent.
-		panic(fmt.Sprintf("chat gRPC cannot attach the domain error detail for %q: %v", matched[0].key, detailErr))
+		panic(fmt.Sprintf("chat gRPC cannot attach the domain error detail for %q: %v", primary.key, detailErr))
 	}
 	return serverError{status: detailed, cause: err}
 }
@@ -422,14 +494,27 @@ func mapRemoteError(err error) error {
 // The first DomainError detail decides, and no later detail is consulted: the
 // scan used to continue, so with two details the last known key won and two
 // peers that disagreed about which detail is authoritative disagreed about the
-// sentinel. A detail whose keys this build does not know falls back to the bare
-// code, which is how a newer peer's class stays classified rather than lost.
+// sentinel.
+//
+// The bare status code is consulted only when the peer sent no DomainError
+// detail at all. Absence of a detail means "this peer predates the detail and
+// the code is all I have", and the code's fallback class is then the best
+// answer available. A detail whose every key is unknown means something else
+// entirely: the peer named a class and this build does not have it. Answering
+// from the code there invents a *different specific* class — a newer peer's
+// FailedPrecondition channel_is_archived came back as
+// service.ErrMessageAlreadyDeleted and its PermissionDenied
+// not_a_workspace_owner as service.ErrMessageNotOwned — and internal/api/slack
+// maps by sentinel, so a caller was confidently told the wrong thing for the
+// whole rolling window. Leaving it unclassified gives the generic path instead.
 func restoreSentinel(remoteStatus *status.Status) (error, bool) {
+	sawDetail := false
 	for _, detail := range remoteStatus.Details() {
 		domainError, ok := detail.(*chatv1.DomainError)
 		if !ok {
 			continue
 		}
+		sawDetail = true
 		keys := domainError.GetKeys()
 		if len(keys) == 0 {
 			keys = []string{domainError.GetKey()}
@@ -442,14 +527,16 @@ func restoreSentinel(remoteStatus *status.Status) (error, bool) {
 		}
 		switch len(restored) {
 		case 0:
-			// Every key is unknown to this build; the bare code is the best
-			// classification available.
+			// Every key is unknown to this build.
 		case 1:
 			return restored[0], true
 		default:
 			return errors.Join(restored...), true
 		}
 		break
+	}
+	if sawDetail {
+		return nil, false
 	}
 	class, ok := errorClassesByCode[remoteStatus.Code()]
 	if !ok {

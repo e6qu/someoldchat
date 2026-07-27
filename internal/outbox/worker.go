@@ -115,7 +115,9 @@ func (w Worker) deliverBatch(ctx, batchContext context.Context, records []events
 		deliveryErr := hold.precedence(w.Deliver(batchContext, record))
 		if deliveryErr != nil && !errors.Is(deliveryErr, ErrPermanent) {
 			retryAt := w.now().Add(w.Lease)
-			if releaseErr := w.Source.ReleaseEvents(ctx, w.Owner, outstanding[index:], retryAt); releaseErr != nil {
+			if releaseErr := hold.release(nil, func() error {
+				return w.Source.ReleaseEvents(ctx, w.Owner, outstanding[index:], retryAt)
+			}); releaseErr != nil {
 				return delivered, errors.Join(deliveryErr, releaseErr)
 			}
 			return delivered, deliveryErr
@@ -129,7 +131,12 @@ func (w Worker) deliverBatch(ctx, batchContext context.Context, records []events
 			// until the lease lapses — a full lease period of stalled delivery
 			// caused by one transient store error.
 			if tail := outstanding[index+1:]; len(tail) != 0 {
-				if releaseErr := w.Source.ReleaseEvents(ctx, w.Owner, tail, w.now().Add(w.Lease)); releaseErr != nil {
+				// The record whose acknowledgement failed is still leased by this
+				// worker and is not released, so it stays in the hold; the tail
+				// behind it leaves both the store and the hold together.
+				if releaseErr := hold.release(outstanding[index:index+1], func() error {
+					return w.Source.ReleaseEvents(ctx, w.Owner, tail, w.now().Add(w.Lease))
+				}); releaseErr != nil {
 					return delivered, errors.Join(deliveryErr, err, releaseErr)
 				}
 			}
@@ -182,7 +189,20 @@ func (w Worker) holdLease(ctx context.Context, cancel context.CancelFunc, sequen
 				covered := hold.covered()
 				var renewErr error
 				if len(covered) != 0 {
-					renewErr = w.Source.RenewEvents(ctx, w.Owner, covered, w.Lease)
+					// The renewal is bounded by its own interval. A renewal that
+					// cannot answer within one interval has already failed by
+					// definition: the lease it is extending expires two intervals
+					// later, and until it returns the worker keeps delivering
+					// records it no longer holds while another worker's claim
+					// hands the same records out — a duplicate delivery for every
+					// record in that window. Worse, acknowledgement takes this
+					// same lock, so an unbounded renewal against a degraded store
+					// stops the batch from recording anything it has delivered.
+					// Failing fast lets the cancel-and-report machinery run before
+					// the lease lapses instead of after.
+					renewContext, cancelRenew := context.WithTimeout(ctx, interval)
+					renewErr = w.Source.RenewEvents(renewContext, w.Owner, covered, w.Lease)
+					cancelRenew()
 				}
 				hold.renewal.Unlock()
 				if renewErr != nil {
@@ -205,6 +225,29 @@ func (hold *leaseHold) acknowledge(remaining []uint64, ack func() error) error {
 	hold.renewal.Lock()
 	defer hold.renewal.Unlock()
 	if err := ack(); err != nil {
+		return err
+	}
+	hold.mu.Lock()
+	hold.sequences = append(hold.sequences[:0], remaining...)
+	hold.mu.Unlock()
+	return nil
+}
+
+// release hands records back to the queue and narrows the hold to what the
+// worker still owns, under the same lock a renewal takes — the same contract
+// acknowledge has, for the same reason.
+//
+// A released sequence must leave the renewal set: renewing a record this worker
+// has just handed back asks the store to extend a lease the worker no longer
+// holds, and both stores answer store.ErrLeaseConflict. The worker then records
+// a lost lease it inflicted on itself. Today a delivery error happens to take
+// precedence on both release paths, so the self-inflicted conflict is masked;
+// that is luck, not design, and the asymmetry between acknowledge and release
+// is the defect.
+func (hold *leaseHold) release(remaining []uint64, release func() error) error {
+	hold.renewal.Lock()
+	defer hold.renewal.Unlock()
+	if err := release(); err != nil {
 		return err
 	}
 	hold.mu.Lock()

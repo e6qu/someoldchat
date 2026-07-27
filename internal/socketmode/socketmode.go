@@ -52,46 +52,44 @@ type EventSource interface {
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
 }
 
-// CursorStore is the legacy per-app delivery position.
+// CursorStore is the per-app delivery position, and it is the only delivery
+// mechanism any deployment can select.
 //
 // It is keyed on the application alone while domain.SocketModeConnectionLimit
 // deliberately permits ten concurrent connections per app, so every connection
 // seeds its own copy from the same row and every envelope is delivered once per
 // open connection — ten times for an app that holds the limit open during a
 // redeploy, which is what the limit exists for. Slack's Socket Mode contract
-// delivers each envelope to exactly one connection. A deployment that provides
-// an EnvelopeQueue gets that contract; this interface remains for one that has
-// not migrated yet, and is retired with the store methods behind it.
+// delivers each envelope to exactly one connection.
+//
+// OPEN DEFECT: duplicate delivery is live, and this is where it lives.
+//
+// The previous change shipped an EnvelopeQueue interface, a claim-based
+// delivery path and a conformance test for per-envelope ownership, but no store
+// implemented the interface and no composition root set the field, so the whole
+// path was selectable only by a test double and the duplicate delivery it was
+// written to remove was untouched. That code has been deleted rather than left
+// standing, because an interface with no implementation reads as a fix. What is
+// left is the real behaviour plus an operator-visible report of it (see
+// ServeHTTP), so nobody mistakes the duplication for exactly-once delivery.
+//
+// Closing the defect needs storage this package does not own. The contract is:
+//
+//	ClaimAppEvent(ctx, appID domain.AppID, owner string, lease time.Duration) (events.Record, bool, error)
+//	RenewAppEvent(ctx, owner string, sequence uint64, lease time.Duration) error
+//	AckAppEvent(ctx, owner string, sequence uint64) error
+//	ReleaseAppEvent(ctx, owner string, sequence uint64, retryAt time.Time) error
+//
+// with the owner being the connection identifier, the same visibility rules
+// ListAppEventsAfter applies (the application's installed workspaces only, never
+// an internal topic), and store.ErrLeaseConflict when the owner no longer holds
+// the record. It needs an implementation in internal/store/memory and
+// internal/store/sqlstore, the four matching RPCs on the chat seam so the split
+// composition can reach them, and wiring in cmd/server. Until all four exist
+// this interface, its row and every connection's copy of it stay as they are.
 type CursorStore interface {
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
-}
-
-// EnvelopeQueue gives each durable record to exactly one of an application's
-// connections, using the same claim/lease/acknowledge model the response
-// direction already uses. A shared cursor cannot express that: two connections
-// sitting at the same position both read the same record, and the connection
-// that acknowledges second writes a cursor that has already moved.
-//
-// The owner is the connection identifier, so a connection that disappears takes
-// no envelope with it: its claim lapses with its lease and the next connection
-// takes the record.
-type EnvelopeQueue interface {
-	// ClaimAppEvent leases the oldest record the application has not
-	// acknowledged and no connection currently holds, and reports ok=false when
-	// there is none. It applies the same visibility rules as
-	// ListAppEventsAfter: the application's installed workspaces only, and never
-	// an internal topic.
-	ClaimAppEvent(ctx context.Context, appID domain.AppID, owner string, lease time.Duration) (record events.Record, ok bool, err error)
-	// RenewAppEvent extends the lease the owner holds on a claimed record. It
-	// fails with store.ErrLeaseConflict when the owner no longer holds it.
-	RenewAppEvent(ctx context.Context, owner string, sequence uint64, lease time.Duration) error
-	// AckAppEvent records that the application is finished with the record, so
-	// no connection is offered it again.
-	AckAppEvent(ctx context.Context, owner string, sequence uint64) error
-	// ReleaseAppEvent returns a claimed record to the queue, claimable again at
-	// retryAt, so another connection takes it instead of waiting out the lease.
-	ReleaseAppEvent(ctx context.Context, owner string, sequence uint64, retryAt time.Time) error
 }
 
 type ResponseSink interface {
@@ -168,12 +166,11 @@ func (s Service) Open(ctx context.Context, appID domain.AppID) (OpenResult, erro
 
 type Handler struct {
 	Store ConnectionStore
-	// Events and Cursors are the shared-cursor delivery path. Envelopes replaces
-	// both: when it is set it is used, and each envelope reaches exactly one of
-	// the application's connections.
+	// Events and Cursors are the delivery path: the application's durable
+	// records, and the shared position it has acknowledged up to. See
+	// CursorStore for the ownership defect that position carries.
 	Events    EventSource
 	Cursors   CursorStore
-	Envelopes EnvelopeQueue
 	Responses ResponseSink
 	Upgrader  websocket.Upgrader
 	// Logger records connection-level failures that are handled rather than
@@ -245,20 +242,21 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		closeWith(websocket.CloseInternalServerErr, "event delivery state unavailable")
 		return
 	}
-	if delivery != nil {
-		// A connection that goes away must not take an envelope with it. Handing
-		// the claim back here means the next connection sees it immediately
-		// rather than after the lease lapses.
-		defer func() {
-			if abandonErr := delivery.abandon(context.Background()); abandonErr != nil {
-				h.logger().Error("Socket Mode envelope was not returned to the queue", "connection", connection.ID, "app", connection.AppID, "error", abandonErr)
-			}
-		}()
-	}
 	connectionCount, err := h.Store.CountSocketModeConnections(r.Context(), connection.AppID)
 	if err != nil {
 		closeWith(websocket.CloseInternalServerErr, "connection state unavailable")
 		return
+	}
+	if delivery != nil && connectionCount > 1 {
+		// The delivery position is keyed on the application, so this connection
+		// is about to deliver every record the other connections are also
+		// delivering. That is a live defect (see CursorStore) which nothing else
+		// makes visible: the app's handler simply runs once per open connection
+		// per event, side effects included. Reporting it here means it is
+		// happening now, on this app, rather than being a possibility recorded
+		// in a comment.
+		h.logger().Warn("Socket Mode delivers app events from a shared per-app position, so every open connection of this app receives every envelope",
+			"app", connection.AppID, "connection", connection.ID, "connections", connectionCount)
 	}
 	// debug_info.host identifies the host serving the connection. Reporting the
 	// app ID there makes SDK diagnostics and reconnect logs describe the client
@@ -360,9 +358,17 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if time.Since(pendingSince) < envelopeTimeout {
 					continue
 				}
-				// The app never answered. The record is handed back rather than
-				// acknowledged, so the next connection receives it instead of
-				// this app's stream stalling with no error anywhere.
+				// The app never answered, so the position is not advanced and
+				// the connection is closed rather than left waiting forever
+				// with no error anywhere.
+				//
+				// OPEN DEFECT: the record is then redelivered on the next
+				// connection with no attempt bound, so an app whose handler
+				// fails on one envelope shape blocks its own event stream at one
+				// cycle per envelopeTimeout indefinitely. Bounding it needs a
+				// delivery-attempt count on the queued record, which the shared
+				// per-app position cannot express — it is the same storage this
+				// package does not own; see CursorStore.
 				h.logger().Warn("Socket Mode envelope was not acknowledged", "app", connection.AppID, "connection", connection.ID, "timeout", envelopeTimeout)
 				closeWith(websocket.CloseTryAgainLater, "envelope was not acknowledged")
 				return
@@ -417,16 +423,6 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				closeWith(websocket.CloseInternalServerErr, "connection lease unavailable")
 				return
 			}
-			if delivery != nil {
-				if err := delivery.renew(r.Context()); err != nil {
-					// The claim is gone, so the envelope in flight belongs to
-					// another connection now. Continuing would let both deliver
-					// it.
-					h.logger().Warn("Socket Mode lost the lease on an envelope in flight", "app", connection.AppID, "connection", connection.ID, "error", err)
-					closeWith(deliveryCloseCode(err))
-					return
-				}
-			}
 		}
 	}
 }
@@ -438,31 +434,10 @@ func servingHost(r *http.Request) string {
 	return r.Host
 }
 
-// envelopeDelivery is how one connection obtains the next record and records
-// that the application is finished with it. It exists so the delivery loop does
-// not have to know whether ownership is per envelope or shared.
-type envelopeDelivery interface {
-	// next returns the record this connection should deliver, if any.
-	next(ctx context.Context) (events.Record, bool, error)
-	// consume records that the application is finished with the record, whether
-	// it acknowledged the envelope or the record was undeliverable.
-	consume(ctx context.Context, sequence uint64) error
-	// renew extends this connection's hold on the record in flight.
-	renew(ctx context.Context) error
-	// abandon returns the record in flight to the queue for another connection.
-	abandon(ctx context.Context) error
-}
-
-// envelopeLease has to outlast envelopeTimeout, or the claim lapses while the
-// handler is still waiting for the application to acknowledge the envelope it
-// was sent, and a second connection is handed a record that is already in
-// flight. It is renewed on the connection lease tick.
-const envelopeLease = 2 * envelopeTimeout
-
-func (h Handler) newDelivery(ctx context.Context, connection domain.SocketModeConnection) (envelopeDelivery, error) {
-	if h.Envelopes != nil {
-		return &claimDelivery{queue: h.Envelopes, appID: connection.AppID, owner: connection.ID}, nil
-	}
+// newDelivery prepares this connection's view of the application's delivery
+// position. A handler with no event source delivers nothing and answers
+// acknowledgements, which is what the response-only deployments use.
+func (h Handler) newDelivery(ctx context.Context, connection domain.SocketModeConnection) (*cursorDelivery, error) {
 	if h.Events == nil {
 		return nil, nil
 	}
@@ -475,50 +450,6 @@ func (h Handler) newDelivery(ctx context.Context, connection domain.SocketModeCo
 		delivery.cursor = cursor
 	}
 	return delivery, nil
-}
-
-// claimDelivery gives the record to exactly one connection: the claim is the
-// ownership, and it is keyed on this connection rather than on the application.
-type claimDelivery struct {
-	queue EnvelopeQueue
-	appID domain.AppID
-	owner string
-	held  uint64
-}
-
-func (d *claimDelivery) next(ctx context.Context) (events.Record, bool, error) {
-	record, ok, err := d.queue.ClaimAppEvent(ctx, d.appID, d.owner, envelopeLease)
-	if err != nil || !ok {
-		return events.Record{}, false, err
-	}
-	d.held = record.Sequence
-	return record, true, nil
-}
-
-func (d *claimDelivery) consume(ctx context.Context, sequence uint64) error {
-	if err := d.queue.AckAppEvent(ctx, d.owner, sequence); err != nil {
-		return err
-	}
-	if d.held == sequence {
-		d.held = 0
-	}
-	return nil
-}
-
-func (d *claimDelivery) renew(ctx context.Context) error {
-	if d.held == 0 {
-		return nil
-	}
-	return d.queue.RenewAppEvent(ctx, d.owner, d.held, envelopeLease)
-}
-
-func (d *claimDelivery) abandon(ctx context.Context) error {
-	if d.held == 0 {
-		return nil
-	}
-	sequence := d.held
-	d.held = 0
-	return d.queue.ReleaseAppEvent(ctx, d.owner, sequence, time.Now().UTC())
 }
 
 // cursorDelivery is the shared per-application position. Every connection of an
@@ -551,10 +482,6 @@ func (d *cursorDelivery) consume(ctx context.Context, sequence uint64) error {
 	d.cursor = sequence
 	return nil
 }
-
-func (d *cursorDelivery) renew(context.Context) error { return nil }
-
-func (d *cursorDelivery) abandon(context.Context) error { return nil }
 
 // deliveryCloseCode distinguishes losing a race for an envelope from the store
 // being unable to answer. A connection that acknowledges an envelope another
