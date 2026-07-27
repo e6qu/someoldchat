@@ -958,7 +958,9 @@ public final class Qualification {
                             .limit(10)
                             .build());
             require(history.isOk(), "conversations.history failed: " + history.getError());
-            require(history.getMessages() != null && history.getMessages().size() == 4, "history page mismatch");
+            require(history.getMessages() != null && history.getMessages().size() == 3, "history page mismatch");
+            require(history.getMessages().stream().noneMatch(message -> posted.getTs().equals(message.getTs())),
+                    "deleted message remained in history");
             com.slack.api.methods.response.search.SearchMessagesResponse search = methods.searchMessages(
                     com.slack.api.methods.request.search.SearchMessagesRequest.builder().query("thread").build());
             require(search.isOk() && search.getMessages() != null

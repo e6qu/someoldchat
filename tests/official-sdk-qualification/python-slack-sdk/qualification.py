@@ -642,7 +642,8 @@ assert marked["ok"] is True
 
 history = client.conversations_history(channel="C1", limit=10)
 assert history["ok"] is True
-assert len(history["messages"]) == 4
+assert len(history["messages"]) == 3
+assert all(message["ts"] != posted["ts"] for message in history["messages"])
 assert history["has_more"] is False
 search = client.search_messages(query="thread")
 assert search["ok"] is True
