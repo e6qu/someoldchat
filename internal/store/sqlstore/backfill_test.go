@@ -603,8 +603,22 @@ func TestSQLiteBackfillRateIsLinear(t *testing.T) {
 		t.Logf("%6d rows in %8s (%7.0f rows/s)", rows, elapsed.Round(time.Millisecond), float64(rows)/elapsed.Seconds())
 		return elapsed
 	}
-	small := measure(10000)
-	large := measure(20000)
+	// Package tests run in separate processes and may contend for the same
+	// runner. Contention can inflate one sample arbitrarily, so compare the
+	// fastest of three measurements at each size. A quadratic implementation
+	// cannot shed its extra work in a quiet sample, while a linear one is no
+	// longer failed by another package briefly taking the disk or CPU.
+	var small, large time.Duration
+	for sample := 0; sample < 3; sample++ {
+		measuredSmall := measure(10000)
+		measuredLarge := measure(20000)
+		if small == 0 || measuredSmall < small {
+			small = measuredSmall
+		}
+		if large == 0 || measuredLarge < large {
+			large = measuredLarge
+		}
+	}
 	if large > 3*small {
 		t.Fatalf("doubling the rows multiplied the time by %.1f (%s -> %s); the pass is not linear", float64(large)/float64(small), small, large)
 	}
