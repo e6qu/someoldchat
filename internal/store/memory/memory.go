@@ -2623,6 +2623,18 @@ func (s *Store) CreateMessage(_ context.Context, message domain.Message, event e
 			return store.ErrIdempotencyConflict
 		}
 	}
+	// A message's timestamp is its public identifier, so two messages in one
+	// conversation may not share one microsecond. The SQL profiles enforce this
+	// with a UNIQUE index on (conversation, created_at); this one enforces it by
+	// looking, and both answer store.ErrMessageTimestampTaken so the caller's
+	// remedy is the same everywhere. It is checked AFTER the identifier and the
+	// idempotency key, in the same order as the SQL profiles, so a caller that
+	// retried a whole request is told that and not this.
+	for _, existing := range s.messages[message.Conversation] {
+		if existing.CreatedAt.Equal(message.CreatedAt) {
+			return store.ErrMessageTimestampTaken
+		}
+	}
 	message.Unfurls = copyUnfurls(unfurls)
 	values := s.messages[message.Conversation]
 	index := sort.Search(len(values), func(index int) bool {
@@ -4124,6 +4136,12 @@ func (s *Store) CreateListWithItems(_ context.Context, value domain.List, event 
 	// from its transaction; this one has to be written that way.
 	created := make(map[domain.ListItemID]domain.ListItem, len(items))
 	for _, creation := range items {
+		// An empty identifier would key the map on "" here and insert a row with
+		// an empty primary key on the SQL profiles. The two validation sets are
+		// stated to be equivalent, so they have to reject the same input.
+		if creation.Item.ID == "" {
+			return store.ErrInvalidArgument
+		}
 		if creation.Item.ListID != value.ID || creation.Item.WorkspaceID != value.WorkspaceID {
 			return store.ErrInvalidArgument
 		}

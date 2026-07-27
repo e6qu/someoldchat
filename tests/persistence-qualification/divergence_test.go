@@ -1020,3 +1020,100 @@ func connectedChannelPagesAreFilteredAndBounded(t *testing.T, open opener) {
 		t.Fatalf("filtering by channel returned %+v, want %v", named, channels[:2])
 	}
 }
+
+// messageTimestampsAreUniquePerConversation is the identity contract behind a
+// message's public timestamp.
+//
+// A message's ts is `<seconds>.<six digits>`, and every write-addressing call —
+// chat.update, chat.delete, reactions.add, thread-root resolution — resolves a
+// message through it. Two messages on one microsecond therefore share one
+// identifier and the second becomes permanently unaddressable, which is what a
+// migration that truncated the stored instant in place produced. Both profiles
+// refuse the collision, and both name the same sentinel, so the one producer's
+// remedy is the same everywhere.
+func messageTimestampsAreUniquePerConversation(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	instant := time.Date(2024, 6, 1, 9, 0, 0, 123456000, time.UTC)
+	first := f.message(t, ctx, "unique-first", instant)
+
+	// 123 nanoseconds later is the SAME microsecond, so it is the same
+	// identifier.
+	contested := domain.Message{ID: domain.MessageID("unique-second-" + f.suffix), WorkspaceID: f.workspaceID, Conversation: f.channelID, AuthorID: f.userID, Text: "contested", CreatedAt: instant.Add(123 * time.Nanosecond)}
+	if err := f.repository.CreateMessage(ctx, contested, f.event("event-contested", "message.created", string(contested.ID)), ""); !errors.Is(err, store.ErrMessageTimestampTaken) {
+		t.Fatalf("second message on one microsecond err=%v, want store.ErrMessageTimestampTaken", err)
+	}
+	// The remedy is the next microsecond, and it works.
+	contested.CreatedAt = instant.Add(time.Microsecond)
+	if err := f.repository.CreateMessage(ctx, contested, f.event("event-contested", "message.created", string(contested.ID)), ""); err != nil {
+		t.Fatalf("the next microsecond was also refused: %v", err)
+	}
+	// Both messages are individually addressable by their own timestamps.
+	for _, want := range []domain.Message{first, contested} {
+		found, err := f.repository.GetMessageByCreatedAt(ctx, f.channelID, want.CreatedAt)
+		if err != nil {
+			t.Fatalf("message %s is not addressable by its own instant: %v", want.ID, err)
+		}
+		if found.ID != want.ID {
+			t.Fatalf("instant %s resolves to %s, want %s", want.CreatedAt, found.ID, want.ID)
+		}
+	}
+}
+
+// conversationCreatorIsAMember pins a membership rule that governs writes and
+// that both repositories were changed to implement independently, with no shared
+// test. Joining only private conversations left the creator of a public channel
+// unable to act on the channel they had just made.
+func conversationCreatorIsAMember(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	for _, testCase := range []struct {
+		name    string
+		private bool
+	}{{"public", false}, {"private", true}} {
+		id := domain.ConversationID("C-creator-" + testCase.name + "-" + f.suffix)
+		conversation := domain.Conversation{ID: id, WorkspaceID: f.workspaceID, Name: "creator-" + testCase.name, IsPrivate: testCase.private}
+		if err := f.repository.CreateConversation(ctx, conversation, f.userID, f.event("event-creator-"+testCase.name, "conversation.created", string(id))); err != nil {
+			t.Fatalf("create %s conversation: %v", testCase.name, err)
+		}
+		member, err := f.repository.IsConversationMember(ctx, id, f.userID)
+		if err != nil || !member {
+			t.Fatalf("the creator of a %s conversation is not a member (err=%v)", testCase.name, err)
+		}
+		members, err := f.repository.ListConversationMembers(ctx, id, domain.PageRequest{Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, value := range members.Users {
+			if value.ID == f.userID {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("members of the %s conversation = %+v, want the creator listed", testCase.name, members.Users)
+		}
+	}
+}
+
+// authMethodDefaultsToEnabled pins a security-relevant default that has been
+// inverted twice in two releases and had no contract. The table records an
+// administrator's decision to turn a provider OFF; a provider with no row is not
+// "disabled", it is "not overridden".
+func authMethodDefaultsToEnabled(t *testing.T, open opener) {
+	ctx := context.Background()
+	f, closeRepository := newFixture(t, ctx, open)
+	defer closeRepository()
+
+	method, err := f.repository.GetAuthMethod(ctx, f.workspaceID, "a-provider-nobody-configured")
+	if err != nil {
+		t.Fatalf("an unwritten provider reported err=%v, want no error", err)
+	}
+	if !method.Enabled {
+		t.Fatalf("an unwritten provider reported %+v, want Enabled: true", method)
+	}
+}

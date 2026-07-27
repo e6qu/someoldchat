@@ -1056,6 +1056,14 @@ func TestPublicFileSharingStreamsOnlyWhileTokenIsActive(t *testing.T) {
 	}
 }
 
+// testImageBytes is a byte stream http.DetectContentType identifies as a PNG:
+// the eight-byte signature the format itself defines, plus a marker so two
+// fixtures can be told apart. A profile photo fixture has to be a real image
+// now, because SetUserPhoto refuses a stream that is not the type it claims.
+func testImageBytes(marker string) []byte {
+	return append([]byte("\x89PNG\r\n\x1a\n"), marker...)
+}
+
 func TestUserPhotoStagesBlobAndExposesOnlyCommittedToken(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
@@ -1065,7 +1073,8 @@ func TestUserPhotoStagesBlobAndExposesOnlyCommittedToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages := Messages{Store: s, Blob: objects}
-	user, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", 5, bytes.NewReader([]byte("photo")))
+	photo := testImageBytes("photo")
+	user, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", int64(len(photo)), bytes.NewReader(photo))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1080,7 +1089,7 @@ func TestUserPhotoStagesBlobAndExposesOnlyCommittedToken(t *testing.T) {
 	}
 	content, err := io.ReadAll(reader)
 	reader.Close()
-	if err != nil || string(content) != "photo" {
+	if err != nil || string(content) != string(photo) {
 		t.Fatalf("content=%q err=%v", content, err)
 	}
 	if _, _, err := messages.OpenUserPhoto(context.Background(), "T1", "U1", "wrong"); err != store.ErrNotFound {
@@ -1123,7 +1132,8 @@ func TestUserPhotoReportsBlobCleanupFailureAfterProfileFailure(t *testing.T) {
 		Store: failingProfileStore{Store: base, err: profileErr},
 		Blob:  failingPhotoCleanupBlob{deleteErr: cleanupErr},
 	}
-	_, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", 5, bytes.NewReader([]byte("photo")))
+	photo := testImageBytes("photo")
+	_, err := messages.SetUserPhoto(context.Background(), "T1", "U1", "image/png", int64(len(photo)), bytes.NewReader(photo))
 	if !errors.Is(err, profileErr) || !errors.Is(err, cleanupErr) {
 		t.Fatalf("error=%v, want profile and cleanup errors", err)
 	}

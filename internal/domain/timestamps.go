@@ -119,18 +119,3 @@ func (value StoredTime) Ordered() bool {
 
 // ParseStoredTime decodes a timestamp read back from a TEXT column.
 func ParseStoredTime(value string) (time.Time, error) { return StoredTime(value).Time() }
-
-// NormalizeStoredTime rewrites a stored timestamp into the fixed-width form.
-// It is idempotent, so a migration may apply it to rows that are already
-// correct, and it reports whether the value changed.
-func NormalizeStoredTime(value string) (StoredTime, bool, error) {
-	if value == "" {
-		return "", false, nil
-	}
-	parsed, err := ParseStoredTime(value)
-	if err != nil {
-		return "", false, err
-	}
-	normalized := NewStoredTime(parsed)
-	return normalized, string(normalized) != value, nil
-}

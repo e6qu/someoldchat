@@ -54,6 +54,9 @@ func runQualification(t *testing.T, open opener) {
 		{"mutations return the value they wrote", mutationsReturnTheValueTheyWrote},
 		{"ending an already ended call is a conflict", endingAnAlreadyEndedCallIsAConflict},
 		{"connected channel pages are filtered and bounded", connectedChannelPagesAreFilteredAndBounded},
+		{"message timestamps are unique per conversation", messageTimestampsAreUniquePerConversation},
+		{"the creator of a conversation is a member of it", conversationCreatorIsAMember},
+		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
 	}
