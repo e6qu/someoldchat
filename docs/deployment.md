@@ -1,12 +1,21 @@
 # SameOldChat deployment guide
 
 This guide separates current infrastructure from deployment profiles that still
-need qualification. The current provider-specific implementation is the AWS
-Elastic Container Service module in
-[deploy/ecs-scale-zero](../deploy/ecs-scale-zero/README.md).
-That module provides request-triggered task activation and scale-down. The
-provider-neutral Go lifecycle activator remains a separate deployment unit for
-hibernation, snapshot publication, and restore.
+need qualification. The current provider-specific implementation is AWS Elastic
+Container Service, split across two shipped Terraform modules:
+
+- [terraform/ecs-runtime](../terraform/ecs-runtime/README.md) owns the durable
+  application resources — the private uploads bucket, the API-token,
+  session-token, and authorization-state secrets, the least-privilege task-role
+  policy, and the `environment`/`secrets` values a task needs to start; and
+- [deploy/ecs-scale-zero](../deploy/ecs-scale-zero/README.md) owns
+  request-triggered task activation and scale-down for the HTTP path, plus the
+  always-on WebSocket edge and the scale-to-zero WebSocket application tier.
+
+Both pin the same exact AWS provider version, so one root configuration can
+consume them together. The provider-neutral Go lifecycle activator remains a
+separate deployment unit for hibernation, snapshot publication, and restore;
+neither module deploys it.
 
 ## Deployment philosophy
 
@@ -24,8 +33,24 @@ hibernation, wake, fencing, and recovery tests.
 | Google Cloud Run | Native | Not authoritative on local disk | Use an external PostgreSQL service | Companion compute required | Cloud Storage snapshot, compute 0 |
 | Azure Container Apps | Native | Conditional single-owner | Use an external PostgreSQL service | Conditional raw-TCP profile; VM profile is a separate qualified option | Blob snapshot, replicas/VMs 0 |
 
-“Conditional” means the profile must pass the version-pinned qualification
-suite before production use.
+The matrix describes intended capability, not shipped infrastructure. Only the
+Amazon ECS rows have templates in this repository, and even those cover
+request-triggered activation only — the hibernation state machine and snapshot
+and restore procedures are not shipped by either ECS module. There are no
+systemd units, cloud-init files, Cloud Run services, or Container Apps templates
+anywhere in the repository, so the Linux VM, Google Cloud Run, and Azure
+Container Apps rows are targets an operator must build. Using the qualification
+vocabulary of the [hosting specification](../specs/hosting.md):
+
+| Profile | Qualification level |
+|---|---|
+| Linux VM | experimental — no templates shipped |
+| Amazon ECS on AWS Fargate | experimental — request-triggered activation shipped; hibernation and snapshot/restore not shipped |
+| Google Cloud Run | experimental — no templates shipped |
+| Azure Container Apps | experimental — no templates shipped |
+
+“Conditional” in the matrix above means the profile must pass the
+version-pinned qualification suite before production use.
 
 ## Common configuration
 
@@ -43,7 +68,7 @@ hibernation:
   enabled: true
   idle_after: 30m
   wake_deadline: 120s
-  retained_snapshots: 3
+  retained_snapshots: 3   # target only; see the note below
 
 scaling:
   server_min: 0
@@ -61,19 +86,27 @@ configuration.
 The first supported installation SHOULD be a Linux VM with:
 
 - the SameOldChat binary or OCI image;
-- systemd units for activator, server, worker, and lifecycle commands;
+- systemd units for the activator, server, worker, socketmode-worker, blobgc,
+  and lifecycle commands;
 - SQLite for the simplest topology;
 - Caddy, nginx, or a cloud load balancer for TLS;
 - an S3-compatible bucket for snapshots and files; and
 - a narrowly scoped credential allowing the activator to start stopped units or
   additional database VMs.
 
-The provider-neutral `sameoldchat-activator` requires a durable SQLite control
-DSN, an explicit snapshot store (`filesystem` with `-snapshot-root` or `s3`
-with `-snapshot-s3-bucket` and optional `-snapshot-s3-prefix`), a forward URL,
-an authenticated control token, an explicit snapshot mode (`file` for one
-database file or `directory` for a stopped dqlite state directory), and every
-lifecycle command at startup.
+The provider-neutral `sameoldchat-activator` requires all of the following at
+startup, and fails loudly when any is missing: `-listen`; a durable SQLite
+control DSN; an explicit snapshot store (`filesystem` with `-snapshot-root` or
+`s3` with `-snapshot-s3-bucket` and optional `-snapshot-s3-prefix`); a forward
+URL; an authenticated control token; an explicit snapshot mode (`file` for one
+database file or `directory` for a stopped dqlite state directory);
+`-snapshot-source`, `-snapshot-output`, `-snapshot-max-bytes`, `-snapshot-key-id`,
+`-snapshot-encryption-key-hex`, and `-snapshot-signing-key-hex`; `-backend`,
+`-schema-version`, and `-application-version`; `-request-spool-key-hex`,
+`-request-spool-owner`, `-request-spool-max-bytes`, and
+`-request-spool-max-requests`; and every lifecycle command.
+`-wake-deadline`, `-wake-safety-margin`, and `-request-max-bytes` have defaults
+and are documented in [operations](operations.md#observability).
 Commands receive the fencing
 generation through `SAMEOLDCHAT_LIFECYCLE_GENERATION`; persistence startup also
 receives the selected backend, snapshot artifact, and schema version. Missing
@@ -83,10 +116,12 @@ request spool uses a separately supplied encryption key and stores accepted
 cold requests until replay succeeds; replay supplies a stable spool-derived
 idempotency key when the caller did not provide one.
 
-Local profiles select file storage explicitly with `-blob-dir` and
-`-blob-max-bytes`, or select Amazon Simple Storage Service with
-`-blob-s3-bucket`, `-blob-s3-prefix`, and `-blob-max-bytes`. These choices are
-mutually exclusive; the application does not fall back from one to the other.
+Local profiles select file storage explicitly with `-blob-dir`, or select Amazon
+Simple Storage Service with `-blob-s3-bucket` and `-blob-s3-prefix`. These
+choices are mutually exclusive; the application does not fall back from one to
+the other. `-blob-max-bytes` bounds an individual object and is not a storage
+selection; it defaults to 100 MiB, so a profile that needs a different ceiling
+must state it.
 File bytes are never placed in the chat database. The
 activator additionally requires a stable replica spool owner plus explicit
 maximum queued bytes and request count; overflow is rejected before durable
@@ -95,9 +130,14 @@ distributed profile configures the blob directory on the owning module process,
 not on the HTTP-only replica.
 
 For a one-VM deployment, the VM remains the cheap always-on host and only the
-activator stays running. For a three-VM dqlite deployment, database VMs may be
-stopped or released after the verified snapshot while the activator host stays
-up.
+activator stays running. For a three-VM dqlite deployment the two steps are
+separate and the order matters: `directory` snapshot mode archives a **stopped**
+state directory, so the database processes stop before the snapshot is taken,
+while the active storage is released only after the manifest is verified and
+published. Stopping is reversible — an interrupted hibernation restarts from the
+live volume and reads no snapshot — and releasing is not. See
+[scale-to-zero](../specs/scale-to-zero.md#snapshot-boundary-by-profile). The
+activator host stays up throughout.
 
 The same VM profile maps directly to the major clouds:
 
@@ -132,6 +172,12 @@ these assumptions inside SameOldChat's immutable source inventory. Qualification
 MUST be repeated when the recorded platform capability set changes.
 
 ## Deliverables per provider
+
+`retained_snapshots` is a target, not a setting the application reads: no code
+consumes it, and `internal/lifecycle` implements no snapshot retention or
+pruning at all, so every published generation is retained forever. The whole
+"Common configuration" block above is an illustrative logical schema showing what
+a provider profile must decide; it is not a file format the application parses.
 
 Each provider implementation MUST ship:
 

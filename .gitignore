@@ -4,6 +4,7 @@
 **/.terraform/
 /coverage.out
 /dist/
+**/__pycache__/
 
 # Generated catalogs and local evidence are not source contracts.
 /specs/generated/*

@@ -18,6 +18,7 @@ request-triggered restoration for deployments that support scale-to-zero.
 - [Qualification suites](tests/README.md)
 - [Specifications and pinned contract sources](specs/README.md)
 - [Terminology](docs/terminology.md)
+- [Engineering rules](AGENTS.md)
 
 ## Core constraints
 
@@ -33,16 +34,21 @@ request-triggered restoration for deployments that support scale-to-zero.
   mandatory 24-hour publication quarantine.
 - The repository contains deployment guidance for Linux virtual machines,
   Amazon Elastic Container Service (ECS) on AWS Fargate, Google Cloud Run, and
-  Azure Container Apps. The Amazon ECS scale-to-zero module is the current
-  provider-specific infrastructure implementation; the other profiles require
-  their stated qualification work.
+  Azure Container Apps. The two Amazon ECS Terraform modules —
+  [`terraform/ecs-runtime`](terraform/ecs-runtime/README.md) for durable
+  application resources and
+  [`deploy/ecs-scale-zero`](deploy/ecs-scale-zero/README.md) for
+  request-triggered activation — are the current provider-specific
+  infrastructure implementation; the other profiles ship no templates and
+  require their stated qualification work.
 - The production container uses standard OpenID Connect discovery, so a
   conforming identity provider is configured by issuer URL rather than by a
   cloud-specific integration.
 
-The documents distinguish implemented behavior from qualification work. The
-same module interfaces support direct Go calls in monolith mode and generated
-gRPC adapters in distributed mode.
+The documents distinguish implemented behavior from qualification work. The same
+module interfaces support direct Go calls in local composition
+(`-chat-mode local`) and generated gRPC adapters in distributed composition
+(`-chat-mode grpc`); see [Terminology](docs/terminology.md).
 
 ## License
 
@@ -52,19 +58,24 @@ or any later version. See [LICENSE](LICENSE).
 ## Development commands
 
 ```sh
-make check
+make check                  # every offline gate, including go vet
+make check-full             # everything the pull-request workflow gates on
+# The two ratchets compare against a base revision, so they take BASE_REF and are
+# not part of `make check`. CI runs both with the pull request's base branch.
+make contract-ratchet BASE_REF=origin/main   # Slack HTTP compatibility ledger
+make proto-breaking   BASE_REF=origin/main   # gRPC wire compatibility
 make browser-qualification
 SHAUTH_SOURCE_DIR=/path/to/shauth make shauth-sso-qualification
 make build
 make build-static
-make run                    # explicitly selects local mode, memory, and dev credentials
+make run                    # explicitly selects local composition, memory, and dev credentials
 ./bin/sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db' \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```
 
 The `sameoldchat-socketmode-worker` binary claims durable Socket Mode
 responses and delivers them to an explicitly configured HTTP destination. It
-requires `--store`, `--app-id`, `--owner`, and `--response-url`, together with
+requires `-store`, `-app-id`, `-owner`, and `-response-url`, together with
 the storage settings for the selected backend. A delivery failure releases
 the response at the configured retry time; a process crash leaves the lease
 for another replica to reclaim.

@@ -101,9 +101,9 @@ delivery are rejected. The identity provider client registers
 logout URI and `https://<application-host>/auth/shauth/logout/complete` as its
 allowed post-logout redirect URI; Shauth owns the final return to
 `/signed-out`. The
-application uses the same durable session store in monolith and
-separate modes; the gRPC session adapter remains the authoritative path for
-separate mode.
+application uses the same durable session store in local and distributed
+composition; the gRPC session adapter remains the authoritative path for
+distributed composition.
 
 Administrative user removal deactivates workspace membership and revokes every
 session and Slack-compatible token owned by that user in the same durable
@@ -116,9 +116,18 @@ bind the returned ID token to a per-request nonce. The resulting SameOldChat
 session cannot outlive that ID token or the application's 24-hour maximum. It
 links a returned external subject to an
 existing workspace member by provider and subject, or by verified email when
-the subject has not been linked. An OpenID Connect identity is provisioned only
-when the configured issuer returns a supported `developer` or `admin` role;
-missing or unknown roles fail closed.
+the subject has not been linked. Email-based linking and provisioning require the
+provider to assert `email_verified`; an absent, false, or non-boolean assertion
+fails closed, and Microsoft Entra ID's `preferred_username` fallback is never
+treated as verified. Only GitHub's primary verified address and an asserted
+`email_verified` claim establish a new binding. An OpenID Connect identity is
+provisioned only when the configured issuer returns a supported `developer` or
+`admin` role; missing or unknown roles fail closed.
+
+The scopes carried by the resulting browser session are derived from the user's
+durable workspace role. A `member` session receives no `admin` or `admin.*`
+scope; only `admin` and `owner` roles do. An unrecognized role yields no session
+at all.
 
 Shauth-managed deployments register `/auth/validation` as their authenticated
 validation URL and `/signed-out` as their signed-out URL. `/auth/validation`
@@ -137,15 +146,20 @@ single-use authorization code or rotates a durable refresh token. The exchange
 requires the `openid` scope and verifies Proof Key for Code Exchange when the
 authorization code carries a challenge. `POST /api/openid.connect.userInfo`
 accepts the resulting bearer token and returns the Slack-shaped user identity.
-These methods use the same selected storage backend in monolith and separate
-mode; the separate mode reaches the implementation through the generated
-gRPC client.
+These methods use the same selected storage backend in local and distributed
+composition; distributed composition reaches the implementation through the
+generated gRPC client.
 
 ## Administration
 
-When external authorization is configured, an administrator with the relevant
-Slack-compatible scope can use `/app/admin/auth` to enable or disable the
-configured sources and create an active member manually. Manual creation uses
+When external authorization is configured, `/app/admin/auth` and the internal
+administration endpoints require both the relevant Slack-compatible scope and a
+durable `admin` or `owner` workspace role. A session's stored scope list is a
+snapshot taken when it was minted, so the role is re-read on every request: a
+demoted administrator loses the control plane immediately, and a session that
+carries an `admin.*` scope its role does not justify is refused. An authorized
+administrator can enable or disable the configured sources and create an active
+member manually. Manual creation uses
 the supplied verified email, creates durable workspace membership, and accepts
 only the `member` or `admin` role. It does not create a password or bypass the
 configured authorization source.

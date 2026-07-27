@@ -43,10 +43,71 @@ variable "bootstrap_admin_email" {
   }
 }
 
+# Every other variable in this module validates; this one did not, and it is
+# interpolated straight into the task policy as "${bucket}/${prefix}*". An empty
+# value produced "bucket/*" and a "*" produced "bucket/**", granting the task
+# delete access to every object in the bucket including any future snapshot
+# prefix.
 variable "blob_prefix" {
   description = "Amazon Simple Storage Service object-key prefix for uploaded blobs."
   type        = string
   default     = "blobs/"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9!._-][A-Za-z0-9!._/-]*/$", var.blob_prefix))
+    error_message = "blob_prefix must be a non-empty key prefix ending in a slash, with no wildcard, so the task policy cannot widen to the whole bucket."
+  }
+}
+
+variable "chat_mode" {
+  description = "Chat composition the task runs: local or grpc."
+  type        = string
+  default     = "local"
+
+  validation {
+    condition     = contains(["local", "grpc"], var.chat_mode)
+    error_message = "chat_mode must be local or grpc."
+  }
+}
+
+variable "store" {
+  description = "Storage backend the task selects: memory, sqlite, postgresql, or dqlite."
+  type        = string
+
+  validation {
+    condition     = contains(["memory", "sqlite", "postgresql", "dqlite"], var.store)
+    error_message = "store must be memory, sqlite, postgresql, or dqlite; storage selection is mandatory and never inferred."
+  }
+}
+
+variable "auth_workspace" {
+  description = "Workspace identifier used for external authorization."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.auth_workspace) != ""
+    error_message = "auth_workspace is required whenever an OpenID Connect provider is configured."
+  }
+}
+
+variable "auth_lookup_user" {
+  description = "Existing user identifier that authorizes external identity lookup."
+  type        = string
+
+  validation {
+    condition     = trimspace(var.auth_lookup_user) != ""
+    error_message = "auth_lookup_user is required whenever an OpenID Connect provider is configured."
+  }
+}
+
+variable "auth_public_url" {
+  description = "Public HTTPS URL used for authorization callbacks."
+  type        = string
+
+  validation {
+    condition     = can(regex("^https://", var.auth_public_url))
+    error_message = "auth_public_url must be an HTTPS URL."
+  }
 }
 
 variable "tags" {

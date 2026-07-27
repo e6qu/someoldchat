@@ -24,10 +24,12 @@ typed target profiles containing process replica counts.
 stale generated files fail `make check`.
 
 Build tags are reserved for coarse binary roles. They must not encode every
-local/remote combination. The current targets include a direct-call monolith
-and a separate `sameoldchat-chatd` process using the explicit TLS gRPC adapter. The transport
+local/remote combination. The current targets include local composition (the
+direct-call `monolith` target) and distributed composition (the `separate`
+target, a `sameoldchat-chatd` process reached through the explicit TLS gRPC
+adapter). The transport
 is selected by composition, not by business logic. No remote transport is
-silently substituted for the local mode. The server and `sameoldchat-chatd` composition
+silently substituted for local composition. The server and `sameoldchat-chatd` composition
 roots consume generated transport bindings, so the declared module seam is
 the source of truth for both local and distributed assembly.
 
@@ -78,9 +80,9 @@ Remote module APIs must be coarse enough to survive a process boundary: they
 carry explicit request objects, context cancellation, deadlines, typed errors,
 and bounded/streamable results. Directory, conversation reads/mutations,
 message reads/mutations, presence, and file metadata operations use typed
-protobuf contracts and generated gRPC service adapters. File uploads and downloads use typed streaming metadata
-with bounded byte chunks. File uploads use a client-streaming gRPC
-method, and downloads use a server-streaming method; the server feeds bytes
+protobuf contracts and generated gRPC service adapters. File uploads use a
+client-streaming gRPC method and downloads use a server-streaming method, both
+with typed streaming metadata and bounded byte chunks; the server feeds bytes
 directly between the transport and blob store without materializing the object
 in process memory. All chat services use generated protobuf gRPC client/server
 contracts, including the file streams whose metadata and bounded chunks are

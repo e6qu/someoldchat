@@ -1,7 +1,27 @@
+# Docker matches these with filepath.Match against the context-relative path and
+# `*` does not cross `/`, so a leading `**/` is required for a directory that can
+# appear at any depth. `.terraform/` alone matched only a top-level directory and
+# let `terraform init`'s provider binaries (hundreds of megabytes) into every
+# build context; .gitignore already used `**/.terraform/`.
+**/.terraform/
+**/__pycache__/
 .cache/
 .git/
-.terraform/
+.qualification/
 bin/
 coverage.out
 dist/
 tests/browser/node_modules/
+
+# The build copies the whole context and compiles only ./cmd/..., so anything
+# below changes the `COPY . .` layer digest without changing the binary. Leaving
+# them in defeated `cache-from: type=gha` on both architectures and on the SBOM
+# build, costing three full Go builds for a documentation-only commit.
+.github/
+*.md
+deploy/
+docs/
+scripts/
+specs/
+terraform/
+tests/

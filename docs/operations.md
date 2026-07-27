@@ -5,7 +5,8 @@
 Operators and automation observe the same lifecycle states defined in the
 scale-to-zero specification:
 
-`ACTIVE`, `QUIESCING`, `SNAPSHOTTING`, `HIBERNATED`, `WAKING`, and `FAILED`.
+`ACTIVE`, `QUIESCING`, `SNAPSHOTTING`, `STOPPING`, `HIBERNATED`, `WAKING`, and
+`FAILED`.
 
 Only the activator accepts public traffic in every state. When the application
 is active it reverse-proxies traffic; otherwise it coordinates wake-up.
@@ -75,9 +76,13 @@ generation. It then:
 8. Moves to `ACTIVE` and forwards buffered requests.
 
 The activator returns a lightweight startup page to browsers. API requests may
-be held and replayed only within configured body, count, and deadline limits.
-Requests beyond those limits receive HTTP 503, `Retry-After`, and the closest
-compatible Slack error envelope recorded in the compatibility ledger.
+be held and replayed only within configured body, count, and deadline limits. A
+request whose body exceeds the configured maximum is rejected with HTTP 413
+before it is held. A request that cannot be held or replayed within the queue and
+deadline limits receives HTTP 503, `Retry-After`, and the closest compatible
+Slack error envelope recorded in the compatibility ledger. Both the
+provider-neutral `sameoldchat-activator` and the AWS Lambda activator in
+`deploy/ecs-scale-zero` enforce the same two contracts.
 
 ## Scheduled work while hibernated
 
@@ -172,9 +177,9 @@ The worker continues after a handler delivery failure because it has released
 the records at an explicit retry time. It exits on claim, release, or
 acknowledgement failure so the deployment platform can restart it.
 
-The outbox worker requires `--delivery-format`. Use `record` only for an
+The outbox worker requires `-delivery-format`. Use `record` only for an
 integration that explicitly accepts the internal `events.Record` JSON shape.
-Use `slack-events` with `--app-id` and `--signing-secret` for a Slack Events
+Use `slack-events` with `-app-id` and `-signing-secret` for a Slack Events
 API request URL. That mode requires each delivered payload to be a JSON Slack
 inner event or a validated complete `event_callback` envelope. It does not
 turn an identifier-only domain event into a guessed Slack event. The request
@@ -198,12 +203,23 @@ or type-less JSON event payloads.
 - A manifest includes schema version, backend, application compatibility range,
   byte length, cryptographic digest, encryption metadata, creation time, and
   fencing generation.
-- The newest verified generation and at least two older verified generations
-  are retained by default.
-- Snapshot deletion is a separate garbage-collection operation and never part
-  of publication.
-- Restore drills run automatically on disposable infrastructure.
 - A snapshot is not considered valid merely because upload succeeded.
+
+Snapshot retention is a stated target, not current behaviour. `internal/lifecycle`
+exposes snapshot creation, restore, current-generation selection, and
+last-verified lookup, and no delete, prune, or retain operation at all; every
+published generation is retained forever, `retained_snapshots` in the deployment
+guide's configuration schema is read by no code, and no automated restore drill
+exists in `.github/workflows` or `scripts`. The target is:
+
+- retain the newest verified generation and at least two older verified
+  generations by default;
+- perform snapshot deletion as a separate garbage-collection operation that is
+  never part of publication;
+- run restore drills automatically on disposable infrastructure.
+
+Until those are implemented, generations accumulate without bound and restore
+drills are a manual operator step in the release procedure below.
 
 ## Disaster recovery
 
@@ -234,6 +250,20 @@ request context, so a control-plane client timeout cannot cancel fencing,
 snapshot verification, or storage release. `POST /activate` and public wake
 forwarding use the same property for shared recovery.
 
+Three `sameoldchat-activator` settings bound those operations and have defaults,
+so they are easy to miss:
+
+| Flag | Default | Effect |
+|---|---|---|
+| `-wake-deadline` | `2m` | How long a caller waits for a cold start before the activator gives up on that request. |
+| `-wake-safety-margin` | `5m` | Measured restore time plus margin reserved before a scheduled wake deadline. Hibernation is refused with 409 and `Retry-After` when a published deadline falls inside it, and the scheduled-wake loop polls at a tenth of it. |
+| `-request-max-bytes` | `4194304` | One cap for both the spooled request body and the captured response. They must agree, so there is one flag rather than two that can diverge. |
+
+Every other activator setting is required and has no default; the process exits
+2 rather than choosing a snapshot store, key, or command for the operator. The
+`-control-token` value is what a WebSocket edge must be given as
+`-activator-token`, and what a `/metrics` scraper must present.
+
 SQLite startup migrations acquire an immediate transaction on a pinned database
 connection. Concurrent replicas therefore serialize schema changes, and a
 process crash rolls back the in-flight migration instead of exposing a partial
@@ -260,9 +290,31 @@ snapshot durations, snapshot sizes, restore failures, and buffered or rejected
 request counts and bytes. It does not expose request identifiers, tenant data,
 credentials, or snapshot locations.
 
+`GET /metrics` requires the control-plane bearer token, like `POST /activate`,
+`POST /hibernate`, and `POST /recover`. A scraper must be configured with the
+token; an unauthenticated scrape receives 401. The listener is shared with
+forwarded application traffic, so authorization is an allow-list of exactly two
+open routes — the forwarded catch-all, which the active stack authenticates
+itself, and `GET /healthz`, which a load balancer polls before any token exists.
+Every other route the activator registers requires the token by default, so a
+newly added operator endpoint cannot be unauthenticated by omission.
+
 Outbox replicas run `sameoldchat-worker` with distinct owner IDs and the same
 authoritative backend. Blob cleanup replicas run `sameoldchat-blobgc` with
-distinct owner IDs and the same backend/blob store. Neither worker persists
+distinct owner IDs and the same backend/blob store. `sameoldchat-blobgc` also
+takes `-min-orphan-age` (default `1h`), the grace period an unreferenced object
+must survive before an audit may classify it as an orphan; see
+[blob lifecycle](blob-lifecycle.md).
+
+The published container image at `ghcr.io/e6qu/someoldchat` contains only
+`cmd/server`. `sameoldchat-worker`, `sameoldchat-blobgc`,
+`sameoldchat-socketmode-worker`, `sameoldchat-chatd`, `sameoldchat-activator`,
+and `sameoldchat-ecs-ws-activator` have no published image, so on a container
+platform they must be built from this repository — the root `Dockerfile` for the
+first five by changing the built package, and
+`deploy/ecs-scale-zero/Dockerfile.websocket-edge` for the WebSocket activator.
+`make build` and `make build-static` produce all seven for the systemd profile in
+the deployment guide. Neither worker persists
 queue state locally; a failure releases the durable lease with its retry time,
 and a process crash is recovered by lease expiry.
 

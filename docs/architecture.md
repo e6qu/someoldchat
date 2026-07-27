@@ -17,7 +17,7 @@ configuration is an error; it is never silently replaced with a default
 backend, empty value, alternate algorithm, or no-op implementation.
 
 When multiple implementations are genuinely supported, the caller selects one
-explicitly (for example `memory`, `sqlite`, or `dqlite`). Those are distinct
+explicitly (for example `memory`, `sqlite`, `postgresql`, or `dqlite`). Those are distinct
 operating modes, not fallbacks. An unavailable selected mode fails at startup.
 Retries, bounded backoff, and protocol negotiation are explicit protocol
 behaviors and are not fallback mechanisms.
@@ -114,10 +114,11 @@ explicit retry times. Long-running deliveries renew their lease while active,
 so lease expiry represents a crashed or fenced worker rather than a slow
 healthy worker; this is never an alternate implementation path.
 
-Both deployment modes may run multiple replicas. In monolith mode each replica
-contains the direct-call composition and all replicas use the same
-qualified durable stores. In separate mode module processes have independent
-replica counts and communicate through the selected transport; each module's
+Both compositions may run multiple replicas. In local composition
+(`-chat-mode local`, the `monolith` target in `modules.json`) each replica
+contains the direct-call composition and all replicas use the same qualified
+durable stores. In distributed composition (`-chat-mode grpc`, the `separate`
+target) module processes have independent replica counts and communicate through the selected transport; each module's
 replicas still use the module's state store and must be replaceable without
 data migration or user repair. The in-memory store is a single-replica test
 backend only; selecting it for a multi-replica deployment is invalid.
@@ -163,11 +164,9 @@ explicit integration; `slack-events` validates a Slack Events API envelope,
 adds the configured application ID and signing-secret headers when the durable
 payload is an inner event, and fails loudly for identifier-only domain events.
 Both formats use durable leases and the event ID as their idempotency key. Due
-scheduled messages, including normalized Block Kit payloads, are claimed with a separate durable lease and posted with
-scheduled messages, including normalized Block Kit and attachment payloads,
-are claimed with a separate durable lease and posted with
-the scheduled-message ID as their idempotency key before the scheduled record
-is acknowledged. A worker crash therefore leaves both committed events and
+scheduled messages, including normalized Block Kit and attachment payloads, are
+claimed with a separate durable lease and posted with the scheduled-message ID
+as their idempotency key before the scheduled record is acknowledged. A worker crash therefore leaves both committed events and
 scheduled records claimable after lease expiry rather than losing a
 process-local queue.
 
@@ -197,15 +196,24 @@ cmd/
   blobgc/         blob cleanup process
   activator/      wake coordinator and reverse proxy
 internal/
+  activator/      standalone wake coordinator handler and request spool
   api/slack/      Slack wire decoding and response mapping
+  app/localchat/  explicit local storage and blob composition
   web/            page and HTMX fragment handlers
   auth/           browser sessions, bearer tokens, scopes
   domain/         entities and domain invariants
   service/        transactions and application use cases
   store/          persistence ports
+    memory/       single-replica development store
     sqlstore/     portable SQLite repositories and lifecycle state
+    postgres/     PostgreSQL repositories
     dqlite/       clustered lifecycle adapter
+    dqlitetest/   dqlite cluster harness
   events/         event journal, outbox, webhook delivery
+  outbox/         outbox delivery worker
+  scheduler/      scheduled-message worker
+  socketmode/     Socket Mode connection, envelope, and response handling
+  observability/  bounded Prometheus-compatible aggregates
   realtime/       SSE registration and replay
   blob/           external file objects and storage port
   lifecycle/      state machine, fencing, snapshots
@@ -213,14 +221,15 @@ internal/
   generated/      generated composition bindings
 proto/            gRPC service schemas
 specs/            project requirements and pinned contract sources
-deploy/           provider-specific infrastructure modules
+deploy/           request-triggered activation infrastructure modules
+terraform/        durable application infrastructure modules
 tests/            application and official SDK qualification tests
 docs/             architecture, operations, and deployment guidance
 ```
 
 Module API packages are the separable seams. The generated composition root
-chooses local bindings for a static monolith or generated transport bindings
-for a split deployment. Business packages do not inspect topology or choose a
+chooses local bindings for local composition or generated transport bindings for
+distributed composition. Business packages do not inspect topology or choose a
 transport. See [separable module architecture](modules.md).
 
 Imports point inward: wire and storage adapters depend on service/domain
@@ -273,12 +282,59 @@ web replicas may stop.
 - Every lifecycle and writer lease includes a fencing generation so a process
   from a previous activation cannot write after hibernation begins.
 
+## Route inventory outside `/api`
+
+Every Slack Web API method is `/api/{method}` and is enumerated in
+[`specs/compatibility.yaml`](../specs/compatibility.yaml). These are the routes
+that are not, so the set is complete rather than merely representative — an
+operator configuring a CDN, WAF, or access-log redaction policy needs all of
+them.
+
+| Route | Purpose |
+|---|---|
+| `GET /healthz`, `GET /readyz` | liveness and end-to-end readiness |
+| `GET /{$}` | redirect to `/app` |
+| `GET /app`, `/app/search`, `/app/members`, `/app/timeline` | HTMX application pages and fragments |
+| `POST /app/message`, `/app/profile`, `/app/conversation/open`, `/app/reaction`, `/app/reaction/remove`, `/app/pin`, `/app/pin/remove`, `/app/session/revoke` | HTMX mutations |
+| `GET /app/admin/auth` | administrative authorization surface |
+| `GET /login`, `GET /auth/{provider}`, `GET /auth/{provider}/callback`, `POST /logout`, `GET /signed-out`, `GET /me`, `GET /auth/validation` | browser authorization; see [authentication](authentication.md) |
+| `POST /auth/oidc/backchannel-logout`, `GET /auth/shauth/logout/complete` | provider-initiated logout |
+| `GET /events` | server-sent event stream, 16 KiB message ceiling |
+| `GET /rtm` | Real Time Messaging WebSocket |
+| `/socket-mode` | Socket Mode WebSocket, registered only when a connection store exists |
+| `POST /services/{workspace}/{app}/{secret}` | incoming webhook delivery; see [incoming webhooks](incoming-webhooks.md) |
+| `POST /internal/admin/incoming-webhooks/create`, `/enable` | webhook administration |
+| `GET /internal/slack-lists/download.csv` | `slackLists` CSV export |
+
+Three routes are **unauthenticated token-bearing capability URLs**: possession of
+the path is the authorization.
+
+| Route | Purpose |
+|---|---|
+| `GET /files/public/{token}` | public file download |
+| `GET /users/{workspace}/{user}/photo/{token}` | user avatar |
+| `POST /internal/files/external/{upload}` | server-minted external upload target |
+
+Treat the whole path of each as a secret: do not log it, do not place it in a
+referrer-leaking context, and do not cache it under a shared key. See
+[files](files.md).
+
 ## Deployment profiles
 
 ### Local
 
-One combined server/worker process, SQLite file, local blob directory, and an
-optional in-process activator for lifecycle testing.
+One `cmd/server` process, a SQLite file, and a local blob directory. There is no
+combined server/worker process and no in-process activator: `cmd/server` imports
+neither `internal/outbox` nor `internal/scheduler` nor `internal/lifecycle`, so
+outbox delivery, scheduled messages, and blob cleanup still require the separate
+`cmd/worker` and `cmd/blobgc` processes and lifecycle testing requires the
+separate `cmd/activator`.
+
+This is deliberate rather than an omission. `cmd/worker` requires an explicit
+`-delivery-format` with no safe default, plus an owner identity that must be
+unique per replica, and `cmd/blobgc` needs its own lease owner; folding either
+into the server would mean inferring configuration the program is required to
+reject.
 
 ### Small scale-to-zero
 

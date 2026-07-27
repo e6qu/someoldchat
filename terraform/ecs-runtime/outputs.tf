@@ -3,13 +3,26 @@ output "blob_bucket_name" {
   value       = aws_s3_bucket.blobs.bucket
 }
 
+# A task configured from this output alone used to exit 2 at "invalid chat
+# composition": -chat-mode, -store, -auth-workspace, -auth-lookup-user, and
+# -auth-public-url were not exported and had no environment form, so following
+# the README produced a crash-looping service. The blob settings are exported
+# too, so the task's -blob-s3-prefix can never diverge from the prefix the
+# task-role policy actually grants.
 output "environment" {
   description = "Non-secret SameOldChat environment configuration for an ECS task."
   value = {
+    SAMEOLDCHAT_AUTH_LOOKUP_USER      = var.auth_lookup_user
+    SAMEOLDCHAT_AUTH_PUBLIC_URL       = var.auth_public_url
+    SAMEOLDCHAT_AUTH_WORKSPACE        = var.auth_workspace
+    SAMEOLDCHAT_BLOB_S3_BUCKET        = aws_s3_bucket.blobs.bucket
+    SAMEOLDCHAT_BLOB_S3_PREFIX        = var.blob_prefix
     SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL = var.bootstrap_admin_email
+    SAMEOLDCHAT_CHAT_MODE             = var.chat_mode
     SAMEOLDCHAT_OIDC_CLIENT_ID        = var.oidc_client_id
     SAMEOLDCHAT_OIDC_ISSUER           = var.oidc_issuer
     SAMEOLDCHAT_RELEASE_REVISION      = var.release_revision
+    SAMEOLDCHAT_STORE                 = var.store
   }
 }
 
