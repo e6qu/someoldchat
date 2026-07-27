@@ -118,6 +118,7 @@ func (h Handler) Close() error {
 func (h Handler) RegisterForwarding(mux *http.ServeMux) {
 	mux.HandleFunc("POST /activate", h.activate)
 	mux.HandleFunc("GET /healthz", h.health)
+	mux.HandleFunc("GET /lifecycle", h.lifecycle)
 	mux.Handle("/", h)
 }
 
@@ -505,7 +506,32 @@ func (h Handler) ensureActive(ctx context.Context) error {
 	}
 }
 
+// health is the liveness probe a load balancer polls before any token exists, so
+// it is unauthenticated and says only that this process is answering.
+//
+// It used to publish the lifecycle state and the fencing generation on that
+// public listener — two of the exact three things that were removed from the
+// public /metrics route for the same reason, and what
+// specs/scale-to-zero.md:189 forbids public lifecycle status from revealing.
+// Those now live on the token-protected GET /lifecycle.
+//
+// The body is byte-identical to cmd/ecs-ws-activator's GET /healthz, which its
+// comment already claimed. That claim mattered: internal/scheduler's
+// ActivatorDeadlinePublisher decoded a generation out of this body, and
+// {"ok":true} decodes as generation 0 with no error, so an operator pointing the
+// publisher at the WebSocket edge published every wake deadline against a fence
+// the activator refuses forever.
 func (h Handler) health(w http.ResponseWriter, _ *http.Request) {
+	h.recordLifecycleState()
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true}`))
+}
+
+// lifecycle reports the durable lifecycle state and the fencing generation. It
+// is registered under its own mux pattern, so cmd/activator's allow-list leaves
+// it behind the control-plane token; the wake-deadline publisher is the caller
+// that needs the fence and it already sends that token.
+func (h Handler) lifecycle(w http.ResponseWriter, _ *http.Request) {
 	state, generation := h.controller.Snapshot()
 	h.recordLifecycleState()
 	w.Header().Set("Content-Type", "application/json")

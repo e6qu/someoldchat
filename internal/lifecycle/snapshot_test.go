@@ -513,3 +513,49 @@ func (s *failingSnapshotStore) Open(ctx context.Context, key string) (blob.Objec
 	}
 	return s.memorySnapshotStore.Open(ctx, key)
 }
+
+// The two storage backends must answer LastVerified the same way.
+//
+// The filesystem path fell back to reading current.json when the manifests/ scan
+// found nothing verifiable; the object-store path returned ErrNoVerifiedSnapshot.
+// That is the implicit fallback specs/scale-to-zero.md:180-183 forbids, still
+// alive in one backend: the coordinator's exact-generation check defanged it for
+// today's callers, but the same question answered two ways is how the next caller
+// silently restores a generation nobody selected.
+func TestLastVerifiedDoesNotFallBackToCurrentInEitherBackend(t *testing.T) {
+	root := t.TempDir()
+	sourcePath := filepath.Join(root, "database.sqlite")
+	if err := os.WriteFile(sourcePath, []byte("published generation 3"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	object := &memorySnapshotStore{objects: make(map[string][]byte)}
+	objectManager, err := NewObjectSnapshotManager(object, bytes.Repeat([]byte{21}, 32), bytes.Repeat([]byte{22}, 32), "object-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileManager, err := NewSnapshotManager(filepath.Join(root, "snapshots"), bytes.Repeat([]byte{21}, 32), bytes.Repeat([]byte{22}, 32), "object-key", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, manager := range []SnapshotManager{fileManager, objectManager} {
+		if _, err := manager.Create(sourcePath, Manifest{Generation: 3, Backend: "sqlite", SchemaVersion: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The published manifests are lost — a partially restored bucket, a truncated
+	// volume — while current.json survives. Both backends must now say the same
+	// thing: there is no verified generation to select.
+	if err := os.RemoveAll(filepath.Join(root, "snapshots", "manifests")); err != nil {
+		t.Fatal(err)
+	}
+	delete(object.objects, "manifests/00000000000000000003.json")
+
+	for name, manager := range map[string]SnapshotManager{"filesystem": fileManager, "object store": objectManager} {
+		if _, err := manager.Current(3); err != nil {
+			t.Fatalf("%s: current.json is expected to survive: %v", name, err)
+		}
+		if _, err := manager.LastVerified(3); !errors.Is(err, ErrNoVerifiedSnapshot) {
+			t.Fatalf("%s: LastVerified error=%v, want %v rather than a generation nobody published to manifests/", name, err, ErrNoVerifiedSnapshot)
+		}
+	}
+}

@@ -113,11 +113,19 @@ func NewActivatorDeadlinePublisher(baseURL, token string, client *http.Client) (
 	return &ActivatorDeadlinePublisher{base: baseURL, token: token, client: client}, nil
 }
 
-// Fence reads the activator's current lifecycle generation from its health
-// endpoint, which is the same value every other fenced transition is checked
-// against.
+// Fence reads the activator's current lifecycle generation from its
+// token-protected lifecycle endpoint, which is the same value every other fenced
+// transition is checked against.
+//
+// An absent or unparseable generation is an error, never zero. It used to read
+// the unauthenticated GET /healthz, whose body on the WebSocket edge is
+// {"ok":true}: encoding/json decodes that into a uint64 field as 0 with no
+// error, so an operator pointing this publisher at the wrong one of the two
+// "activator" URLs in deploy/ecs-scale-zero published every wake deadline
+// against fence 0, which the activator refuses with 409 forever. The scheduled
+// wake feature was silently inert with a log line as its only symptom.
 func (p *ActivatorDeadlinePublisher) Fence(ctx context.Context) (uint64, error) {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+"/healthz", nil)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, p.base+"/lifecycle", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -132,15 +140,18 @@ func (p *ActivatorDeadlinePublisher) Fence(ctx context.Context) (uint64, error) 
 		return 0, err
 	}
 	if response.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("lifecycle activator health returned %d", response.StatusCode)
+		return 0, fmt.Errorf("lifecycle activator status returned %d", response.StatusCode)
 	}
-	var health struct {
-		Generation uint64 `json:"generation"`
+	var status struct {
+		Generation *uint64 `json:"generation"`
 	}
-	if err := json.Unmarshal(body, &health); err != nil {
-		return 0, fmt.Errorf("decode lifecycle activator health: %w", err)
+	if err := json.Unmarshal(body, &status); err != nil {
+		return 0, fmt.Errorf("decode lifecycle activator status: %w", err)
 	}
-	return health.Generation, nil
+	if status.Generation == nil {
+		return 0, errors.New("lifecycle activator status carries no fencing generation")
+	}
+	return *status.Generation, nil
 }
 
 // SetWakeDeadline records the hint. A stale fence is reported rather than

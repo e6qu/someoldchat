@@ -436,10 +436,17 @@ func TestBeginRecoveryPersistsVolumeAuthorityWithTheWakingRecord(t *testing.T) {
 	}
 }
 
-// The explicit operator restore is the only transition that may declare the
-// snapshot authoritative without a hibernation having published one, and it must
-// advance the fence so the failed attempt's processes cannot re-enter.
-func TestOperatorRestoreRecordsConsentAndAdvancesTheFence(t *testing.T) {
+// The explicit operator restore records consent for one named generation and
+// advances the fence so the failed attempt's processes cannot re-enter.
+//
+// This test previously asserted that the transition sets SnapshotAuthoritative.
+// That assertion encoded the defect: authority is a claim about which copy of the
+// data is newer, nothing has been written at this point, and the flag survived
+// both Fail and AcknowledgeFailure — so a restore the operator got wrong left a
+// standing permission to overwrite a strictly newer volume. The contract the
+// transition actually owes is the one asserted here: authority is untouched, and
+// the selection is recorded against the fence it will run under.
+func TestOperatorRestoreRecordsConsentWithoutClaimingTheSnapshotIsNewer(t *testing.T) {
 	c := New(StateActive)
 	hibernateFence, err := c.BeginHibernate(0)
 	if err != nil {
@@ -448,7 +455,7 @@ func TestOperatorRestoreRecordsConsentAndAdvancesTheFence(t *testing.T) {
 	if err := c.Fail(hibernateFence); err != nil {
 		t.Fatal(err)
 	}
-	restoreFence, err := c.BeginOperatorRestore(hibernateFence)
+	restoreFence, err := c.BeginOperatorRestore(hibernateFence, 7)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -456,10 +463,13 @@ func TestOperatorRestoreRecordsConsentAndAdvancesTheFence(t *testing.T) {
 		t.Fatalf("restore fence=%d, want %d", restoreFence, hibernateFence+1)
 	}
 	metadata := c.Metadata()
-	if metadata.State != StateWaking || !metadata.SnapshotAuthoritative {
-		t.Fatalf("metadata=%+v, want a waking record with the operator's consent recorded", metadata)
+	if metadata.State != StateWaking || metadata.RestoreGeneration != 7 {
+		t.Fatalf("metadata=%+v, want a waking record naming the selected generation 7", metadata)
 	}
-	if _, err := c.BeginOperatorRestore(hibernateFence); !errors.Is(err, ErrStaleFence) {
+	if metadata.SnapshotAuthoritative {
+		t.Fatalf("metadata=%+v: the transition claimed the snapshot is newer than the volume before writing a byte", metadata)
+	}
+	if _, err := c.BeginOperatorRestore(hibernateFence, 7); !errors.Is(err, ErrStaleFence) {
 		t.Fatalf("stale operator restore err=%v, want %v", err, ErrStaleFence)
 	}
 }
@@ -470,7 +480,154 @@ func TestOperatorRestoreRejectsAnInProgressAttempt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.BeginOperatorRestore(fence); !errors.Is(err, ErrInvalidTransition) {
+	if _, err := c.BeginOperatorRestore(fence, 1); !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("operator restore during a wake err=%v, want %v", err, ErrInvalidTransition)
+	}
+}
+
+func TestOperatorRestoreRejectsAGenerationOfZero(t *testing.T) {
+	c := New(StateHibernated)
+	if _, err := c.BeginOperatorRestore(0, 0); !errors.Is(err, ErrGenerationNotRestorable) {
+		t.Fatalf("operator restore of generation 0 err=%v, want %v", err, ErrGenerationNotRestorable)
+	}
+	if c.Metadata().State != StateHibernated {
+		t.Fatalf("metadata=%+v, want the hibernated record untouched", c.Metadata())
+	}
+}
+
+// A restore that never wrote anything must leave the durable record exactly as it
+// found it, so the next ordinary wake still starts from the live volume.
+//
+// This is the state-machine half of the recorded data-loss path: the stack failed
+// mid-hibernation, so the volume holds writes no snapshot has; an operator names
+// the wrong generation; the restore is refused before a byte is written. Consent
+// is scoped to that attempt and dies with it.
+func TestRefusedOperatorRestoreLeavesNoStandingPermission(t *testing.T) {
+	backend := &testStateStore{record: StateRecord{State: StateActive, Generation: 5}}
+	c, err := NewPersistent(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := c.BeginHibernate(5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BeginSnapshot(fence); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Fail(fence); err != nil {
+		t.Fatal(err)
+	}
+	before := backend.load()
+
+	restoreFence, err := c.BeginOperatorRestore(fence, 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The restore is refused before writing: the handler fails the attempt.
+	if err := c.Fail(restoreFence); err != nil {
+		t.Fatal(err)
+	}
+	failed := backend.load()
+	if failed.SnapshotAuthoritative || failed.RestoreGeneration != 0 {
+		t.Fatalf("durable record=%+v after a refused restore, want no authority and no outstanding selection", failed)
+	}
+	acknowledged, err := c.AcknowledgeFailure(restoreFence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovered := backend.load()
+	if recovered.SnapshotAuthoritative || recovered.RestoreGeneration != 0 {
+		t.Fatalf("durable record=%+v after the runbook recovery, want the volume still authoritative", recovered)
+	}
+	wakeFence, err := c.BeginWake()
+	if err != nil || wakeFence != acknowledged+1 {
+		t.Fatalf("wake fence=%d err=%v", wakeFence, err)
+	}
+	woken := c.Metadata()
+	if woken.SnapshotAuthoritative || woken.RestoreGeneration != 0 {
+		t.Fatalf("metadata=%+v, want the next ordinary wake to start from the volume", woken)
+	}
+	if before.SnapshotAuthoritative {
+		t.Fatalf("setup is wrong: the mid-hibernation failure=%+v already claimed snapshot authority", before)
+	}
+}
+
+// specs/scale-to-zero.md requires the earliest necessary wake time to survive
+// until the job runs. Every sibling transition carries it deliberately;
+// AcknowledgeFailure dropped it, so an operator recovery silently disarmed the
+// activator's scheduled wake loop and a due message waited for unrelated traffic.
+func TestAcknowledgeFailurePreservesTheScheduledWakeDeadline(t *testing.T) {
+	// Relative to now, because Activate consumes a deadline that has elapsed: a
+	// fixed calendar date would quietly turn this into a test of the other branch.
+	deadline := time.Now().UTC().Add(time.Hour).Truncate(time.Millisecond)
+	backend := &testStateStore{record: StateRecord{State: StateHibernated, Generation: 4}}
+	c, err := NewPersistent(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetWakeDeadline(4, deadline); err != nil {
+		t.Fatal(err)
+	}
+	fence, err := c.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Fail(fence); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AcknowledgeFailure(fence); err != nil {
+		t.Fatal(err)
+	}
+	if got := backend.load().WakeDeadline; !got.Equal(deadline) {
+		t.Fatalf("durable wake deadline=%s after an acknowledged failure, want %s preserved", got, deadline)
+	}
+	// The retried wake reaches ACTIVE while the job is still due, so the hint
+	// still stands and hibernation is still refused inside its window.
+	retry, err := c.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Activate(retry); err != nil {
+		t.Fatal(err)
+	}
+	if got := backend.load().WakeDeadline; !got.Equal(deadline) {
+		t.Fatalf("durable wake deadline=%s after the retried wake, want %s still pending", got, deadline)
+	}
+}
+
+// The point of no return and its mirror. Authority is granted by the caller that
+// is about to write over the volume and dropped by the caller that has just made
+// the volume complete and live again, and both are fenced and state-conditional
+// like every other transition.
+func TestSnapshotAndVolumeAuthorityDeclarationsAreFenced(t *testing.T) {
+	c := New(StateActive)
+	if err := c.DeclareSnapshotAuthoritative(0); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("declaring a serving stack's snapshot authoritative err=%v, want %v", err, ErrInvalidTransition)
+	}
+	hibernateFence, err := c.BeginHibernate(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BeginRecovery(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeclareSnapshotAuthoritative(hibernateFence + 1); !errors.Is(err, ErrStaleFence) {
+		t.Fatalf("stale declaration err=%v, want %v", err, ErrStaleFence)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("a refused declaration granted authority anyway")
+	}
+	if err := c.DeclareSnapshotAuthoritative(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Metadata().SnapshotAuthoritative {
+		t.Fatal("the point of no return did not record that only the snapshot is complete")
+	}
+	if err := c.DeclareVolumeAuthoritative(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("a live restored volume is still reported as older than the snapshot")
 	}
 }

@@ -3,6 +3,9 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -254,4 +257,67 @@ func (s *failingPostLateRenewalSource) RenewScheduledMessage(context.Context, st
 	}
 	<-s.releaseRenewal
 	return errScheduledLeaseLost
+}
+
+// A missing fencing generation is an error, never zero.
+//
+// Fence read the unauthenticated GET /healthz, and cmd/ecs-ws-activator's probe
+// answers {"ok":true}: encoding/json decodes that into a uint64 field as 0 with
+// no error at all. deploy/ecs-scale-zero calls both processes "the activator", so
+// an operator pointing -activator-url at the WebSocket edge published every wake
+// deadline against fence 0, which the lifecycle activator refuses with 409
+// forever. The scheduled-wake feature was inert with a log line as its only
+// symptom, so the absence has to be reported rather than defaulted.
+func TestActivatorFenceRejectsAResponseWithoutAGeneration(t *testing.T) {
+	for _, probe := range []struct {
+		name string
+		body string
+	}{
+		{name: "websocket edge", body: `{"ok":true}`},
+		{name: "empty object", body: `{}`},
+		{name: "not json", body: `no fence here`},
+	} {
+		t.Run(probe.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, probe.body)
+			}))
+			defer server.Close()
+			publisher, err := NewActivatorDeadlinePublisher(server.URL, "secret", server.Client())
+			if err != nil {
+				t.Fatal(err)
+			}
+			fence, err := publisher.Fence(context.Background())
+			if err == nil {
+				t.Fatalf("fence=%d err=nil, want the absent generation reported", fence)
+			}
+			if fence != 0 {
+				t.Fatalf("fence=%d on error, want the zero value", fence)
+			}
+		})
+	}
+}
+
+// The generation is read from the token-protected lifecycle route, not from the
+// public probe, so the value the publisher fences against is the one only an
+// authenticated caller can see.
+func TestActivatorFenceReadsTheAuthenticatedLifecycleRoute(t *testing.T) {
+	var requested, authorization string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requested, authorization = r.URL.Path, r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"ok":true,"state":"active","generation":12}`)
+	}))
+	defer server.Close()
+	publisher, err := NewActivatorDeadlinePublisher(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := publisher.Fence(context.Background())
+	if err != nil || fence != 12 {
+		t.Fatalf("fence=%d err=%v, want 12", fence, err)
+	}
+	if requested != "/lifecycle" || authorization != "Bearer secret" {
+		t.Fatalf("requested %q with %q, want the token-protected lifecycle route", requested, authorization)
+	}
 }

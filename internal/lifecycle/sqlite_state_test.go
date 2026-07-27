@@ -9,11 +9,77 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// hibernatedRecord is the durable record a fresh control store is seeded with:
-// a hibernated stack released its volume, so the published snapshot is the only
-// copy and restoring it is required.
+// hibernatedRecord is the durable record of a stack that has completed a
+// hibernation: it released its volume, so the published snapshot is the only copy
+// and restoring it is required. It is written by CompareAndSwap, never seeded;
+// see TestSQLiteStateStoreSeedsVerbatim.
 func hibernatedRecord(generation uint64) StateRecord {
 	return StateRecord{State: StateHibernated, Generation: generation, SnapshotAuthoritative: true}
+}
+
+// A seed describes a deployment that has never run, so it has published nothing
+// and the store must record exactly what it was given.
+//
+// Deriving snapshot authority from the seeded state instead is what made a
+// brand-new deployment unbootable: cmd/activator seeds
+// StateRecord{State: StateHibernated}, the seed turned that into "the published
+// snapshot is authoritative", and the first wake looked for a current.json that
+// cannot exist. The conservative polarity documented on the field only protects
+// anything if a seed is allowed to carry it.
+func TestSQLiteStateStoreSeedsVerbatim(t *testing.T) {
+	for _, seed := range []StateRecord{
+		{State: StateHibernated},
+		{State: StateStopping},
+		{State: StateHibernated, Generation: 4, SnapshotAuthoritative: true},
+		{State: StateWaking, Generation: 9, RestoreGeneration: 3},
+	} {
+		t.Run(string(seed.State), func(t *testing.T) {
+			store, err := OpenSQLiteStateStore(filepath.Join(t.TempDir(), "lifecycle.db"), seed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			record, err := store.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if record != seed {
+				t.Fatalf("seeded record=%+v, want %+v written verbatim", record, seed)
+			}
+		})
+	}
+}
+
+// The operator's restore selection decides which generation a resumed restore
+// writes over the volume, so it must round-trip durably and must be part of the
+// compare-and-swap predicate for the same reason snapshot authority is.
+func TestSQLiteStateStorePersistsAndFencesTheOperatorRestoreSelection(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lifecycle.db")
+	store, err := OpenSQLiteStateStore(path, hibernatedRecord(4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := StateRecord{State: StateWaking, Generation: 5, SnapshotAuthoritative: true, RestoreGeneration: 2}
+	if err := store.CompareAndSwap(hibernatedRecord(4), selected); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := OpenSQLiteStateStore(path, hibernatedRecord(99))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	record, err := restarted.Load()
+	if err != nil || record != selected {
+		t.Fatalf("record=%+v err=%v, want %+v", record, err, selected)
+	}
+	stale := selected
+	stale.RestoreGeneration = 0
+	if err := restarted.CompareAndSwap(stale, StateRecord{State: StateActive, Generation: 5}); err != ErrStateConflict {
+		t.Fatalf("stale restore-selection CAS error=%v, want %v", err, ErrStateConflict)
+	}
 }
 
 func TestSQLiteStateStoreSurvivesRestartAndFencesCAS(t *testing.T) {

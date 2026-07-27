@@ -72,7 +72,13 @@ func (c Coordinator) Hibernate(ctx context.Context, fence uint64) (Manifest, err
 	defer func() { c.Metrics.ObserveDuration("sameoldchat_hibernate_duration", time.Since(started)) }()
 	// Idle eligibility is checked before the fence advances so a refused
 	// hibernation leaves the serving stack exactly as it was.
-	if deadline := c.Controller.Metadata().WakeDeadline; !deadline.IsZero() && time.Until(deadline) <= c.WakeSafetyMargin {
+	// Only a deadline still in the future demands a wake this hibernation could
+	// miss. An elapsed one has already been met by the stack that is serving right
+	// now, and the scheduled worker owns the job from here; treating it as
+	// permanently inside the window refused every later hibernation forever, so a
+	// deployment that woke once for a scheduled job stopped scaling to zero and
+	// reported it only as repeated 409s.
+	if remaining := time.Until(c.Controller.Metadata().WakeDeadline); remaining > 0 && remaining <= c.WakeSafetyMargin {
 		c.Metrics.AddCounter("sameoldchat_hibernate_refused_wake_deadline_total", 1)
 		return Manifest{}, ErrWakeDeadlineWithinSafetyWindow
 	}
@@ -140,6 +146,12 @@ func (c Coordinator) WakeAt(ctx context.Context, fence uint64) error {
 	if metadata.State != StateWaking || metadata.Generation != fence {
 		return ErrInvalidTransition
 	}
+	if metadata.RestoreGeneration != 0 {
+		// This fence carries an operator's selection of a specific generation.
+		// Completing it as an ordinary wake would restore whatever happens to be
+		// current instead of what was chosen, so the caller must use RestoreAt.
+		return ErrInvalidTransition
+	}
 	if !metadata.SnapshotAuthoritative {
 		live, err := c.Snapshots.LiveState(ctx, fence)
 		if err != nil {
@@ -161,6 +173,12 @@ func (c Coordinator) WakeAt(ctx context.Context, fence uint64) error {
 // must already own the fence through Controller.BeginOperatorRestore, which is
 // the transition that records the operator's consent to overwrite the volume.
 //
+// The consent is matched against the generation being restored, not merely
+// against snapshot authority. An ordinary wake out of a hibernated stack also
+// carries authority, so checking authority admitted a fence that recorded no
+// consent at all — the same conflation that let a refused restore latch the flag
+// on and destroy the volume on the next unrelated request.
+//
 // The selection is exact: a generation that is not itself verified and
 // known-good is refused rather than rounded down to the nearest one that is.
 func (c Coordinator) RestoreAt(ctx context.Context, fence, generation uint64) error {
@@ -173,10 +191,7 @@ func (c Coordinator) RestoreAt(ctx context.Context, fence, generation uint64) er
 	if metadata.State != StateWaking || metadata.Generation != fence {
 		return ErrInvalidTransition
 	}
-	if !metadata.SnapshotAuthoritative {
-		// BeginOperatorRestore is what records the operator's consent. Reaching
-		// here without it means the caller took an ordinary wake fence and is
-		// about to write a snapshot over a volume nobody agreed to lose.
+	if metadata.RestoreGeneration != generation {
 		return ErrInvalidTransition
 	}
 	manifest, err := c.Snapshots.LastVerified(ctx, generation)
@@ -197,17 +212,32 @@ func (c Coordinator) RestoreAt(ctx context.Context, fence, generation uint64) er
 // wakeAtManifest runs the fenced startup path. When restore is false the
 // database already on the active volume is authoritative and no snapshot bytes
 // are written over it.
+//
+// The two durable declarations around the restore stage are what make snapshot
+// authority mean the same thing to a replacement process as it does here. The
+// first is the point of no return: from the instant Restore may have written a
+// byte, the volume is not a complete copy and only the snapshot is, so the
+// record must say so before the write, not after. The second is its mirror: once
+// persistence is running on the restored volume, the volume is complete and is
+// about to accept migration and worker writes no snapshot has, so authority is
+// dropped there rather than at Activate several stages later.
 func (c Coordinator) wakeAtManifest(ctx context.Context, fence uint64, manifest Manifest, restore bool) error {
 	if err := c.runStage(ctx, "inspect", func() error { return c.Driver.Inspect(ctx, fence) }); err != nil {
 		return err
 	}
 	if restore {
+		if err := c.Controller.DeclareSnapshotAuthoritative(fence); err != nil {
+			return err
+		}
 		if err := c.runStage(ctx, "restore", func() error { return c.Snapshots.Restore(ctx, manifest) }); err != nil {
 			c.Metrics.AddCounter("sameoldchat_restore_failures_total", 1)
 			return err
 		}
 	}
 	if err := c.runStage(ctx, "start_persistence", func() error { return c.Driver.StartPersistence(ctx, fence, manifest) }); err != nil {
+		return err
+	}
+	if err := c.Controller.DeclareVolumeAuthoritative(fence); err != nil {
 		return err
 	}
 	c.Metrics.SetGauge("sameoldchat_last_successful_restore_unix_seconds", time.Now().UTC().Unix())
@@ -233,12 +263,23 @@ func (c Coordinator) runStage(ctx context.Context, name string, operation func()
 
 // Recover resumes a persisted wake or an interrupted hibernation.
 func (c Coordinator) Recover(ctx context.Context) error {
-	state, fence := c.Controller.Snapshot()
-	switch state {
+	metadata := c.Controller.Metadata()
+	fence := metadata.Generation
+	switch metadata.State {
 	case StateActive, StateHibernated:
 		return nil
 	case StateWaking:
-		if err := c.WakeAt(ctx, fence); err != nil {
+		// A WAKING record that names a generation is an operator restore that was
+		// interrupted. The operator's selection is the one thing a replacement
+		// process must not guess at, so it resumes that exact generation rather
+		// than the current manifest.
+		resume := c.WakeAt
+		if metadata.RestoreGeneration != 0 {
+			resume = func(ctx context.Context, fence uint64) error {
+				return c.RestoreAt(ctx, fence, metadata.RestoreGeneration)
+			}
+		}
+		if err := resume(ctx, fence); err != nil {
 			return errors.Join(err, c.Controller.Fail(fence))
 		}
 		return c.Controller.Activate(fence)

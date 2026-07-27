@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -698,4 +699,49 @@ type noClaimSpool struct {
 
 func (*noClaimSpool) Claim(context.Context, string, int, time.Duration) ([]SpooledRequest, error) {
 	return nil, nil
+}
+
+// The unauthenticated probe must reveal nothing about the lifecycle, and the
+// fencing generation must be served on its own token-protected route.
+//
+// Two defects met on this endpoint. The probe published the lifecycle state and
+// the fencing generation on the same public listener as forwarded application
+// traffic — two of the exact three things /metrics was protected for, and what
+// specs/scale-to-zero.md:189 forbids. And because cmd/ecs-ws-activator's probe
+// answers {"ok":true}, a wake-deadline publisher pointed at the WebSocket edge
+// decoded a generation of 0 with no error and published every deadline against a
+// fence the activator refuses forever. One shape for the public probe fixes both:
+// the edge already answers it, and the generation now has a route of its own.
+func TestPublicProbeRevealsNoLifecycleStateAndTheFenceHasItsOwnRoute(t *testing.T) {
+	controller := lifecycle.New(lifecycle.StateHibernated)
+	fence, err := controller.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := NewForwardingHandler(
+		context.Background(), controller, newFencedWake(controller).wake,
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+		1<<20, time.Minute, observability.NewRegistry(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	mux := http.NewServeMux()
+	h.RegisterForwarding(mux)
+
+	probe := httptest.NewRecorder()
+	mux.ServeHTTP(probe, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if body := strings.TrimSpace(probe.Body.String()); body != `{"ok":true}` {
+		t.Fatalf("probe body=%q, want the same shape cmd/ecs-ws-activator answers and nothing more", body)
+	}
+
+	status := httptest.NewRecorder()
+	mux.ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/lifecycle", nil))
+	if status.Code != http.StatusOK {
+		t.Fatalf("lifecycle status=%d, want 200", status.Code)
+	}
+	if body := strings.TrimSpace(status.Body.String()); !strings.Contains(body, `"generation":`+strconv.FormatUint(fence, 10)) || !strings.Contains(body, `"state":"waking"`) {
+		t.Fatalf("lifecycle body=%q, want the state and the fencing generation", body)
+	}
 }
