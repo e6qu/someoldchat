@@ -1400,6 +1400,9 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 	if err := handler.SetReleaseRevision("0123456789abcdef0123456789abcdef01234567"); err != nil {
 		t.Fatal(err)
 	}
+	if handler.ReleaseRevision != "0123456789ab" {
+		t.Fatalf("displayed release revision = %q, want the immutable 12-character image tag", handler.ReleaseRevision)
+	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
 	for _, path := range []string{"/auth/validation", "/me"} {
@@ -1408,7 +1411,7 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
 		body := response.Body.String()
-		for _, expected := range []string{`data-testid="validation-username">developer`, `data-testid="validation-email">developer@example.test`, `data-testid="validation-role">developer`, `data-testid="validation-release">0123456789abcdef0123456789abcdef01234567`, `aria-label="Avatar for developer">D</span>`, `action="/logout"`, `>Sign out</button>`} {
+		for _, expected := range []string{`data-testid="validation-username">developer`, `data-testid="validation-email">developer@example.test`, `data-testid="validation-role">developer`, `data-testid="validation-release">0123456789ab`, `aria-label="Avatar for developer">D</span>`, `action="/logout"`, `>Sign out</button>`} {
 			if response.Code != http.StatusOK || !strings.Contains(body, expected) {
 				t.Fatalf("%s status=%d missing %q body=%s", path, response.Code, expected, body)
 			}
@@ -1438,6 +1441,12 @@ func TestShauthValidationAndMyProfileExposeVerifiedIdentityAndLogout(t *testing.
 	}
 	if err := handler.SetReleaseRevision("latest"); err == nil {
 		t.Fatal("mutable release revision was accepted")
+	}
+	if err := handler.SetReleaseRevision("sha256:" + strings.Repeat("a", 64)); err != nil {
+		t.Fatal(err)
+	}
+	if handler.ReleaseRevision != "sha256:"+strings.Repeat("a", 64) {
+		t.Fatalf("image digest was shortened to %q", handler.ReleaseRevision)
 	}
 }
 
