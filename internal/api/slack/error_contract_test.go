@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -313,27 +315,102 @@ func TestHistoryHonoursTheRequestedTimeWindow(t *testing.T) {
 
 // files.list decoded only limit and cursor, so `?channel=C1` returned every file
 // the principal could see across every channel while reporting success.
-func TestFilesListRefusesFiltersItCannotHonour(t *testing.T) {
-	handler, _ := testHandlerWithStore()
-	if envelope := decodeEnvelope(t, callAPI(t, handler, http.MethodGet, "/api/files.list", "")); !envelope.OK {
-		t.Fatalf("unfiltered files.list: body=%+v", envelope)
-	}
-	for query, want := range map[string]string{
-		"channel=C1":                   "invalid_arg_name",
-		"user=U1":                      "invalid_arg_name",
-		"ts_from=1":                    "invalid_arg_name",
-		"ts_to=2":                      "invalid_arg_name",
-		"count=5":                      "invalid_arg_name",
-		"page=2":                       "invalid_arg_name",
-		"show_files_hidden_by_limit=1": "invalid_arg_name",
-		"types=images":                 "unknown_type",
-	} {
-		response := callAPI(t, handler, http.MethodGet, "/api/files.list?"+query, "")
-		envelope := decodeEnvelope(t, response)
-		if envelope.OK || envelope.Error != want {
-			t.Errorf("files.list?%s: body=%+v, want %q", query, envelope, want)
+// files.list declares user, channel, ts_from, ts_to, types, count, page and
+// show_files_hidden_by_limit. The handler decoded none of them, so a scoped
+// request such as ?channel=C1 returned every file in the workspace with
+// "ok":true. Refusing them was not the answer either: count is how the official
+// SDK paginates this method, and refusing it broke that qualification suite.
+// Each declared parameter now has to actually narrow the result.
+func TestFilesListHonoursEveryDeclaredFilter(t *testing.T) {
+	handler, store := testHandlerWithStore()
+	ctx := context.Background()
+	old := time.Now().UTC().Add(-48 * time.Hour)
+	recent := time.Now().UTC()
+	seed := func(id domain.FileID, uploader domain.UserID, mime string, at time.Time, channels []domain.ConversationID) {
+		event, err := events.New(domain.EventID("E"+string(id)), "T1", uploader, events.NewPayload("file.created", events.String("file_id", string(id))), at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		file := domain.File{ID: id, WorkspaceID: "T1", Uploader: uploader, Name: string(id) + ".bin", MIMEType: mime, BlobKey: "blob-" + string(id), CreatedAt: at, SharedChannels: channels}
+		if err := store.CreateFile(ctx, file, event); err != nil {
+			t.Fatal(err)
 		}
 	}
+	seed("FIMG", "U1", "image/png", recent, []domain.ConversationID{"C1"})
+	seed("FOLD", "U2", "application/pdf", old, []domain.ConversationID{"C2"})
+
+	total := decodeFilesList(t, handler, "")
+	if len(total) < 3 {
+		t.Fatalf("unfiltered files.list returned %d files, want the whole fixture", len(total))
+	}
+
+	if got := decodeFilesList(t, handler, "user=U2"); len(got) != 1 || got[0] != "FOLD" {
+		t.Errorf("user filter returned %v, want only the file U2 uploaded", got)
+	}
+	if got := decodeFilesList(t, handler, "channel=C2"); len(got) != 1 || got[0] != "FOLD" {
+		t.Errorf("channel filter returned %v, want only the file shared into C2", got)
+	}
+	if got := decodeFilesList(t, handler, "types=images"); len(got) != 1 || got[0] != "FIMG" {
+		t.Errorf("types filter returned %v, want only the image", got)
+	}
+	if got := decodeFilesList(t, handler, fmt.Sprintf("ts_from=%d", recent.Add(-time.Hour).Unix())); len(got) == 0 {
+		t.Error("ts_from excluded every file, want the recent ones")
+	} else {
+		for _, id := range got {
+			if id == "FOLD" {
+				t.Error("ts_from included a file created before the window")
+			}
+		}
+	}
+	if got := decodeFilesList(t, handler, fmt.Sprintf("ts_to=%d", old.Add(time.Hour).Unix())); len(got) != 1 || got[0] != "FOLD" {
+		t.Errorf("ts_to returned %v, want only the file created before the window", got)
+	}
+
+	// count is the parameter the official SDK sends, and page has to move.
+	first := decodeFilesList(t, handler, "count=1")
+	if len(first) != 1 {
+		t.Fatalf("count=1 returned %d files, want 1", len(first))
+	}
+	second := decodeFilesList(t, handler, "count=1&page=2")
+	if len(second) != 1 {
+		t.Fatalf("count=1&page=2 returned %d files, want 1", len(second))
+	}
+	if first[0] == second[0] {
+		t.Errorf("page 2 repeated page 1 (%q)", first[0])
+	}
+
+	// An unrecognised type name narrows to nothing rather than falling back to
+	// an unscoped answer.
+	if got := decodeFilesList(t, handler, "types=not-a-type"); len(got) != 0 {
+		t.Errorf("unrecognised type returned %v, want no files", got)
+	}
+}
+
+func decodeFilesList(t *testing.T, handler http.Handler, query string) []string {
+	t.Helper()
+	path := "/api/files.list"
+	if query != "" {
+		path += "?" + query
+	}
+	response := callAPI(t, handler, http.MethodGet, path, "")
+	var body struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+		Files []struct {
+			ID string `json:"id"`
+		} `json:"files"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("files.list?%s: %v (%s)", query, err, response.Body)
+	}
+	if !body.OK {
+		t.Fatalf("files.list?%s: error=%q", query, body.Error)
+	}
+	ids := make([]string, 0, len(body.Files))
+	for _, file := range body.Files {
+		ids = append(ids, file.ID)
+	}
+	return ids
 }
 
 // stars.list dropped the store's cursor and emitted an invented `spill` key, so a

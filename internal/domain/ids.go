@@ -41,6 +41,21 @@ func NewMessageTimestamp(value time.Time) MessageTimestamp {
 	return MessageTimestamp(fmt.Sprintf("%d.%06d", value.Unix(), value.Nanosecond()/1000))
 }
 
+// MessageInstant is the creation instant a message may be stored with: the
+// microsecond resolution its own Slack-style timestamp can express.
+//
+// A message's timestamp IS its public identifier, and read cursors, thread roots
+// and pagination all key on it. Storing an instant finer than that identifier
+// makes the two disagree: a message created at .123456789 stores greater than a
+// read cursor built from the very same instant, which truncates to .123456, so
+// the message can never be marked read. The service truncated at its own two
+// creation sites, which hid this from every caller that went through it, but the
+// repository accepted any resolution — and whether the defect appeared at all
+// then depended on the host clock's granularity.
+func MessageInstant(value time.Time) time.Time {
+	return value.UTC().Truncate(time.Microsecond)
+}
+
 // ErrInvalidMessageTimestamp is the single sentinel for a malformed Slack-style
 // message timestamp. The three ad-hoc errors it replaces were indistinguishable
 // from a repository failure, so a caller could not tell a bad request from a

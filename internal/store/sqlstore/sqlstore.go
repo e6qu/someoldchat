@@ -651,10 +651,22 @@ func (s *Store) Migrate(ctx context.Context) error {
 		return fmt.Errorf("acquire migration connection: %w", err)
 	}
 	defer connection.Close()
-	// The fence table has to exist before the transaction that locks it. Both
-	// statements are idempotent, so concurrently starting replicas race safely.
+	// The fence table has to exist before the transaction that locks it.
+	//
+	// CREATE TABLE IF NOT EXISTS is NOT safe against a concurrent creator on
+	// PostgreSQL: the existence check and the catalog insert are not atomic, so
+	// two replicas starting together can both pass the check and one then fails
+	// on the pg_type unique index. That is precisely the situation this fence
+	// exists to survive, so a losing creator is an expected outcome rather than
+	// an error: if the table is there afterwards, whoever created it is
+	// immaterial.
 	if _, err := connection.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migration_lock (id INTEGER PRIMARY KEY, acquired INTEGER NOT NULL DEFAULT 0)`); err != nil {
-		return fmt.Errorf("create migration fence: %w", err)
+		if !errors.Is(classify(err), store.ErrAlreadyExists) {
+			return fmt.Errorf("create migration fence: %w", err)
+		}
+		if _, verifyErr := connection.ExecContext(ctx, `SELECT 1 FROM schema_migration_lock WHERE 1 = 0`); verifyErr != nil {
+			return fmt.Errorf("create migration fence: %w", errors.Join(err, verifyErr))
+		}
 	}
 	if _, err := connection.ExecContext(ctx, `INSERT INTO schema_migration_lock(id, acquired) VALUES (1, 0) ON CONFLICT(id) DO NOTHING`); err != nil {
 		return fmt.Errorf("initialize migration fence: %w", err)
@@ -4669,6 +4681,9 @@ func (s *Store) IsConversationMember(ctx context.Context, conversation domain.Co
 }
 
 func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	// A message may not be stored at a finer resolution than its own timestamp
+	// can express, or a read cursor built from that timestamp can never cover it.
+	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err

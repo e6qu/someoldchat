@@ -4,6 +4,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -114,20 +115,24 @@ func TestOIDCProvisioningAcrossPostgreSQLAndGRPC(t *testing.T) {
 	if link.UserID != provisioned {
 		t.Fatalf("external identity=%+v, want user %q", link, provisioned)
 	}
-	page, err := remote.AdminListUsers(ctx, workspaceID, lookupUserID, domain.PageRequest{Limit: 100})
+	// Read the provisioned membership as that user reading their own row.
+	// Listing the workspace is an administrative read, and the configured lookup
+	// user is a member, so this assertion used to depend on an authority the
+	// login path is not supposed to hold. It also exercises WorkspaceMembership
+	// across the gRPC boundary, which is the call the browser shell makes on
+	// every request.
+	membership, err := remote.WorkspaceMembership(ctx, workspaceID, provisioned, provisioned)
 	if err != nil {
 		t.Fatal(err)
 	}
-	matches := 0
-	for _, item := range page.Users {
-		if item.User.Email == identity.Email {
-			matches++
-			if item.Membership.Role != domain.WorkspaceRoleMember || !item.Membership.Active {
-				t.Fatalf("provisioned membership=%+v", item.Membership)
-			}
-		}
+	if membership.Role != domain.WorkspaceRoleMember || !membership.Active {
+		t.Fatalf("provisioned membership=%+v", membership)
 	}
-	if matches != 1 {
-		t.Fatalf("provisioned users with email %q=%d, want 1", identity.Email, matches)
+	page, err := remote.AdminListUsers(ctx, workspaceID, provisioned, domain.PageRequest{Limit: 100})
+	if err == nil {
+		t.Fatalf("a member listed the workspace: page=%+v", page)
+	}
+	if !errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		t.Fatalf("administrative listing refusal=%v, want it to survive the transport as ErrNotWorkspaceAdmin", err)
 	}
 }

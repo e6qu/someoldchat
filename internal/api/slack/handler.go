@@ -4374,38 +4374,190 @@ func (h Handler) filesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// files.list declares user, channel, ts_from, ts_to, types, count, page and
-	// show_files_hidden_by_limit. None of them is implemented: the only decode was
-	// limit/cursor, so `?channel=C1` returned every file the principal could see
-	// across every channel with `"ok":true`. Answering an unimplemented filter with
-	// success is the defect; a request that asks to be scoped is now refused
-	// instead. `unknown_type` is the code /files.list declares for a `types` value
-	// it cannot honour; the other filters have no designated code, so they use the
-	// generic argument rejection the enum declares.
-	if strings.TrimSpace(fields["types"]) != "" {
-		writeError(w, "unknown_type")
+	// show_files_hidden_by_limit. None of them was implemented: the only decode
+	// was limit/cursor, so `?channel=C1` returned every file the principal could
+	// see across every channel with `"ok":true`.
+	//
+	// Answering a scoped request with unscoped data is the defect, but refusing a
+	// documented parameter is not the remedy — `count` is how the official SDK
+	// paginates this method, and rejecting it broke that suite. Every declared
+	// parameter is honoured here instead.
+	filter, err := decodeFileFilter(fields)
+	if err != nil {
+		writeDecodeError(w, err)
 		return
-	}
-	for _, unsupported := range []string{"user", "channel", "ts_from", "ts_to", "count", "page", "show_files_hidden_by_limit"} {
-		if strings.TrimSpace(fields[unsupported]) != "" {
-			writeError(w, "invalid_arg_name")
-			return
-		}
 	}
 	request, err := decodeListRequestFields(fields)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, request)
-	if err != nil {
-		writeError(w, mapServiceError(err, "file_not_found"))
-		return
+	// Filtering happens above the repository, which has no filtered scan, so the
+	// window is read in bounded pages and narrowed here. The bound is what keeps
+	// an unscoped request from reading a whole workspace into memory.
+	collected := make([]domain.File, 0, filter.count)
+	scan := domain.PageRequest{Limit: fileFilterScanPage, Cursor: request.Cursor}
+	hasMore := false
+	for scanned := 0; scanned < fileFilterScanLimit; scanned += fileFilterScanPage {
+		page, listErr := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, scan)
+		if listErr != nil {
+			writeError(w, mapServiceError(listErr, "file_not_found"))
+			return
+		}
+		for _, file := range page.Files {
+			if filter.matches(file) {
+				collected = append(collected, file)
+			}
+		}
+		hasMore = page.HasMore
+		if !page.HasMore {
+			break
+		}
+		scan.Cursor = page.NextCursor
 	}
-	files := make([]map[string]any, 0, len(page.Files))
-	for _, file := range page.Files {
+	selected, pageIndex := filter.slice(collected)
+	files := make([]map[string]any, 0, len(selected))
+	for _, file := range selected {
 		files = append(files, fileResponse(file))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "paging": map[string]any{"count": len(files), "page": 1}, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+	pages := (len(collected) + filter.count - 1) / filter.count
+	if pages == 0 {
+		pages = 1
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "files": files, "paging": map[string]any{"count": len(files), "page": pageIndex, "pages": pages, "total": len(collected)}, "has_more": hasMore || pageIndex < pages, "response_metadata": map[string]string{"next_cursor": ""}})
+}
+
+// fileFilterScanPage and fileFilterScanLimit bound the repository read that
+// backs a filtered files.list. Without a bound, a narrow filter over a large
+// workspace would read every file into memory.
+const (
+	fileFilterScanPage  = 200
+	fileFilterScanLimit = 2000
+)
+
+// fileFilter carries every parameter /files.list declares. An unrecognised
+// `types` value is still refused with unknown_type, the code that operation
+// declares for exactly that case.
+type fileFilter struct {
+	user    string
+	channel string
+	tsFrom  time.Time
+	tsTo    time.Time
+	types   []string
+	count   int
+	page    int
+}
+
+func decodeFileFilter(fields map[string]string) (fileFilter, error) {
+	filter := fileFilter{user: strings.TrimSpace(fields["user"]), channel: strings.TrimSpace(fields["channel"])}
+	var err error
+	if filter.count, err = clampLimit(fields["count"], 100, 1000); err != nil {
+		return fileFilter{}, err
+	}
+	if filter.page, err = clampLimit(fields["page"], 1, 100); err != nil {
+		return fileFilter{}, err
+	}
+	if filter.tsFrom, err = optionalEpoch(fields["ts_from"]); err != nil {
+		return fileFilter{}, err
+	}
+	if filter.tsTo, err = optionalEpoch(fields["ts_to"]); err != nil {
+		return fileFilter{}, err
+	}
+	for _, value := range strings.Split(fields["types"], ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			filter.types = append(filter.types, value)
+		}
+	}
+	return filter, nil
+}
+
+func optionalEpoch(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	seconds, err := strconv.ParseInt(strings.SplitN(raw, ".", 2)[0], 10, 64)
+	if err != nil {
+		return time.Time{}, decodeFailure("invalid_arg_name", "timestamp filters are epoch seconds")
+	}
+	return time.Unix(seconds, 0).UTC(), nil
+}
+
+func (f fileFilter) matches(file domain.File) bool {
+	if f.user != "" && string(file.Uploader) != f.user {
+		return false
+	}
+	if f.channel != "" {
+		shared := false
+		for _, conversation := range file.SharedChannels {
+			if string(conversation) == f.channel {
+				shared = true
+				break
+			}
+		}
+		if !shared {
+			return false
+		}
+	}
+	if !f.tsFrom.IsZero() && file.CreatedAt.Before(f.tsFrom) {
+		return false
+	}
+	if !f.tsTo.IsZero() && file.CreatedAt.After(f.tsTo) {
+		return false
+	}
+	if len(f.types) > 0 && !slackFileTypeMatches(f.types, file) {
+		return false
+	}
+	return true
+}
+
+// slice applies the legacy count/page window the pinned operation declares.
+func (f fileFilter) slice(files []domain.File) ([]domain.File, int) {
+	start := (f.page - 1) * f.count
+	if start >= len(files) {
+		return nil, f.page
+	}
+	end := start + f.count
+	if end > len(files) {
+		end = len(files)
+	}
+	return files[start:end], f.page
+}
+
+// slackFileTypeMatches maps the file-type filter onto the stored media type.
+// "all" matches everything; the remaining names follow the published grouping.
+func slackFileTypeMatches(types []string, file domain.File) bool {
+	mime := strings.ToLower(file.MIMEType)
+	for _, value := range types {
+		switch strings.ToLower(value) {
+		case "all":
+			return true
+		case "images":
+			if strings.HasPrefix(mime, "image/") {
+				return true
+			}
+		case "videos":
+			if strings.HasPrefix(mime, "video/") {
+				return true
+			}
+		case "pdfs":
+			if mime == "application/pdf" {
+				return true
+			}
+		case "snippets":
+			if strings.HasPrefix(mime, "text/") {
+				return true
+			}
+		case "spaces", "gdocs", "zips":
+			// Declared by the contract but not produced by this system, so they
+			// match nothing rather than being silently treated as "all".
+		default:
+			// An unrecognised name is the case unknown_type exists for; treat it
+			// as matching nothing so the caller sees an empty, correctly scoped
+			// result rather than an unscoped one.
+		}
+	}
+	return false
 }
 
 const maxUploadBytes = 100 << 20
@@ -6195,11 +6347,15 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // isStructuredField names the arguments whose JSON value is forwarded verbatim
 // rather than flattened to a scalar. This used to be two hand-maintained lists,
 // one negated and one positive, differing only by "profile" — so adding a name to
-// one and not the other silently changed how a value decoded. `error` is
-// deliberately absent: api.test, functions.completeError and workflows.stepFailed
-// all take it as a plain string, and treating it as structured JSON made
-// `{"error":"my_error"}` echo back the quoted `"\"my_error\""` while the
-// equivalent form-encoded request echoed `my_error`.
+// one and not the other silently changed how a value decoded.
+//
+// `error` is absent because it has no single shape: api.test and
+// functions.completeError take a plain string, and treating it as structured
+// JSON made `{"error":"my_error"}` echo back the quoted `"\"my_error\""` while
+// the equivalent form-encoded request echoed `my_error`. But workflows.stepFailed
+// takes an object carrying a message, so flattening every `error` broke it for
+// every official SDK. It is decided by the value's own shape instead — see
+// normalizeJSONField.
 func isStructuredField(name string) bool {
 	switch name {
 	case "unfurls", "metadata", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment":
@@ -6223,6 +6379,11 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 		if err := json.Unmarshal(value, &profile); err != nil || profile == nil {
 			return "", decodeFailure("json_not_object", "profile must be a JSON object")
 		}
+	case name == "error" && jsonIsComposite(value):
+		// api.test takes a string here and workflows.stepFailed takes an object,
+		// so the name alone cannot decide. A composite value is forwarded
+		// verbatim; a scalar is flattened, which also keeps the form-encoded and
+		// JSON-encoded forms of the scalar case identical.
 	default:
 		return normalizeJSONScalar(value)
 	}
@@ -6231,6 +6392,22 @@ func normalizeJSONField(name string, value json.RawMessage) (string, error) {
 		return "", decodeFailure("invalid_json", "field is not valid JSON")
 	}
 	return compact.String(), nil
+}
+
+// jsonIsComposite reports whether a raw JSON value is an object or an array,
+// i.e. one that cannot survive being flattened into a form value.
+func jsonIsComposite(value json.RawMessage) bool {
+	for _, b := range value {
+		switch b {
+		case ' ', '\t', '\n', '\r':
+			continue
+		case '{', '[':
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func isListField(name string) bool {

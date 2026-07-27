@@ -73,8 +73,12 @@ primary_client_secret=$(openssl rand -hex 32)
 witness_client_secret=$(openssl rand -hex 32)
 primary_api_token=$(openssl rand -hex 32)
 witness_api_token=$(openssl rand -hex 32)
-primary_session_token=$(openssl rand -hex 32)
-witness_session_token=$(openssl rand -hex 32)
+# No -session-token here. This suite exercises real single sign-on, and a static
+# browser session shared by every holder cannot coexist with a configured
+# identity provider: possession of the value yields an authenticated session and
+# its CSRF token together, in the same workspace SSO signs users in to. The
+# server now refuses that combination at startup, which is how this omission was
+# found — the qualification harness had been configuring both.
 primary_state_key=$(openssl rand -hex 48)
 witness_state_key=$(openssl rand -hex 48)
 
@@ -199,7 +203,7 @@ provider_compose exec -T postgres createdb -U shauth sameoldchat_witness
 "$work_dir/sameoldchat" \
 	-addr ":${primary_port}" -chat-mode local -store postgresql \
 	-db "postgres://shauth:${postgres_password}@127.0.0.1:${postgres_port}/sameoldchat_primary?sslmode=disable" \
-	-api-token "$primary_api_token" -session-token "$primary_session_token" \
+	-api-token "$primary_api_token" \
 	-bootstrap-admin-email primary-bootstrap@localhost.test \
 	-auth-workspace Tdev -auth-lookup-user Udev -auth-public-url "$primary_origin" -auth-state-key-hex "$primary_state_key" \
 	-oidc-issuer "$provider_origin" -oidc-client-id someoldchat-primary -oidc-client-secret "$primary_client_secret" \
@@ -209,7 +213,7 @@ primary_pid=$!
 "$work_dir/sameoldchat" \
 	-addr ":${witness_port}" -chat-mode local -store postgresql \
 	-db "postgres://shauth:${postgres_password}@127.0.0.1:${postgres_port}/sameoldchat_witness?sslmode=disable" \
-	-api-token "$witness_api_token" -session-token "$witness_session_token" \
+	-api-token "$witness_api_token" \
 	-bootstrap-admin-email witness-bootstrap@localhost.test \
 	-auth-workspace Tdev -auth-lookup-user Udev -auth-public-url "$witness_origin" -auth-state-key-hex "$witness_state_key" \
 	-oidc-issuer "$provider_origin" -oidc-client-id someoldchat-witness -oidc-client-secret "$witness_client_secret" \

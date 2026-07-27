@@ -2557,6 +2557,9 @@ func (s *Store) IsConversationMember(_ context.Context, conversation domain.Conv
 // "[]", a duplicate message identifier silently inserted a second row, and a
 // message could reference a conversation that does not exist.
 func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	// Matches the SQL backends: see the note there on why a message instant is
+	// held to the resolution of its own timestamp.
+	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
 		return err

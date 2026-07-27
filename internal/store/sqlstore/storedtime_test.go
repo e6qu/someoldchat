@@ -630,3 +630,72 @@ func TestSQLiteUserEmailMigrationNormalizesAndRefusesCollisions(t *testing.T) {
 		t.Fatalf("collision error=%v, want both user identities named", err)
 	}
 }
+
+// A message's timestamp is its public identifier, and a read cursor is expressed
+// in that same form. Storing a creation instant finer than the identifier can
+// express makes a message permanently unread: it stores greater than a cursor
+// derived from the very same instant.
+//
+// This reproduced only where the host clock returns sub-microsecond precision,
+// so it passed on a development machine and failed in continuous integration.
+// The instant here is chosen explicitly so the assertion does not depend on the
+// clock at all.
+func TestSQLiteMessageInstantCannotOutrunItsOwnTimestamp(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "message-instant.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 789 nanoseconds past a microsecond boundary: a value the Slack-style
+	// timestamp cannot represent.
+	created := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
+	if err := s.CreateMessage(ctx, domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "unread", CreatedAt: created}, mustEvent(t, "E1", "T1", created), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := s.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(stored.Messages) != 1 {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	instant := stored.Messages[0].CreatedAt
+	if roundTripped := domain.NewMessageTimestamp(instant); string(roundTripped) != string(domain.NewMessageTimestamp(created)) {
+		t.Fatalf("timestamp=%q, want it stable across the store", roundTripped)
+	}
+	if instant.Nanosecond()%1000 != 0 {
+		t.Fatalf("stored instant %v carries sub-microsecond precision its own timestamp cannot express", instant)
+	}
+
+	// A cursor built from the message's own timestamp must mark it read.
+	if err := s.SetReadCursor(ctx, domain.ReadCursor{WorkspaceID: "T1", UserID: "U1", Conversation: "C1", LastRead: domain.NewMessageTimestamp(created), UpdatedAt: created}, mustEvent(t, "E2", "T1", created)); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil || len(page.Conversations) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if page.Conversations[0].UnreadCount != 0 {
+		t.Fatalf("unread=%d, want a message covered by a cursor at its own timestamp to be read", page.Conversations[0].UnreadCount)
+	}
+}
+
+// mustEvent builds a durable event through the constructor, so a fixture cannot
+// describe a payload no producer emits.
+func mustEvent(t *testing.T, id domain.EventID, workspace domain.WorkspaceID, at time.Time) events.Event {
+	t.Helper()
+	event, err := events.New(id, workspace, "U1", events.NewPayload("message.created", events.String("message_id", "M1"), events.String("channel_id", "C1")), at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return event
+}
