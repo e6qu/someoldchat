@@ -497,3 +497,137 @@ func ecsTask(arn, address string) ecstypes.Task {
 func itoa(value int) string {
 	return strconv.Itoa(value)
 }
+
+// The NLB target group probes GET /healthz over HTTP with matcher "200". A 204
+// matches nothing, so every edge task was permanently unhealthy: with
+// deployment_minimum_healthy_percent = 100 and the deployment circuit breaker
+// enabled the service could never converge and no WebSocket traffic was served.
+func TestHealthzAnswersTheStatusTheTargetGroupMatches(t *testing.T) {
+	response := httptest.NewRecorder()
+	health(response, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200 so the NLB matcher accepts it", response.Code)
+	}
+	if got := response.Header().Get("Content-Type"); got != "application/json" {
+		t.Fatalf("content type=%q, want application/json to match the lifecycle activator's probe", got)
+	}
+	if body := strings.TrimSpace(response.Body.String()); body != `{"ok":true}` {
+		t.Fatalf("body=%q", body)
+	}
+}
+
+// A half-open peer used to pin its connection lease forever: neither leg set a
+// read deadline or generated pings, while renewLeaseLoop kept extending the lease
+// regardless of peer health, so one closed laptop lid held the whole application
+// service awake at full replica cost and defeated scale-to-zero.
+func TestProxiedStreamClosesWhenAPeerStopsAnsweringPings(t *testing.T) {
+	const streamTimeout = 300 * time.Millisecond
+	silent, proxied, cleanup := websocketPair(t)
+	defer cleanup()
+	// A half-open peer: the TCP connection is alive, the process behind it is not.
+	silent.SetPingHandler(func(string) error { return nil })
+	go func() {
+		for {
+			if _, _, err := silent.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	side := &peer{conn: proxied, writeWait: time.Second}
+	if err := side.watch(streamTimeout); err != nil {
+		t.Fatal(err)
+	}
+	errorsCh := make(chan error, 4)
+	done := make(chan struct{})
+	defer close(done)
+	go side.keepalive(done, errorsCh, streamTimeout/10)
+	go proxyMessages(errorsCh, side, side, streamTimeout)
+
+	select {
+	case err := <-errorsCh:
+		if err == nil || isNormalWebSocketClose(err) {
+			t.Fatalf("proxy error=%v, want the unanswered stream torn down", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a peer that never answered a ping held the stream, and therefore its lease, open")
+	}
+}
+
+// The mirror case: a peer that answers must not be torn down. Without it the
+// liveness fix would trade a pinned lease for dropped connections.
+func TestProxiedStreamSurvivesWhileThePeerAnswersPings(t *testing.T) {
+	const streamTimeout = 300 * time.Millisecond
+	live, proxied, cleanup := websocketPair(t)
+	defer cleanup()
+	// A live peer replies to pings while it is reading, which is what any real
+	// client and the application server both do.
+	go func() {
+		for {
+			if _, _, err := live.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	side := &peer{conn: proxied, writeWait: time.Second}
+	if err := side.watch(streamTimeout); err != nil {
+		t.Fatal(err)
+	}
+	pongs := make(chan struct{}, 32)
+	proxied.SetPongHandler(func(string) error {
+		select {
+		case pongs <- struct{}{}:
+		default:
+		}
+		return proxied.SetReadDeadline(time.Now().Add(streamTimeout))
+	})
+	errorsCh := make(chan error, 4)
+	done := make(chan struct{})
+	defer close(done)
+	go side.keepalive(done, errorsCh, streamTimeout/10)
+	go proxyMessages(errorsCh, side, side, streamTimeout)
+
+	// Five round trips is well past the timeout, so a stream that survives them
+	// survives because the pongs arrived, not because nothing was checked.
+	for range 5 {
+		select {
+		case <-pongs:
+		case err := <-errorsCh:
+			t.Fatalf("proxy error=%v, want a stream with a live peer kept open", err)
+		case <-time.After(10 * time.Second):
+			t.Fatal("no pong observed from a live peer")
+		}
+	}
+	select {
+	case err := <-errorsCh:
+		t.Fatalf("proxy error=%v, want a stream with a live peer kept open", err)
+	default:
+	}
+}
+
+// websocketPair returns the two ends of one real WebSocket connection: the first
+// is driven by the test, the second is the end the proxy owns.
+func websocketPair(t *testing.T) (*websocket.Conn, *websocket.Conn, func()) {
+	t.Helper()
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	accepted := make(chan *websocket.Conn, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		accepted <- conn
+	}))
+	dialed, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		server.Close()
+		t.Fatal(err)
+	}
+	proxied := <-accepted
+	return dialed, proxied, func() {
+		_ = dialed.Close()
+		_ = proxied.Close()
+		server.Close()
+	}
+}

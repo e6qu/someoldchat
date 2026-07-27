@@ -51,7 +51,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	audit := flags.Bool("audit", false, "audit durable blob references and provider objects, then exit")
 	enqueueOrphans := flags.Bool("enqueue-orphans", false, "enqueue audited orphan objects for leased cleanup; requires -audit")
 	maxResults := flags.Int("max-audit-results", 1000, "maximum orphan or missing keys returned by an audit; audit mode only")
-	minOrphanAge := flags.Duration("min-orphan-age", time.Hour, "grace period an unreferenced object must survive before it counts as an orphan; audit mode only")
+	minOrphanAge := flags.Duration("min-orphan-age", time.Hour, "grace period an unreferenced object must survive before it counts as an orphan; audit mode only, and never shorter than the external upload window")
 	limit := flags.Int("batch-size", 100, "bounded cleanup batch size; cleanup mode only")
 	lease := flags.Duration("lease", 30*time.Second, "durable cleanup lease; cleanup mode only")
 	poll := flags.Duration("poll", 250*time.Millisecond, "poll interval; cleanup mode only")
@@ -65,8 +65,16 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// first created the SQLite database, and for dqlite joined the cluster, only
 	// to reject the command line a moment later; an invocation that is refused
 	// must leave no durable state behind.
-	if *backend == "" || *workspace == "" || (*blobDirectory == "" && *blobS3Bucket == "") || (*blobDirectory != "" && *blobS3Bucket != "") || *maxResults <= 0 || *minOrphanAge <= 0 {
-		logger.Error("blobgc requires one explicit blob store, store backend, workspace, positive audit limit, and positive minimum orphan age")
+	if *backend == "" || *workspace == "" || (*blobDirectory == "" && *blobS3Bucket == "") || (*blobDirectory != "" && *blobS3Bucket != "") || *maxResults <= 0 {
+		logger.Error("blobgc requires one explicit blob store, store backend, workspace, and positive audit limit")
+		return exitConfiguration
+	}
+	// The floor is the external upload window, not zero. An upload writes its
+	// bytes before the row that references them is committed, so a grace period
+	// shorter than the ticket lifetime lets an audit delete a file the user
+	// completes minutes later, on a bucket whose versioning is suspended.
+	if *minOrphanAge < blob.ExternalUploadWindow {
+		logger.Error("minimum orphan age is shorter than the external upload window", "min_orphan_age", *minOrphanAge, "external_upload_window", blob.ExternalUploadWindow)
 		return exitConfiguration
 	}
 	if *enqueueOrphans && !*audit {
@@ -132,6 +140,14 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			return exitRuntime
 		}
 		logger.Info("blob audit", "objects", result.Objects, "references", result.References, "orphans", len(result.OrphanKeys), "missing", len(result.MissingKeys), "duplicates", result.DuplicateKeys, "too_recent_for_orphan_cleanup", result.RecentObjects)
+		// The missing-object check comes before anything destructive. It used to
+		// come after the enqueue, so an audit whose own view of the provider was
+		// demonstrably wrong had already queued every deletion it derived from
+		// that view by the time it reported the inconsistency and exited non-zero.
+		if len(result.MissingKeys) != 0 {
+			logger.Error("audit found referenced objects the blob store does not have", "missing", len(result.MissingKeys), "hint", "no orphan deletions were enqueued from an inconsistent audit")
+			return exitRuntime
+		}
 		if *enqueueOrphans {
 			count, err := reconciler.EnqueueOrphans(ctx, domain.WorkspaceID(*workspace), result)
 			if err != nil {
@@ -139,10 +155,17 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 				return exitRuntime
 			}
 			logger.Info("enqueued orphan cleanup", "count", count)
-		}
-		if len(result.MissingKeys) != 0 {
-			logger.Error("audit found referenced objects the blob store does not have", "missing", len(result.MissingKeys))
-			return exitRuntime
+			// Abandoned staging files are excluded from enumeration so an upload
+			// in flight is never deleted, which also means nothing else ever
+			// reclaims one whose writer was killed. They are reclaimed here,
+			// behind the same operator opt-in as the orphan deletions and counted
+			// separately from them.
+			swept, err := reconciler.SweepAbandonedUploads(ctx, domain.WorkspaceID(*workspace))
+			if err != nil {
+				logger.Error("sweep abandoned uploads", "count", swept, "error", err)
+				return exitRuntime
+			}
+			logger.Info("swept abandoned uploads", "count", swept)
 		}
 		return 0
 	}

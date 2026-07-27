@@ -2,14 +2,34 @@ package lifecycle
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 )
 
-type testStateStore struct{ record StateRecord }
+// testStateStore stands in for the durable control store. It is mutex-guarded
+// because the interleavings that matter — two replicas, or a replacement process
+// resuming a record an abandoned one is still holding — are concurrent by
+// definition, and a data race in the fake would hide the behaviour under test.
+type testStateStore struct {
+	mu     sync.Mutex
+	record StateRecord
+}
 
-func (s *testStateStore) Load() (StateRecord, error) { return s.record, nil }
+func (s *testStateStore) Load() (StateRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.record, nil
+}
+
+func (s *testStateStore) load() StateRecord {
+	record, _ := s.Load()
+	return record
+}
+
 func (s *testStateStore) CompareAndSwap(expected, next StateRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.record != expected {
 		return ErrStateConflict
 	}
@@ -307,5 +327,150 @@ func TestBeginWakePreservesTheScheduledWakeDeadline(t *testing.T) {
 	}
 	if got := backend.record.WakeDeadline; !got.Equal(deadline) {
 		t.Fatalf("durable wake deadline=%s, want %s", got, deadline)
+	}
+}
+
+// Snapshot authority must be produced and consumed at exactly the two points where
+// the answer changes, and carried unchanged everywhere else. A per-case
+// conditional in the wake path cannot express that; only the durable record can,
+// which is why the whole transition table is pinned here rather than in the one
+// or two transitions a bug was observed in.
+func TestVolumeAuthorityIsCarriedThroughEveryTransition(t *testing.T) {
+	c := New(StateHibernated)
+	if !c.Metadata().SnapshotAuthoritative {
+		t.Fatal("a hibernated stack released its volume; the snapshot is the only copy")
+	}
+	fence, err := c.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Metadata().SnapshotAuthoritative {
+		t.Fatal("a wake elected out of hibernation must still restore its snapshot")
+	}
+	if err := c.Activate(fence); err != nil {
+		t.Fatal(err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("a serving stack accepts writes no snapshot has")
+	}
+	hibernateFence, err := c.BeginHibernate(fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("quiescing publishes no manifest, so the volume is still the only copy")
+	}
+	if err := c.BeginSnapshot(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("snapshotting has not published a manifest yet")
+	}
+	if err := c.BeginStop(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Metadata().SnapshotAuthoritative {
+		t.Fatal("stopping has a verified published manifest for this exact fence")
+	}
+	if err := c.CompleteHibernate(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	if !c.Metadata().SnapshotAuthoritative {
+		t.Fatal("a completed hibernation released the volume")
+	}
+}
+
+// The recorded data-loss path, at the level of the state machine: a failure that
+// happened while the volume was the only copy must still say so after an operator
+// has acknowledged it and after the next wake election.
+func TestAcknowledgedFailureAndTheNextWakeKeepVolumeAuthority(t *testing.T) {
+	c := New(StateActive)
+	fence, err := c.BeginHibernate(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BeginSnapshot(fence); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Fail(fence); err != nil {
+		t.Fatal(err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("failing mid-hibernation forgot that the volume is the only copy")
+	}
+	acknowledged, err := c.AcknowledgeFailure(fence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("acknowledging the failure forgot that the volume is the only copy")
+	}
+	wakeFence, err := c.BeginWake()
+	if err != nil || wakeFence != acknowledged+1 {
+		t.Fatalf("wake fence=%d err=%v", wakeFence, err)
+	}
+	if c.Metadata().SnapshotAuthoritative {
+		t.Fatal("the wake after an acknowledged mid-hibernation failure would restore over the volume")
+	}
+}
+
+// A recovery that persists WAKING must persist snapshot authority with it,
+// because that record — not the call stack that wrote it — is what a replacement
+// process reads.
+func TestBeginRecoveryPersistsVolumeAuthorityWithTheWakingRecord(t *testing.T) {
+	backend := &testStateStore{record: StateRecord{State: StateActive, Generation: 3}}
+	c, err := NewPersistent(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := c.BeginHibernate(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.BeginRecovery(fence); err != nil {
+		t.Fatal(err)
+	}
+	record := backend.load()
+	if record.State != StateWaking || record.Generation != fence || record.SnapshotAuthoritative {
+		t.Fatalf("durable record=%+v, want a WAKING record that still names the volume authoritative", record)
+	}
+}
+
+// The explicit operator restore is the only transition that may declare the
+// snapshot authoritative without a hibernation having published one, and it must
+// advance the fence so the failed attempt's processes cannot re-enter.
+func TestOperatorRestoreRecordsConsentAndAdvancesTheFence(t *testing.T) {
+	c := New(StateActive)
+	hibernateFence, err := c.BeginHibernate(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Fail(hibernateFence); err != nil {
+		t.Fatal(err)
+	}
+	restoreFence, err := c.BeginOperatorRestore(hibernateFence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoreFence != hibernateFence+1 {
+		t.Fatalf("restore fence=%d, want %d", restoreFence, hibernateFence+1)
+	}
+	metadata := c.Metadata()
+	if metadata.State != StateWaking || !metadata.SnapshotAuthoritative {
+		t.Fatalf("metadata=%+v, want a waking record with the operator's consent recorded", metadata)
+	}
+	if _, err := c.BeginOperatorRestore(hibernateFence); !errors.Is(err, ErrStaleFence) {
+		t.Fatalf("stale operator restore err=%v, want %v", err, ErrStaleFence)
+	}
+}
+
+func TestOperatorRestoreRejectsAnInProgressAttempt(t *testing.T) {
+	c := New(StateHibernated)
+	fence, err := c.BeginWake()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.BeginOperatorRestore(fence); !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("operator restore during a wake err=%v, want %v", err, ErrInvalidTransition)
 	}
 }

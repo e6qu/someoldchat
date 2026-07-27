@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/lease"
 	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 )
@@ -340,52 +341,27 @@ func (h Handler) deliverSpooledRequest(ctx context.Context, request SpooledReque
 	return nil
 }
 
+// forwardSpoolRequest replays one spooled request while holding its lease. A lost
+// lease means another owner is running the same work, which is the condition
+// behind duplicate delivery, so lease.While always surfaces it.
+//
+// A capture failure is not a delivery failure: the application ran to completion,
+// so the caller decides what to do with an applied request whose response could
+// not be held.
 func (h Handler) forwardSpoolRequest(ctx context.Context, request *http.Request, id uint64, capture *capturedWriter) error {
-	deliveryContext, cancel := context.WithCancel(ctx)
-	defer cancel()
-	renewErrors := make(chan error, 1)
-	done := make(chan struct{})
-	renewDone := make(chan struct{})
-	interval := h.wakeWait / 3
-	if interval < time.Millisecond {
-		interval = time.Millisecond
+	err := lease.While(ctx, h.wakeWait,
+		func(renewContext context.Context) error {
+			return h.spool.Renew(renewContext, h.spoolOwner, []uint64{id}, h.wakeWait)
+		},
+		func(deliveryContext context.Context) error {
+			h.forward.ServeHTTP(capture, request.WithContext(deliveryContext))
+			return nil
+		},
+	)
+	if err != nil {
+		h.metrics.AddCounter("sameoldchat_activator_lease_lost_total", 1)
+		return errors.Join(err, capture.err)
 	}
-	go func() {
-		defer close(renewDone)
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				return
-			case <-ticker.C:
-				if err := h.spool.Renew(deliveryContext, h.spoolOwner, []uint64{id}, h.wakeWait); err != nil {
-					cancel()
-					renewErrors <- err
-					return
-				}
-			}
-		}
-	}()
-	request = request.WithContext(deliveryContext)
-	h.forward.ServeHTTP(capture, request)
-	cancel()
-	close(done)
-	<-renewDone
-	select {
-	case err := <-renewErrors:
-		// A lost lease means another owner is running the same work. That is
-		// the condition behind duplicate delivery, so it is always surfaced
-		// rather than dropped in favor of the operation's own error.
-		if !errors.Is(err, context.Canceled) {
-			h.metrics.AddCounter("sameoldchat_activator_lease_lost_total", 1)
-			return errors.Join(err, capture.err)
-		}
-	default:
-	}
-	// A capture failure is not a delivery failure: the application ran to
-	// completion, so the caller decides what to do with an applied request
-	// whose response could not be held.
 	return nil
 }
 

@@ -11,8 +11,33 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 )
 
+// ExternalUploadWindow is the longest interval this product allows between an
+// object being written to blob storage and the durable row that references it
+// being committed. It is the ticket lifetime of an external upload: the client
+// receives an upload URL, PUTs the bytes under workspace/external/<id>, and only
+// then calls files.completeUploadExternal, which is what creates the row the
+// reference walk can see.
+//
+// The reconciler's minimum orphan age must never be shorter than this, and the
+// relationship is enforced rather than documented: with a five-minute grace
+// period an audit deleted the bytes of an upload the user completed six minutes
+// later, and terraform/ecs-runtime suspends bucket versioning, so that deletion
+// is unrecoverable.
+//
+// internal/api/slack/handler.go mints the ticket with this same duration written
+// as a literal; it should read this constant so the two cannot drift.
+const ExternalUploadWindow = 15 * time.Minute
+
 type ReferenceSource interface {
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
+}
+
+// TemporaryObjectStore is implemented by providers that stage in-progress uploads
+// inside the namespace Walk enumerates. Walk hides those entries so an upload in
+// flight can never be classified as an orphan, which means nothing else ever
+// reclaims one abandoned by a killed process; this is how they are reclaimed.
+type TemporaryObjectStore interface {
+	SweepTemporaryObjects(ctx context.Context, prefix string, olderThan time.Time) (int, error)
 }
 
 type EventSink interface {
@@ -46,8 +71,8 @@ func NewReconciler(references ReferenceSource, objects WalkStore, events EventSi
 	if references == nil || objects == nil || events == nil || maxResults <= 0 {
 		return Reconciler{}, errors.New("blob reconciliation requires reference source, walk store, event sink, and positive result limit")
 	}
-	if minOrphanAge <= 0 {
-		return Reconciler{}, errors.New("blob reconciliation requires a positive minimum orphan age so an in-flight upload cannot be classified as an orphan")
+	if minOrphanAge < ExternalUploadWindow {
+		return Reconciler{}, fmt.Errorf("blob reconciliation requires a minimum orphan age of at least %s, the external upload window, so an upload whose bytes are written before its reference is committed cannot be classified as an orphan", ExternalUploadWindow)
 	}
 	return Reconciler{References: references, Objects: objects, Events: events, MaxResults: maxResults, MinOrphanAge: minOrphanAge, Now: time.Now}, nil
 }
@@ -67,9 +92,18 @@ func (r Reconciler) Audit(ctx context.Context, workspace domain.WorkspaceID) (Re
 	if workspace == "" {
 		return Reconciliation{}, errors.New("blob reconciliation requires a workspace")
 	}
-	if r.Now == nil || r.MinOrphanAge <= 0 {
+	if r.Now == nil || r.MinOrphanAge < ExternalUploadWindow {
 		return Reconciliation{}, errors.New("blob reconciliation is not configured")
 	}
+	// The hold-back instant is taken before anything is enumerated, not after
+	// both walks finish. Measured at the end, the grace period shrinks by the
+	// duration of the audit itself: on a workspace whose walks take longer than
+	// MinOrphanAge — exactly the large deployments that need the audit — an object
+	// written moments after the audit started was already "old enough" by the time
+	// it was judged, and its reference had not yet been committed. Anchoring the
+	// comparison at the start makes the guarantee independent of how long the
+	// audit runs, and makes an object written during the walk trivially too new.
+	cutoff := r.Now().UTC()
 	result := Reconciliation{}
 	objects := make(map[string]time.Time)
 	prefix := string(workspace) + "/"
@@ -107,7 +141,6 @@ func (r Reconciler) Audit(ctx context.Context, workspace domain.WorkspaceID) (Re
 	}); err != nil {
 		return Reconciliation{}, err
 	}
-	cutoff := r.Now().UTC()
 	for key, modified := range objects {
 		if modified.IsZero() || cutoff.Sub(modified.UTC()) < r.MinOrphanAge {
 			// An unknown age is treated as too recent: deleting live bytes is
@@ -154,9 +187,43 @@ func (r Reconciler) confirmMissing(ctx context.Context, candidates []string) ([]
 	return confirmed, nil
 }
 
+// SweepAbandonedUploads removes staging files a killed process left behind.
+//
+// Walk deliberately hides them, which is what stops an in-flight upload being
+// deleted, but it also means nothing reports or reclaims one whose writer died
+// between os.CreateTemp and the final rename. Without this they accumulate at
+// full object size on the blob volume forever. Providers that stage server-side
+// have nothing to sweep and simply do not implement the interface.
+//
+// It is destructive, so it lives beside EnqueueOrphans behind the same operator
+// opt-in rather than inside the read-only audit, and it uses the same grace
+// period: a temporary file younger than MinOrphanAge may be an upload in flight.
+func (r Reconciler) SweepAbandonedUploads(ctx context.Context, workspace domain.WorkspaceID) (int, error) {
+	if workspace == "" {
+		return 0, errors.New("blob cleanup requires a workspace")
+	}
+	if r.Now == nil || r.MinOrphanAge < ExternalUploadWindow {
+		return 0, errors.New("blob reconciliation is not configured")
+	}
+	sweeper, ok := r.Objects.(TemporaryObjectStore)
+	if !ok {
+		return 0, nil
+	}
+	return sweeper.SweepTemporaryObjects(ctx, string(workspace)+"/", r.Now().UTC().Add(-r.MinOrphanAge))
+}
+
 func (r Reconciler) EnqueueOrphans(ctx context.Context, workspace domain.WorkspaceID, result Reconciliation) (int, error) {
 	if workspace == "" {
 		return 0, errors.New("blob cleanup requires a workspace")
+	}
+	// A referenced object the provider does not have is evidence that this
+	// audit's own view of the provider is wrong — the wrong prefix, a partially
+	// restored snapshot, a bucket that has not caught up. Deleting the objects it
+	// classified as orphans from that same view is exactly the wrong response,
+	// and cmd/blobgc's non-zero exit came after the deletions were already
+	// enqueued.
+	if len(result.MissingKeys) != 0 {
+		return 0, fmt.Errorf("blob cleanup refuses to enqueue %d orphan deletions while %d referenced objects are missing", len(result.OrphanKeys), len(result.MissingKeys))
 	}
 	for _, key := range result.OrphanKeys {
 		if key == "" {

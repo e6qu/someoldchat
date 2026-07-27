@@ -1,9 +1,20 @@
 package main
 
 import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
+	"time"
+
+	"github.com/sameoldchat/sameoldchat/internal/activator"
+	"github.com/sameoldchat/sameoldchat/internal/lifecycle"
+	"github.com/sameoldchat/sameoldchat/internal/observability"
+	"github.com/sameoldchat/sameoldchat/internal/scheduler"
 )
 
 func TestValidControlTokenRequiresBearerSchemeAndExactToken(t *testing.T) {
@@ -49,6 +60,7 @@ func TestControlTokenGuardsMetricsAlongsideLifecycleEndpoints(t *testing.T) {
 	mux.HandleFunc("GET /metrics", serve)
 	mux.HandleFunc("POST /hibernate", serve)
 	mux.HandleFunc("POST /recover", serve)
+	mux.HandleFunc("POST /restore", serve)
 	guarded := requireControlToken(mux, "secret")
 
 	for _, route := range []struct {
@@ -58,6 +70,7 @@ func TestControlTokenGuardsMetricsAlongsideLifecycleEndpoints(t *testing.T) {
 		{http.MethodGet, "/metrics"},
 		{http.MethodPost, "/hibernate"},
 		{http.MethodPost, "/recover"},
+		{http.MethodPost, "/restore"},
 	} {
 		forwarded = false
 		response := httptest.NewRecorder()
@@ -97,6 +110,206 @@ func TestUnlistedControlRouteIsProtectedByDefault(t *testing.T) {
 	guarded := requireControlToken(mux, "secret")
 	response := httptest.NewRecorder()
 	guarded.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/newly-added-control-endpoint", nil))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status=%d, want the control token required", response.Code)
+	}
+}
+
+// The lifecycle coordinator no longer walks back to older snapshot generations on
+// its own, because specs/scale-to-zero.md:180-183 forbids converting a restore
+// failure into an implicit fallback. This is the explicit operator action the
+// same paragraph mandates and which had no implementation: docs/operations.md
+// promised it and cmd/activator registered only /activate, /hibernate, /recover
+// and /metrics.
+func TestOperatorRestoreSelectsTheNamedGenerationAndFencesIt(t *testing.T) {
+	controller := lifecycle.New(lifecycle.StateFailed)
+	snapshots := &stubSnapshotter{verified: map[uint64]lifecycle.Manifest{
+		2: {Generation: 2, Backend: "sqlite", SchemaVersion: 1},
+		4: {Generation: 4, Backend: "sqlite", SchemaVersion: 1},
+	}}
+	coordinator, err := lifecycle.NewCoordinator(controller, &stubDriver{}, snapshots, observability.NewRegistry(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := restoreHandler(controller, coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	response := httptest.NewRecorder()
+	handler(response, httptest.NewRequest(http.MethodPost, "/restore", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("missing generation status=%d, want 400", response.Code)
+	}
+
+	response = httptest.NewRecorder()
+	handler(response, httptest.NewRequest(http.MethodPost, "/restore?generation=3", nil))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("unverified generation status=%d, want 409", response.Code)
+	}
+	if len(snapshots.restored) != 0 {
+		t.Fatalf("restored=%v, want nothing written for a generation that is not known-good", snapshots.restored)
+	}
+	if state, _ := controller.Snapshot(); state != lifecycle.StateFailed {
+		t.Fatalf("state=%s, want the stack still failed after a rejected selection", state)
+	}
+
+	_, fence := controller.Snapshot()
+	response = httptest.NewRecorder()
+	handler(response, httptest.NewRequest(http.MethodPost, "/restore?generation=2", nil))
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("status=%d body=%q, want 204", response.Code, response.Body.String())
+	}
+	if len(snapshots.restored) != 1 || snapshots.restored[0] != 2 {
+		t.Fatalf("restored=%v, want exactly the operator-selected generation 2", snapshots.restored)
+	}
+	state, generation := controller.Snapshot()
+	if state != lifecycle.StateActive || generation != fence+1 {
+		t.Fatalf("state=%s generation=%d, want an active stack at a new fence", state, generation)
+	}
+	if got := response.Header().Get("X-Lifecycle-Generation"); got != strconv.FormatUint(generation, 10) {
+		t.Fatalf("generation header=%q, want %d", got, generation)
+	}
+}
+
+// An operator restore must never be reachable on a serving stack: it clears
+// volume authority, so on an ACTIVE stack it would consent, on the operator's
+// behalf, to overwriting a volume nobody said was expendable.
+func TestOperatorRestoreIsRefusedOnAServingStack(t *testing.T) {
+	controller := lifecycle.New(lifecycle.StateActive)
+	snapshots := &stubSnapshotter{verified: map[uint64]lifecycle.Manifest{2: {Generation: 2, Backend: "sqlite", SchemaVersion: 1}}}
+	coordinator, err := lifecycle.NewCoordinator(controller, &stubDriver{}, snapshots, observability.NewRegistry(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	restoreHandler(controller, coordinator, slog.New(slog.NewTextHandler(io.Discard, nil)))(response, httptest.NewRequest(http.MethodPost, "/restore?generation=2", nil))
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status=%d, want 409 on a serving stack", response.Code)
+	}
+	if len(snapshots.restored) != 0 {
+		t.Fatalf("restored=%v, want the serving volume untouched", snapshots.restored)
+	}
+	if state, _ := controller.Snapshot(); state != lifecycle.StateActive {
+		t.Fatalf("state=%s, want the serving stack intact", state)
+	}
+}
+
+type stubDriver struct{}
+
+func (stubDriver) Inspect(context.Context, uint64) error                              { return nil }
+func (stubDriver) StartPersistence(context.Context, uint64, lifecycle.Manifest) error { return nil }
+func (stubDriver) RunMigration(context.Context, uint64, int) error                    { return nil }
+func (stubDriver) StartWorkers(context.Context, uint64) error                         { return nil }
+func (stubDriver) StartServers(context.Context, uint64) error                         { return nil }
+func (stubDriver) DrainServers(context.Context, uint64) error                         { return nil }
+func (stubDriver) StopWorkers(context.Context, uint64) error                          { return nil }
+func (stubDriver) StopPersistence(context.Context, uint64) error                      { return nil }
+func (stubDriver) ReleaseActiveStorage(context.Context, uint64) error                 { return nil }
+
+type stubSnapshotter struct {
+	verified map[uint64]lifecycle.Manifest
+	restored []uint64
+}
+
+func (s *stubSnapshotter) Create(context.Context, uint64) (lifecycle.Manifest, error) {
+	return lifecycle.Manifest{}, errors.New("not used")
+}
+
+func (s *stubSnapshotter) Current(context.Context, uint64) (lifecycle.Manifest, error) {
+	return lifecycle.Manifest{}, lifecycle.ErrNoVerifiedSnapshot
+}
+
+func (s *stubSnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (lifecycle.Manifest, error) {
+	var newest lifecycle.Manifest
+	for generation, manifest := range s.verified {
+		if generation <= maxGeneration && generation > newest.Generation {
+			newest = manifest
+		}
+	}
+	if newest.Generation == 0 {
+		return lifecycle.Manifest{}, lifecycle.ErrNoVerifiedSnapshot
+	}
+	return newest, nil
+}
+
+func (s *stubSnapshotter) LiveState(_ context.Context, generation uint64) (lifecycle.Manifest, error) {
+	return lifecycle.Manifest{Generation: generation, Backend: "sqlite", SchemaVersion: 1}, nil
+}
+
+func (s *stubSnapshotter) Restore(_ context.Context, manifest lifecycle.Manifest) error {
+	s.restored = append(s.restored, manifest.Generation)
+	return nil
+}
+
+// specs/scale-to-zero.md requires the active stack to publish its earliest
+// necessary wake time before shutdown. The consume side was wired — the
+// scheduled wake loop and the hibernation safety-window check both read it — but
+// nothing in production ever produced the value, so the wake timer was inert and
+// a hibernated stack fired a due scheduled message only when unrelated traffic
+// happened to wake it. The producer lives in a different process from the record,
+// so the hint crosses the authenticated control boundary.
+func TestPublishedWakeDeadlineReachesTheDurableRecordAndIsFenced(t *testing.T) {
+	controller := lifecycle.New(lifecycle.StateActive)
+	forwarding, err := activator.NewForwardingHandler(
+		context.Background(), controller,
+		func(context.Context, uint64) error { return nil },
+		http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }),
+		1<<20, time.Minute, observability.NewRegistry(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer forwarding.Close()
+	mux := http.NewServeMux()
+	forwarding.RegisterForwarding(mux)
+	mux.HandleFunc("POST /wake-deadline", wakeDeadlineHandler(controller, slog.New(slog.NewTextHandler(io.Discard, nil))))
+	server := httptest.NewServer(requireControlToken(mux, "secret"))
+	defer server.Close()
+
+	publisher, err := scheduler.NewActivatorDeadlinePublisher(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fence, err := publisher.Fence(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Date(2026, time.August, 2, 9, 30, 0, 0, time.UTC)
+	if err := publisher.SetWakeDeadline(fence, deadline); err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Metadata().WakeDeadline; !got.Equal(deadline) {
+		t.Fatalf("durable wake deadline=%s, want %s", got, deadline)
+	}
+	// Clearing is the ordinary case once the work has run. A served deadline left
+	// behind would refuse every later hibernation inside its safety window.
+	if err := publisher.SetWakeDeadline(fence, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := controller.Metadata().WakeDeadline; !got.IsZero() {
+		t.Fatalf("durable wake deadline=%s, want it cleared", got)
+	}
+	// A worker from a generation the stack has moved past must not be able to
+	// reinstate a deadline the current generation cleared.
+	if err := publisher.SetWakeDeadline(fence+1, deadline); err == nil {
+		t.Fatal("a stale generation published a wake deadline")
+	}
+	if got := controller.Metadata().WakeDeadline; !got.IsZero() {
+		t.Fatalf("durable wake deadline=%s after a stale publish, want it still cleared", got)
+	}
+}
+
+// The wake deadline is lifecycle control, so it is protected by omission from the
+// unauthenticated allow-list like every other activator-owned route.
+func TestWakeDeadlineRequiresTheControlToken(t *testing.T) {
+	if unauthenticatedPatterns["POST /wake-deadline"] {
+		t.Fatal("the wake deadline endpoint is on the unauthenticated allow-list")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("POST /wake-deadline", func(http.ResponseWriter, *http.Request) {
+		t.Error("the wake deadline endpoint was served without the control token")
+	})
+	response := httptest.NewRecorder()
+	requireControlToken(mux, "secret").ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/wake-deadline?generation=1", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status=%d, want the control token required", response.Code)
 	}
