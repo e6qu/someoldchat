@@ -685,7 +685,7 @@ func TestMapServiceErrorNamesHandledFailuresFromThePinnedEnums(t *testing.T) {
 			t.Errorf("%s: mapServiceError = %q, want %q", testCase.name, reason, testCase.want)
 		}
 	}
-	if reason := mapServiceErrorNamed(service.ErrInvalidConversation, "channel_not_found", "restricted_action"); reason != "restricted_action" {
+	if reason := mapServiceErrorNamed(service.ErrInvalidConversation, "channel_not_found", "restricted_action", ""); reason != "restricted_action" {
 		t.Errorf("named validation reason = %q, want restricted_action", reason)
 	}
 }
