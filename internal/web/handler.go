@@ -33,6 +33,7 @@ type Handler struct {
 }
 
 var immutableReleaseRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$|^sha256:[0-9a-f]{64}$`)
+var immutableCommitRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 
 // ValidateReleaseRevision decides, without constructing anything, whether a
 // release identity is acceptable. It is exported so a process can settle the
@@ -51,7 +52,11 @@ func (h *Handler) SetReleaseRevision(revision string) error {
 	if err := ValidateReleaseRevision(revision); err != nil {
 		return err
 	}
-	h.ReleaseRevision = strings.TrimSpace(revision)
+	revision = strings.TrimSpace(revision)
+	if immutableCommitRevision.MatchString(revision) {
+		revision = revision[:12]
+	}
+	h.ReleaseRevision = revision
 	return nil
 }
 

@@ -64,7 +64,7 @@ representative_value() {
 	SAMEOLDCHAT_OIDC_ISSUER) echo "https://id.example.com" ;;
 	SAMEOLDCHAT_OIDC_CLIENT_ID) echo "representative-client" ;;
 	SAMEOLDCHAT_OIDC_CLIENT_SECRET) echo "representative-secret" ;;
-	SAMEOLDCHAT_RELEASE_REVISION) echo "0123456789abcdef0123456789abcdef01234567" ;;
+	SAMEOLDCHAT_RELEASE_REVISION) echo "0123456789ab" ;;
 	SAMEOLDCHAT_METRICS_LISTEN) echo "127.0.0.1:9464" ;;
 	SAMEOLDCHAT_APP_TOKEN) echo "xapp-representative" ;;
 	SAMEOLDCHAT_APP_ID) echo "A0REPRESENTATIVE" ;;

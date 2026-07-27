@@ -28,8 +28,8 @@ variable "release_revision" {
   type        = string
 
   validation {
-    condition     = can(regex("^([0-9a-f]{12,64}|sha256:[0-9a-f]{64})$", var.release_revision))
-    error_message = "release_revision must be a 12-64 character lowercase hexadecimal commit or a sha256 digest."
+    condition     = can(regex("^([0-9a-f]{12}|sha256:[0-9a-f]{64})$", var.release_revision))
+    error_message = "release_revision must be a 12-character lowercase hexadecimal commit tag or a sha256 digest."
   }
 }
 
