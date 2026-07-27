@@ -153,6 +153,11 @@ test('the composer honours the keyboard contract it advertises', async ({ page, 
   await search.press('Escape');
   await expect(composer).toBeFocused();
   await expect(composer).toHaveValue('draft survives search');
+
+  // Slash is the no-modifier search shortcut when the reader is not editing.
+  await page.locator('.channel-title').click();
+  await page.keyboard.press('/');
+  await expect(search).toBeFocused();
 });
 
 // Public channels are intentionally readable before joining, but that does not
@@ -243,6 +248,75 @@ test('reactions and pins render and reverse in place', async ({ page, context, r
   await expect(target.locator('.pinned')).toHaveCount(0);
 });
 
+test('a member can edit and delete their own message in place', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const composer = page.locator('form.composer textarea[name="text"]');
+  const original = `edit target ${Date.now()}`;
+  await composer.fill(original);
+  await composer.press('Enter');
+
+  const target = page.locator('.message', { hasText: original });
+  await target.getByText('Edit', { exact: true }).click();
+  const editor = target.getByRole('textbox', { name: 'Edit your message' });
+  const changed = `edited in browser ${Date.now()}`;
+  await editor.fill(changed);
+  await target.getByRole('button', { name: 'Save' }).click();
+  await expect(page.locator('.message', { hasText: changed })).toHaveCount(1);
+  await expect(page.locator('.message', { hasText: original })).toHaveCount(0);
+
+  const changedTarget = page.locator('.message', { hasText: changed });
+  await changedTarget.getByText('Delete', { exact: true }).click();
+  await changedTarget.getByRole('button', { name: 'Delete this message' }).click();
+  await expect(page.locator('.message', { hasText: changed })).toHaveCount(0);
+});
+
+test('channel creation is reachable and conversation shortcuts switch channels', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  await page.getByText('Add channel', { exact: false }).click();
+  const name = `browser-${Date.now()}`;
+  await page.getByLabel('Channel name').fill(name);
+  await page.getByLabel('Private channel').check();
+  await page.getByRole('button', { name: 'Create' }).click();
+
+  await expect(page.locator('.channel-title')).toHaveText(`# ${name}`);
+  const createdURL = page.url();
+  await page.keyboard.press('Alt+ArrowUp');
+  await expect(page).not.toHaveURL(createdURL);
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(page).toHaveURL(createdURL);
+});
+
+test('profile editing presents one human-facing photo field and saves status', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app/members');
+
+  await expect(page.getByRole('heading', { name: 'People', level: 1 })).toBeVisible();
+  await expect(page.locator('input[name^="image_"]')).toHaveCount(0);
+  await expect(page.getByLabel('Profile photo URL')).toHaveCount(1);
+
+  const status = `Qualifying ${Date.now()}`;
+  await page.getByLabel('Status', { exact: true }).fill(status);
+  await page.getByLabel('Status emoji').fill(':white_check_mark:');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page).toHaveURL('/app/members');
+  await expect(page.getByText(status, { exact: false }).first()).toBeVisible();
+});
+
+test('theme choice persists across workspace pages', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const toggle = page.getByRole('button', { name: 'Theme' });
+  await toggle.click();
+  const theme = await page.locator('html').getAttribute('data-theme');
+  await page.getByRole('link', { name: 'Members' }).click();
+  await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+});
+
 // A failed post added a class no stylesheet defined, so the failure was
 // invisible and the typed message was lost with no explanation.
 test('a rejected post explains itself and keeps the draft', async ({ page, context }) => {
@@ -286,6 +360,14 @@ test('the narrow layout keeps every control named and the thread reachable', asy
   await expect(page.getByRole('button', { name: 'Sign out' })).toHaveAttribute('aria-label', 'Sign out');
   // The thread reflows instead of disappearing.
   await expect(page.locator('#thread-messages')).toBeVisible();
+
+  // Channel creation remains reachable without expanding the 64px navigation
+  // rail into an unusably narrow form.
+  await page.getByText('Add channel', { exact: false }).click();
+  const channelName = page.getByLabel('Channel name');
+  await expect(channelName).toBeVisible();
+  const panel = await channelName.boundingBox();
+  expect(panel.x).toBeGreaterThanOrEqual(64);
 });
 
 // `GET /app` is the only entry point; a template edit used to be able to take it

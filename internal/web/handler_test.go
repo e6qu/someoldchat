@@ -380,6 +380,89 @@ func TestReactionsAndPinsAreRenderedAndReversible(t *testing.T) {
 	}
 }
 
+// Editing and deleting were complete Slack API operations with no browser
+// journey. Rendering the controls only on the signed-in author's messages is a
+// convenience; the mutation handlers also enforce ownership server-side.
+func TestOwnMessageCanBeEditedAndDeleted(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 123456000).UTC()
+	seedMessage(t, s, "M1", "before", created)
+	timestamp := string(domain.NewMessageTimestamp(created))
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "own message", body,
+		`aria-label="Edit message"`,
+		`action="/app/message/update?channel=Cdev&amp;ts=`+timestamp,
+		`aria-label="Delete message"`,
+	)
+
+	updated := postForm(t, mux, "/app/message/update?channel=Cdev&ts="+timestamp, "text=after", true)
+	if updated.Code != http.StatusNoContent {
+		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
+	}
+	message, err := s.GetMessage(context.Background(), "M1")
+	if err != nil || message.Text != "after" {
+		t.Fatalf("updated message=%+v err=%v", message, err)
+	}
+
+	deleted := postForm(t, mux, "/app/message/delete?channel=Cdev&ts="+timestamp, "", true)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body)
+	}
+	after := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireMissing(t, "deleted message", after, "after", `data-message-id="M1"`)
+}
+
+func TestAnotherMembersMessageCannotBeChanged(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
+	created := time.Unix(1700000000, 123456000).UTC()
+	message := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U2", Text: "belongs to Bob", CreatedAt: created}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "message.created", Payload: "M2", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+	timestamp := string(domain.NewMessageTimestamp(created))
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireMissing(t, "another member's message", body, `action="/app/message/update?channel=Cdev&amp;ts=`+timestamp, `action="/app/message/delete?channel=Cdev&amp;ts=`+timestamp)
+	refused := postForm(t, mux, "/app/message/update?channel=Cdev&ts="+timestamp, "text=stolen", true)
+	if refused.Code != http.StatusForbidden {
+		t.Fatalf("update status=%d body=%s", refused.Code, refused.Body)
+	}
+	stored, err := s.GetMessage(context.Background(), "M2")
+	if err != nil || stored.Text != "belongs to Bob" {
+		t.Fatalf("message=%+v err=%v", stored, err)
+	}
+}
+
+// Channel creation existed at /api/conversations.create but the signed-in
+// workspace did not expose it, leaving users dependent on an API client for a
+// basic product journey.
+func TestWorkspaceCanCreateAChannel(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "workspace", body, `action="/app/conversation/create"`, `name="is_private"`, "Add channel")
+
+	created := postForm(t, mux, "/app/conversation/create", "name=Product+Launch&is_private=true", false)
+	if created.Code != http.StatusSeeOther {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body)
+	}
+	location := created.Header().Get("Location")
+	target, err := url.Parse(location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	channel := domain.ConversationID(target.Query().Get("channel"))
+	conversation, err := s.GetConversation(context.Background(), channel)
+	if err != nil || conversation.Name != "product-launch" || !conversation.IsPrivate {
+		t.Fatalf("conversation=%+v err=%v", conversation, err)
+	}
+	member, err := s.IsConversationMember(context.Background(), channel, "U1")
+	if err != nil || !member {
+		t.Fatalf("member=%t err=%v", member, err)
+	}
+}
+
 // TestReactionKeepsTheOpenViewInsteadOfNavigating covers the defect where a
 // reaction always answered with a full-page redirect that dropped the open
 // thread and the composer draft, while declaring HTMX attributes that the
@@ -1444,6 +1527,23 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	}
 }
 
+func TestSearchNamesDirectMessagesAfterTheirParticipants(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
+	s.SeedConversation(domain.Conversation{ID: "Cdm", WorkspaceID: "T1", Name: "direct", IsDirect: true, IsPrivate: true})
+	s.SeedConversationMember("Cdm", "U1")
+	s.SeedConversationMember("Cdm", "U2")
+	created := time.Unix(1700000000, 123456000).UTC()
+	message := domain.Message{ID: "Mdm", WorkspaceID: "T1", Conversation: "Cdm", AuthorID: "U2", Text: "private needle", CreatedAt: created}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Edm", WorkspaceID: "T1", Topic: "message.created", Payload: "Mdm", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	body := get(t, mux, "/app/search?q=needle&channel=Cdm").Body.String()
+	requireContains(t, "direct-message search result", body, `<span class="channel">Bob Builder</span>`, "private needle")
+	requireMissing(t, "direct-message search result", body, "#direct")
+}
+
 // TestSearchReportsValidationInsteadOfAnOutage covers the defect where an
 // over-long query answered with a bare "search unavailable" page.
 func TestSearchReportsValidationInsteadOfAnOutage(t *testing.T) {
@@ -1611,23 +1711,25 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), "Available") || !strings.Contains(res.Body.String(), ":wave:") {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
 	}
-	// The form mirrors the limits the service enforces.
-	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `type="url" maxlength="2048"`)
-	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&image_24=&image_32=&image_48=&image_72=&image_192=&image_512=&image_1024=", false)
+	// The form mirrors the limits the service enforces without exposing the
+	// seven size-specific image fields in Slack's API model.
+	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`)
+	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`, `required`)
+	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if updateResult.Code != http.StatusSeeOther {
 		t.Fatalf("profile update status=%d body=%s", updateResult.Code, updateResult.Body)
 	}
 	stored, err := s.GetUser(context.Background(), "U1")
-	if err != nil || stored.Profile.DisplayName != "updated" || stored.Profile.StatusText != "Ready" {
+	if err != nil || stored.Profile.DisplayName != "updated" || stored.Profile.StatusText != "Ready" || stored.Profile.Image24 != "https://example.test/avatar.png" || stored.Profile.Image1024 != "https://example.test/avatar.png" {
 		t.Fatalf("updated profile=%+v err=%v", stored.Profile, err)
 	}
 }
 
 // TestRejectedProfileKeepsEveryFieldAndExplainsTheLimit covers the defect where
-// a rejected save answered with bare status text and lost all ten fields.
+// a rejected save answered with bare status text and lost every field.
 func TestRejectedProfileKeepsEveryFieldAndExplainsTheLimit(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	response := postForm(t, mux, "/app/profile", "display_name="+strings.Repeat("n", 81)+"&status_text=Ready&status_emoji=%3Aok%3A&image_24=&image_32=&image_48=&image_72=&image_192=&image_512=&image_1024=", false)
+	response := postForm(t, mux, "/app/profile", "display_name="+strings.Repeat("n", 81)+"&status_text=Ready&status_emoji=%3Aok%3A&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
@@ -1637,6 +1739,7 @@ func TestRejectedProfileKeepsEveryFieldAndExplainsTheLimit(t *testing.T) {
 		`value="`+strings.Repeat("n", 81)+`"`,
 		`value="Ready"`,
 		`value=":ok:"`,
+		`value="https://example.test/avatar.png"`,
 	)
 }
 
