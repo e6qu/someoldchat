@@ -28,12 +28,7 @@ import (
 // forms pointed at this origin; default-src 'none' means the page cannot pull in
 // script at all.
 func authAdminSecurityHeaders(w http.ResponseWriter) {
-	header := w.Header()
-	header.Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
-	header.Set("X-Frame-Options", "DENY")
-	header.Set("X-Content-Type-Options", "nosniff")
-	header.Set("Referrer-Policy", "no-referrer")
-	header.Set("Cache-Control", "no-store")
+	secureHeaders(w, "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 }
 
 func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
@@ -45,7 +40,7 @@ func writeAuthAdminJSON(w http.ResponseWriter, status int, value any) {
 
 const authAdminStyle = `body{font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f8f8fa;color:#1d1c1d;margin:0}.wrap{max-width:760px;margin:40px auto;background:#fff;padding:28px;border:1px solid #ddd;border-radius:10px}h1{margin-top:0}.row{display:flex;align-items:center;justify-content:space-between;border-top:1px solid #ddd;padding:16px 0}.toggle{background:#007a5a;color:#fff;border:0;border-radius:5px;padding:8px 12px}.toggle.off{background:#777}table{width:100%;border-collapse:collapse}th,td{text-align:left;border-top:1px solid #ddd;padding:10px 6px;vertical-align:top}.inline-form{display:inline-flex;gap:6px;align-items:center}.problem{border-left:4px solid #b4234b;background:#fdf0f3;padding:12px 16px;border-radius:6px}a{color:#611f69}`
 
-var authAdminTemplate = template.Must(template.New("authAdmin").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorization methods · SameOldChat</title><style>` + authAdminStyle + `</style></head><body><main class="wrap"><h1>Authorization methods</h1><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><small>{{.State}}</small></span>{{if $.CanWriteApps}}<form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if not .Enabled}} off{{end}}" type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}{{if .CanReadUsers}}<hr><h2>Workspace users</h2><p>Manage active membership and workspace roles. Deactivating a user revokes their sessions and access tokens.</p><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><small>{{.Email}}</small></td><td>{{.Status}}</td><td>{{.Role}}</td><td>{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle" type="submit">{{if .Active}}Disable{{else}}Enable{{end}}</button></form> <form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role"><option value="member"{{if .IsMember}} selected{{end}}>Member</option><option value="admin"{{if .IsAdmin}} selected{{end}}>Administrator</option></select></label><button class="toggle" type="submit">Save role</button></form>{{else}}<span>Read only</span>{{end}}</td></tr>{{end}}</tbody></table>{{if .NextPageURL}}<p><a href="{{.NextPageURL}}">Next page</a></p>{{end}}{{end}}{{if .CanWriteUsers}}<hr><h2>Manual user setup</h2><p>Create an active workspace member directly. External authorization still requires a matching verified email.</p><form method="post" action="/api/admin.auth.users.create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Email <input name="email" type="email" maxlength="320" autocomplete="email" required></label> <label>Name <input name="real_name" maxlength="200" autocomplete="name" required></label> <label>Role <select name="role"><option value="member">Member</option><option value="admin">Administrator</option></select></label> <button class="toggle" type="submit">Create user</button></form>{{end}}</main></body></html>`))
+var authAdminTemplate = template.Must(template.New("authAdmin").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorization methods · SameOldChat</title><style>` + authAdminStyle + `</style></head><body><main class="wrap"><h1>Authorization methods</h1><p>Provider secrets are deployment configuration. Enablement is durable workspace state.</p>{{range .Methods}}<div class="row"><span><strong>{{.Label}}</strong><br><small>{{.State}}</small></span>{{if $.CanWriteApps}}<form method="post" action="/api/admin.auth.methods.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="provider" value="{{.Name}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button class="toggle{{if not .Enabled}} off{{end}}" type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div>{{end}}{{if .CanReadUsers}}<hr><h2>Workspace users</h2><p>Manage active membership and workspace roles. Deactivating a user revokes their sessions and access tokens.</p><table><thead><tr><th scope="col">User</th><th scope="col">Status</th><th scope="col">Role</th><th scope="col">Actions</th></tr></thead><tbody>{{range .Users}}<tr><td><strong>{{.Name}}</strong><br><small>{{.Email}}</small></td><td>{{.Status}}</td><td>{{.Role}}</td><td>{{if $.CanWriteUsers}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="{{if .Active}}disable{{else}}enable{{end}}"><button class="toggle" type="submit">{{if .Active}}Disable{{else}}Enable{{end}}</button></form> {{if .RoleOptions}}<form class="inline-form" method="post" action="/api/admin.auth.users.set"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="user_id" value="{{.ID}}"><input type="hidden" name="action" value="role"><label>Role for {{.Name}} <select name="role">{{range .RoleOptions}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}</select></label><button class="toggle" type="submit">Save role</button></form>{{end}}{{else}}<span>Read only</span>{{end}}</td></tr>{{end}}</tbody></table>{{if .NextPageURL}}<p><a href="{{.NextPageURL}}">Next page</a></p>{{end}}{{end}}{{if .CanWriteUsers}}<hr><h2>Manual user setup</h2><p>Create an active workspace member directly. External authorization still requires a matching verified email.</p><form method="post" action="/api/admin.auth.users.create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Email <input name="email" type="email" maxlength="320" autocomplete="email" required></label> <label>Name <input name="real_name" maxlength="200" autocomplete="name" required></label> <label>Role <select name="role"><option value="member">Member</option><option value="admin">Administrator</option></select></label> <button class="toggle" type="submit">Create user</button></form>{{end}}</main></body></html>`))
 
 var authAdminErrorTemplate = template.Must(template.New("authAdminError").Parse(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}} · SameOldChat</title><style>` + authAdminStyle + `</style></head><body><main class="wrap"><h1>{{.Title}}</h1><p class="problem" role="alert">{{.Message}}</p><p><a href="/app/admin/auth">Back to authorization methods</a></p></main></body></html>`))
 
@@ -67,14 +62,58 @@ type authAdminMethodView struct {
 }
 
 type authAdminUserView struct {
-	ID       domain.UserID
-	Name     string
-	Email    string
-	Status   string
-	Role     domain.WorkspaceRole
-	Active   bool
-	IsMember bool
-	IsAdmin  bool
+	ID     domain.UserID
+	Name   string
+	Email  string
+	Status string
+	Role   domain.WorkspaceRole
+	Active bool
+	// RoleOptions is the set of roles this actor may write onto this row, with
+	// the row's current role selected. It is empty when the actor may not change
+	// the row at all, and the form is then not rendered.
+	//
+	// The two booleans it replaces could not represent owner: both were false
+	// for an owner, so every browser default-selected the first option and the
+	// page presented a workspace owner with a pre-loaded demotion — one click,
+	// no field to change — that the handler then refused to reverse.
+	RoleOptions []authAdminRoleOption
+}
+
+type authAdminRoleOption struct {
+	Value    domain.WorkspaceRole
+	Label    string
+	Selected bool
+}
+
+// assignableRoles mirrors the authority the service enforces, so the page tells
+// the truth about what this actor can do rather than offering a control whose
+// submission is refused:
+//
+//   - a role may be granted up to, and including, the actor's own rank;
+//   - a row that outranks the actor is not editable at all.
+func assignableRoles(actor, target domain.WorkspaceRole) []authAdminRoleOption {
+	if target.Outranks(actor) {
+		return nil
+	}
+	options := make([]authAdminRoleOption, 0, 3)
+	for _, role := range []domain.WorkspaceRole{domain.WorkspaceRoleMember, domain.WorkspaceRoleAdmin, domain.WorkspaceRoleOwner} {
+		if role.Rank() > actor.Rank() {
+			continue
+		}
+		options = append(options, authAdminRoleOption{Value: role, Label: workspaceRoleLabel(role), Selected: role == target})
+	}
+	return options
+}
+
+func workspaceRoleLabel(role domain.WorkspaceRole) string {
+	switch role {
+	case domain.WorkspaceRoleOwner:
+		return "Owner"
+	case domain.WorkspaceRoleAdmin:
+		return "Administrator"
+	default:
+		return "Member"
+	}
 }
 
 type authAdminErrorData struct {
@@ -143,7 +182,8 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
 		return
 	}
-	if !h.authAdminRoleAllowed(w, r, principal) {
+	actorRole, roleAllowed := h.authAdminRoleAllowed(w, r, principal)
+	if !roleAllowed {
 		return
 	}
 	canReadApps := principal.HasScope(auth.ScopeAdminAppsRead) || principal.HasScope(auth.ScopeAdminAppsWrite)
@@ -152,7 +192,6 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
 		return
 	}
-	h.setCSRFCookie(w, r)
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
 	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
 		h.writeAuthAdminProblem(w, r, problemSessionMissing)
@@ -200,14 +239,13 @@ func (h Handler) authAdminPage(w http.ResponseWriter, r *http.Request) {
 				status = "active"
 			}
 			data.Users = append(data.Users, authAdminUserView{
-				ID:       item.User.ID,
-				Name:     name,
-				Email:    item.User.Email,
-				Status:   status,
-				Role:     item.Membership.Role,
-				Active:   active,
-				IsMember: item.Membership.Role == domain.WorkspaceRoleMember,
-				IsAdmin:  item.Membership.Role == domain.WorkspaceRoleAdmin,
+				ID:          item.User.ID,
+				Name:        name,
+				Email:       item.User.Email,
+				Status:      status,
+				Role:        item.Membership.Role,
+				Active:      active,
+				RoleOptions: assignableRoles(actorRole, item.Membership.Role),
 			})
 		}
 		if page.NextCursor != "" {
@@ -293,8 +331,11 @@ func (h Handler) authUserSet(w http.ResponseWriter, r *http.Request) {
 		operationErr = h.Login.service.AdminAssignUser(r.Context(), h.Login.workspace, principal.UserID, target, []domain.ConversationID{})
 	case "role":
 		role := domain.WorkspaceRole(strings.ToLower(strings.TrimSpace(fields["role"])))
-		if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin {
-			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_role", Title: "Request rejected", Message: "A workspace role must be member or admin."})
+		// owner is a real, reachable workspace role. Refusing it here left the
+		// page unable to restore an owner it had just demoted; the service
+		// enforces who may grant it.
+		if role.Rank() == 0 {
+			h.writeAuthAdminProblem(w, r, authAdminProblem{Status: http.StatusBadRequest, Code: "invalid_role", Title: "Request rejected", Message: "A workspace role must be member, admin, or owner."})
 			return
 		}
 		operationErr = h.Login.service.SetUserRole(r.Context(), h.Login.workspace, principal.UserID, target, role)
@@ -310,6 +351,12 @@ func (h Handler) authUserSet(w http.ResponseWriter, r *http.Request) {
 }
 
 func authAdminUserMutationProblem(err error) authAdminProblem {
+	// A refusal by the role hierarchy is an authorization answer, not an
+	// outage: it used to be reported as "temporarily unavailable", which told an
+	// administrator to try again at something that can never succeed.
+	if errors.Is(err, service.ErrNotWorkspaceAdmin) {
+		return authAdminProblem{Status: http.StatusForbidden, Code: "not_authorized", Title: "Not authorized", Message: "Your workspace role does not allow that change. Nothing was changed."}
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return authAdminProblem{Status: http.StatusNotFound, Code: "user_not_found", Title: "User not found", Message: "That workspace user does not exist."}
 	}
@@ -389,7 +436,7 @@ func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request, scopes
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
 		return auth.Principal{}, false
 	}
-	if !h.authAdminRoleAllowed(w, r, principal) {
+	if _, allowed := h.authAdminRoleAllowed(w, r, principal); !allowed {
 		return auth.Principal{}, false
 	}
 	return principal, true
@@ -404,21 +451,21 @@ func (h Handler) authAdminAllowed(w http.ResponseWriter, r *http.Request, scopes
 // derived from roles, or a statically seeded deployment credential — still cannot
 // reach the administration surface, and a demoted administrator loses it without
 // waiting for their session to expire.
-func (h Handler) authAdminRoleAllowed(w http.ResponseWriter, r *http.Request, principal auth.Principal) bool {
+func (h Handler) authAdminRoleAllowed(w http.ResponseWriter, r *http.Request, principal auth.Principal) (domain.WorkspaceRole, bool) {
 	role, err := h.Login.workspaceRole(r.Context(), principal.UserID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			h.writeAuthAdminProblem(w, r, problemNotAuthorized)
-			return false
+			return "", false
 		}
 		h.writeAuthAdminProblem(w, r, problemRoleUnavailable)
-		return false
+		return "", false
 	}
 	if !auth.WorkspaceRoleHoldsControlPlane(role) {
 		h.writeAuthAdminProblem(w, r, problemNotAuthorized)
-		return false
+		return "", false
 	}
-	return true
+	return role, true
 }
 
 func normalizeAdminInviteChannels(raw string) []domain.ConversationID {

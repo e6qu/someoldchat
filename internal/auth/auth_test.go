@@ -110,7 +110,6 @@ func TestValidateCSRFRequiresSessionBoundToken(t *testing.T) {
 	token := CSRFToken("session")
 	request := httptest.NewRequest(http.MethodPost, "/app/message", nil)
 	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
-	request.AddCookie(&http.Cookie{Name: CSRFTokenCookieName, Value: token})
 	request.Header.Set(CSRFTokenHeaderName, token)
 	if err := ValidateCSRF(request); err != nil {
 		t.Fatalf("valid CSRF token rejected: %v", err)
@@ -118,6 +117,68 @@ func TestValidateCSRFRequiresSessionBoundToken(t *testing.T) {
 	request.Header.Set(CSRFTokenHeaderName, CSRFToken("other-session"))
 	if err := ValidateCSRF(request); err == nil {
 		t.Fatal("CSRF token for another session was accepted")
+	}
+}
+
+// TestValidateCSRFRefusesRequestsTheBrowserReportsAsForeign covers the defect
+// the deleted CSRF cookie left open. The cookie copy of the token proved
+// nothing — the server derives the expected value from the session cookie of
+// the same request — while `Domain=<parent>` published a script-readable token
+// to every sibling host. A page on such a host held a valid token and a
+// SameSite=Lax session cookie, so nothing refused its mutation.
+//
+// Fetch metadata is written by the user agent and cannot be set by page script,
+// so it is the part of the request the attacker does not control.
+func TestValidateCSRFRefusesRequestsTheBrowserReportsAsForeign(t *testing.T) {
+	token := CSRFToken("session")
+	forged := func() *http.Request {
+		request := httptest.NewRequest(http.MethodPost, "/app/message", nil)
+		request.Host = "chat.example.test"
+		request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
+		// The attacker holds the real token: this is the whole point.
+		request.Header.Set(CSRFTokenHeaderName, token)
+		return request
+	}
+
+	for name, apply := range map[string]func(*http.Request){
+		"sibling subdomain": func(r *http.Request) {
+			r.Header.Set("Sec-Fetch-Site", "same-site")
+			r.Header.Set("Origin", "https://evil.example.test")
+		},
+		"unrelated origin": func(r *http.Request) {
+			r.Header.Set("Sec-Fetch-Site", "cross-site")
+			r.Header.Set("Origin", "https://evil.example")
+		},
+		"sibling subdomain without fetch metadata": func(r *http.Request) {
+			r.Header.Set("Origin", "https://evil.example.test")
+		},
+		"opaque origin": func(r *http.Request) {
+			r.Header.Set("Origin", "null")
+		},
+	} {
+		request := forged()
+		apply(request)
+		if err := ValidateCSRF(request); !errors.Is(err, ErrCSRFCrossSite) {
+			t.Fatalf("%s: err=%v, want ErrCSRFCrossSite", name, err)
+		}
+	}
+
+	for name, apply := range map[string]func(*http.Request){
+		"same origin": func(r *http.Request) {
+			r.Header.Set("Sec-Fetch-Site", "same-origin")
+			r.Header.Set("Origin", "https://chat.example.test")
+		},
+		"user initiated": func(r *http.Request) { r.Header.Set("Sec-Fetch-Site", "none") },
+		"same origin without fetch metadata": func(r *http.Request) {
+			r.Header.Set("Origin", "https://chat.example.test")
+		},
+		"no browser metadata at all": func(*http.Request) {},
+	} {
+		request := forged()
+		apply(request)
+		if err := ValidateCSRF(request); err != nil {
+			t.Fatalf("%s: rejected a request from this origin: %v", name, err)
+		}
 	}
 }
 
@@ -196,7 +257,6 @@ func TestValidateCSRFBoundsTheBodyBeforeParsingIt(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "/app/message", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
-	request.AddCookie(&http.Cookie{Name: CSRFTokenCookieName, Value: token})
 	if err := ValidateCSRF(request); err == nil {
 		t.Fatal("a form body over the limit was parsed and accepted")
 	}
@@ -209,20 +269,8 @@ func TestValidateCSRFBoundsTheBodyBeforeParsingIt(t *testing.T) {
 	within := httptest.NewRequest(http.MethodPost, "/app/message", strings.NewReader(CSRFTokenFieldName+"="+token+"&text=hello"))
 	within.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	within.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
-	within.AddCookie(&http.Cookie{Name: CSRFTokenCookieName, Value: token})
 	if err := ValidateCSRF(within); err != nil {
 		t.Fatalf("valid in-body CSRF token rejected: %v", err)
-	}
-}
-
-func TestValidateCSRFRequiresTheCookieCopyToAgree(t *testing.T) {
-	token := CSRFToken("session")
-	request := httptest.NewRequest(http.MethodPost, "/app/message", nil)
-	request.AddCookie(&http.Cookie{Name: SessionCookieName, Value: "session"})
-	request.AddCookie(&http.Cookie{Name: CSRFTokenCookieName, Value: CSRFToken("other-session")})
-	request.Header.Set(CSRFTokenHeaderName, token)
-	if err := ValidateCSRF(request); err == nil {
-		t.Fatal("a CSRF cookie belonging to another session was accepted")
 	}
 }
 

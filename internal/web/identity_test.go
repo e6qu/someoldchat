@@ -877,7 +877,6 @@ func TestBrowserSessionScopesFollowTheWorkspaceRole(t *testing.T) {
 			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			request.Header.Set("Accept", "application/json")
 			request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: sessionCookie.Value})
-			request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: csrf})
 			response := httptest.NewRecorder()
 			mux.ServeHTTP(response, request)
 			if response.Code != http.StatusForbidden {
@@ -926,7 +925,6 @@ func TestAdministratorSessionKeepsTheControlPlane(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
 	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: sessionCookie.Value})
-	request.AddCookie(&http.Cookie{Name: auth.CSRFTokenCookieName, Value: csrf})
 	response := httptest.NewRecorder()
 	mux.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
