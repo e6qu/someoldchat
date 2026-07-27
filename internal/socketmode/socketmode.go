@@ -346,6 +346,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			delete(pending, envelope.EnvelopeID)
+			// One durable record can be several envelopes — a single
+			// conversation.members_invited record is one member_joined_channel
+			// per invited user — and the delivery position names the record.
+			// Advancing it after the first acknowledgement would drop every
+			// envelope behind it, so the record is consumed only once the app
+			// has acknowledged all of them.
+			if len(pending) != 0 {
+				continue
+			}
 			if err := delivery.consume(r.Context(), sequence); err != nil {
 				closeWith(deliveryCloseCode(err))
 				return
@@ -381,7 +390,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				continue
 			}
-			encoded, err := encodeEvent(record)
+			envelopes, err := encodeEvent(record, connection.AppID)
 			if err != nil {
 				// An internal worker record, a record addressed to a single user,
 				// or a payload written before the typed payload contract can never
@@ -392,8 +401,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				// A record with no identifier is reported separately and at Error:
 				// the payload may be a perfectly deliverable event, and what is
 				// wrong is the record's own identity, which no reconnect recovers.
+				// A payload that names a Slack event this system knows but cannot
+				// fill in is a defect in the producer, and it is reported as one:
+				// it is not an app problem, and no reconnect fixes it.
 				if errors.Is(err, events.ErrEventIncomplete) {
 					h.logger().Error("Socket Mode dropped a record with no event ID", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
+				} else if errors.Is(err, events.ErrSlackEventIncomplete) || errors.Is(err, events.ErrPayloadFieldInvalid) {
+					h.logger().Error("Socket Mode dropped a record whose payload cannot fill its Slack event", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic, "error", err)
 				} else if !errors.Is(err, events.ErrPayloadInternal) && !errors.Is(err, events.ErrPayloadMalformed) && !errors.Is(err, events.ErrPayloadRecipientScoped) {
 					closeWith(websocket.CloseInternalServerErr, "event payload is invalid")
 					return
@@ -406,10 +420,31 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				continue
 			}
-			if err := writeJSON(encoded); err != nil {
+			if len(envelopes) == 0 {
+				// The record's topic maps to no Slack event, or to one whose
+				// inner shape this repository has not modelled. Shipping the
+				// durable record instead is what made every official client
+				// unable to parse this stream, so the record is stepped over
+				// durably. Debug rather than Warn: for most topics this is the
+				// table's deliberate answer, not an incident.
+				h.logger().Debug("Socket Mode has no Slack event for this topic", "app", connection.AppID, "sequence", record.Sequence, "topic", record.Event.Topic)
+				if consumeErr := delivery.consume(r.Context(), record.Sequence); consumeErr != nil {
+					closeWith(deliveryCloseCode(consumeErr))
+					return
+				}
+				continue
+			}
+			written := true
+			for _, envelope := range envelopes {
+				if err := writeJSON(envelope.Frame); err != nil {
+					written = false
+					break
+				}
+				pending[envelope.ID] = record.Sequence
+			}
+			if !written {
 				return
 			}
-			pending[string(record.Event.ID)] = record.Sequence
 			pendingSince = time.Now()
 		case <-pingTicker.C:
 			if err := conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
@@ -494,11 +529,20 @@ func deliveryCloseCode(err error) (int, string) {
 	return websocket.CloseInternalServerErr, "event delivery state unavailable"
 }
 
-// encodeEvent renders a durable record as a Socket Mode envelope. The payload
-// is read through events.Broadcastable, so neither an internal worker record nor
-// a record addressed to a single user can be sent to an app, and a payload that
-// is not self-describing is refused with a sentinel the caller can act on.
-func encodeEvent(record events.Record) (map[string]any, error) {
+// encodeEvent renders a durable record as the Socket Mode envelopes it becomes.
+//
+// The shape is built by events.SocketModeEnvelopes, not here: an official
+// Socket Mode client indexes payload.event and dispatches on the inner event's
+// type, and this transport used to ship the durable payload verbatim, so every
+// official client received a payload with no "event" member and a type that is
+// not a Slack event name. A transport must not decide what a Slack event looks
+// like, so the whole shape — envelope, wrapper and inner event — comes from the
+// one translation site.
+//
+// An empty result is not an error. It means the record's topic maps to no Slack
+// event, or to one whose inner shape is not modelled yet; the record is
+// consumed and reported rather than delivered in a shape no client can parse.
+func encodeEvent(record events.Record, appID domain.AppID) ([]events.SocketModeEnvelope, error) {
 	// A missing identifier is a defect in the record's identity, not in its
 	// payload: the payload may be a perfectly deliverable event. Classifying it
 	// as a malformed payload made it indistinguishable from an undeliverable one
@@ -507,9 +551,5 @@ func encodeEvent(record events.Record) (map[string]any, error) {
 	if strings.TrimSpace(string(record.Event.ID)) == "" {
 		return nil, fmt.Errorf("%w: Socket Mode envelope ID comes from the event ID, which is empty", events.ErrEventIncomplete)
 	}
-	delivered, err := events.Broadcastable(record.Event)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"envelope_id": string(record.Event.ID), "payload": delivered.Object, "type": "events_api", "accepts_response_payload": true}, nil
+	return events.SocketModeEnvelopes(record, string(appID))
 }

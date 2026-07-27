@@ -15,6 +15,43 @@ type Cursor string
 type PageRequest struct {
 	Limit  int
 	Cursor Cursor
+	// Descending selects the newest-first direction of a read that supports one:
+	// `ORDER BY created_at DESC, id DESC`, with the cursor walking backwards.
+	//
+	// It exists because the newest window of a conversation was otherwise only
+	// reachable by walking the whole conversation forward from its first message.
+	// internal/web bounded that walk, so a conversation longer than the bound had
+	// no reachable newest window at all — paging forward, "jump to the latest" and
+	// a search permalink all landed on the same stale window in the middle of the
+	// history — and internal/api/slack filtered a full scan for the same reason.
+	// One descending page answers both.
+	//
+	// The cursor encoding is the same in both directions and carries no direction
+	// of its own: it names the last row of the page that produced it, and the
+	// request says which side of that row the next page lies on. A cursor minted
+	// by a descending page is therefore usable by an ascending request and the
+	// reverse, which is what makes a permalink reachable from either end.
+	//
+	// A read that does not implement the direction refuses a descending request
+	// with store.ErrInvalidArgument rather than silently answering ascending; see
+	// store.CheckAscendingPage.
+	Descending bool
+}
+
+// PageAfter reports whether a row keyed (createdAt, id) belongs on the page a
+// request with this cursor key asks for: strictly after the cursor when the
+// request is ascending, strictly before it when it is descending.
+//
+// Both repositories and both directions decide the page boundary here, so a row
+// cannot be skipped by one profile and repeated by another. The key is the same
+// (created_at, id) tuple every message ORDER BY and every message cursor uses,
+// which is what makes a forward walk and a backward walk of one conversation
+// visit exactly the same rows.
+func (r PageRequest) PageAfter(createdAt time.Time, id MessageID, cursorAt time.Time, cursorID MessageID) bool {
+	if r.Descending {
+		return createdAt.Before(cursorAt) || (createdAt.Equal(cursorAt) && string(id) < string(cursorID))
+	}
+	return createdAt.After(cursorAt) || (createdAt.Equal(cursorAt) && string(id) > string(cursorID))
 }
 
 type ConversationType string

@@ -80,8 +80,8 @@ func (s DirectorySnapshotter) Current(_ context.Context, generation uint64) (Man
 	return s.Manager.Current(generation)
 }
 
-func (s DirectorySnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (Manifest, error) {
-	return s.Manager.LastVerified(maxGeneration)
+func (s DirectorySnapshotter) Select(_ context.Context, generation uint64) (Manifest, error) {
+	return s.Manager.Select(generation)
 }
 
 // LiveState describes the state directory already present at OutputPath without

@@ -187,6 +187,7 @@ var errorClasses = []errorClass{
 	{key: "events.payload_required", code: codes.Internal, sentinel: events.ErrPayloadRequired},
 	{key: "events.payload_field_invalid", code: codes.Internal, sentinel: events.ErrPayloadFieldInvalid},
 	{key: "events.payload_malformed", code: codes.Internal, sentinel: events.ErrPayloadMalformed},
+	{key: "events.slack_event_incomplete", code: codes.Internal, sentinel: events.ErrSlackEventIncomplete},
 	{key: "events.event_incomplete", code: codes.Internal, sentinel: events.ErrEventIncomplete},
 
 	// Dependency failure. codes.Unavailable deliberately has no restoresCode

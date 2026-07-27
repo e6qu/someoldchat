@@ -130,7 +130,7 @@ func TestBlobKeyRecordsAreNotDeliverable(t *testing.T) {
 	if _, err := Deliverable(event); !errors.Is(err, ErrPayloadInternal) {
 		t.Fatalf("error=%v, want %v", err, ErrPayloadInternal)
 	}
-	if _, err := SlackEventBody(Record{Sequence: 1, Event: event}, "A1"); !errors.Is(err, ErrPayloadInternal) {
+	if _, err := SlackEventBodies(Record{Sequence: 1, Event: event}, "A1"); !errors.Is(err, ErrPayloadInternal) {
 		t.Fatalf("Slack body error=%v, want %v", err, ErrPayloadInternal)
 	}
 	if !InternalTopic(FileBlobDeleteTopic) || !InternalTopic(UserPhotoBlobDeleteTopic) || InternalTopic("message.created") {
@@ -141,30 +141,17 @@ func TestBlobKeyRecordsAreNotDeliverable(t *testing.T) {
 	}
 }
 
-func TestSlackEventBodyWrapsAProducedPayload(t *testing.T) {
+func TestUntranslatedProducedPayloadIsWithheldFromSlack(t *testing.T) {
 	event, err := New("Ev1", "T1", "U1", NewPayload("message.created", String("message_id", "M1"), String("channel_id", "C1")), time.Unix(1700000000, 0))
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, err := SlackEventBody(Record{Sequence: 3, Event: event}, "A1")
+	bodies, err := SlackEventBodies(Record{Sequence: 3, Event: event}, "A1")
 	if err != nil {
-		t.Fatalf("a produced record could not be delivered as a Slack event: %v", err)
+		t.Fatalf("evaluating a produced record for Slack delivery: %v", err)
 	}
-	var envelope struct {
-		Type  string          `json:"type"`
-		Team  string          `json:"team_id"`
-		App   string          `json:"api_app_id"`
-		ID    string          `json:"event_id"`
-		Event json.RawMessage `json:"event"`
-	}
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.Type != "event_callback" || envelope.Team != "T1" || envelope.App != "A1" || envelope.ID != "Ev1" {
-		t.Fatalf("envelope=%s", body)
-	}
-	if !strings.Contains(string(envelope.Event), `"event_ts"`) || !strings.Contains(string(envelope.Event), `"message_id":"M1"`) {
-		t.Fatalf("inner event=%s", envelope.Event)
+	if len(bodies) != 0 {
+		t.Fatalf("message.created payload without message content became %d Slack events", len(bodies))
 	}
 }
 
@@ -191,7 +178,7 @@ func TestRecipientScopedRecordsAreNotBroadcastable(t *testing.T) {
 	if _, err := Broadcastable(event); !errors.Is(err, ErrPayloadRecipientScoped) {
 		t.Fatalf("broadcast error=%v, want %v", err, ErrPayloadRecipientScoped)
 	}
-	if _, err := SlackEventBody(Record{Sequence: 1, Event: event}, "A1"); !errors.Is(err, ErrPayloadRecipientScoped) {
+	if _, err := SlackEventBodies(Record{Sequence: 1, Event: event}, "A1"); !errors.Is(err, ErrPayloadRecipientScoped) {
 		t.Fatalf("Slack body error=%v, want %v", err, ErrPayloadRecipientScoped)
 	}
 	if !RecipientScoped(EphemeralMessageTopic) || RecipientScoped("message.created") {
@@ -347,9 +334,9 @@ func TestNewPayloadCopiesItsFields(t *testing.T) {
 	}
 }
 
-func TestSlackEventBodyRefusesIdentifierOnlyPayload(t *testing.T) {
+func TestSlackEventBodiesRefuseIdentifierOnlyPayload(t *testing.T) {
 	record := Record{Sequence: 1, Event: Event{ID: "Ev1", WorkspaceID: "T1", Topic: "message.created", Payload: "M0123", CreatedAt: time.Unix(1700000000, 0)}}
-	if _, err := SlackEventBody(record, "A1"); !errors.Is(err, ErrPayloadMalformed) {
+	if _, err := SlackEventBodies(record, "A1"); !errors.Is(err, ErrPayloadMalformed) {
 		t.Fatalf("error=%v, want %v", err, ErrPayloadMalformed)
 	}
 }

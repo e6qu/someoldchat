@@ -1012,6 +1012,7 @@ type HistoryRequest struct {
 	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
 	Limit          int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
 	Cursor         string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending     bool                   `protobuf:"varint,6,opt,name=descending,proto3" json:"descending,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -1079,6 +1080,13 @@ func (x *HistoryRequest) GetCursor() string {
 		return x.Cursor
 	}
 	return ""
+}
+
+func (x *HistoryRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
 }
 
 type RepliesRequest struct {
@@ -1767,13 +1775,16 @@ const file_sameoldchat_chat_v1_messages_proto_rawDesc = "" +
 	"\bmessages\x18\x01 \x03(\v2\x1c.sameoldchat.chat.v1.MessageR\bmessages\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xa3\x01\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xc3\x01\n" +
 	"\x0eHistoryRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
 	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\xc1\x01\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\n" +
+	"descending\x18\x06 \x01(\bR\n" +
+	"descending\"\xc1\x01\n" +
 	"\x0eRepliesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +

@@ -416,6 +416,36 @@ func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }
 
+// FoldSearchText produces the single canonical form a case-insensitive search
+// compares, for both the stored value and the query term.
+//
+// Case-insensitive MATCHING must not be delegated to the database either, and
+// for exactly the reason case-insensitive IDENTITY must not be: SQLite's and
+// dqlite's lower() folds ASCII only, PostgreSQL's is locale-aware, and the
+// in-memory repository folds with Go. The search paths folded the TERM in Go and
+// the COLUMN in SQL, so the two disagreed the moment a character was not ASCII:
+// a message containing "ÄPFEL" was found by SearchMessages("äpfel") and by
+// SearchMessages("ÄPFEL") in memory and on PostgreSQL, and by neither on SQLite
+// or dqlite. The same held for conversations.name, .topic and .purpose. A
+// workspace could not find its own data, and which data it could not find
+// depended on the configured storage profile.
+//
+// The repair is a stored, Go-folded copy of each searchable value — see the
+// *_folded columns in the SQL schema — maintained by every write path and
+// backfilled for rows written before it existed. Both sides of every comparison
+// then come out of this one function, so every profile agrees by construction
+// and the predicate stays a plain indexable column comparison rather than a
+// per-engine expression.
+//
+// The fold is strings.ToLower and deliberately NOT strings.EqualFold's full
+// Unicode case folding, for consistency with NormalizeEmail: full folding maps
+// distinct letters onto one another (U+017F LATIN SMALL LETTER LONG S folds onto
+// 's'), and one fold for the whole product is worth more here than the handful
+// of extra matches the wider one would find.
+func FoldSearchText(value string) string {
+	return strings.ToLower(value)
+}
+
 // UserPhotoBlobKey decodes the blob key behind a stored profile photo URL, and
 // reports whether the URL is one this deployment minted.
 //

@@ -3,7 +3,6 @@ package memory
 import (
 	"context"
 	"crypto/hmac"
-	"errors"
 	"slices"
 	"sort"
 	"strings"
@@ -103,7 +102,7 @@ func (s *Store) RecordAccess(_ context.Context, value domain.AccessLog) error {
 }
 func (s *Store) ListAccessLogs(_ context.Context, workspace domain.WorkspaceID, before time.Time, limit, page int) ([]domain.AccessLog, bool, error) {
 	if limit <= 0 || limit > 1000 || page <= 0 {
-		return nil, false, errors.New("access log page parameters are invalid")
+		return nil, false, store.InvalidArgument("access log page parameters are invalid")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -302,7 +301,7 @@ func (s *Store) SeedWorkspace(workspace domain.Workspace) error {
 		workspace.Discoverability = domain.WorkspaceDiscoverabilityOpen
 	}
 	if !workspace.Discoverability.Valid() {
-		return errors.New("invalid workspace discoverability")
+		return store.InvalidArgument("invalid workspace discoverability")
 	}
 	s.workspaces[workspace.ID] = workspace
 	return nil
@@ -321,7 +320,7 @@ func (s *Store) SeedUser(user domain.User) error {
 		user.Presence = domain.PresenceAuto
 	}
 	if user.Presence != domain.PresenceAuto && user.Presence != domain.PresenceAway {
-		return errors.New("invalid user presence")
+		return store.InvalidArgument("invalid user presence")
 	}
 	user.Email = domain.NormalizeEmail(user.Email)
 	// The SQL repositories enforce workspace-scoped e-mail uniqueness through the
@@ -365,7 +364,7 @@ func (s *Store) SeedWorkspaceRole(workspaceID domain.WorkspaceID, userID domain.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
-		return errors.New("invalid workspace role")
+		return store.InvalidArgument("invalid workspace role")
 	}
 	key := string(workspaceID) + "\x00" + string(userID)
 	membership, ok := s.members[key]
@@ -428,7 +427,7 @@ func (s *Store) SeedAppToken(_ context.Context, token string, record domain.AppT
 		return nil
 	}
 	if record.AppID == "" {
-		return errors.New("app token requires an app ID")
+		return store.InvalidArgument("app token requires an app ID")
 	}
 	record.Scopes = domain.NormalizeScopes(record.Scopes)
 	s.appTokens[key] = record
@@ -485,7 +484,7 @@ func (s *Store) SeedSession(_ context.Context, token string, record domain.Sessi
 
 func (s *Store) CreateSession(_ context.Context, token string, record domain.SessionRecord) error {
 	if strings.TrimSpace(token) == "" || record.WorkspaceID == "" || record.UserID == "" || record.ExpiresAt.IsZero() || !record.ExpiresAt.After(time.Now().UTC()) || len(domain.NormalizeScopes(record.Scopes)) == 0 {
-		return errors.New("invalid session")
+		return store.InvalidArgument("invalid session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -540,7 +539,7 @@ func (s *Store) GetAuthMethod(_ context.Context, workspace domain.WorkspaceID, p
 
 func (s *Store) SetAuthMethod(_ context.Context, value domain.AuthMethod) error {
 	if value.WorkspaceID == "" || value.Provider == "" {
-		return errors.New("invalid auth method")
+		return store.InvalidArgument("invalid auth method")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -567,7 +566,7 @@ func (s *Store) GetExternalIdentity(_ context.Context, workspace domain.Workspac
 
 func (s *Store) CreateExternalIdentity(_ context.Context, value domain.ExternalIdentity) error {
 	if value.WorkspaceID == "" || value.Provider == "" || value.Subject == "" || value.UserID == "" {
-		return errors.New("invalid external identity")
+		return store.InvalidArgument("invalid external identity")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -676,7 +675,7 @@ func (s *Store) GetWorkspace(_ context.Context, id domain.WorkspaceID) (domain.W
 
 func (s *Store) CreateWorkspace(_ context.Context, value domain.Workspace, event events.Event) error {
 	if value.ID == "" || strings.TrimSpace(value.Domain) == "" || strings.TrimSpace(value.Name) == "" || !value.Discoverability.Valid() {
-		return errors.New("invalid workspace")
+		return store.InvalidArgument("invalid workspace")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -782,10 +781,10 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if user.ID == "" || user.WorkspaceID == "" || user.Email == "" || user.Name == "" || membership.WorkspaceID != user.WorkspaceID || membership.UserID != user.ID || !membership.Active {
-		return errors.New("user and active workspace membership are required")
+		return store.InvalidArgument("user and active workspace membership are required")
 	}
 	if membership.Role != domain.WorkspaceRoleMember && membership.Role != domain.WorkspaceRoleAdmin {
-		return errors.New("user membership role must be member or admin")
+		return store.InvalidArgument("user membership role must be member or admin")
 	}
 	if _, exists := s.workspaces[user.WorkspaceID]; !exists {
 		return store.ErrNotFound
@@ -833,7 +832,7 @@ func (s *Store) FindUserByEmail(_ context.Context, workspace domain.WorkspaceID,
 // one unit. See store.Store.UpdateUserProfile.
 func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, profile domain.UserProfile, changes ...events.Event) (domain.User, error) {
 	if len(changes) == 0 {
-		return domain.User{}, errors.New("a profile change requires at least one event")
+		return domain.User{}, store.InvalidArgument("a profile change requires at least one event")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -854,7 +853,7 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 
 func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence, event events.Event) (domain.User, error) {
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
-		return domain.User{}, errors.New("invalid user presence")
+		return domain.User{}, store.InvalidArgument("invalid user presence")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -960,7 +959,7 @@ func (s *Store) SetWorkspaceRole(_ context.Context, workspaceID domain.Workspace
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin && role != domain.WorkspaceRoleOwner {
-		return errors.New("invalid workspace role")
+		return store.InvalidArgument("invalid workspace role")
 	}
 	key := string(workspaceID) + "\x00" + string(userID)
 	membership, ok := s.members[key]
@@ -1018,8 +1017,8 @@ func messageBefore(left, right domain.Message) bool {
 }
 
 func (s *Store) ListUsers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.UserPage, error) {
-	if request.Limit <= 0 {
-		return domain.UserPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.UserPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -1048,8 +1047,8 @@ func (s *Store) ListUsers(_ context.Context, workspace domain.WorkspaceID, reque
 }
 
 func (s *Store) ListAdminUsers(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.AdminUserPage, error) {
-	if request.Limit <= 0 {
-		return domain.AdminUserPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AdminUserPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -1080,8 +1079,8 @@ func (s *Store) ListAdminUsers(_ context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) ListUsersByRole(_ context.Context, workspace domain.WorkspaceID, role domain.WorkspaceRole, request domain.PageRequest) (domain.UserPage, error) {
-	if request.Limit <= 0 {
-		return domain.UserPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.UserPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -1112,8 +1111,8 @@ func (s *Store) ListUsersByRole(_ context.Context, workspace domain.WorkspaceID,
 }
 
 func (s *Store) ListConversationMembers(_ context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.UserPage, error) {
-	if request.Limit <= 0 {
-		return domain.UserPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.UserPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -1199,7 +1198,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 		return store.ErrAlreadyExists
 	}
 	if !conversation.IsPrivate || (!conversation.IsDirect && !conversation.IsGroupDirect) || len(members) < 2 {
-		return errors.New("invalid direct conversation")
+		return store.InvalidArgument("invalid direct conversation")
 	}
 	wantedKey := domain.DirectConversationKey(conversation.WorkspaceID, members)
 	for id, existing := range s.conversations {
@@ -1217,7 +1216,7 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	memberSet := make(map[domain.UserID]struct{}, len(members))
 	for _, member := range members {
 		if _, duplicate := memberSet[member]; duplicate {
-			return errors.New("direct conversation contains duplicate members")
+			return store.InvalidArgument("direct conversation contains duplicate members")
 		}
 		user, exists := s.users[member]
 		if !exists || user.WorkspaceID != conversation.WorkspaceID || user.Deleted {
@@ -1454,8 +1453,8 @@ func (s *Store) SetInviteRequestStatus(_ context.Context, workspace domain.Works
 }
 
 func (s *Store) ListInviteRequests(_ context.Context, workspace domain.WorkspaceID, status domain.InviteRequestStatus, request domain.PageRequest) (domain.InviteRequestPage, error) {
-	if request.Limit <= 0 {
-		return domain.InviteRequestPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.InviteRequestPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -1551,8 +1550,11 @@ func (s *Store) SetAppApproval(_ context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) ListAppApprovals(_ context.Context, workspace domain.WorkspaceID, status domain.AppApprovalStatus, request domain.PageRequest) (domain.AppApprovalPage, error) {
-	if request.Limit <= 0 || !validAppApprovalStatus(status) {
+	if !validAppApprovalStatus(status) {
 		return domain.AppApprovalPage{}, store.ErrInvalidAppApproval
+	}
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.AppApprovalPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -1577,7 +1579,7 @@ func (s *Store) ListAppApprovals(_ context.Context, workspace domain.WorkspaceID
 
 func (s *Store) CreateAppPermissionRequest(_ context.Context, value domain.AppPermissionRequest, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.RequesterID == "" || value.TargetUserID == "" || value.TriggerID == "" || len(value.Scopes) == 0 {
-		return errors.New("invalid app permission request")
+		return store.InvalidArgument("invalid app permission request")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1592,7 +1594,7 @@ func (s *Store) CreateAppPermissionRequest(_ context.Context, value domain.AppPe
 
 func (s *Store) CreateView(_ context.Context, value domain.View, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
-		return errors.New("invalid view")
+		return store.InvalidArgument("invalid view")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1671,7 +1673,7 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 		return domain.View{}, store.ErrConflict
 	}
 	if value.Payload == "" || value.Hash == "" {
-		return domain.View{}, errors.New("invalid view")
+		return domain.View{}, store.InvalidArgument("invalid view")
 	}
 	value.CreatedAt = current.CreatedAt
 	value.UpdatedAt = value.UpdatedAt.UTC()
@@ -1688,7 +1690,7 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 
 func (s *Store) SetWorkflowStep(_ context.Context, value domain.WorkflowStep, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Status == "" || value.UpdatedAt.IsZero() {
-		return errors.New("invalid workflow step")
+		return store.InvalidArgument("invalid workflow step")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1718,7 +1720,7 @@ func (s *Store) GetWorkflowStep(_ context.Context, workspace domain.WorkspaceID,
 
 func (s *Store) CreateDialog(_ context.Context, value domain.Dialog, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Payload == "" || value.CreatedAt.IsZero() {
-		return errors.New("invalid dialog")
+		return store.InvalidArgument("invalid dialog")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1742,7 +1744,7 @@ func (s *Store) GetDialog(_ context.Context, workspace domain.WorkspaceID, id do
 
 func (s *Store) CreateBot(_ context.Context, value domain.Bot) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Name == "" || value.UpdatedAt.IsZero() {
-		return errors.New("invalid bot")
+		return store.InvalidArgument("invalid bot")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1769,7 +1771,7 @@ func migrationKey(workspace domain.WorkspaceID, id domain.UserID) string {
 
 func (s *Store) CreateUserMigration(_ context.Context, value domain.UserMigration, event events.Event) error {
 	if value.WorkspaceID == "" || value.OldID == "" || value.GlobalID == "" {
-		return errors.New("invalid user migration")
+		return store.InvalidArgument("invalid user migration")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1804,7 +1806,7 @@ func (s *Store) SetConversationTeams(_ context.Context, workspace domain.Workspa
 	set := make(map[domain.WorkspaceID]struct{}, len(teams))
 	for _, team := range teams {
 		if team == "" {
-			return errors.New("invalid conversation team")
+			return store.InvalidArgument("invalid conversation team")
 		}
 		if _, exists := s.workspaces[team]; !exists {
 			return store.ErrNotFound
@@ -1812,7 +1814,7 @@ func (s *Store) SetConversationTeams(_ context.Context, workspace domain.Workspa
 		set[team] = struct{}{}
 	}
 	if len(set) == 0 && !orgChannel {
-		return errors.New("conversation team association is empty")
+		return store.InvalidArgument("conversation team association is empty")
 	}
 	s.conversationTeams[conversation] = set
 	s.conversationOrg[conversation] = orgChannel
@@ -1856,8 +1858,8 @@ func (s *Store) DisconnectConversationTeams(_ context.Context, workspace domain.
 }
 
 func (s *Store) ListConnectedChannelInfo(_ context.Context, workspace domain.WorkspaceID, channels []domain.ConversationID, teams []domain.WorkspaceID, request domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error) {
-	if request.Limit <= 0 {
-		return nil, false, "", errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
 	}
 	if _, err := domain.DecodeListCursor(request.Cursor); err != nil {
 		return nil, false, "", err
@@ -1919,7 +1921,7 @@ func containsWorkspace(values map[domain.WorkspaceID]struct{}, value domain.Work
 
 func (s *Store) CreateOAuthClient(_ context.Context, value domain.OAuthClient) error {
 	if value.ID == "" || value.SecretHash == "" || value.AppID == "" {
-		return errors.New("invalid oauth client")
+		return store.InvalidArgument("invalid oauth client")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1954,7 +1956,7 @@ type memoryOAuthCode struct {
 // never expired.
 func (s *Store) CreateOAuthCode(_ context.Context, value domain.OAuthCode) error {
 	if value.Code == "" || value.ClientID == "" || value.WorkspaceID == "" || value.UserID == "" {
-		return errors.New("invalid oauth code")
+		return store.InvalidArgument("invalid oauth code")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2016,7 +2018,7 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 
 func (s *Store) CreateRTMConnection(_ context.Context, value domain.RTMConnection) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.ExpiresAt.IsZero() {
-		return errors.New("invalid RTM connection")
+		return store.InvalidArgument("invalid RTM connection")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2051,7 +2053,7 @@ func (s *Store) CreateSocketModeConnection(_ context.Context, value domain.Socke
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if value.ID == "" || value.AppID == "" || !value.ExpiresAt.After(time.Now().UTC()) {
-		return errors.New("invalid Socket Mode connection")
+		return store.InvalidArgument("invalid Socket Mode connection")
 	}
 	if _, exists := s.socketConnections[value.ID]; exists {
 		return store.ErrAlreadyExists
@@ -2104,7 +2106,7 @@ func (s *Store) RenewSocketModeConnection(_ context.Context, id string, expiresA
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !expiresAt.After(time.Now().UTC()) {
-		return errors.New("invalid Socket Mode connection renewal")
+		return store.InvalidArgument("invalid Socket Mode connection renewal")
 	}
 	value, exists := s.socketConnections[id]
 	// An expired connection has already given up its slot, so a replacement may
@@ -2150,7 +2152,7 @@ func socketModeResponseKey(appID domain.AppID, envelopeID string) string {
 
 func (s *Store) RecordSocketModeResponse(_ context.Context, value domain.SocketModeResponse) error {
 	if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" || strings.TrimSpace(value.Payload) == "" || value.ReceivedAt.IsZero() {
-		return errors.New("invalid Socket Mode response")
+		return store.InvalidArgument("invalid Socket Mode response")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2167,7 +2169,7 @@ func (s *Store) RecordSocketModeResponse(_ context.Context, value domain.SocketM
 
 func validateSocketModeResponseLease(appID domain.AppID, owner string, limit int, lease time.Duration) error {
 	if appID == "" || strings.TrimSpace(owner) == "" || limit <= 0 || limit > 1000 || lease <= 0 {
-		return errors.New("invalid Socket Mode response lease")
+		return store.InvalidArgument("invalid Socket Mode response lease")
 	}
 	return nil
 }
@@ -2219,11 +2221,11 @@ func (s *Store) ClaimSocketModeResponses(_ context.Context, appID domain.AppID, 
 // repositories acknowledge the batch in one transaction for the same reason.
 func (s *Store) AckSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse) error {
 	if strings.TrimSpace(owner) == "" || len(values) == 0 {
-		return errors.New("Socket Mode response owner and a non-empty batch are required")
+		return store.InvalidArgument("Socket Mode response owner and a non-empty batch are required")
 	}
 	for _, value := range values {
 		if value.AppID == "" || strings.TrimSpace(value.EnvelopeID) == "" {
-			return errors.New("invalid Socket Mode response key")
+			return store.InvalidArgument("invalid Socket Mode response key")
 		}
 	}
 	s.mu.Lock()
@@ -2257,7 +2259,7 @@ func (s *Store) AckSocketModeResponses(_ context.Context, owner string, values [
 
 func (s *Store) RenewSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse, lease time.Duration) error {
 	if strings.TrimSpace(owner) == "" || len(values) == 0 || lease <= 0 {
-		return errors.New("Socket Mode response renewal fields are required")
+		return store.InvalidArgument("Socket Mode response renewal fields are required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2284,7 +2286,7 @@ func (s *Store) RenewSocketModeResponses(_ context.Context, owner string, values
 
 func (s *Store) ReleaseSocketModeResponses(_ context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
 	if strings.TrimSpace(owner) == "" || retryAt.IsZero() {
-		return errors.New("Socket Mode response release fields are required")
+		return store.InvalidArgument("Socket Mode response release fields are required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2460,7 +2462,7 @@ func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event
 
 func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.ConversationListRequest) (domain.ConversationPage, error) {
 	if request.Limit <= 0 {
-		return domain.ConversationPage{}, errors.New("page limit must be positive")
+		return domain.ConversationPage{}, store.InvalidArgument("page limit must be positive")
 	}
 	if err := domain.ValidateConversationTypes(request.Types); err != nil {
 		return domain.ConversationPage{}, err
@@ -2543,16 +2545,16 @@ func (s *Store) ListConversations(_ context.Context, workspace domain.WorkspaceI
 }
 
 func (s *Store) SearchConversations(_ context.Context, workspace domain.WorkspaceID, query string, request domain.PageRequest) (domain.ConversationPage, error) {
-	if request.Limit <= 0 {
-		return domain.ConversationPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ConversationPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
 		return domain.ConversationPage{}, err
 	}
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = domain.FoldSearchText(strings.TrimSpace(query))
 	if query == "" {
-		return domain.ConversationPage{}, errors.New("conversation search query is required")
+		return domain.ConversationPage{}, store.InvalidArgument("conversation search query is required")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2561,7 +2563,7 @@ func (s *Store) SearchConversations(_ context.Context, workspace domain.Workspac
 		if conversation.WorkspaceID != workspace || (after != "" && string(conversation.ID) <= after) {
 			continue
 		}
-		if !strings.Contains(strings.ToLower(conversation.Name), query) && !strings.Contains(strings.ToLower(conversation.Topic), query) && !strings.Contains(strings.ToLower(conversation.Purpose), query) {
+		if !strings.Contains(domain.FoldSearchText(conversation.Name), query) && !strings.Contains(domain.FoldSearchText(conversation.Topic), query) && !strings.Contains(domain.FoldSearchText(conversation.Purpose), query) {
 			continue
 		}
 		values = appendSorted(values, conversation, request.Limit+1, func(left, right domain.Conversation) bool { return left.ID < right.ID })
@@ -2734,8 +2736,8 @@ func (s *Store) RemoveReaction(_ context.Context, reaction domain.Reaction, even
 func (s *Store) ListReactions(_ context.Context, message domain.MessageID, request domain.PageRequest) ([]domain.Reaction, domain.Cursor, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if request.Limit <= 0 {
-		return nil, "", false, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, "", false, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -2765,8 +2767,8 @@ func (s *Store) ListReactions(_ context.Context, message domain.MessageID, reque
 }
 
 func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.UserReactionPage, error) {
-	if request.Limit <= 0 {
-		return domain.UserReactionPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.UserReactionPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -2850,8 +2852,8 @@ func (s *Store) RemovePin(_ context.Context, pin domain.Pin, event events.Event)
 func (s *Store) ListPins(_ context.Context, conversation domain.ConversationID, request domain.PageRequest) ([]domain.Pin, domain.Cursor, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if request.Limit <= 0 {
-		return nil, "", false, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, "", false, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -2920,8 +2922,8 @@ func (s *Store) RemoveStar(_ context.Context, star domain.Star, event events.Eve
 }
 
 func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error) {
-	if request.Limit <= 0 {
-		return nil, "", false, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, "", false, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3061,8 +3063,8 @@ func (s *Store) GetReminder(_ context.Context, workspace domain.WorkspaceID, use
 }
 
 func (s *Store) ListReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.ReminderPage, error) {
-	if request.Limit <= 0 {
-		return domain.ReminderPage{}, errors.New("reminder list limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ReminderPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3130,8 +3132,8 @@ func (s *Store) CreateScheduledMessage(_ context.Context, value domain.Scheduled
 }
 
 func (s *Store) ListScheduledMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
-	if request.Limit <= 0 {
-		return domain.ScheduledMessagePage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ScheduledMessagePage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3191,7 +3193,7 @@ func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.Works
 
 func (s *Store) ClaimScheduledMessages(_ context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]domain.ScheduledMessage, error) {
 	if owner == "" || limit <= 0 || lease <= 0 {
-		return nil, errors.New("scheduled claim requires owner, positive limit, and lease")
+		return nil, store.InvalidArgument("scheduled claim requires owner, positive limit, and lease")
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -3299,8 +3301,8 @@ func (s *Store) GetUserGroup(_ context.Context, workspace domain.WorkspaceID, id
 }
 
 func (s *Store) ListUserGroups(_ context.Context, workspace domain.WorkspaceID, includeDisabled bool, request domain.PageRequest) (domain.UserGroupPage, error) {
-	if request.Limit <= 0 {
-		return domain.UserGroupPage{}, errors.New("user group list limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.UserGroupPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3574,8 +3576,8 @@ func (s *Store) GetPublicFile(_ context.Context, token string) (domain.File, err
 }
 
 func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.FilePage, error) {
-	if request.Limit <= 0 {
-		return domain.FilePage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.FilePage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3605,7 +3607,7 @@ func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, reque
 
 func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.WorkspaceID, visit func(string) error) error {
 	if visit == nil {
-		return errors.New("blob reference visitor is required")
+		return store.InvalidArgument("blob reference visitor is required")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
@@ -3675,8 +3677,8 @@ func (s *Store) GetRemoteFile(_ context.Context, workspace domain.WorkspaceID, l
 }
 
 func (s *Store) ListRemoteFiles(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) (domain.RemoteFilePage, error) {
-	if request.Limit <= 0 {
-		return domain.RemoteFilePage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.RemoteFilePage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -3822,7 +3824,7 @@ func (s *Store) Outbox() []events.Event {
 }
 func (s *Store) ListEventsAfter(_ context.Context, workspace domain.WorkspaceID, after uint64, limit int) ([]events.Record, error) {
 	if limit <= 0 {
-		return nil, errors.New("event limit must be positive")
+		return nil, store.InvalidArgument("event limit must be positive")
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -3842,7 +3844,7 @@ func (s *Store) ListEventsAfter(_ context.Context, workspace domain.WorkspaceID,
 
 func (s *Store) ListAppEventsAfter(_ context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
 	if appID == "" || limit <= 0 {
-		return nil, errors.New("app ID and positive event limit are required")
+		return nil, store.InvalidArgument("app ID and positive event limit are required")
 	}
 	s.mu.RLock()
 	workspaces := make(map[domain.WorkspaceID]struct{})
@@ -3875,14 +3877,14 @@ func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, o
 
 func (s *Store) ClaimEventsForTopic(ctx context.Context, workspace domain.WorkspaceID, topic, owner string, limit int, lease time.Duration) ([]events.Record, error) {
 	if topic == "" {
-		return nil, errors.New("topic is required")
+		return nil, store.InvalidArgument("topic is required")
 	}
 	return s.claimEvents(ctx, workspace, topic, owner, limit, lease)
 }
 
 func (s *Store) claimEvents(_ context.Context, workspace domain.WorkspaceID, topic, owner string, limit int, lease time.Duration) ([]events.Record, error) {
 	if workspace == "" || owner == "" || limit <= 0 || lease <= 0 {
-		return nil, errors.New("workspace, owner, positive limit, and positive lease are required")
+		return nil, store.InvalidArgument("workspace, owner, positive limit, and positive lease are required")
 	}
 	now := time.Now().UTC()
 	expires := now.Add(lease)
@@ -3910,7 +3912,7 @@ func (s *Store) claimEvents(_ context.Context, workspace domain.WorkspaceID, top
 
 func (s *Store) ReleaseEvents(_ context.Context, owner string, sequences []uint64, retryAt time.Time) error {
 	if owner == "" || len(sequences) == 0 || !retryAt.After(time.Now().UTC()) {
-		return errors.New("owner, event sequences, and a future retry time are required")
+		return store.InvalidArgument("owner, event sequences, and a future retry time are required")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3929,7 +3931,7 @@ func (s *Store) ReleaseEvents(_ context.Context, owner string, sequences []uint6
 
 func (s *Store) RenewEvents(_ context.Context, owner string, sequences []uint64, lease time.Duration) error {
 	if owner == "" || len(sequences) == 0 || lease <= 0 {
-		return errors.New("owner, event sequences, and positive lease are required")
+		return store.InvalidArgument("owner, event sequences, and positive lease are required")
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -3950,7 +3952,7 @@ func (s *Store) RenewEvents(_ context.Context, owner string, sequences []uint64,
 
 func (s *Store) AckEvents(_ context.Context, owner string, sequences []uint64) error {
 	if owner == "" || len(sequences) == 0 {
-		return errors.New("owner and event sequences are required")
+		return store.InvalidArgument("owner and event sequences are required")
 	}
 	now := time.Now().UTC()
 	s.mu.Lock()
@@ -3967,30 +3969,52 @@ func (s *Store) AckEvents(_ context.Context, owner string, sequences []uint64) e
 	}
 	return nil
 }
+
+// ListMessages pages one conversation in either direction; see the port for why
+// the descending direction exists.
+//
+// s.messages[conversation] is held in (CreatedAt, ID) order by CreateMessage, so
+// the descending page is the same window read from the other end and reversed.
+// The page boundary is decided by domain.PageRequest.PageAfter, the same
+// predicate the SQL profiles put in their WHERE clause, so the two profiles
+// cannot disagree about which row a cursor excludes.
 func (s *Store) ListMessages(_ context.Context, conversation domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if request.Limit <= 0 {
-		return domain.MessagePage{}, errors.New("page limit must be positive")
+	if err := store.CheckPage(request); err != nil {
+		return domain.MessagePage{}, err
 	}
 	values := s.messages[conversation]
-	start := 0
+	var createdAt time.Time
+	var id domain.MessageID
 	if request.Cursor != "" {
-		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
+		var err error
+		createdAt, id, err = domain.DecodeMessageCursor(request.Cursor)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
-		for start < len(values) && (values[start].CreatedAt.Before(createdAt) || (values[start].CreatedAt.Equal(createdAt) && string(values[start].ID) <= string(id))) {
-			start++
+	}
+	window := make([]domain.Message, 0, request.Limit+1)
+	if request.Descending {
+		for index := len(values) - 1; index >= 0 && len(window) <= request.Limit; index-- {
+			if values[index].Deleted {
+				continue
+			}
+			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
+				continue
+			}
+			window = append(window, cloneMessage(values[index]))
 		}
-	}
-	end := start + request.Limit + 1
-	if end > len(values) {
-		end = len(values)
-	}
-	window := make([]domain.Message, 0, end-start)
-	for _, message := range values[start:end] {
-		window = append(window, cloneMessage(message))
+	} else {
+		for index := 0; index < len(values) && len(window) <= request.Limit; index++ {
+			if values[index].Deleted {
+				continue
+			}
+			if request.Cursor != "" && !request.PageAfter(values[index].CreatedAt, values[index].ID, createdAt, id) {
+				continue
+			}
+			window = append(window, cloneMessage(values[index]))
+		}
 	}
 	hasMore := len(window) > request.Limit
 	if hasMore {
@@ -4008,12 +4032,12 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 }
 
 func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
-	if request.Limit <= 0 {
-		return domain.MessagePage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.MessagePage{}, err
 	}
-	terms := strings.Fields(strings.ToLower(query))
+	terms := strings.Fields(domain.FoldSearchText(query))
 	if len(terms) == 0 {
-		return domain.MessagePage{}, errors.New("search query must not be empty")
+		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
 	startTime, startID, err := domain.DecodeMessageCursor(request.Cursor)
 	if err != nil {
@@ -4035,7 +4059,7 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 			if message.Deleted || (request.Cursor != "" && (message.CreatedAt.Before(startTime) || (message.CreatedAt.Equal(startTime) && message.ID <= startID))) {
 				continue
 			}
-			text := strings.ToLower(message.Text)
+			text := domain.FoldSearchText(message.Text)
 			matches := true
 			for _, term := range terms {
 				if !strings.Contains(text, term) {
@@ -4064,8 +4088,8 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 }
 
 func (s *Store) ListThreadMessages(_ context.Context, conversation domain.ConversationID, timestamp domain.MessageTimestamp, request domain.PageRequest) (domain.MessagePage, error) {
-	if request.Limit <= 0 {
-		return domain.MessagePage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.MessagePage{}, err
 	}
 	startTime, startID, startRoot, err := domain.DecodeMessageCursorWithRoot(request.Cursor)
 	if err != nil {
@@ -4075,6 +4099,9 @@ func (s *Store) ListThreadMessages(_ context.Context, conversation domain.Conver
 	defer s.mu.RUnlock()
 	values := make([]domain.Message, 0, request.Limit+1)
 	for _, message := range s.messages[conversation] {
+		if message.Deleted {
+			continue
+		}
 		if (message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp) || message.ThreadTimestamp == timestamp {
 			if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
 				values = appendSorted(values, message, request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
@@ -4222,8 +4249,8 @@ func (s *Store) GetListItem(_ context.Context, workspace domain.WorkspaceID, lis
 }
 
 func (s *Store) ListItems(_ context.Context, workspace domain.WorkspaceID, listID domain.ListID, request domain.PageRequest, archived bool) (domain.ListItemPage, error) {
-	if request.Limit <= 0 {
-		return domain.ListItemPage{}, errors.New("page limit must be positive")
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListItemPage{}, err
 	}
 	after, err := domain.DecodeListCursor(request.Cursor)
 	if err != nil {
@@ -4287,7 +4314,7 @@ func (s *Store) DeleteListItems(_ context.Context, workspace domain.WorkspaceID,
 		return store.ErrNotFound
 	}
 	if len(ids) == 0 {
-		return errors.New("list item IDs are required")
+		return store.InvalidArgument("list item IDs are required")
 	}
 	for _, id := range ids {
 		if _, exists := s.listItems[listID][id]; !exists {
@@ -4441,7 +4468,7 @@ func (s *Store) GetListDownload(_ context.Context, workspace domain.WorkspaceID,
 
 func (s *Store) CreateOpenIDRefreshToken(_ context.Context, value domain.OpenIDRefreshToken) error {
 	if value.TokenHash == "" || value.ClientID == "" || value.WorkspaceID == "" || value.UserID == "" || !value.ExpiresAt.After(time.Now().UTC()) || len(domain.NormalizeScopes(value.Scopes)) == 0 {
-		return errors.New("invalid OpenID Connect refresh token")
+		return store.InvalidArgument("invalid OpenID Connect refresh token")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

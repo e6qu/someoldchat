@@ -85,32 +85,6 @@ var (
 	ErrEventIncomplete = errors.New("event record is incomplete")
 )
 
-// internalTopics is the single set of topics that exist only for an internal
-// worker. Every consumer — the payload rules here and the storage queries that
-// exclude them from a claim or a replay — must read this one set: a second copy
-// means adding a topic to one and not the other silently publishes an internal
-// record or starves the worker that exists to consume it.
-var internalTopics = []string{FileBlobDeleteTopic, UserPhotoBlobDeleteTopic}
-
-// InternalTopic reports whether a topic carries internal worker records rather
-// than events an app, a webhook or a browser may receive. The set is explicit
-// so that every consumer applies the same rule.
-func InternalTopic(topic string) bool {
-	for _, internal := range internalTopics {
-		if topic == internal {
-			return true
-		}
-	}
-	return false
-}
-
-// InternalTopics is the same set in the form a SQL IN predicate needs. It
-// returns a copy, so a storage query cannot reorder or truncate the set every
-// other consumer reads.
-func InternalTopics() []string {
-	return append([]string(nil), internalTopics...)
-}
-
 // NewPayload builds the deliverable payload for a topic. The topic doubles as
 // the payload's "type" discriminator, so a consumer never has to infer what it
 // received.
@@ -288,33 +262,6 @@ type Delivered struct {
 	Object map[string]json.RawMessage
 }
 
-// recipientScopedTopics is the single set of topics whose payload is addressed
-// to exactly one user. Every consumer that can scope delivery must filter on
-// this set, and every consumer that cannot must refuse it; naming one member of
-// the set in a consumer instead of asking the predicate is how a second
-// recipient-scoped topic gets broadcast to a whole workspace.
-var recipientScopedTopics = []string{EphemeralMessageTopic}
-
-// RecipientScoped reports whether a topic's payload is addressed to exactly one
-// user. Such a record carries that user's content — an ephemeral message
-// carries its text, blocks and attachments — so a consumer that cannot scope
-// delivery to a recipient must not receive it at all.
-func RecipientScoped(topic string) bool {
-	for _, scoped := range recipientScopedTopics {
-		if topic == scoped {
-			return true
-		}
-	}
-	return false
-}
-
-// RecipientScopedTopics is the same set, for a consumer that has to enumerate
-// it. It returns a copy so no caller can shrink the set every other consumer
-// reads.
-func RecipientScopedTopics() []string {
-	return append([]string(nil), recipientScopedTopics...)
-}
-
 // audience names what a consumer of a decoded payload can address.
 type audience uint8
 
@@ -399,7 +346,7 @@ func Deliverable(event Event) (Delivered, error) {
 // its payload describes itself as.
 //
 // This is the one site both halves of the rule go through. Broadcastable,
-// Deliverable, SlackEventBody and Event.MarshalJSON all funnel here, so a
+// Deliverable, SlackEventBodies and Event.MarshalJSON all funnel here, so a
 // record cannot be refused by one and admitted by another, and a record rebuilt
 // from independent parts — which is what the transport codec produces from
 // separate proto fields, with no way to check that they agree — is judged by
@@ -427,12 +374,12 @@ func decodeDelivered(payload, topic string, to audience) (Delivered, error) {
 	// The payload's type is deliberately NOT required to equal the record's
 	// topic. A record this system produces cannot disagree — NewPayload derives
 	// the type from the topic — so the equality protects against nothing our
-	// producers can do. What it does reject is a payload carrying a Slack event
-	// type, which is what the Socket Mode and real-time transports must deliver
-	// for an official client to parse it, and which the qualification fixtures
-	// store directly because no translation from an internal record to a Slack
-	// envelope exists yet. Asserting the equality here broke every official
-	// Socket Mode and real-time client while protecting nothing.
+	// producers can do. What it does reject is a payload that already carries a
+	// Slack event type: the transports accept such a payload as an already
+	// translated event (see slackShaped in slack.go), and the qualification
+	// fixture stores two of them for the topics this repository cannot translate
+	// yet. Asserting the equality here broke every official Socket Mode and
+	// real-time client while protecting nothing.
 	//
 	// What the equality was reaching for is the refusal below: a record rebuilt
 	// from independent parts must not escape a rule by being filed under a topic
@@ -455,6 +402,21 @@ func (d Delivered) Field(name string) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+// Strings reports a list-of-strings payload field, as Strings wrote it. The
+// second result is false when the field is absent or is not a JSON array of
+// strings.
+func (d Delivered) Strings(name string) ([]string, bool) {
+	raw, exists := d.Object[name]
+	if !exists {
+		return nil, false
+	}
+	var values []string
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, false
+	}
+	return values, true
 }
 
 // Encode renders the payload object back to JSON with stable key ordering.

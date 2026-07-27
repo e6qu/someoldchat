@@ -127,6 +127,17 @@ func producedEvent(t *testing.T, id domain.EventID, topic string, fields ...even
 	return event
 }
 
+func slackShapedMessageEvent(id domain.EventID) events.Event {
+	return events.Event{
+		ID:          id,
+		WorkspaceID: "T1",
+		ActorID:     "U1",
+		Topic:       "message.created",
+		Payload:     `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`,
+		CreatedAt:   time.Unix(1700000000, 0).UTC(),
+	}
+}
+
 // Both delivery formats read one rule about one question: may this record be
 // handed to an audience. They were separate implementations of it, and the
 // record format's copy refused a payload carrying a Slack event type — which is
@@ -137,9 +148,7 @@ func producedEvent(t *testing.T, id domain.EventID, topic string, fields ...even
 // record.
 func TestBothDeliveryFormatsAcceptTheSameRecords(t *testing.T) {
 	compatibility := []events.Record{
-		{Sequence: 1, Event: events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", CreatedAt: time.Unix(1700000000, 0).UTC(),
-			Payload: `{"type":"message","event_ts":"1700000000.000000","channel":"C1","text":"hello"}`}},
-		{Sequence: 2, Event: producedEvent(t, "evt_2", "message.created", events.String("message_id", "M1"))},
+		{Sequence: 1, Event: slackShapedMessageEvent("evt_1")},
 	}
 	for _, record := range compatibility {
 		var recordBody []byte
@@ -187,10 +196,7 @@ func TestSlackEventDeliverySignsTheExactBytesItSends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.New("evt_1", "T1", "U1", events.NewPayload("message.created", events.String("message_id", "M1"), events.String("channel_id", "C1")), time.Unix(1700000000, 0).UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := slackShapedMessageEvent("evt_1")
 	if err := delivery(context.Background(), events.Record{Sequence: 1, Event: event}); err != nil {
 		t.Fatal(err)
 	}
@@ -343,13 +349,9 @@ func TestSlackEventDeliveryBuildsSignedSlackEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The record is built by the typed constructor the service uses, so this
-	// asserts the delivery of a payload production actually emits rather than a
-	// hand-written envelope.
-	event, err := events.New("evt_1", "T1", "U1", events.NewPayload("message.created", events.String("message_id", "M1"), events.String("channel_id", "C1")), time.Unix(1700000000, 0).UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The qualification fixture stores a Slack-shaped inner message until the
+	// application event source has a conversation-visibility filter.
+	event := slackShapedMessageEvent("evt_1")
 	record := events.Record{Sequence: 1, Event: event}
 	if err := delivery(context.Background(), record); err != nil {
 		t.Fatal(err)
@@ -363,6 +365,30 @@ func TestSlackEventDeliveryBuildsSignedSlackEnvelope(t *testing.T) {
 	}
 	if envelope["type"] != "event_callback" || envelope["api_app_id"] != "A1" || envelope["team_id"] != "T1" {
 		t.Fatalf("envelope=%s", gotBody)
+	}
+}
+
+func TestSlackEventDeliveryFansOutWithDistinctIdempotencyKeys(t *testing.T) {
+	var keys []string
+	delivery, err := newSlackEventDeliveryWithClient("https://delivery.invalid/events", "A1", "signing-secret", &http.Client{Transport: roundTripperFunc(func(request *http.Request) (*http.Response, error) {
+		keys = append(keys, request.Header.Get("Idempotency-Key"))
+		return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader("")), Header: make(http.Header)}, nil
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := events.New("evt_fanout", "T1", "U1", events.NewPayload("conversation.members_invited",
+		events.String("channel_id", "C1"),
+		events.Strings("user_ids", []string{"U2", "U3"}),
+	), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := delivery(context.Background(), events.Record{Sequence: 1, Event: event}); err != nil {
+		t.Fatal(err)
+	}
+	if len(keys) != 2 || keys[0] != "evt_fanout" || keys[1] != "evt_fanout#1" {
+		t.Fatalf("idempotency keys=%v, want one stable key per fanned-out event", keys)
 	}
 }
 
@@ -385,6 +411,14 @@ func TestSlackEventDeliveryReportsUndeliverableRecordsAsPermanent(t *testing.T) 
 	if err := delivery(context.Background(), internal); !errors.Is(err, outbox.ErrPermanent) {
 		t.Fatalf("internal record error=%v, want %v", err, outbox.ErrPermanent)
 	}
+	incomplete := events.Record{Sequence: 3, Event: events.Event{
+		ID: "evt_3", WorkspaceID: "T1", Topic: "reaction.added",
+		Payload:   `{"type":"reaction.added","event_ts":"1700000000.000000","channel_id":"C1","user_id":"U1","reaction":"wave"}`,
+		CreatedAt: time.Unix(1700000000, 0).UTC(),
+	}}
+	if err := delivery(context.Background(), incomplete); !errors.Is(err, outbox.ErrPermanent) || !errors.Is(err, events.ErrSlackEventIncomplete) {
+		t.Fatalf("incomplete translated payload error=%v, want permanent %v", err, events.ErrSlackEventIncomplete)
+	}
 }
 
 // A destination failure is not the record's fault: retrying is the only way to
@@ -396,10 +430,7 @@ func TestSlackEventDeliveryKeepsDestinationFailuresRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	event, err := events.New("evt_1", "T1", "U1", events.NewPayload("message.created", events.String("message_id", "M1")), time.Unix(1700000000, 0).UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
+	event := slackShapedMessageEvent("evt_1")
 	deliveryErr := delivery(context.Background(), events.Record{Sequence: 1, Event: event})
 	if deliveryErr == nil {
 		t.Fatal("a rejected delivery was reported as success")

@@ -145,6 +145,7 @@ type Service interface {
 	EndDND(context.Context, domain.WorkspaceID, domain.UserID) error
 	Users(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.UserPage, error)
 	ConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
+	IsConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (bool, error)
 	WorkspaceInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.Workspace, error)
 	AdminCreateWorkspace(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.WorkspaceDiscoverability) (domain.Workspace, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)

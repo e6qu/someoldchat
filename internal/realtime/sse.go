@@ -211,12 +211,27 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 			if !addressedTo(record.Event.Topic, delivered, connection.UserID) {
 				continue
 			}
-			payload, encodeErr := delivered.Encode()
-			if encodeErr != nil {
+			// The frame is the bare Slack inner event, built by the one
+			// translation site. This loop used to send the durable payload
+			// verbatim, so an official RTM client received {"type":"message.created",
+			// "message_id":…} and its "message" listener never fired: the client
+			// emits by the event's type, and our topics are not Slack event
+			// names. A record whose topic maps to no Slack event yields no frame
+			// and is stepped over, because an unparseable frame is not delivery.
+			inners, translateErr := events.RTMEvents(record.Event.Topic, delivered)
+			if translateErr != nil {
+				h.logger().Warn("RTM skipped a record whose payload cannot fill its Slack event", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", translateErr)
 				continue
 			}
-			if websocket.Message.Send(conn, payload) != nil {
-				return
+			for _, inner := range inners {
+				payload, encodeErr := inner.Encode()
+				if encodeErr != nil {
+					h.logger().Warn("RTM skipped a record it could not encode", "workspace", h.Workspace, "sequence", record.Sequence, "topic", record.Event.Topic, "error", encodeErr)
+					continue
+				}
+				if websocket.Message.Send(conn, payload) != nil {
+					return
+				}
 			}
 		}
 		select {

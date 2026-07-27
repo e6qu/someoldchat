@@ -906,11 +906,15 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				isMember, err := chat.IsConversationMember(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
 				identifiers := make([]domain.UserID, 0, len(members.Users))
 				for _, member := range members.Users {
 					identifiers = append(identifiers, member.ID)
 				}
-				return []any{cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore}, nil
+				return []any{cursor.Conversation, cursor.LastRead == timestampOf(message), identifiers, members.HasMore, isMember}, nil
 			},
 		},
 		{

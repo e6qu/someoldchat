@@ -38,7 +38,7 @@ type RuntimeDriver interface {
 type Snapshotter interface {
 	Create(context.Context, uint64) (Manifest, error)
 	Current(context.Context, uint64) (Manifest, error)
-	LastVerified(context.Context, uint64) (Manifest, error)
+	Select(context.Context, uint64) (Manifest, error)
 	// LiveState describes the database already present on the active volume
 	// without reading, downloading, or restoring any snapshot. Recovery of an
 	// interrupted hibernation starts from it so an older snapshot can never
@@ -194,7 +194,7 @@ func (c Coordinator) RestoreAt(ctx context.Context, fence, generation uint64) er
 	if metadata.RestoreGeneration != generation {
 		return ErrInvalidTransition
 	}
-	manifest, err := c.Snapshots.LastVerified(ctx, generation)
+	manifest, err := c.Snapshots.Select(ctx, generation)
 	if err != nil {
 		c.Metrics.AddCounter("sameoldchat_snapshot_selection_failures_total", 1)
 		return err

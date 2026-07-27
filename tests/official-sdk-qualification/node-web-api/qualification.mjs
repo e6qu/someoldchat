@@ -682,7 +682,8 @@ assert.equal(marked.ok, true);
 
 const history = await client.conversations.history({ channel: "C1", limit: 10 });
 assert.equal(history.ok, true);
-assert.equal(history.messages.length, 4);
+assert.equal(history.messages.length, 3);
+assert.equal(history.messages.some((message) => message.ts === posted.ts), false);
 assert.equal(history.has_more, false);
 const search = await client.search.messages({ query: "thread" });
 assert.equal(search.ok, true);

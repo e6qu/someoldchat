@@ -509,7 +509,7 @@ func (r Remote) Permalink(ctx context.Context, workspaceID domain.WorkspaceID, u
 }
 
 func (r Remote) History(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, request domain.PageRequest) (domain.MessagePage, error) {
-	in := &chatv1.HistoryRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor)}
+	in := &chatv1.HistoryRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending}
 	out, err := r.messages.History(ctx, in)
 	if err != nil {
 		return domain.MessagePage{}, err
@@ -1792,6 +1792,29 @@ func (r Remote) ConversationMembers(ctx context.Context, workspaceID domain.Work
 		return domain.UserPage{}, err
 	}
 	return decodeProtoUserPage(out)
+}
+
+// IsConversationMember is derived from the existing paged member RPC. Keeping
+// this as a client-side projection avoids adding a transport-only RPC for a
+// fact the directory already exposes, while still giving local and distributed
+// web compositions the same exact membership answer.
+func (r Remote) IsConversationMember(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (bool, error) {
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := r.ConversationMembers(ctx, workspaceID, userID, conversationID, request)
+		if err != nil {
+			return false, err
+		}
+		for _, member := range page.Users {
+			if member.ID == userID {
+				return true, nil
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			return false, nil
+		}
+		request.Cursor = page.NextCursor
+	}
 }
 
 func (r Remote) WorkspaceInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.Workspace, error) {
@@ -4010,7 +4033,7 @@ func (s *Server) permalinkProto(ctx context.Context, input *chatv1.PermalinkRequ
 }
 
 func (s *Server) historyProto(ctx context.Context, input *chatv1.HistoryRequest) (*chatv1.MessagePage, error) {
-	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request := protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending())
 	page, err := s.implementation.History(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), request)
 	if err != nil {
 		return nil, mapError(err)
@@ -4886,7 +4909,15 @@ func seamPage(limit int) int {
 // both compositions read it. What survives here is maxSeamPage, which refuses
 // nothing and only stops one request from reserving gigabytes.
 func protoPageRequest(limit int32, cursor string) domain.PageRequest {
-	return domain.PageRequest{Limit: seamPage(int(limit)), Cursor: domain.Cursor(cursor)}
+	return protoDirectionalPageRequest(limit, cursor, false)
+}
+
+func protoDirectionalPageRequest(limit int32, cursor string, descending bool) domain.PageRequest {
+	return domain.PageRequest{
+		Limit:      seamPage(int(limit)),
+		Cursor:     domain.Cursor(cursor),
+		Descending: descending,
+	}
 }
 
 func stringIDs(values []domain.UserID) []string {

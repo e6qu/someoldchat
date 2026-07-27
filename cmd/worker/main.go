@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -251,7 +252,13 @@ type httpDoer interface {
 // retryable: a receiver that is misconfigured today may accept the same body
 // tomorrow, and dropping a committed event for it would lose data.
 func permanentDeliveryFailure(err error) bool {
-	return errors.Is(err, events.ErrPayloadInternal) || errors.Is(err, events.ErrPayloadRecipientScoped) || errors.Is(err, events.ErrPayloadMalformed) || errors.Is(err, events.ErrEventIncomplete)
+	return errors.Is(err, events.ErrPayloadInternal) ||
+		errors.Is(err, events.ErrPayloadRecipientScoped) ||
+		errors.Is(err, events.ErrPayloadRequired) ||
+		errors.Is(err, events.ErrPayloadFieldInvalid) ||
+		errors.Is(err, events.ErrPayloadMalformed) ||
+		errors.Is(err, events.ErrSlackEventIncomplete) ||
+		errors.Is(err, events.ErrEventIncomplete)
 }
 
 // classifyEncodeFailure applies one policy to every delivery format. A record
@@ -315,38 +322,64 @@ func newSlackEventDeliveryWithClient(target, appID, signingSecret string, client
 	return func(ctx context.Context, record events.Record) error {
 		// A record that cannot be encoded for Slack will never encode: it is
 		// either an internal worker record, a record addressed to a single user,
-		// or a payload written before the typed payload contract. Retrying it
-		// forever hides the problem and stops the outbox from draining, so it is
+		// a payload written before the typed payload contract, or a payload that
+		// cannot fill the Slack event its topic maps to. Retrying it forever
+		// hides the problem and stops the outbox from draining, so it is
 		// reported as permanent and the worker drops it after logging.
-		body, err := events.SlackEventBody(record, appID)
+		bodies, err := events.SlackEventBodies(record, appID)
 		if err != nil {
 			return classifyEncodeFailure(record, err)
 		}
-		timestamp := time.Now().UTC()
-		// The signature covers the exact bytes sent below. Re-encoding the
-		// envelope for signing would produce a MAC over bytes the receiver never
-		// sees whenever the two encodings differ in key order or spacing, and
-		// every delivery would be rejected as unsigned.
-		signature, err := events.SlackSignature(signingSecret, timestamp, body)
-		if err != nil {
-			return err
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Slack-Request-Timestamp", fmt.Sprint(timestamp.Unix()))
-		req.Header.Set("X-Slack-Signature", signature)
-		req.Header.Set("Idempotency-Key", string(record.Event.ID))
-		response, err := client.Do(req)
-		if err != nil {
-			return err
-		}
-		defer response.Body.Close()
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return fmt.Errorf("Slack event delivery returned HTTP %d", response.StatusCode)
+		// No body is not a failure: the record's topic maps to no Slack event,
+		// or to one whose inner shape is not modelled yet. Posting the durable
+		// record instead is what an Events API receiver cannot route, so the
+		// record is acknowledged without being sent. One record can also become
+		// several events — conversation.members_invited is one per invited user
+		// — and each is posted as its own signed request, because an Events API
+		// receiver reads one event per delivery.
+		for index, body := range bodies {
+			if err := postSlackEvent(ctx, client, target, signingSecret, record, index, body); err != nil {
+				return err
+			}
 		}
 		return nil
 	}, nil
+}
+
+// postSlackEvent sends one signed event_callback body.
+//
+// The idempotency key names the event and, when a record fans out, which of its
+// events this is: a receiver that de-duplicates on the key alone would
+// otherwise discard every event of a fan-out after the first.
+func postSlackEvent(ctx context.Context, client httpDoer, target, signingSecret string, record events.Record, index int, body []byte) error {
+	timestamp := time.Now().UTC()
+	// The signature covers the exact bytes sent below. Re-encoding the
+	// envelope for signing would produce a MAC over bytes the receiver never
+	// sees whenever the two encodings differ in key order or spacing, and
+	// every delivery would be rejected as unsigned.
+	signature, err := events.SlackSignature(signingSecret, timestamp, body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	idempotency := string(record.Event.ID)
+	if index > 0 {
+		idempotency += "#" + strconv.Itoa(index)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Slack-Request-Timestamp", fmt.Sprint(timestamp.Unix()))
+	req.Header.Set("X-Slack-Signature", signature)
+	req.Header.Set("Idempotency-Key", idempotency)
+	response, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("Slack event delivery returned HTTP %d", response.StatusCode)
+	}
+	return nil
 }

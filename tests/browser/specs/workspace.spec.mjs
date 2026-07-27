@@ -143,6 +143,46 @@ test('the composer honours the keyboard contract it advertises', async ({ page, 
   await composer.press('Enter');
   await expect(page.locator('.message-text').last()).toHaveText(sent);
   await expect(composer).toHaveValue('');
+
+  // Slack's global search shortcut works from the composer, and Escape returns
+  // to composing without submitting or losing text.
+  await composer.fill('draft survives search');
+  await composer.press('Control+k');
+  const search = page.locator('#workspace-search');
+  await expect(search).toBeFocused();
+  await search.press('Escape');
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue('draft survives search');
+});
+
+// Public channels are intentionally readable before joining, but that does not
+// make their mutation controls usable. The UI must offer the real membership
+// transition first and reveal the composer only after it succeeds.
+test('a public-channel preview can be joined and posted to', async ({ page, context, request }) => {
+  const leave = await request.post('/api/conversations.leave', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL },
+  });
+  const left = await leave.json();
+  expect(left.ok, JSON.stringify(left)).toBe(true);
+
+  await signIn(context);
+  await page.goto('/app');
+  await expect(page.getByText('Not joined', { exact: true })).toBeVisible();
+  await expect(page.locator('form.composer')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Pin' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Join channel' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Join channel' }).click();
+  await expect(page).toHaveURL(/\/app\?channel=Cdev/);
+  const composer = page.locator('form.composer textarea[name="text"]');
+  await expect(composer).toBeVisible();
+  await expect(page.getByText('Joined', { exact: true })).toBeVisible();
+
+  const sent = `joined from browser ${Date.now()}`;
+  await composer.fill(sent);
+  await composer.press('Enter');
+  await expect(page.locator('.message-text').last()).toHaveText(sent);
 });
 
 // The page closed its EventSource on the first submit and never reopened it, and
@@ -182,6 +222,7 @@ test('reactions and pins render and reverse in place', async ({ page, context, r
   const url = page.url();
 
   const reaction = target.locator('form[aria-label="Add reaction"] input[name="name"]');
+  await target.getByText('Add reaction', { exact: true }).click();
   await reaction.fill('wave');
   await reaction.press('Enter');
 
@@ -348,49 +389,6 @@ test('a message sent while reading older history is not lost', async ({ page, co
   // The reader is taken to the window the message is actually in.
   await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'true');
   await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(1);
-});
-
-// The test above covers the reachable half of `data-live="false"`: an ordinary
-// page of older history, where the newest window exists and the client can
-// navigate to it. The other half is a conversation longer than the timeline
-// scan budget, where *no* window is the newest one — the walk gives up in the
-// same place whatever cursor it is given, so navigating lands back on the same
-// stale window and the message the reader just sent disappears with no error.
-// That was the regression the fix above introduced.
-//
-// The state is produced by the server only past timelineScan*timelineScanPages
-// messages, which is 10,050 sequential posts through this API and minutes of
-// wall clock per run; internal/web's TestATruncatedTimelineIsNeverPresentedAsCurrent
-// covers the server half against the real handler. What that Go test cannot
-// observe is the client, so the server's answer is rewritten here and only the
-// client's behaviour is asserted: it must not append the message to a region a
-// refresh will drop, must not navigate, and must say what happened.
-test('a message sent into a conversation whose newest window cannot be reached says so', async ({ page, context }) => {
-  await signIn(context);
-  await page.route('**/app?**', async (route) => {
-    const response = await route.fetch();
-    const body = (await response.text())
-      .replace('data-truncated="false"', 'data-truncated="true"')
-      .replace(/data-newest="[^"]*"/, 'data-newest=""');
-    await route.fulfill({ response, body });
-  });
-
-  await page.goto('/app?channel=Cdev');
-  await expect(page.locator('form.composer')).toHaveAttribute('data-truncated', 'true');
-
-  const composer = page.locator('form.composer textarea[name="text"]');
-  const sent = `sent into a truncated conversation ${Date.now()}`;
-  const before = await page.locator('#timeline .message').count();
-  await composer.fill(sent);
-  await page.getByRole('button', { name: 'Send' }).click();
-
-  // The reader is told, rather than shown a message that is not in this window.
-  await expect(page.locator('#live-status')).toHaveText(/cannot reach the newest part of this conversation/);
-  await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(0);
-  await expect(page.locator('#timeline .message')).toHaveCount(before);
-  // The composer is cleared, so the reader knows the message was accepted.
-  await expect(composer).toHaveValue('');
-  await page.unroute('**/app?**');
 });
 
 // Sign-out must come last in this file. The suite runs with a single worker

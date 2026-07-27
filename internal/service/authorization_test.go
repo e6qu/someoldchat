@@ -326,6 +326,26 @@ func TestJoinConversationRefusesPrivateAndDirectConversations(t *testing.T) {
 	if _, err := messages.JoinConversation(ctx, "T1", "U3", "C1"); err != nil {
 		t.Fatalf("joining a public channel was refused: %v", err)
 	}
+	records, err := s.ListEventsAfter(ctx, "T1", 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var join *events.Record
+	for index := range records {
+		if records[index].Event.Topic == "conversation.member_added" {
+			join = &records[index]
+		}
+	}
+	if join == nil {
+		t.Fatal("joining a public channel did not publish conversation.member_added")
+	}
+	bodies, err := events.SlackEventBodies(*join, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 1 || !strings.Contains(string(bodies[0]), `"type":"member_joined_channel"`) || !strings.Contains(string(bodies[0]), `"user":"U3"`) || !strings.Contains(string(bodies[0]), `"channel":"C1"`) {
+		t.Fatalf("join event bodies=%q, want one complete member_joined_channel", bodies)
+	}
 }
 
 // AdminDisconnectSharedConversation went straight from the role check to the

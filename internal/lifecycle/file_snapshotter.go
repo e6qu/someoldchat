@@ -44,8 +44,8 @@ func (s FileSnapshotter) Current(_ context.Context, generation uint64) (Manifest
 	return s.Manager.Current(generation)
 }
 
-func (s FileSnapshotter) LastVerified(_ context.Context, maxGeneration uint64) (Manifest, error) {
-	return s.Manager.LastVerified(maxGeneration)
+func (s FileSnapshotter) Select(_ context.Context, generation uint64) (Manifest, error) {
+	return s.Manager.Select(generation)
 }
 
 // LiveState describes the database already present at OutputPath. It reads no

@@ -95,11 +95,11 @@ func TestEncryptedSnapshotRoundTrip(t *testing.T) {
 	if current.Artifact != manifest.Artifact || current.Signature != manifest.Signature {
 		t.Fatalf("current manifest = %+v, created = %+v", current, manifest)
 	}
-	last, err := manager.LastVerified(1)
+	last, err := manager.Select(1)
 	if err != nil || last.Artifact != manifest.Artifact {
 		t.Fatalf("last verified manifest = %+v err=%v", last, err)
 	}
-	if _, err := manager.LastVerified(0); err == nil {
+	if _, err := manager.Select(0); err == nil {
 		t.Fatal("snapshot newer than recovery fence was accepted")
 	}
 	if current, err := manager.Current(2); err != nil || current.Generation != 1 {
@@ -140,7 +140,7 @@ func TestObjectSnapshotRoundTrip(t *testing.T) {
 	if !bytes.Equal(got, want) {
 		t.Fatalf("restored=%q, want %q", got, want)
 	}
-	if last, err := manager.LastVerified(1); err != nil || last.Generation != 1 {
+	if last, err := manager.Select(1); err != nil || last.Generation != 1 {
 		t.Fatalf("last verified=%+v err=%v", last, err)
 	}
 }
@@ -193,7 +193,7 @@ func TestSnapshotRejectsUnsafeArtifact(t *testing.T) {
 	}
 }
 
-func TestLastVerifiedSkipsCorruptNewestGeneration(t *testing.T) {
+func TestSelectQuarantinesCorruptSelectedGeneration(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "database.sqlite")
 	if err := os.WriteFile(sourcePath, []byte("durable"), 0o600); err != nil {
@@ -235,9 +235,19 @@ func TestLastVerifiedSkipsCorruptNewestGeneration(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	last, err := manager.LastVerified(2)
+	if _, err := manager.Select(2); err == nil {
+		t.Fatal("corrupt selected generation was accepted")
+	}
+	quarantine, err := os.ReadFile(filepath.Join(manager.Root, "quarantine", "00000000000000000002.json"))
+	if err != nil {
+		t.Fatalf("corrupt generation was not quarantined: %v", err)
+	}
+	if !bytes.Contains(quarantine, []byte(`"generation":2`)) {
+		t.Fatalf("quarantine record=%s", quarantine)
+	}
+	last, err := manager.Select(first.Generation)
 	if err != nil || last.Generation != first.Generation {
-		t.Fatalf("last=%+v err=%v", last, err)
+		t.Fatalf("explicit prior selection=%+v err=%v", last, err)
 	}
 }
 
@@ -286,8 +296,11 @@ func TestSnapshotFailurePreservesPriorManifest(t *testing.T) {
 	if err != nil || current.Generation != first.Generation || current.Signature != first.Signature {
 		t.Fatalf("current=%+v err=%v, want prior manifest=%+v", current, err, first)
 	}
-	if _, err := manager.LastVerified(2); err != nil {
+	if _, err := manager.Select(1); err != nil {
 		t.Fatalf("prior verified snapshot was lost: %v", err)
+	}
+	if _, err := manager.Select(2); !errors.Is(err, ErrNoVerifiedSnapshot) {
+		t.Fatalf("failed generation exists as a selectable manifest: %v", err)
 	}
 }
 
@@ -480,7 +493,7 @@ func TestRestoreRefusesSnapshotFromANewerSchema(t *testing.T) {
 // the same rule belongs here: a transient read failure on the newest manifest
 // must not be indistinguishable from corruption, because that silently selects
 // older data.
-func TestLastVerifiedSurfacesProviderFailuresInsteadOfSelectingOlderData(t *testing.T) {
+func TestSelectSurfacesProviderFailuresInsteadOfSelectingOlderData(t *testing.T) {
 	store := &failingSnapshotStore{memorySnapshotStore: memorySnapshotStore{objects: make(map[string][]byte)}}
 	manager, err := NewObjectSnapshotManager(store, bytes.Repeat([]byte{13}, 32), bytes.Repeat([]byte{14}, 32), "object-key", 1<<20)
 	if err != nil {
@@ -497,7 +510,7 @@ func TestLastVerifiedSurfacesProviderFailuresInsteadOfSelectingOlderData(t *test
 		}
 	}
 	store.failKey = "manifests/00000000000000000002.json"
-	if _, err := manager.LastVerified(2); err == nil {
+	if _, err := manager.Select(2); err == nil {
 		t.Fatal("an unreadable newest manifest silently selected an older generation")
 	}
 }
@@ -514,7 +527,7 @@ func (s *failingSnapshotStore) Open(ctx context.Context, key string) (blob.Objec
 	return s.memorySnapshotStore.Open(ctx, key)
 }
 
-// The two storage backends must answer LastVerified the same way.
+// The two storage backends must answer Select the same way.
 //
 // The filesystem path fell back to reading current.json when the manifests/ scan
 // found nothing verifiable; the object-store path returned ErrNoVerifiedSnapshot.
@@ -522,7 +535,7 @@ func (s *failingSnapshotStore) Open(ctx context.Context, key string) (blob.Objec
 // alive in one backend: the coordinator's exact-generation check defanged it for
 // today's callers, but the same question answered two ways is how the next caller
 // silently restores a generation nobody selected.
-func TestLastVerifiedDoesNotFallBackToCurrentInEitherBackend(t *testing.T) {
+func TestSelectDoesNotFallBackToCurrentInEitherBackend(t *testing.T) {
 	root := t.TempDir()
 	sourcePath := filepath.Join(root, "database.sqlite")
 	if err := os.WriteFile(sourcePath, []byte("published generation 3"), 0o600); err != nil {
@@ -554,8 +567,8 @@ func TestLastVerifiedDoesNotFallBackToCurrentInEitherBackend(t *testing.T) {
 		if _, err := manager.Current(3); err != nil {
 			t.Fatalf("%s: current.json is expected to survive: %v", name, err)
 		}
-		if _, err := manager.LastVerified(3); !errors.Is(err, ErrNoVerifiedSnapshot) {
-			t.Fatalf("%s: LastVerified error=%v, want %v rather than a generation nobody published to manifests/", name, err, ErrNoVerifiedSnapshot)
+		if _, err := manager.Select(3); !errors.Is(err, ErrNoVerifiedSnapshot) {
+			t.Fatalf("%s: Select error=%v, want %v rather than a generation nobody published to manifests/", name, err, ErrNoVerifiedSnapshot)
 		}
 	}
 }
