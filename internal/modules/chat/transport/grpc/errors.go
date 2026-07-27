@@ -134,6 +134,10 @@ var errorClasses = []errorClass{
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
 	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwned, restoresCode: true},
 	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
+	// Refusing to remove a workspace's last owner is a precondition failure, not
+	// a permission failure: the actor has the authority, and the operation is
+	// refused because the workspace would become unadministrable.
+	{key: "service.last_workspace_owner", code: codes.FailedPrecondition, sentinel: service.ErrLastWorkspaceOwner},
 
 	// Absence.
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},

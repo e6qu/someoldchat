@@ -205,6 +205,7 @@ func pinnedErrorCodes(t *testing.T) map[string]struct{} {
 func recordedNonPinnedCodes() map[string]string {
 	return map[string]string{
 		// Surfaces the pinned snapshot does not describe, or that declare no enum.
+		"cant_delete_primary_owner":  "the pinned snapshot declares no owner-protection code for admin.users.*; this names the real cause rather than reporting a permission failure the actor does not have",
 		"canvas_not_found":           "canvases.* is absent from the pinned snapshot",
 		"list_not_found":             "slackLists.* is absent from the pinned snapshot",
 		"call_not_found":             "calls.* declares no error enum",

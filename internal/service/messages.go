@@ -67,6 +67,12 @@ var (
 	// does not exist, and would hide the real reason from the operator reading the
 	// audit trail.
 	ErrNotWorkspaceAdmin = errors.New("actor is not a workspace administrator")
+
+	// ErrLastWorkspaceOwner refuses a change that would leave a workspace with no
+	// owner. Ownership is the authority that appoints administrators, so a
+	// workspace that loses its last owner cannot appoint another and is
+	// permanently unadministrable.
+	ErrLastWorkspaceOwner = errors.New("workspace must retain an owner")
 )
 
 type Messages struct {
@@ -720,12 +726,30 @@ func (m Messages) UserInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 }
 
 func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID) error {
-	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+	actor, err := m.requireWorkspaceRole(ctx, workspaceID, actorID)
+	if err != nil {
 		return err
 	}
 	target, err := m.Store.GetUser(ctx, targetID)
 	if err != nil || target.WorkspaceID != workspaceID {
 		return store.ErrNotFound
+	}
+	// Removal carries the same authority as demotion: it ends the target's
+	// participation entirely, so an administrator must not be able to apply it
+	// to an owner, and the last owner must not be removable.
+	membership, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	if err == nil {
+		if membership.Role.Outranks(actor.Role) {
+			return ErrNotWorkspaceAdmin
+		}
+		if membership.Role == domain.WorkspaceRoleOwner {
+			if err := m.refuseLastOwnerChange(ctx, workspaceID, targetID); err != nil {
+				return err
+			}
+		}
 	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("user.removed", events.String("user_id", string(targetID))), time.Now().UTC())
 	if err != nil {
@@ -735,10 +759,79 @@ func (m Messages) RemoveUser(ctx context.Context, workspaceID domain.WorkspaceID
 }
 
 func (m Messages) SetUserRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, targetID domain.UserID, role domain.WorkspaceRole) error {
-	if err := m.requireWorkspaceAdmin(ctx, workspaceID, actorID); err != nil {
+	actor, err := m.requireWorkspaceRole(ctx, workspaceID, actorID)
+	if err != nil {
+		return err
+	}
+	if err := m.authorizeRoleChange(ctx, workspaceID, actor, targetID, role); err != nil {
 		return err
 	}
 	return m.setWorkspaceRole(ctx, workspaceID, actorID, targetID, role)
+}
+
+// authorizeRoleChange enforces the workspace role hierarchy on a role mutation.
+//
+// Before this, "is the actor an administrator" was the only question asked, and
+// Admin and Owner answered it identically. An administrator could therefore
+// grant themselves Owner, demote the real owner, and remove them — taking a
+// workspace from its owner permanently. Three rules close that:
+//
+//   - nobody may grant a role at or above their own, so an administrator cannot
+//     mint an owner and cannot promote themselves;
+//   - nobody may change the role of someone who outranks them, so an
+//     administrator cannot demote an owner;
+//   - the last remaining owner cannot be demoted, because a workspace with no
+//     owner cannot appoint one and is permanently unadministrable.
+func (m Messages) authorizeRoleChange(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.WorkspaceMembership, targetID domain.UserID, role domain.WorkspaceRole) error {
+	// An actor may grant any role up to and including their own, so an
+	// administrator can appoint administrators but not owners. Requiring the
+	// actor to strictly outrank the granted role would stop an administrator
+	// appointing another administrator, which is ordinary workspace management.
+	if role.Rank() > actor.Role.Rank() {
+		return ErrNotWorkspaceAdmin
+	}
+	target, err := m.Store.GetWorkspaceMembership(ctx, workspaceID, targetID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	if target.Role.Outranks(actor.Role) {
+		return ErrNotWorkspaceAdmin
+	}
+	if target.Role == domain.WorkspaceRoleOwner && role != domain.WorkspaceRoleOwner {
+		return m.refuseLastOwnerChange(ctx, workspaceID, targetID)
+	}
+	return nil
+}
+
+// refuseLastOwnerChange reports ErrLastWorkspaceOwner when targetID is the only
+// active owner the workspace has.
+func (m Messages) refuseLastOwnerChange(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID) error {
+	page, err := m.Store.ListUsersByRole(ctx, workspaceID, domain.WorkspaceRoleOwner, domain.PageRequest{Limit: 2})
+	if err != nil {
+		return err
+	}
+	for _, owner := range page.Users {
+		if owner.ID != targetID && !owner.Deleted {
+			return nil
+		}
+	}
+	return ErrLastWorkspaceOwner
+}
+
+// requireWorkspaceRole is requireWorkspaceAdmin, returning the membership so a
+// caller can compare authority rather than re-reading it.
+func (m Messages) requireWorkspaceRole(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID) (domain.WorkspaceMembership, error) {
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, actorID)
+	if err != nil {
+		return domain.WorkspaceMembership{}, err
+	}
+	if membership.Role != domain.WorkspaceRoleAdmin && membership.Role != domain.WorkspaceRoleOwner {
+		return domain.WorkspaceMembership{}, ErrNotWorkspaceAdmin
+	}
+	return membership, nil
 }
 
 // setWorkspaceRole is the validation and write shared by the administrative
@@ -3676,6 +3769,15 @@ func (m Messages) ProvisionExternalUser(ctx context.Context, workspaceID domain.
 // mutually authenticated TLS 1.3 connection (cmd/chatd/main.go configures
 // tls.RequireAndVerifyClientCert).
 func (m Messages) SynchronizeExternalUserRole(ctx context.Context, workspaceID domain.WorkspaceID, targetID domain.UserID, role domain.WorkspaceRole) error {
+	// An identity provider may describe a member or an administrator. It may not
+	// appoint an owner: ownership is the authority that decides who administers
+	// the workspace, and it must not be assignable by an external claim or by
+	// anyone who can reach the internal boundary. createWorkspaceUser already
+	// refused Owner for the same reason; this path did not, so the two
+	// provisioning routes disagreed about the same concept.
+	if role != domain.WorkspaceRoleMember && role != domain.WorkspaceRoleAdmin {
+		return ErrInvalidWorkspace
+	}
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
 		return err
 	}

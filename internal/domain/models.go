@@ -59,6 +59,30 @@ const (
 	WorkspaceRoleOwner  WorkspaceRole = "owner"
 )
 
+// Rank orders the workspace roles so authority can be compared rather than
+// enumerated. An unrecognised role ranks below every real one, so a corrupt or
+// future value can never be read as authority.
+//
+// The three roles were previously compared by equality at each call site, which
+// made Admin and Owner interchangeable everywhere: an administrator could grant
+// themselves Owner and demote the real owner, because "is an administrator" was
+// the only question anyone asked.
+func (r WorkspaceRole) Rank() int {
+	switch r {
+	case WorkspaceRoleOwner:
+		return 3
+	case WorkspaceRoleAdmin:
+		return 2
+	case WorkspaceRoleMember:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// Outranks reports whether r holds strictly more authority than other.
+func (r WorkspaceRole) Outranks(other WorkspaceRole) bool { return r.Rank() > other.Rank() }
+
 type WorkspaceMembership struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID

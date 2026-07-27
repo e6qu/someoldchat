@@ -6038,6 +6038,12 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason string) strin
 	if errors.Is(err, service.ErrMessageNotOwned) || errors.Is(err, service.ErrNotWorkspaceAdmin) {
 		return "no_permission"
 	}
+	// A refusal to leave the workspace ownerless is not a permission failure —
+	// the actor holds the authority — so it must not be reported as one, or an
+	// administrator is told they lack a right they actually have.
+	if errors.Is(err, service.ErrLastWorkspaceOwner) {
+		return "cant_delete_primary_owner"
+	}
 	if errors.Is(err, service.ErrMessageAlreadyDeleted) {
 		return "message_not_found"
 	}

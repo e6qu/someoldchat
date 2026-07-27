@@ -233,7 +233,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 80
+const schemaVersion = 81
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1420,6 +1420,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("discard plaintext oauth codes: %w", err)
 		}
 	}
+	if version < 81 {
+		// Step 78 rewrote every stored timestamp into the fixed-width encoding,
+		// but it re-encoded at full nanosecond resolution — so it corrected the
+		// ORDERING defect and left the RESOLUTION defect untouched.
+		//
+		// A message's timestamp is its public identifier and carries
+		// microseconds. A stored instant finer than that identifier can never be
+		// matched by a read cursor, a thread-root lookup, or a
+		// created-at lookup built from it, so a message written before
+		// domain.MessageInstant existed stays permanently unread. Truncating at
+		// write time fixed only new messages; every row already in the database
+		// kept the defect, and step 78 carried it across the upgrade intact.
+		//
+		// This is a separate step rather than an amendment to 78 because a
+		// deployment that already applied 78 will never run it again.
+		if err := s.truncateMessageInstants(ctx, db); err != nil {
+			return err
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -1533,6 +1552,53 @@ func (s *Store) normalizeStoredTimestampColumn(ctx context.Context, db queryExec
 	for _, value := range rewrites {
 		if _, err := db.ExecContext(ctx, `UPDATE `+table+` SET `+column+` = ? WHERE `+column+` = ?`, value.to, value.from); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// truncateMessageInstants holds every stored message creation instant to the
+// microsecond resolution its own Slack-style timestamp can express.
+//
+// Only messages.created_at is affected. The other migrated columns are compared
+// against cursors built from themselves at full resolution, so truncating them
+// would lose ordering information for no benefit.
+func (s *Store) truncateMessageInstants(ctx context.Context, db queryExecutor) error {
+	rows, err := db.QueryContext(ctx, `SELECT DISTINCT created_at FROM messages WHERE created_at <> ''`)
+	if err != nil {
+		return err
+	}
+	type rewrite struct {
+		from string
+		to   domain.StoredTime
+	}
+	var rewrites []rewrite
+	for rows.Next() {
+		var stored string
+		if err := rows.Scan(&stored); err != nil {
+			rows.Close()
+			return err
+		}
+		parsed, parseErr := domain.ParseStoredTime(stored)
+		if parseErr != nil {
+			rows.Close()
+			return fmt.Errorf("message created_at %q: %w", stored, parseErr)
+		}
+		truncated := domain.NewStoredTime(domain.MessageInstant(parsed))
+		if string(truncated) != stored {
+			rewrites = append(rewrites, rewrite{from: stored, to: truncated})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, value := range rewrites {
+		if _, err := db.ExecContext(ctx, `UPDATE messages SET created_at = ? WHERE created_at = ?`, value.to, value.from); err != nil {
+			return fmt.Errorf("truncate message instant: %w", err)
 		}
 	}
 	return nil

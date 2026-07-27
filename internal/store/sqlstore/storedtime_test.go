@@ -699,3 +699,66 @@ func mustEvent(t *testing.T, id domain.EventID, workspace domain.WorkspaceID, at
 	}
 	return event
 }
+
+// A message written before domain.MessageInstant existed carries sub-microsecond
+// precision its own timestamp cannot express, so a read cursor built from that
+// timestamp can never cover it. Truncating at write time repaired only new
+// messages; migration step 78 rewrote the ENCODING of the existing ones and
+// preserved their RESOLUTION, carrying the defect across the upgrade intact.
+func TestSQLiteMigrationRepairsMessageInstantsWrittenBeforeTruncation(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy-instants.db")
+	first, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Write the row the way a pre-truncation release did, bypassing CreateMessage
+	// so the value reaches the column exactly as it would have then.
+	legacy := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
+	if _, err := first.db.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES ('M1','T1','C1','U1','legacy','','[]','',?,0,'{}')`, domain.NewStoredTime(legacy)); err != nil {
+		t.Fatal(err)
+	}
+	// Rewind the recorded schema version so the upgrade path runs again.
+	if _, err := first.db.ExecContext(ctx, `DELETE FROM schema_migrations WHERE version >= 81`); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(ctx, path)
+	if err != nil {
+		t.Fatalf("reopening an existing database must migrate it: %v", err)
+	}
+	defer migrated.Close()
+
+	stored, err := migrated.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
+	if err != nil || len(stored.Messages) != 1 {
+		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+	if instant := stored.Messages[0].CreatedAt; instant.Nanosecond()%1000 != 0 {
+		t.Fatalf("migrated instant %v still carries sub-microsecond precision its timestamp cannot express", instant)
+	}
+
+	// The real consequence: a cursor at the message's own timestamp marks it read.
+	if err := migrated.SetReadCursor(ctx, domain.ReadCursor{WorkspaceID: "T1", UserID: "U1", Conversation: "C1", LastRead: domain.NewMessageTimestamp(legacy), UpdatedAt: legacy}, mustEvent(t, "E2", "T1", legacy)); err != nil {
+		t.Fatal(err)
+	}
+	page, err := migrated.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil || len(page.Conversations) != 1 {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+	if page.Conversations[0].UnreadCount != 0 {
+		t.Fatalf("unread=%d: a message written before truncation is still permanently unread after the upgrade", page.Conversations[0].UnreadCount)
+	}
+}
