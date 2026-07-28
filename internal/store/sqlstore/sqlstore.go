@@ -7864,6 +7864,11 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		querySQL += ` AND m.text_folded LIKE ? ESCAPE '\'`
 		args = append(args, "%"+escapeLikeTerm(term)+"%")
 	}
+	countSQL := strings.Replace(querySQL, `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, m.unfurls`, `SELECT COUNT(*)`, 1)
+	var total int
+	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+		return domain.MessagePage{}, err
+	}
 	if request.Cursor != "" {
 		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
 		if err != nil {
@@ -7907,7 +7912,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if hasMore {
 		values = values[:request.Limit]
 	}
-	page := domain.MessagePage{Messages: values, HasMore: hasMore}
+	page := domain.MessagePage{Messages: values, HasMore: hasMore, Total: total}
 	if hasMore {
 		page.NextCursor, err = domain.NewMessageCursor(values[len(values)-1])
 		if err != nil {

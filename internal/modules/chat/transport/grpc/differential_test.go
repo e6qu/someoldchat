@@ -1319,6 +1319,7 @@ var parityGaps = map[string]struct{}{
 	"UpdateView":                              {},
 	"UpdateWithBlocks":                        {},
 	"UpdateWithBlocksAndAttachments":          {},
+	"UpdateMessage":                           {},
 	"UserGroupChannels":                       {},
 	"UserGroupUsers":                          {},
 	"UserReactions":                           {},

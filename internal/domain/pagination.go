@@ -108,6 +108,9 @@ type MessagePage struct {
 	Messages   []Message
 	NextCursor Cursor
 	HasMore    bool
+	// Total is populated by searches, whose public contract includes the
+	// complete match count. History and reply pages leave it zero.
+	Total int
 }
 
 type UserPage struct {

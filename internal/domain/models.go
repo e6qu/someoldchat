@@ -889,6 +889,17 @@ type Message struct {
 	Unfurls         map[string]string
 }
 
+// MessagePatch preserves the difference between an omitted Slack field and a
+// field explicitly set to an empty value. That distinction is observable:
+// chat.update retains omitted blocks and attachments, while [] removes them.
+// Plain strings cannot represent both states and previously caused the HTTP
+// and gRPC compositions to erase rich content that an official SDK omitted.
+type MessagePatch struct {
+	Text        *string
+	Blocks      *string
+	Attachments *string
+}
+
 func NormalizeBlocks(raw []byte) (string, error) {
 	return normalizeJSONArrayObjects(raw, "blocks")
 }

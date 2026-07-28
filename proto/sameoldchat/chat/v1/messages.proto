@@ -77,6 +77,16 @@ message UpdateWithBlocksRequest {
   string attachments = 7;
 }
 
+message UpdateMessageRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  optional string text = 5;
+  optional string blocks = 6;
+  optional string attachments = 7;
+}
+
 message UnfurlRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -107,6 +117,7 @@ message MessagePage {
   repeated Message messages = 1;
   string next_cursor = 2;
   bool has_more = 3;
+  int64 total = 4;
 }
 
 message HistoryRequest {
@@ -186,6 +197,7 @@ service MessagesService {
   rpc PostEphemeral(PostEphemeralRequest) returns (EphemeralMessage);
   rpc Update(UpdateRequest) returns (Message);
   rpc UpdateWithBlocks(UpdateWithBlocksRequest) returns (Message);
+  rpc UpdateMessage(UpdateMessageRequest) returns (Message);
   rpc Unfurl(UnfurlRequest) returns (Message);
   rpc Delete(DeleteRequest) returns (Message);
   rpc Permalink(PermalinkRequest) returns (PermalinkResponse);

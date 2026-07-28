@@ -1765,6 +1765,27 @@ func TestSearchMessages(t *testing.T) {
 	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "searchable hello") {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
 	}
+	var payload struct {
+		Messages struct {
+			Total      int `json:"total"`
+			Matches    []map[string]any
+			Pagination struct {
+				PerPage int `json:"per_page"`
+			} `json:"pagination"`
+			Paging struct {
+				Count int `json:"count"`
+			} `json:"paging"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(result.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Messages.Total != 1 || payload.Messages.Pagination.PerPage != 20 || payload.Messages.Paging.Count != 20 {
+		t.Fatalf("search paging does not match Slack's default envelope: %s", result.Body)
+	}
+	if channel, ok := payload.Messages.Matches[0]["channel"].(map[string]any); !ok || channel["id"] != "C1" {
+		t.Fatalf("search match omitted its channel object: %s", result.Body)
+	}
 }
 
 func TestFileMetadataEndpoints(t *testing.T) {
@@ -2850,6 +2871,59 @@ func TestUpdateMessageAcceptsAttachmentsWithoutFallbackText(t *testing.T) {
 	handler.ServeHTTP(result, update)
 	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"attachments":[{"text":"updated"}]`) {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+}
+
+func TestUpdateMessageDistinguishesOmittedFieldsFromEmptyArrays(t *testing.T) {
+	handler := testHandler()
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader(url.Values{
+		"channel":     {"C1"},
+		"text":        {"fallback"},
+		"blocks":      {`[{"type":"section","text":{"type":"plain_text","text":"block"}}]`},
+		"attachments": {`[{"text":"attachment"}]`},
+	}.Encode()))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Authorization", "Bearer token")
+	posted := httptest.NewRecorder()
+	handler.ServeHTTP(posted, post)
+	var created struct {
+		TS string `json:"ts"`
+	}
+	if err := json.NewDecoder(posted.Body).Decode(&created); err != nil || created.TS == "" {
+		t.Fatalf("post body=%s err=%v", posted.Body, err)
+	}
+	call := func(values url.Values) map[string]any {
+		t.Helper()
+		values.Set("channel", "C1")
+		values.Set("ts", created.TS)
+		request := httptest.NewRequest(http.MethodPost, "/api/chat.update", strings.NewReader(values.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var payload map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&payload); err != nil || payload["ok"] != true {
+			t.Fatalf("status=%d body=%s err=%v", response.Code, response.Body, err)
+		}
+		return payload["message"].(map[string]any)
+	}
+	attachmentsOnly := call(url.Values{"attachments": {`[{"text":"changed"}]`}})
+	if _, ok := attachmentsOnly["blocks"]; !ok {
+		t.Fatalf("attachments-only update erased blocks: %#v", attachmentsOnly)
+	}
+	if attachmentsOnly["text"] != "fallback" {
+		t.Fatalf("attachments-only update erased text: %#v", attachmentsOnly)
+	}
+	noBlocks := call(url.Values{"blocks": {"[]"}})
+	if blocks, ok := noBlocks["blocks"].([]any); !ok || len(blocks) != 0 {
+		t.Fatalf("explicit empty blocks did not produce an empty array: %#v", noBlocks)
+	}
+	if _, ok := noBlocks["attachments"]; !ok {
+		t.Fatalf("empty blocks erased omitted attachments: %#v", noBlocks)
+	}
+	noAttachments := call(url.Values{"attachments": {"[]"}})
+	if _, ok := noAttachments["attachments"]; ok {
+		t.Fatalf("explicit empty attachments were retained: %#v", noAttachments)
 	}
 }
 

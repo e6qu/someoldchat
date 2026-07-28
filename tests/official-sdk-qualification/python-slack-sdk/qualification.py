@@ -340,6 +340,28 @@ assert updated["ok"] is True
 deleted = client.chat_delete(channel="C1", ts=posted["ts"])
 assert deleted["ok"] is True
 
+rich_for_update = client.chat_postMessage(
+    channel="C1",
+    text="python rich update fallback",
+    blocks=[{"type": "section", "text": {"type": "plain_text", "text": "retained block"}}],
+    attachments=[{"text": "retained attachment"}],
+)
+attachments_only = client.chat_update(
+    channel="C1",
+    ts=rich_for_update["ts"],
+    attachments=[{"text": "changed attachment"}],
+)
+assert attachments_only["message"]["text"] == "python rich update fallback"
+assert attachments_only["message"]["blocks"][0]["text"]["text"] == "retained block"
+assert attachments_only["message"]["attachments"][0]["text"] == "changed attachment"
+removed_blocks = client.chat_update(channel="C1", ts=rich_for_update["ts"], blocks=[])
+assert removed_blocks["message"].get("blocks", []) == []
+assert removed_blocks["message"]["attachments"][0]["text"] == "changed attachment"
+removed_attachments = client.chat_update(channel="C1", ts=rich_for_update["ts"], attachments=[])
+assert removed_attachments["message"].get("attachments", []) == []
+assert removed_attachments["message"]["text"] == "python rich update fallback"
+assert client.chat_delete(channel="C1", ts=rich_for_update["ts"])["ok"] is True
+
 conversation = client.conversations_info(channel="C1")
 assert conversation["ok"] is True
 assert conversation["channel"]["id"] == "C1"
@@ -645,9 +667,17 @@ assert history["ok"] is True
 assert len(history["messages"]) == 3
 assert all(message["ts"] != posted["ts"] for message in history["messages"])
 assert history["has_more"] is False
-search = client.search_messages(query="thread")
+search = client.search_messages(query="thread", count=999, cursor="*")
 assert search["ok"] is True
 assert len(search["messages"]["matches"]) >= 2
+assert search["messages"]["total"] >= 2
+assert search["messages"]["pagination"]["per_page"] == 100
+assert search["messages"]["paging"]["count"] == 100
+assert search["messages"]["matches"][0]["channel"]["id"] == "C1"
+assert search["messages"]["matches"][0]["channel"]["name"] == "general"
+assert search["messages"]["matches"][0]["team"] == "T1"
+assert search["messages"]["matches"][0]["username"] == "alice"
+assert isinstance(search["messages"]["matches"][0]["permalink"], str)
 
 users = client.users_list(limit=10)
 assert users["ok"] is True
