@@ -60,16 +60,39 @@ func main() {
 	if err := store.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "qualification-client", SecretHash: domain.HashToken("qualification-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
-	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-token-code", "qualification-openid-code"} {
+	for _, code := range []string{"qualification-code", "qualification-v2-code", "qualification-v2-user-code", "qualification-token-code", "qualification-openid-code"} {
 		scopes := auth.AllScopes()
 		if code == "qualification-openid-code" {
 			scopes = append(scopes, "openid")
 		}
-		if err := store.CreateOAuthCode(context.Background(), domain.OAuthCode{Code: code, ClientID: "qualification-client", WorkspaceID: "T1", UserID: "U1", Scopes: scopes, RedirectURI: "https://example.com/oauth"}); err != nil {
+		grant := domain.OAuthCode{Code: code, ClientID: "qualification-client", WorkspaceID: "T1", UserID: "U1", Scopes: scopes, UserScopes: scopes, RedirectURI: "https://example.com/oauth"}
+		if code == "qualification-v2-code" {
+			grant.BotID = "B1"
+			grant.BotUserID = "U1"
+			grant.BotScopes = scopes
+		}
+		if err := store.CreateOAuthCode(context.Background(), grant); err != nil {
 			panic(err)
 		}
 	}
-	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
+	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: auth.AllScopes()})
+	for _, candidate := range []struct {
+		suffix string
+		appID  domain.AppID
+	}{
+		{suffix: "node", appID: "AUNODE"},
+		{suffix: "python", appID: "AUPYTHON"},
+		{suffix: "java", appID: "AUJAVA"},
+	} {
+		clientID := "uninstall-" + candidate.suffix
+		if err := store.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: clientID, SecretHash: domain.HashToken("uninstall-secret"), AppID: candidate.appID}); err != nil {
+			panic(err)
+		}
+		store.SeedToken(context.Background(), "xoxp-uninstall-"+candidate.suffix, domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: candidate.appID, TokenType: "user", Scopes: auth.AllScopes()})
+		if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: candidate.appID, WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+			panic(err)
+		}
+	}
 	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		panic(err)
@@ -95,7 +118,7 @@ func main() {
 		panic(err)
 	}
 	store.SeedFileComment(domain.FileComment{ID: "FC1", File: qualificationFile.ID, WorkspaceID: "T1", UserID: "U1", Text: "qualification comment", CreatedAt: time.Now().UTC()})
-	authenticator, err := auth.NewStatic("xoxb-test", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: scopeSet()})
+	authenticator, err := auth.NewStored(store)
 	if err != nil {
 		panic(err)
 	}
@@ -162,12 +185,4 @@ func (s *qualificationResponseSink) get(envelopeID string) (string, bool) {
 	defer s.mu.RUnlock()
 	payload, ok := s.values[envelopeID]
 	return payload, ok
-}
-
-func scopeSet() map[auth.Scope]struct{} {
-	result := make(map[auth.Scope]struct{})
-	for _, scope := range auth.AllScopes() {
-		result[auth.Scope(scope)] = struct{}{}
-	}
-	return result
 }

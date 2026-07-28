@@ -170,7 +170,17 @@ func NewDialogID() (DialogID, error) {
 	return DialogID(value), err
 }
 
-func NewOAuthToken() (string, error) { return PublicID("xoxp-") }
+func NewOAuthToken() (string, error) { return NewUserToken() }
+
+func NewUserToken() (string, error) { return PublicID("xoxp-") }
+
+func NewBotToken() (string, error) { return PublicID("xoxb-") }
+
+func NewRotatingUserToken() (string, error) { return PublicID("xoxe.xoxp-") }
+
+func NewRotatingBotToken() (string, error) { return PublicID("xoxe.xoxb-") }
+
+func NewRefreshToken() (string, error) { return PublicID("xoxe-") }
 
 func NewRTMConnectionID() (string, error) { return PublicID("rtm-") }
 

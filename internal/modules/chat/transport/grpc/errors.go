@@ -102,6 +102,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: service.ErrInvalidMigration},
 	{key: "service.invalid_oauth", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuth},
 	{key: "service.invalid_oauth_client", code: codes.InvalidArgument, sentinel: service.ErrInvalidOAuthClient},
+	{key: "service.oauth_app_mismatch", code: codes.PermissionDenied, sentinel: service.ErrOAuthAppMismatch},
 	{key: "service.invalid_integration_logs", code: codes.InvalidArgument, sentinel: service.ErrInvalidIntegrationLogs},
 	{key: "service.invalid_list", code: codes.InvalidArgument, sentinel: service.ErrInvalidList},
 	{key: "service.invalid_entity", code: codes.InvalidArgument, sentinel: service.ErrInvalidEntity},

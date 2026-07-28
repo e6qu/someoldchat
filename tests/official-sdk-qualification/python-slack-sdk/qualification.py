@@ -17,6 +17,8 @@ assert client.api_test()["ok"] is True
 identity = client.auth_test()
 assert identity["team_id"] == "T1"
 assert identity["user_id"] == "U1"
+assert identity["bot_id"] == "B1"
+assert identity["is_enterprise_install"] is False
 assert client.api_call(
     "entity.presentDetails",
     params={
@@ -117,7 +119,24 @@ oauth_v2 = client.oauth_v2_access(
 )
 assert oauth_v2["ok"] is True
 assert oauth_v2["authed_user"]["id"] == "U1"
-assert isinstance(oauth_v2["authed_user"]["access_token"], str)
+assert oauth_v2["token_type"] == "bot"
+assert oauth_v2["bot_user_id"] == "U1"
+assert oauth_v2["access_token"].startswith("xoxb-")
+assert "access_token" not in oauth_v2["authed_user"]
+oauth_v2_user = client.api_call(
+    "oauth.v2.user.access",
+    params={
+        "client_id": "qualification-client",
+        "client_secret": "qualification-secret",
+        "code": "qualification-v2-user-code",
+        "redirect_uri": "https://example.com/oauth",
+    },
+)
+assert oauth_v2_user["ok"] is True
+assert "access_token" not in oauth_v2_user
+assert oauth_v2_user["authed_user"]["id"] == "U1"
+assert oauth_v2_user["authed_user"]["token_type"] == "user"
+assert oauth_v2_user["authed_user"]["access_token"].startswith("xoxp-")
 oauth_token = client.api_call(
     "oauth.token",
     params={
@@ -161,6 +180,7 @@ assert refreshed_openid_token["access_token"] != openid_token["access_token"]
 authorizations = client.apps_event_authorizations_list(event_context="qualification-event")
 assert authorizations["ok"] is True
 assert authorizations["authorizations"][0]["team_id"] == "T1"
+assert authorizations["authorizations"][0]["is_bot"] is True
 admin_users = client.admin_users_list(team_id="T1", limit=10)
 assert admin_users["ok"] is True
 assert any(user["id"] == "U1" for user in admin_users["users"])
@@ -706,7 +726,8 @@ else:
 revoked = client.auth_revoke(test=True)
 assert revoked["ok"] is True
 assert revoked["revoked"] is False
-uninstalled = client.apps_uninstall(client_id="client", client_secret="secret")
+uninstall_client = WebClient(token="xoxp-uninstall-python", base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"))
+uninstalled = uninstall_client.apps_uninstall(client_id="uninstall-python", client_secret="uninstall-secret")
 assert uninstalled["ok"] is True
 
 print("python-slack-sdk qualification passed")

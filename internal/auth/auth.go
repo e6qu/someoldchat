@@ -85,6 +85,8 @@ type Principal struct {
 	WorkspaceID domain.WorkspaceID
 	UserID      domain.UserID
 	AppID       domain.AppID
+	BotID       domain.BotID
+	TokenType   string
 	Scopes      map[Scope]struct{}
 }
 
@@ -147,6 +149,12 @@ var (
 	// ErrTokenRevoked is a credential this deployment issued and then withdrew.
 	// → `token_revoked`.
 	ErrTokenRevoked = fmt.Errorf("%w: credential has been revoked", ErrNotAuthenticated)
+
+	// ErrTokenExpired is a credential whose explicit OAuth lifetime has ended.
+	// It is distinct from an unknown credential and from an app/user revocation:
+	// rotating Slack tokens expire after twelve hours and official SDK
+	// installation stores use `token_expired` to decide when to refresh them.
+	ErrTokenExpired = fmt.Errorf("%w: credential has expired", ErrNotAuthenticated)
 
 	// ErrAccountInactive is a valid, unrevoked credential whose identity no longer
 	// exists or carries no authority: a token record with no workspace or user, an
@@ -586,6 +594,9 @@ func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 	if record.Revoked {
 		return Principal{}, ErrTokenRevoked
 	}
+	if !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(time.Now().UTC()) {
+		return Principal{}, ErrTokenExpired
+	}
 	if record.WorkspaceID == "" || record.UserID == "" {
 		return Principal{}, ErrAccountInactive
 	}
@@ -593,7 +604,7 @@ func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 	for _, scope := range record.Scopes {
 		scopes[Scope(scope)] = struct{}{}
 	}
-	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, Scopes: scopes}, nil
+	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, TokenType: record.TokenType, Scopes: scopes}, nil
 }
 
 func NewStatic(token string, principal Principal) (Static, error) {

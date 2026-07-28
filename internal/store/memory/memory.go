@@ -402,6 +402,9 @@ func (s *Store) SeedToken(_ context.Context, token string, record domain.TokenRe
 		return nil
 	}
 	record.Scopes = domain.NormalizeScopes(record.Scopes)
+	if strings.TrimSpace(record.TokenType) == "" {
+		record.TokenType = "user"
+	}
 	s.tokens[key] = record
 	return nil
 }
@@ -1539,6 +1542,40 @@ func (s *Store) ListAppInstallations(_ context.Context, appID domain.AppID) ([]d
 	return values, nil
 }
 
+func (s *Store) UninstallApp(_ context.Context, workspaceID domain.WorkspaceID, appID domain.AppID) error {
+	if workspaceID == "" || appID == "" {
+		return store.InvalidArgument("app installation identity is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := appInstallationKey(appID, workspaceID)
+	installation, exists := s.appInstallations[key]
+	if !exists || !installation.Enabled {
+		return store.ErrNotFound
+	}
+	installation.Enabled = false
+	s.appInstallations[key] = installation
+	for key, token := range s.tokens {
+		if token.WorkspaceID == workspaceID && token.AppID == appID {
+			token.Revoked = true
+			s.tokens[key] = token
+		}
+	}
+	for key, webhook := range s.incomingWebhooks {
+		if webhook.WorkspaceID == workspaceID && webhook.AppID == appID {
+			webhook.Enabled = false
+			s.incomingWebhooks[key] = webhook
+		}
+	}
+	for key, bot := range s.bots {
+		if bot.WorkspaceID == workspaceID && bot.AppID == appID {
+			bot.Deleted = true
+			s.bots[key] = bot
+		}
+	}
+	return nil
+}
+
 func (s *Store) SetAppApproval(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, requestID domain.AppRequestID, status domain.AppApprovalStatus, updatedAt time.Time, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1983,11 +2020,20 @@ func (s *Store) CreateOAuthCode(_ context.Context, value domain.OAuthCode) error
 	if user, exists := s.users[value.UserID]; !exists || user.WorkspaceID != value.WorkspaceID || user.Deleted {
 		return store.ErrNotFound
 	}
+	if value.BotID != "" || value.BotUserID != "" || len(value.BotScopes) != 0 {
+		bot, exists := s.bots[value.BotID]
+		client := s.oauthClients[value.ClientID]
+		if !exists || value.BotUserID == "" || len(domain.NormalizeScopes(value.BotScopes)) == 0 || bot.WorkspaceID != value.WorkspaceID || bot.AppID != client.AppID || bot.UserID != value.BotUserID || bot.Deleted {
+			return store.InvalidArgument("oauth bot grant does not match the app installation")
+		}
+	}
 	codeHash := domain.HashToken(value.Code)
 	if _, exists := s.oauthCodes[codeHash]; exists {
 		return store.ErrAlreadyExists
 	}
 	value.Scopes = domain.NormalizeScopes(value.Scopes)
+	value.BotScopes = domain.NormalizeScopes(value.BotScopes)
+	value.UserScopes = domain.NormalizeScopes(value.UserScopes)
 	value.Code = codeHash
 	s.oauthCodes[codeHash] = memoryOAuthCode{grant: value, expiresAt: time.Now().UTC().Add(store.OAuthCodeLifetime)}
 	return nil
@@ -2017,15 +2063,39 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
+	tokenType := strings.TrimSpace(token.TokenType)
+	if tokenType == "" {
+		tokenType = "user"
+	}
+	subjectID := grant.UserID
+	var tokenBotID domain.BotID
+	tokenScopes := grant.UserScopes
+	if len(tokenScopes) == 0 {
+		tokenScopes = grant.Scopes
+	}
+	if tokenType == "bot" {
+		if grant.BotID == "" || grant.BotUserID == "" {
+			return domain.OAuthToken{}, store.ErrNotFound
+		}
+		subjectID = grant.BotUserID
+		tokenBotID = grant.BotID
+		tokenScopes = grant.BotScopes
+	}
+	tokenScopes = domain.NormalizeScopes(tokenScopes)
+	if len(tokenScopes) == 0 {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
 	delete(s.oauthCodes, codeHash)
-	grant.Scopes = domain.NormalizeScopes(grant.Scopes)
-	s.tokens[domain.HashToken(accessToken)] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, Scopes: append([]string(nil), grant.Scopes...)}
+	s.tokens[domain.HashToken(accessToken)] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: subjectID, AppID: client.AppID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType}
 	token.AccessToken = accessToken
 	token.AppID = client.AppID
 	token.ClientID = clientID
 	token.WorkspaceID = grant.WorkspaceID
-	token.UserID = grant.UserID
-	token.Scopes = append([]string(nil), grant.Scopes...)
+	token.UserID = subjectID
+	token.InstallerID = grant.UserID
+	token.BotID = tokenBotID
+	token.Scopes = append([]string(nil), tokenScopes...)
+	token.TokenType = tokenType
 	token.CodeVerifier = ""
 	return token, nil
 }

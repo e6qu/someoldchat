@@ -18,6 +18,8 @@ const identity = await client.auth.test();
 assert.equal(identity.ok, true);
 assert.equal(identity.team_id, "T1");
 assert.equal(identity.user_id, "U1");
+assert.equal(identity.bot_id, "B1");
+assert.equal(identity.is_enterprise_install, false);
 assert.equal((await client.apiCall("entity.presentDetails", {
 	trigger_id: "entity-details-trigger",
 	metadata: { entity_type: "slack#/entities/file" },
@@ -104,7 +106,21 @@ const oauthV2 = await client.oauth.v2.access({
 });
 assert.equal(oauthV2.ok, true);
 assert.equal(oauthV2.authed_user.id, "U1");
-assert.equal(typeof oauthV2.authed_user.access_token, "string");
+assert.equal(oauthV2.token_type, "bot");
+assert.equal(oauthV2.bot_user_id, "U1");
+assert.equal(oauthV2.access_token.startsWith("xoxb-"), true);
+assert.equal(oauthV2.authed_user.access_token, undefined);
+const oauthV2User = await client.apiCall("oauth.v2.user.access", {
+  client_id: "qualification-client",
+  client_secret: "qualification-secret",
+  code: "qualification-v2-user-code",
+  redirect_uri: "https://example.com/oauth",
+});
+assert.equal(oauthV2User.ok, true);
+assert.equal(oauthV2User.access_token, undefined);
+assert.equal(oauthV2User.authed_user.id, "U1");
+assert.equal(oauthV2User.authed_user.token_type, "user");
+assert.equal(oauthV2User.authed_user.access_token.startsWith("xoxp-"), true);
 const oauthToken = await client.apiCall("oauth.token", {
 	client_id: "qualification-client",
 	client_secret: "qualification-secret",
@@ -139,6 +155,7 @@ assert.notEqual(refreshedOpenIDToken.access_token, openidToken.access_token);
 const authorizations = await client.apps.event.authorizations.list({ event_context: "qualification-event" });
 assert.equal(authorizations.ok, true);
 assert.equal(authorizations.authorizations[0].team_id, "T1");
+assert.equal(authorizations.authorizations[0].is_bot, true);
 const adminUsers = await client.admin.users.list({ team_id: "T1", limit: 10 });
 assert.equal(adminUsers.ok, true);
 assert.equal(adminUsers.users.some((user) => user.id === "U1"), true);
@@ -795,7 +812,8 @@ await assert.rejects(
 const revoked = await client.auth.revoke({ test: true });
 assert.equal(revoked.ok, true);
 assert.equal(revoked.revoked, false);
-const uninstalled = await client.apps.uninstall({ client_id: "client" });
+const uninstallClient = new WebClient("xoxp-uninstall-node", { slackApiUrl: apiUrl });
+const uninstalled = await uninstallClient.apps.uninstall({ client_id: "uninstall-node", client_secret: "uninstall-secret" });
 assert.equal(uninstalled.ok, true);
 
 console.log("node-web-api qualification passed");

@@ -104,7 +104,11 @@ public final class Qualification {
                             .build());
             require(oauthV2.isOk() && oauthV2.getAuthedUser() != null
                             && "U1".equals(oauthV2.getAuthedUser().getId())
-                            && oauthV2.getAuthedUser().getAccessToken() != null,
+                            && "bot".equals(oauthV2.getTokenType())
+                            && "U1".equals(oauthV2.getBotUserId())
+                            && oauthV2.getAccessToken() != null
+                            && oauthV2.getAccessToken().startsWith("xoxb-")
+                            && oauthV2.getAuthedUser().getAccessToken() == null,
                     "oauth.v2.access failed: " + oauthV2.getError());
             com.slack.api.methods.response.oauth.OAuthTokenResponse oauthToken = methods.oauthToken(
                     com.slack.api.methods.request.oauth.OAuthTokenRequest.builder()
@@ -1008,8 +1012,10 @@ public final class Qualification {
             com.slack.api.methods.response.auth.AuthRevokeResponse revoked = methods.authRevoke(
                     com.slack.api.methods.request.auth.AuthRevokeRequest.builder().test(true).build());
             require(revoked.isOk() && !revoked.isRevoked(), "auth.revoke failed: " + revoked.getError());
-            com.slack.api.methods.response.apps.AppsUninstallResponse uninstalled = methods.appsUninstall(
-                    com.slack.api.methods.request.apps.AppsUninstallRequest.builder().clientId("client").build());
+            MethodsClient uninstallMethods = slack.methods("xoxp-uninstall-java");
+            com.slack.api.methods.response.apps.AppsUninstallResponse uninstalled = uninstallMethods.appsUninstall(
+                    com.slack.api.methods.request.apps.AppsUninstallRequest.builder()
+                            .clientId("uninstall-java").clientSecret("uninstall-secret").build());
             require(uninstalled.isOk(), "apps.uninstall failed: " + uninstalled.getError());
         }
         System.out.println("java-slack-api qualification passed");

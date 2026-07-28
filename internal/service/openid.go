@@ -69,7 +69,7 @@ func (m Messages) OpenIDConnectToken(ctx context.Context, clientID, clientSecret
 	if code == "" || refreshToken != "" {
 		return domain.OpenIDToken{}, ErrInvalidOAuth
 	}
-	oauthToken, err := m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, codeVerifier)
+	oauthToken, err := m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, codeVerifier, "user")
 	if err != nil {
 		return domain.OpenIDToken{}, err
 	}

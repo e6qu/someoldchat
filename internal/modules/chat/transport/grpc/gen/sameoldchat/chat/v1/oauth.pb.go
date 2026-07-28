@@ -27,6 +27,7 @@ type OAuthExchangeRequest struct {
 	ClientSecret  string                 `protobuf:"bytes,2,opt,name=client_secret,json=clientSecret,proto3" json:"client_secret,omitempty"`
 	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
 	RedirectUri   string                 `protobuf:"bytes,4,opt,name=redirect_uri,json=redirectUri,proto3" json:"redirect_uri,omitempty"`
+	UserOnly      bool                   `protobuf:"varint,5,opt,name=user_only,json=userOnly,proto3" json:"user_only,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,6 +90,13 @@ func (x *OAuthExchangeRequest) GetRedirectUri() string {
 	return ""
 }
 
+func (x *OAuthExchangeRequest) GetUserOnly() bool {
+	if x != nil {
+		return x.UserOnly
+	}
+	return false
+}
+
 type OAuthToken struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AccessToken   string                 `protobuf:"bytes,1,opt,name=access_token,json=accessToken,proto3" json:"access_token,omitempty"`
@@ -98,6 +106,8 @@ type OAuthToken struct {
 	UserId        string                 `protobuf:"bytes,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	Scopes        []string               `protobuf:"bytes,6,rep,name=scopes,proto3" json:"scopes,omitempty"`
 	TokenType     string                 `protobuf:"bytes,7,opt,name=token_type,json=tokenType,proto3" json:"token_type,omitempty"`
+	InstallerId   string                 `protobuf:"bytes,8,opt,name=installer_id,json=installerId,proto3" json:"installer_id,omitempty"`
+	BotId         string                 `protobuf:"bytes,9,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -177,6 +187,20 @@ func (x *OAuthToken) GetScopes() []string {
 func (x *OAuthToken) GetTokenType() string {
 	if x != nil {
 		return x.TokenType
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetInstallerId() string {
+	if x != nil {
+		return x.InstallerId
+	}
+	return ""
+}
+
+func (x *OAuthToken) GetBotId() string {
+	if x != nil {
+		return x.BotId
 	}
 	return ""
 }
@@ -545,12 +569,13 @@ var File_sameoldchat_chat_v1_oauth_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/oauth.proto\x12\x13sameoldchat.chat.v1\"\x8f\x01\n" +
+	"\x1fsameoldchat/chat/v1/oauth.proto\x12\x13sameoldchat.chat.v1\"\xac\x01\n" +
 	"\x14OAuthExchangeRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
 	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12\x12\n" +
 	"\x04code\x18\x03 \x01(\tR\x04code\x12!\n" +
-	"\fredirect_uri\x18\x04 \x01(\tR\vredirectUri\"\xd6\x01\n" +
+	"\fredirect_uri\x18\x04 \x01(\tR\vredirectUri\x12\x1b\n" +
+	"\tuser_only\x18\x05 \x01(\bR\buserOnly\"\x90\x02\n" +
 	"\n" +
 	"OAuthToken\x12!\n" +
 	"\faccess_token\x18\x01 \x01(\tR\vaccessToken\x12\x1b\n" +
@@ -560,7 +585,9 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\auser_id\x18\x05 \x01(\tR\x06userId\x12\x16\n" +
 	"\x06scopes\x18\x06 \x03(\tR\x06scopes\x12\x1d\n" +
 	"\n" +
-	"token_type\x18\a \x01(\tR\ttokenType\"\xfd\x01\n" +
+	"token_type\x18\a \x01(\tR\ttokenType\x12!\n" +
+	"\finstaller_id\x18\b \x01(\tR\vinstallerId\x12\x15\n" +
+	"\x06bot_id\x18\t \x01(\tR\x05botId\"\xfd\x01\n" +
 	"\x19OpenIDConnectTokenRequest\x12\x1b\n" +
 	"\tclient_id\x18\x01 \x01(\tR\bclientId\x12#\n" +
 	"\rclient_secret\x18\x02 \x01(\tR\fclientSecret\x12\x12\n" +
@@ -605,9 +632,10 @@ const file_sameoldchat_chat_v1_oauth_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a=\n" +
 	"\x0fTeamImagesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xe2\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xc1\x03\n" +
 	"\fOAuthService\x12[\n" +
-	"\rExchangeOAuth\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12u\n" +
+	"\rExchangeOAuth\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12]\n" +
+	"\x0fExchangeOAuthV2\x12).sameoldchat.chat.v1.OAuthExchangeRequest\x1a\x1f.sameoldchat.chat.v1.OAuthToken\x12u\n" +
 	"\x12OpenIDConnectToken\x12..sameoldchat.chat.v1.OpenIDConnectTokenRequest\x1a/.sameoldchat.chat.v1.OpenIDConnectTokenResponse\x12~\n" +
 	"\x15OpenIDConnectUserInfo\x121.sameoldchat.chat.v1.OpenIDConnectUserInfoRequest\x1a2.sameoldchat.chat.v1.OpenIDConnectUserInfoResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
@@ -639,13 +667,15 @@ var file_sameoldchat_chat_v1_oauth_proto_depIdxs = []int32{
 	6, // 1: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.user_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.UserImagesEntry
 	7, // 2: sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.team_images:type_name -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse.TeamImagesEntry
 	0, // 3: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
-	2, // 4: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:input_type -> sameoldchat.chat.v1.OpenIDConnectTokenRequest
-	4, // 5: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:input_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
-	1, // 6: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:output_type -> sameoldchat.chat.v1.OAuthToken
-	3, // 7: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:output_type -> sameoldchat.chat.v1.OpenIDConnectTokenResponse
-	5, // 8: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:output_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
+	0, // 4: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2:input_type -> sameoldchat.chat.v1.OAuthExchangeRequest
+	2, // 5: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:input_type -> sameoldchat.chat.v1.OpenIDConnectTokenRequest
+	4, // 6: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:input_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoRequest
+	1, // 7: sameoldchat.chat.v1.OAuthService.ExchangeOAuth:output_type -> sameoldchat.chat.v1.OAuthToken
+	1, // 8: sameoldchat.chat.v1.OAuthService.ExchangeOAuthV2:output_type -> sameoldchat.chat.v1.OAuthToken
+	3, // 9: sameoldchat.chat.v1.OAuthService.OpenIDConnectToken:output_type -> sameoldchat.chat.v1.OpenIDConnectTokenResponse
+	5, // 10: sameoldchat.chat.v1.OAuthService.OpenIDConnectUserInfo:output_type -> sameoldchat.chat.v1.OpenIDConnectUserInfoResponse
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
 	3, // [3:3] is the sub-list for extension type_name
 	3, // [3:3] is the sub-list for extension extendee
 	0, // [0:3] is the sub-list for field type_name

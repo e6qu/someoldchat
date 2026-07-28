@@ -54,7 +54,14 @@ func TestStaticAuthenticatorRejectsWrongToken(t *testing.T) {
 
 func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	store := memory.New()
-	store.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{string(ScopeChannelsHistory)}})
+	store.SeedToken(context.Background(), "token", domain.TokenRecord{
+		WorkspaceID: "T1",
+		UserID:      "U1",
+		AppID:       "A1",
+		BotID:       "B1",
+		TokenType:   "bot",
+		Scopes:      []string{string(ScopeChannelsHistory)},
+	})
 	authenticator, err := NewStored(store)
 	if err != nil {
 		t.Fatal(err)
@@ -67,6 +74,27 @@ func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	}
 	if !principal.HasScope(ScopeChannelsHistory) || principal.HasScope(ScopeChatWrite) {
 		t.Fatalf("principal = %+v", principal)
+	}
+	if principal.AppID != "A1" || principal.BotID != "B1" || principal.TokenType != "bot" {
+		t.Fatalf("principal lost app/bot identity: %+v", principal)
+	}
+}
+
+func TestStoredAuthenticatorDistinguishesExpiredToken(t *testing.T) {
+	store := memory.New()
+	store.SeedToken(context.Background(), "expired", domain.TokenRecord{
+		WorkspaceID: "T1",
+		UserID:      "U1",
+		ExpiresAt:   time.Now().UTC().Add(-time.Second),
+	})
+	authenticator, err := NewStored(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Authorization", "Bearer expired")
+	if _, err := authenticator.Authenticate(request); !errors.Is(err, ErrTokenExpired) {
+		t.Fatalf("err = %v, want ErrTokenExpired", err)
 	}
 }
 

@@ -57,6 +57,7 @@ var (
 	ErrInvalidMigration         = errors.New("migration user identifiers are invalid")
 	ErrInvalidOAuth             = errors.New("oauth authorization is invalid")
 	ErrInvalidOAuthClient       = errors.New("oauth client is invalid")
+	ErrOAuthAppMismatch         = errors.New("oauth client and token app do not match")
 	ErrInvalidIntegrationLogs   = errors.New("integration log arguments are invalid")
 	ErrInvalidBookmark          = errors.New("bookmark title, type, and link are invalid")
 	ErrInvalidCanvas            = errors.New("canvas content or access arguments are invalid")
@@ -134,6 +135,20 @@ func (m Messages) CreateAppInstallation(ctx context.Context, value domain.AppIns
 
 func (m Messages) ListAppInstallations(ctx context.Context, appID domain.AppID) ([]domain.AppInstallation, error) {
 	return m.Store.ListAppInstallations(ctx, appID)
+}
+
+func (m Messages) UninstallApp(ctx context.Context, clientID, clientSecret string, workspaceID domain.WorkspaceID, appID domain.AppID) error {
+	client, err := m.Store.GetOAuthClient(ctx, strings.TrimSpace(clientID))
+	if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(strings.TrimSpace(clientSecret))) {
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		return ErrInvalidOAuthClient
+	}
+	if client.AppID != appID {
+		return ErrOAuthAppMismatch
+	}
+	return m.Store.UninstallApp(ctx, workspaceID, appID)
 }
 
 func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
@@ -1628,10 +1643,18 @@ func (m Messages) MigrationExchange(ctx context.Context, workspaceID domain.Work
 }
 
 func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI string) (domain.OAuthToken, error) {
-	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "")
+	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", "user")
 }
 
-func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier string) (domain.OAuthToken, error) {
+func (m Messages) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, code, redirectURI string, userOnly bool) (domain.OAuthToken, error) {
+	tokenType := "bot"
+	if userOnly {
+		tokenType = "user"
+	}
+	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", tokenType)
+}
+
+func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier, tokenType string) (domain.OAuthToken, error) {
 	clientID = strings.TrimSpace(clientID)
 	clientSecret = strings.TrimSpace(clientSecret)
 	code = strings.TrimSpace(code)
@@ -1648,11 +1671,16 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
 		return domain.OAuthToken{}, ErrInvalidOAuthClient
 	}
-	accessToken, err := domain.NewOAuthToken()
+	var accessToken string
+	if tokenType == "bot" {
+		accessToken, err = domain.NewBotToken()
+	} else {
+		accessToken, err = domain.NewUserToken()
+	}
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
-	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, domain.OAuthToken{TokenType: "user", CodeVerifier: codeVerifier})
+	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, domain.OAuthToken{TokenType: tokenType, CodeVerifier: codeVerifier})
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return domain.OAuthToken{}, ErrInvalidOAuth
@@ -1660,7 +1688,7 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 		return domain.OAuthToken{}, err
 	}
 	token.AppID = client.AppID
-	token.TokenType = "user"
+	token.TokenType = tokenType
 	if err := m.Store.CreateAppInstallation(ctx, domain.AppInstallation{AppID: client.AppID, WorkspaceID: token.WorkspaceID, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		return domain.OAuthToken{}, err
 	}

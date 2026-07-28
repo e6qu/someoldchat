@@ -23,6 +23,7 @@ const (
 	AuthService_LookupAppToken_FullMethodName         = "/sameoldchat.chat.v1.AuthService/LookupAppToken"
 	AuthService_CreateAppInstallation_FullMethodName  = "/sameoldchat.chat.v1.AuthService/CreateAppInstallation"
 	AuthService_ListAppInstallations_FullMethodName   = "/sameoldchat.chat.v1.AuthService/ListAppInstallations"
+	AuthService_UninstallApp_FullMethodName           = "/sameoldchat.chat.v1.AuthService/UninstallApp"
 	AuthService_LookupSession_FullMethodName          = "/sameoldchat.chat.v1.AuthService/LookupSession"
 	AuthService_RevokeSession_FullMethodName          = "/sameoldchat.chat.v1.AuthService/RevokeSession"
 	AuthService_RevokeToken_FullMethodName            = "/sameoldchat.chat.v1.AuthService/RevokeToken"
@@ -42,6 +43,7 @@ type AuthServiceClient interface {
 	LookupAppToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AppTokenRecord, error)
 	CreateAppInstallation(ctx context.Context, in *AppInstallationRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 	ListAppInstallations(ctx context.Context, in *AppInstallationRequest, opts ...grpc.CallOption) (*AppInstallationsResponse, error)
+	UninstallApp(ctx context.Context, in *UninstallAppRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 	LookupSession(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*SessionRecord, error)
 	RevokeSession(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
 	RevokeToken(ctx context.Context, in *TokenRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error)
@@ -95,6 +97,16 @@ func (c *authServiceClient) ListAppInstallations(ctx context.Context, in *AppIns
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppInstallationsResponse)
 	err := c.cc.Invoke(ctx, AuthService_ListAppInstallations_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *authServiceClient) UninstallApp(ctx context.Context, in *UninstallAppRequest, opts ...grpc.CallOption) (*AuthRevokeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AuthRevokeResponse)
+	err := c.cc.Invoke(ctx, AuthService_UninstallApp_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -199,6 +211,7 @@ type AuthServiceServer interface {
 	LookupAppToken(context.Context, *TokenRequest) (*AppTokenRecord, error)
 	CreateAppInstallation(context.Context, *AppInstallationRequest) (*AuthRevokeResponse, error)
 	ListAppInstallations(context.Context, *AppInstallationRequest) (*AppInstallationsResponse, error)
+	UninstallApp(context.Context, *UninstallAppRequest) (*AuthRevokeResponse, error)
 	LookupSession(context.Context, *TokenRequest) (*SessionRecord, error)
 	RevokeSession(context.Context, *TokenRequest) (*AuthRevokeResponse, error)
 	RevokeToken(context.Context, *TokenRequest) (*AuthRevokeResponse, error)
@@ -228,6 +241,9 @@ func (UnimplementedAuthServiceServer) CreateAppInstallation(context.Context, *Ap
 }
 func (UnimplementedAuthServiceServer) ListAppInstallations(context.Context, *AppInstallationRequest) (*AppInstallationsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListAppInstallations not implemented")
+}
+func (UnimplementedAuthServiceServer) UninstallApp(context.Context, *UninstallAppRequest) (*AuthRevokeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UninstallApp not implemented")
 }
 func (UnimplementedAuthServiceServer) LookupSession(context.Context, *TokenRequest) (*SessionRecord, error) {
 	return nil, status.Error(codes.Unimplemented, "method LookupSession not implemented")
@@ -344,6 +360,24 @@ func _AuthService_ListAppInstallations_Handler(srv interface{}, ctx context.Cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AuthServiceServer).ListAppInstallations(ctx, req.(*AppInstallationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AuthService_UninstallApp_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UninstallAppRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AuthServiceServer).UninstallApp(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AuthService_UninstallApp_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AuthServiceServer).UninstallApp(ctx, req.(*UninstallAppRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -532,6 +566,10 @@ var AuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListAppInstallations",
 			Handler:    _AuthService_ListAppInstallations_Handler,
+		},
+		{
+			MethodName: "UninstallApp",
+			Handler:    _AuthService_UninstallApp_Handler,
 		},
 		{
 			MethodName: "LookupSession",

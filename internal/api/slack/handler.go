@@ -59,6 +59,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/oauth.token", h.oauthAccess)
 	mux.HandleFunc("GET /api/oauth.v2.access", h.oauthV2Access)
 	mux.HandleFunc("POST /api/oauth.v2.access", h.oauthV2Access)
+	mux.HandleFunc("GET /api/oauth.v2.user.access", h.oauthV2UserAccess)
+	mux.HandleFunc("POST /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("GET /api/auth.revoke", h.authRevoke)
 	mux.HandleFunc("POST /api/auth.revoke", h.authRevoke)
 	mux.HandleFunc("GET /api/apps.permissions.info", h.appsPermissionsInfo)
@@ -596,7 +598,12 @@ func (h Handler) authTest(w http.ResponseWriter, r *http.Request) {
 	if teamName == "" {
 		teamName = string(workspace.ID)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID})
+	response := map[string]any{"ok": true, "url": "http://localhost/", "team": teamName, "team_id": workspace.ID, "user": string(principal.UserID), "user_id": principal.UserID}
+	if principal.TokenType == "bot" {
+		response["bot_id"] = principal.BotID
+		response["is_enterprise_install"] = false
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // foreignWorkspace reports the first workspace in values that is not the
@@ -701,7 +708,7 @@ func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Requ
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "authorizations": []map[string]any{{
 		"enterprise_id": "",
-		"is_bot":        false,
+		"is_bot":        principal.TokenType == "bot",
 		"team_id":       principal.WorkspaceID,
 		"user_id":       principal.UserID,
 	}}})
@@ -1014,7 +1021,8 @@ func (h Handler) appsPermissionsInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
-	if _, err := h.authenticate(r, ""); err != nil {
+	principal, err := h.authenticate(r, "")
+	if err != nil {
 		writeAuthError(w, err)
 		return
 	}
@@ -1023,16 +1031,29 @@ func (h Handler) appsUninstall(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
-	if token == "" {
-		token = strings.TrimSpace(fields["token"])
-	}
-	if token == "" {
-		writeError(w, "not_authed")
+	clientID := strings.TrimSpace(fields["client_id"])
+	clientSecret := strings.TrimSpace(fields["client_secret"])
+	if clientID == "" || clientSecret == "" {
+		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.RevokeToken(r.Context(), token); err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
+	if principal.TokenType == "bot" {
+		writeError(w, "no_permission")
+		return
+	}
+	if principal.AppID == "" {
+		writeError(w, "invalid_auth")
+		return
+	}
+	if err := h.Messages.UninstallApp(r.Context(), clientID, clientSecret, principal.WorkspaceID, principal.AppID); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidOAuthClient):
+			writeError(w, "invalid_client_id")
+		case errors.Is(err, service.ErrOAuthAppMismatch):
+			writeError(w, "client_id_token_mismatch")
+		default:
+			writeError(w, mapServiceError(err, "fatal_error"))
+		}
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1071,14 +1092,18 @@ func (h Handler) authRevoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) oauthAccess(w http.ResponseWriter, r *http.Request) {
-	h.oauthExchange(w, r, false)
+	h.oauthExchange(w, r, false, false)
 }
 
 func (h Handler) oauthV2Access(w http.ResponseWriter, r *http.Request) {
-	h.oauthExchange(w, r, true)
+	h.oauthExchange(w, r, true, false)
 }
 
-func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) {
+func (h Handler) oauthV2UserAccess(w http.ResponseWriter, r *http.Request) {
+	h.oauthExchange(w, r, true, true)
+}
+
+func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userOnly bool) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
@@ -1112,7 +1137,12 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) 
 		writeError(w, "invalid_code")
 		return
 	}
-	token, err := h.Messages.OAuthExchange(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"])
+	var token domain.OAuthToken
+	if v2 {
+		token, err = h.Messages.OAuthV2Exchange(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"], userOnly)
+	} else {
+		token, err = h.Messages.OAuthExchange(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"])
+	}
 	if err != nil {
 		reason := "invalid_code"
 		if errors.Is(err, service.ErrInvalidOAuthClient) {
@@ -1125,17 +1155,19 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2 bool) 
 	if !v2 {
 		response["team_name"] = ""
 	} else {
-		// This implementation issues a user grant only. Slack's v2 user-only
-		// response keeps the token under authed_user; a bot token must never be
-		// fabricated by copying the user token into the top-level fields.
-		delete(response, "access_token")
 		delete(response, "team_id")
-		delete(response, "scope")
-		delete(response, "token_type")
 		response["team"] = map[string]any{"id": token.WorkspaceID}
 		response["enterprise"] = nil
 		response["is_enterprise_install"] = false
-		response["authed_user"] = map[string]any{"id": token.UserID, "access_token": token.AccessToken, "scope": strings.Join(token.Scopes, ","), "token_type": "user"}
+		if userOnly {
+			delete(response, "access_token")
+			delete(response, "scope")
+			delete(response, "token_type")
+			response["authed_user"] = map[string]any{"id": token.InstallerID, "access_token": token.AccessToken, "scope": strings.Join(token.Scopes, ","), "token_type": "user"}
+		} else {
+			response["bot_user_id"] = token.UserID
+			response["authed_user"] = map[string]any{"id": token.InstallerID}
+		}
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -7158,9 +7190,9 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusOK, body)
 		return
 	}
-	// The four authentication outcomes are distinct members of the same pinned
-	// `error` enum — `not_authed` (87 operations), `invalid_auth` (88),
-	// `token_revoked` (52) and `account_inactive` (86) — so collapsing them onto
+	// Authentication outcomes are distinct members of Slack's error vocabulary:
+	// `not_authed` (87 operations), `invalid_auth` (88),
+	// `token_revoked` (52), `token_expired`, and `account_inactive` (86) — so collapsing them onto
 	// `not_authed` told a client holding a stale or withdrawn token that it had
 	// sent no credential at all. The specific sentinels are tested before the
 	// class they wrap.
@@ -7175,6 +7207,8 @@ func writeAuthError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, auth.ErrTokenRevoked):
 		writeError(w, "token_revoked")
+	case errors.Is(err, auth.ErrTokenExpired):
+		writeError(w, "token_expired")
 	case errors.Is(err, auth.ErrAccountInactive):
 		writeError(w, "account_inactive")
 	case errors.Is(err, auth.ErrInvalidToken):
