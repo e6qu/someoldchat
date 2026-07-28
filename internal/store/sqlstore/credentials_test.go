@@ -154,6 +154,65 @@ func TestSQLiteOAuthCodeIsHashedAndExpires(t *testing.T) {
 	}
 }
 
+func TestSQLiteOAuthBotGrantPersistsBotIdentity(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "oauth-bot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	seedConversationFixture(t, ctx, s)
+	if err := s.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "U1", Name: "app", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("client-secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthCode(ctx, domain.OAuthCode{
+		Code:        "bot-code",
+		ClientID:    "client",
+		WorkspaceID: "T1",
+		UserID:      "U1",
+		BotID:       "B1",
+		BotUserID:   "U1",
+		BotScopes:   []string{"chat:write"},
+		RedirectURI: "https://example.test/callback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := s.ExchangeOAuthCode(ctx, "client", "client-secret", "bot-code", "https://example.test/callback", "xoxb-issued", domain.OAuthToken{TokenType: "bot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if token.BotID != "B1" || token.UserID != "U1" || token.InstallerID != "U1" || token.TokenType != "bot" {
+		t.Fatalf("bot token=%+v", token)
+	}
+	record, err := s.LookupToken(ctx, token.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.AppID != "A1" || record.BotID != "B1" || record.UserID != "U1" || record.TokenType != "bot" || strings.Join(record.Scopes, " ") != "chat:write" {
+		t.Fatalf("durable bot token=%+v", record)
+	}
+	if err := s.UninstallApp(ctx, "T1", "A1"); err != nil {
+		t.Fatal(err)
+	}
+	record, err = s.LookupToken(ctx, token.AccessToken)
+	if err != nil || !record.Revoked {
+		t.Fatalf("uninstalled token=%+v err=%v", record, err)
+	}
+	bot, err := s.GetBot(ctx, "T1", "B1")
+	if err != nil || !bot.Deleted {
+		t.Fatalf("uninstalled bot=%+v err=%v", bot, err)
+	}
+	if installations, err := s.ListAppInstallations(ctx, "A1"); err != nil || len(installations) != 0 {
+		t.Fatalf("uninstalled installations=%+v err=%v", installations, err)
+	}
+}
+
 // TestSQLiteOAuthCodeConcurrentRedemptionIsSingleUse exercises the transaction
 // race the HTTP authorization-code endpoint sees when two clients redeem the
 // same code together. One caller may mint the token and every loser must get the

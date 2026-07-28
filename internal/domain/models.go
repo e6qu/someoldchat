@@ -283,6 +283,10 @@ type OAuthCode struct {
 	WorkspaceID         WorkspaceID
 	UserID              UserID
 	Scopes              []string
+	BotID               BotID
+	BotUserID           UserID
+	BotScopes           []string
+	UserScopes          []string
 	RedirectURI         string
 	CodeChallenge       string
 	CodeChallengeMethod string
@@ -294,6 +298,8 @@ type OAuthToken struct {
 	AppID        AppID
 	WorkspaceID  WorkspaceID
 	UserID       UserID
+	InstallerID  UserID
+	BotID        BotID
 	Scopes       []string
 	TokenType    string
 	CodeVerifier string
@@ -347,7 +353,11 @@ func (d DoNotDisturb) SnoozeRemaining(now time.Time) int64 {
 type TokenRecord struct {
 	WorkspaceID WorkspaceID
 	UserID      UserID
+	AppID       AppID
+	BotID       BotID
 	Scopes      []string
+	TokenType   string
+	ExpiresAt   time.Time
 	Revoked     bool
 }
 

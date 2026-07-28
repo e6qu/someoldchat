@@ -188,7 +188,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "oauth-client", SecretHash: domain.HashToken("oauth-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
-	if err := s.CreateOAuthCode(context.Background(), domain.OAuthCode{Code: "oauth-code", ClientID: "oauth-client", WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write"}, RedirectURI: "https://callback"}); err != nil {
+	if err := s.CreateOAuthCode(context.Background(), domain.OAuthCode{Code: "oauth-code", ClientID: "oauth-client", WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write"}, UserScopes: []string{"chat:write"}, BotID: "B1", BotUserID: "U2", BotScopes: []string{"chat:write"}, RedirectURI: "https://callback"}); err != nil {
 		panic(err)
 	}
 	if err := s.CreateFile(context.Background(), domain.File{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "file.txt", BlobKey: "blob", CreatedAt: time.Now().UTC()}, events.Event{ID: "EF1", WorkspaceID: "T1", Topic: "file.created", Payload: "F1", CreatedAt: time.Now().UTC()}); err != nil {
@@ -409,6 +409,36 @@ func TestOAuthV2AccessHTTPExchangesCode(t *testing.T) {
 		OK          bool   `json:"ok"`
 		AccessToken string `json:"access_token"`
 		AppID       string `json:"app_id"`
+		BotUserID   string `json:"bot_user_id"`
+		TokenType   string `json:"token_type"`
+		AuthedUser  struct {
+			ID string `json:"id"`
+		} `json:"authed_user"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.OK || !strings.HasPrefix(body.AccessToken, "xoxb-") || body.AppID != "A1" || body.BotUserID != "U2" || body.TokenType != "bot" || body.AuthedUser.ID != "U1" {
+		t.Fatalf("unexpected body: %s", response.Body)
+	}
+}
+
+func TestOAuthV2UserAccessReturnsUserGrantOnly(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/oauth.v2.user.access", strings.NewReader(url.Values{
+		"client_id":     {"oauth-client"},
+		"client_secret": {"oauth-secret"},
+		"code":          {"oauth-code"},
+		"redirect_uri":  {"https://callback"},
+	}.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response := httptest.NewRecorder()
+	testHandler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	var body struct {
+		OK          bool   `json:"ok"`
+		AccessToken string `json:"access_token"`
 		AuthedUser  struct {
 			ID          string `json:"id"`
 			AccessToken string `json:"access_token"`
@@ -418,8 +448,50 @@ func TestOAuthV2AccessHTTPExchangesCode(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || body.AccessToken != "" || body.AppID != "A1" || body.AuthedUser.ID != "U1" || body.AuthedUser.AccessToken == "" || body.AuthedUser.TokenType != "user" {
+	if !body.OK || body.AccessToken != "" || body.AuthedUser.ID != "U1" || !strings.HasPrefix(body.AuthedUser.AccessToken, "xoxp-") || body.AuthedUser.TokenType != "user" {
 		t.Fatalf("unexpected body: %s", response.Body)
+	}
+}
+
+func TestBotTokenIdentityIsReportedByAuthAndAuthorizations(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "Ubot", WorkspaceID: "T1", Name: "app"})
+	s.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{
+		WorkspaceID: "T1",
+		UserID:      "Ubot",
+		AppID:       "A1",
+		BotID:       "B1",
+		TokenType:   "bot",
+		Scopes:      []string{string(auth.ScopeAuthorizationsRead)},
+	})
+	authenticator, err := auth.NewStored(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: s}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	for path, expected := range map[string][]string{
+		"/api/auth.test": {`"user_id":"Ubot"`, `"bot_id":"B1"`, `"is_enterprise_install":false`},
+		"/api/apps.event.authorizations.list?event_context=event": {`"user_id":"Ubot"`, `"is_bot":true`},
+	} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer xoxb-test")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		for _, fragment := range expected {
+			if !strings.Contains(response.Body.String(), fragment) {
+				t.Errorf("%s body=%s, want %s", path, response.Body, fragment)
+			}
+		}
 	}
 }
 
@@ -924,14 +996,59 @@ func TestAppPermissionIntrospectionUsesAuthenticatedScopes(t *testing.T) {
 	}
 }
 
-func TestAppsUninstallRevokesAuthenticatedToken(t *testing.T) {
-	handler := testHandler()
-	request := httptest.NewRequest(http.MethodPost, "/api/apps.uninstall", strings.NewReader(""))
-	request.Header.Set("Authorization", "Bearer token")
-	result := httptest.NewRecorder()
-	handler.ServeHTTP(result, request)
+func TestAppsUninstallRevokesTheWholeMatchingInstallation(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "app"})
+	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "other-client", SecretHash: domain.HashToken("secret"), AppID: "A2"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	s.SeedToken(context.Background(), "token-one", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user"})
+	s.SeedToken(context.Background(), "token-two", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user"})
+	s.SeedToken(context.Background(), "bot-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "bot"})
+	authenticator, err := auth.NewStored(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slackHandler, err := NewHandler(service.Messages{Store: s}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := http.NewServeMux()
+	slackHandler.Register(handler)
+	uninstall := func(token, clientID string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/apps.uninstall", strings.NewReader(url.Values{"client_id": {clientID}, "client_secret": {"secret"}}.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer "+token)
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, request)
+		return result
+	}
+	if result := uninstall("bot-token", "client"); !strings.Contains(result.Body.String(), `"error":"no_permission"`) {
+		t.Fatalf("bot uninstall status=%d body=%s", result.Code, result.Body)
+	}
+	if result := uninstall("token-one", "other-client"); !strings.Contains(result.Body.String(), `"error":"client_id_token_mismatch"`) {
+		t.Fatalf("mismatched uninstall status=%d body=%s", result.Code, result.Body)
+	}
+	result := uninstall("token-one", "client")
 	if result.Code != http.StatusOK || result.Body.String() != `{"ok":true}`+"\n" {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+	for _, token := range []string{"token-one", "token-two"} {
+		record, err := s.LookupToken(context.Background(), token)
+		if err != nil || !record.Revoked {
+			t.Fatalf("%s record=%+v err=%v", token, record, err)
+		}
+	}
+	if installations, err := s.ListAppInstallations(context.Background(), "A1"); err != nil || len(installations) != 0 {
+		t.Fatalf("installations=%+v err=%v", installations, err)
 	}
 }
 

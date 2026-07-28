@@ -52,7 +52,9 @@ CREATE TABLE IF NOT EXISTS workspace_members (
 );
 CREATE TABLE IF NOT EXISTS tokens (
  token_hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
- user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
+ user_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', bot_id TEXT NOT NULL DEFAULT '',
+ scopes TEXT NOT NULL, token_type TEXT NOT NULL DEFAULT 'user',
+ expires_at INTEGER NOT NULL DEFAULT 0, revoked INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS sessions (
  session_hash TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -74,7 +76,7 @@ CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT 
 -- authorization code is a bearer credential, and a database copy, backup or
 -- replica of it is enough to redeem the grant. expires_at is UnixNano and bounds
 -- redemption to store.OAuthCodeLifetime.
-CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, redirect_uri TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', bot_user_id TEXT NOT NULL DEFAULT '', bot_scopes TEXT NOT NULL DEFAULT '[]', user_scopes TEXT NOT NULL DEFAULT '[]', redirect_uri TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
@@ -249,7 +251,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 85
+const schemaVersion = 86
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -935,11 +937,19 @@ func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 
 func (s *Store) SeedToken(ctx context.Context, token string, record domain.TokenRecord) error {
 	privateScopes := strings.Join(domain.NormalizeScopes(record.Scopes), " ")
+	tokenType := strings.TrimSpace(record.TokenType)
+	if tokenType == "" {
+		tokenType = "user"
+	}
+	var expiresAt int64
+	if !record.ExpiresAt.IsZero() {
+		expiresAt = record.ExpiresAt.UTC().UnixNano()
+	}
 	revoked := 0
 	if record.Revoked {
 		revoked = 1
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, scopes, revoked) VALUES (?, ?, ?, ?, ?) ON CONFLICT(token_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, privateScopes, revoked)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(token_hash) DO NOTHING`, domain.HashToken(token), record.WorkspaceID, record.UserID, record.AppID, record.BotID, privateScopes, tokenType, expiresAt, revoked)
 	return err
 }
 
@@ -1892,6 +1902,44 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index unique conversation names: %w", err)
 		}
 	}
+	if version < 86 {
+		columns, err := s.tableColumns(ctx, db, "tokens")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"app_id TEXT NOT NULL DEFAULT ''",
+			"bot_id TEXT NOT NULL DEFAULT ''",
+			"token_type TEXT NOT NULL DEFAULT 'user'",
+			"expires_at INTEGER NOT NULL DEFAULT 0",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE tokens ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate token %s: %w", name, err)
+			}
+		}
+		oauthColumns, err := s.tableColumns(ctx, db, "oauth_codes")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"bot_id TEXT NOT NULL DEFAULT ''",
+			"bot_user_id TEXT NOT NULL DEFAULT ''",
+			"bot_scopes TEXT NOT NULL DEFAULT '[]'",
+			"user_scopes TEXT NOT NULL DEFAULT '[]'",
+		} {
+			name := strings.Fields(column)[0]
+			if oauthColumns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE oauth_codes ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate oauth code %s: %w", name, err)
+			}
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2162,7 +2210,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" {
+	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -2889,12 +2937,16 @@ func (s *Store) LookupToken(ctx context.Context, token string) (domain.TokenReco
 	var record domain.TokenRecord
 	var scopes string
 	var revoked int
-	err := s.db.QueryRowContext(ctx, `SELECT t.workspace_id, t.user_id, t.scopes, t.revoked FROM tokens t WHERE t.token_hash = ? AND NOT EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = t.user_id AND e.workspace_id = t.workspace_id AND e.expiration_ts > 0 AND e.expiration_ts <= ?)`, domain.HashToken(token), time.Now().UTC().Unix()).Scan(&record.WorkspaceID, &record.UserID, &scopes, &revoked)
+	var expiresAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT t.workspace_id, t.user_id, t.app_id, t.bot_id, t.scopes, t.token_type, t.expires_at, t.revoked FROM tokens t WHERE t.token_hash = ? AND NOT EXISTS (SELECT 1 FROM user_expirations e WHERE e.user_id = t.user_id AND e.workspace_id = t.workspace_id AND e.expiration_ts > 0 AND e.expiration_ts <= ?)`, domain.HashToken(token), time.Now().UTC().Unix()).Scan(&record.WorkspaceID, &record.UserID, &record.AppID, &record.BotID, &scopes, &record.TokenType, &expiresAt, &revoked)
 	if err != nil {
 		return domain.TokenRecord{}, translateNotFound(err)
 	}
 	record.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
 	record.Revoked = revoked != 0
+	if expiresAt > 0 {
+		record.ExpiresAt = time.Unix(0, expiresAt).UTC()
+	}
 	return record, nil
 }
 
@@ -3731,6 +3783,38 @@ func (s *Store) ListAppInstallations(ctx context.Context, appID domain.AppID) ([
 	return values, rows.Err()
 }
 
+func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID) error {
+	if workspaceID == "" || appID == "" {
+		return store.InvalidArgument("app installation identity is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE app_installations SET enabled = 0 WHERE workspace_id = ? AND app_id = ? AND enabled = 1`, workspaceID, appID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE incoming_webhooks SET enabled = 0 WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE bots SET deleted = 1 WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CreateIncomingWebhook(ctx context.Context, value domain.IncomingWebhook) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.ConversationID == "" || value.UserID == "" || value.SecretHash == "" || value.CreatedAt.IsZero() {
 		return store.ErrInvalidAppApproval
@@ -4277,11 +4361,31 @@ func (s *Store) CreateOAuthCode(ctx context.Context, value domain.OAuthCode) err
 	if value.Code == "" || value.ClientID == "" || value.WorkspaceID == "" || value.UserID == "" {
 		return store.InvalidArgument("invalid oauth code")
 	}
+	if value.BotID != "" || value.BotUserID != "" || len(value.BotScopes) != 0 {
+		if value.BotID == "" || value.BotUserID == "" || len(domain.NormalizeScopes(value.BotScopes)) == 0 {
+			return store.InvalidArgument("incomplete oauth bot grant")
+		}
+		var matches int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM bots b JOIN oauth_clients c ON c.app_id = b.app_id WHERE c.id = ? AND b.id = ? AND b.workspace_id = ? AND b.user_id = ? AND b.deleted = 0`, value.ClientID, value.BotID, value.WorkspaceID, value.BotUserID).Scan(&matches); err != nil {
+			return err
+		}
+		if matches != 1 {
+			return store.InvalidArgument("oauth bot grant does not match the app installation")
+		}
+	}
 	scopes, err := json.Marshal(domain.NormalizeScopes(value.Scopes))
 	if err != nil {
 		return err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(value.Code), value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.RedirectURI, value.CodeChallenge, value.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano())
+	botScopes, err := json.Marshal(domain.NormalizeScopes(value.BotScopes))
+	if err != nil {
+		return err
+	}
+	userScopes, err := json.Marshal(domain.NormalizeScopes(value.UserScopes))
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO oauth_codes(code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, code_challenge, code_challenge_method, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, domain.HashToken(value.Code), value.ClientID, value.WorkspaceID, value.UserID, string(scopes), value.BotID, value.BotUserID, string(botScopes), string(userScopes), value.RedirectURI, value.CodeChallenge, value.CodeChallengeMethod, time.Now().UTC().Add(store.OAuthCodeLifetime).UnixNano())
 	return classify(err)
 }
 
@@ -4324,11 +4428,17 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 		return domain.OAuthToken{}, err
 	}
 	var grant domain.OAuthCode
-	var scopes string
-	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, redirect_uri, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ? AND expires_at > ?`, codeHash, clientID, redirect, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.RedirectURI, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
+	var scopes, botScopes, userScopes string
+	if err := tx.QueryRowContext(ctx, `SELECT code, client_id, workspace_id, user_id, scopes, bot_id, bot_user_id, bot_scopes, user_scopes, redirect_uri, code_challenge, code_challenge_method FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ? AND expires_at > ?`, codeHash, clientID, redirect, now.UnixNano()).Scan(&grant.Code, &grant.ClientID, &grant.WorkspaceID, &grant.UserID, &scopes, &grant.BotID, &grant.BotUserID, &botScopes, &userScopes, &grant.RedirectURI, &grant.CodeChallenge, &grant.CodeChallengeMethod); err != nil {
 		return domain.OAuthToken{}, translateNotFound(err)
 	}
 	if err := json.Unmarshal([]byte(scopes), &grant.Scopes); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if err := json.Unmarshal([]byte(botScopes), &grant.BotScopes); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if err := json.Unmarshal([]byte(userScopes), &grant.UserScopes); err != nil {
 		return domain.OAuthToken{}, err
 	}
 	if !domain.VerifyPKCE(grant.CodeChallenge, grant.CodeChallengeMethod, token.CodeVerifier) {
@@ -4346,15 +4456,39 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if changed != 1 {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, scopes, revoked) VALUES (?, ?, ?, ?, 0)`, domain.HashToken(accessToken), grant.WorkspaceID, grant.UserID, strings.Join(domain.NormalizeScopes(grant.Scopes), " ")); err != nil {
+	tokenType := strings.TrimSpace(token.TokenType)
+	if tokenType == "" {
+		tokenType = "user"
+	}
+	subjectID := grant.UserID
+	var tokenBotID domain.BotID
+	tokenScopes := grant.UserScopes
+	if len(tokenScopes) == 0 {
+		tokenScopes = grant.Scopes
+	}
+	if tokenType == "bot" {
+		if grant.BotID == "" || grant.BotUserID == "" {
+			return domain.OAuthToken{}, store.ErrNotFound
+		}
+		subjectID = grant.BotUserID
+		tokenBotID = grant.BotID
+		tokenScopes = grant.BotScopes
+	}
+	if len(tokenScopes) == 0 {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`, domain.HashToken(accessToken), grant.WorkspaceID, subjectID, appID, tokenBotID, strings.Join(domain.NormalizeScopes(tokenScopes), " "), tokenType); err != nil {
 		return domain.OAuthToken{}, err
 	}
 	token.AccessToken = accessToken
 	token.AppID = appID
 	token.ClientID = clientID
 	token.WorkspaceID = grant.WorkspaceID
-	token.UserID = grant.UserID
-	token.Scopes = grant.Scopes
+	token.UserID = subjectID
+	token.InstallerID = grant.UserID
+	token.BotID = tokenBotID
+	token.Scopes = domain.NormalizeScopes(tokenScopes)
+	token.TokenType = tokenType
 	if err := tx.Commit(); err != nil {
 		return domain.OAuthToken{}, err
 	}
@@ -4426,7 +4560,7 @@ func (s *Store) exchangeOpenIDRefreshTokenOnce(ctx context.Context, clientID, ol
 	// which reads this table, and every refreshed token was rejected. Committing
 	// it separately would leave a rotated refresh token whose access token does
 	// not exist, so the insert belongs here, mirroring ExchangeOAuthCode.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, scopes, revoked) VALUES (?, ?, ?, ?, 0)`, domain.HashToken(accessToken), value.WorkspaceID, value.UserID, strings.Join(domain.NormalizeScopes(value.Scopes), " ")); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, '', ?, 'user', 0, 0)`, domain.HashToken(accessToken), value.WorkspaceID, value.UserID, strings.Join(domain.NormalizeScopes(value.Scopes), " ")); err != nil {
 		return domain.OpenIDToken{}, classify(err)
 	}
 	token.AccessToken = accessToken

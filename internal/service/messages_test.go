@@ -75,6 +75,47 @@ func TestOAuthExchangeConsumesAuthorizationCode(t *testing.T) {
 	}
 }
 
+func TestOAuthV2ExchangeIssuesBotIdentityAndScopes(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "Uinstaller", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "Ubot", WorkspaceID: "T1"})
+	ctx := context.Background()
+	if err := s.CreateOAuthClient(ctx, domain.OAuthClient{ID: "client", SecretHash: domain.HashToken("secret"), AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "Ubot", Name: "app", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateOAuthCode(ctx, domain.OAuthCode{
+		Code:        "code",
+		ClientID:    "client",
+		WorkspaceID: "T1",
+		UserID:      "Uinstaller",
+		UserScopes:  []string{"users:read"},
+		BotID:       "B1",
+		BotUserID:   "Ubot",
+		BotScopes:   []string{"chat:write"},
+		RedirectURI: "https://callback",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	token, err := (Messages{Store: s}).OAuthV2Exchange(ctx, "client", "secret", "code", "https://callback", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(token.AccessToken, "xoxb-") || token.TokenType != "bot" || token.UserID != "Ubot" || token.InstallerID != "Uinstaller" || token.BotID != "B1" || strings.Join(token.Scopes, " ") != "chat:write" {
+		t.Fatalf("unexpected token: %+v", token)
+	}
+	issued, err := s.LookupToken(ctx, token.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.AppID != "A1" || issued.BotID != "B1" || issued.UserID != "Ubot" || issued.TokenType != "bot" || strings.Join(issued.Scopes, " ") != "chat:write" {
+		t.Fatalf("unexpected durable token: %+v", issued)
+	}
+}
+
 func TestOpenIDConnectTokenRotatesRefreshTokenAndUserInfoUsesIssuedScope(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test", Domain: "test.example"})

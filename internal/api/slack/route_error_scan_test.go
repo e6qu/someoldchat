@@ -527,6 +527,7 @@ func sentinelDrivenCodes() map[string]string {
 		"hash_conflict":             "store.ErrConflict, classified by sentinel",
 		"too_many_bookmarks":        "store.ErrBookmarkLimit, classified by sentinel",
 		"socket_mode_unavailable":   "store.ErrSocketModeConnectionLimit, classified by sentinel",
+		"token_expired":             "auth.ErrTokenExpired, classified by sentinel",
 		"internal_error":            "store.ErrTransient / store.ErrMessageTimestampTaken, classified by sentinel: a storage-engine failure whose retry was exhausted, named apart from the unclassified fatal_error",
 		"invalid_arg_name":          "the invalidReason default and decodeErrorCode's argument fallback",
 		"invalid_form_data":         "decodeErrorCode's fallback for an unreadable request",

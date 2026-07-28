@@ -33,6 +33,11 @@ Normative, testable requirements and pinned upstream contract sources live in
 [`../PLAN.md`](../PLAN.md). The [SDK qualification inventory](../specs/sdk-compatibility.yaml)
 records the official SDK sources used by the compatibility checks.
 
+The [Slack app platform compatibility matrix](../specs/slack-app-platform.md)
+separately tracks complete app journeys—registration, installation, token
+types, events, commands, interactivity, and UI—so Web API method counts cannot
+stand in for end-to-end app support.
+
 The repository's binding engineering rules are in
 [`../AGENTS.md`](../AGENTS.md).
 

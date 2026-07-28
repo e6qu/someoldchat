@@ -891,7 +891,8 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err := s.SeedConversation(context.Background(), domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SeedToken(context.Background(), "secret-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{"chat:write", "channels:history"}}); err != nil {
+	tokenExpiry := time.Now().UTC().Add(time.Hour).Truncate(time.Nanosecond)
+	if err := s.SeedToken(context.Background(), "secret-token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", ExpiresAt: tokenExpiry, Scopes: []string{"chat:write", "channels:history"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SeedUser(context.Background(), domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
@@ -931,7 +932,7 @@ func TestSQLiteRoundTrip(t *testing.T) {
 		t.Fatalf("authorized conversations=%+v err=%v", conversations, err)
 	}
 	record, err := s.LookupToken(context.Background(), "secret-token")
-	if err != nil || len(record.Scopes) != 2 || record.WorkspaceID != "T1" {
+	if err != nil || len(record.Scopes) != 2 || record.WorkspaceID != "T1" || record.AppID != "A1" || record.BotID != "B1" || record.TokenType != "bot" || !record.ExpiresAt.Equal(tokenExpiry) {
 		t.Fatalf("record=%+v err=%v", record, err)
 	}
 	if err := s.RevokeToken(context.Background(), "secret-token"); err != nil {

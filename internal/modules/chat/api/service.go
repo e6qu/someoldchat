@@ -16,6 +16,7 @@ type Service interface {
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	UninstallApp(context.Context, string, string, domain.WorkspaceID, domain.AppID) error
 	AdminCreateIncomingWebhook(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.UserID) (domain.IncomingWebhook, string, error)
 	AdminSetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.IncomingWebhookID, bool) error
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
@@ -98,6 +99,7 @@ type Service interface {
 	AdminDisconnectSharedConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID) error
 	AdminConnectedChannelInfo(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, []domain.WorkspaceID, domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error)
 	OAuthExchange(context.Context, string, string, string, string) (domain.OAuthToken, error)
+	OAuthV2Exchange(context.Context, string, string, string, string, bool) (domain.OAuthToken, error)
 	OpenIDConnectToken(context.Context, string, string, string, string, string, string, string) (domain.OpenIDToken, error)
 	OpenIDConnectUserInfo(context.Context, string) (domain.OpenIDUserInfo, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)

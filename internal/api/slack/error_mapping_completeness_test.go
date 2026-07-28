@@ -227,6 +227,7 @@ func recordedNonPinnedCodes() map[string]string {
 		"invalid_grant_type":     "oauth.access legacy grant rejection; the operation declares no enum",
 		"invalid_refresh_token":  "oauth.access legacy refresh rejection; the operation declares no enum",
 		"unsupported_grant_type": "RFC 6749 §5.2 token-endpoint error",
+		"token_expired":          "Slack authentication error for an access token whose explicit lifetime has elapsed",
 		// Incoming webhooks answer plain text on hooks.slack.com, not a Web API method.
 		"no_team":         "incoming-webhook plain-text contract, not a Web API method",
 		"invalid_payload": "incoming-webhook plain-text contract, not a Web API method",

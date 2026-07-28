@@ -53,6 +53,26 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.connections.open/
+  - method: apps.manifest.create
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.manifest.create/
+  - method: apps.manifest.delete
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.manifest.delete/
+  - method: apps.manifest.export
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.manifest.export/
+  - method: apps.manifest.update
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.manifest.update/
+  - method: apps.manifest.validate
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.manifest.validate/
   - method: auth.revoke
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -529,6 +549,14 @@ operations:
   - method: oauth.v2.access
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+  - method: oauth.v2.exchange
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/oauth.v2.exchange/
+  - method: oauth.v2.user.access
+    status: sdk-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/oauth.v2.user.access/
   - method: reminders.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi

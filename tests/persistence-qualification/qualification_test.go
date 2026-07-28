@@ -602,7 +602,7 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		if err := repository.CreateOAuthCode(ctx, domain.OAuthCode{Code: code, ClientID: clientID, WorkspaceID: workspaceID, UserID: userID, Scopes: []string{"chat:write", " users:read ", "chat:write"}, RedirectURI: redirect}); err != nil {
 			t.Fatal(err)
 		}
-		token, err := repository.ExchangeOAuthCode(ctx, clientID, "secret", code, redirect, "access-"+suffix, domain.OAuthToken{TokenType: "bot"})
+		token, err := repository.ExchangeOAuthCode(ctx, clientID, "secret", code, redirect, "access-"+suffix, domain.OAuthToken{TokenType: "user"})
 		if err != nil {
 			t.Fatal(err)
 		}

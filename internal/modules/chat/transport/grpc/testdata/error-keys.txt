@@ -50,6 +50,7 @@ service.message_already_deleted
 service.message_not_owned
 service.not_in_conversation
 service.not_workspace_admin
+service.oauth_app_mismatch
 store.already_exists
 store.bookmark_limit
 store.conflict

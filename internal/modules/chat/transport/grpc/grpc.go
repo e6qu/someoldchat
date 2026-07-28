@@ -747,6 +747,17 @@ func (r Remote) RevokeToken(ctx context.Context, token string) error {
 	return nil
 }
 
+func (r Remote) UninstallApp(ctx context.Context, clientID, clientSecret string, workspaceID domain.WorkspaceID, appID domain.AppID) error {
+	out, err := r.auth.UninstallApp(ctx, &chatv1.UninstallAppRequest{ClientId: clientID, ClientSecret: clientSecret, WorkspaceId: string(workspaceID), AppId: string(appID)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed app uninstall was not acknowledged")
+	}
+	return nil
+}
+
 type remoteFileReader struct {
 	stream interface {
 		Recv() (*chatv1.DownloadFilePart, error)
@@ -1996,7 +2007,29 @@ func (r Remote) OAuthExchange(ctx context.Context, clientID, clientSecret, code,
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
-	return domain.OAuthToken{AccessToken: out.GetAccessToken(), ClientID: out.GetClientId(), AppID: domain.AppID(out.GetAppId()), WorkspaceID: domain.WorkspaceID(out.GetWorkspaceId()), UserID: domain.UserID(out.GetUserId()), Scopes: append([]string(nil), out.GetScopes()...), TokenType: out.GetTokenType()}, nil
+	return decodeOAuthToken(out), nil
+}
+
+func (r Remote) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, code, redirectURI string, userOnly bool) (domain.OAuthToken, error) {
+	out, err := r.oauth.ExchangeOAuthV2(ctx, &chatv1.OAuthExchangeRequest{ClientId: clientID, ClientSecret: clientSecret, Code: code, RedirectUri: redirectURI, UserOnly: userOnly})
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	return decodeOAuthToken(out), nil
+}
+
+func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
+	return domain.OAuthToken{
+		AccessToken: value.GetAccessToken(),
+		ClientID:    value.GetClientId(),
+		AppID:       domain.AppID(value.GetAppId()),
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID:      domain.UserID(value.GetUserId()),
+		InstallerID: domain.UserID(value.GetInstallerId()),
+		BotID:       domain.BotID(value.GetBotId()),
+		Scopes:      append([]string(nil), value.GetScopes()...),
+		TokenType:   value.GetTokenType(),
+	}
 }
 
 func (r Remote) TeamBillableInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) (domain.BillableInfo, error) {
@@ -3236,6 +3269,13 @@ func (s *Server) RevokeToken(ctx context.Context, input *chatv1.TokenRequest) (*
 	return s.revokeTokenProto(ctx, input)
 }
 
+func (s *Server) UninstallApp(ctx context.Context, input *chatv1.UninstallAppRequest) (*chatv1.AuthRevokeResponse, error) {
+	if err := s.implementation.UninstallApp(ctx, input.GetClientId(), input.GetClientSecret(), domain.WorkspaceID(input.GetWorkspaceId()), domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AuthRevokeResponse{Ok: true}, nil
+}
+
 func (s *Server) OpenConversation(ctx context.Context, input *chatv1.OpenConversationRequest) (*chatv1.Conversation, error) {
 	return s.openConversationProto(ctx, input)
 }
@@ -3455,7 +3495,29 @@ func (s *Server) ExchangeOAuth(ctx context.Context, input *chatv1.OAuthExchangeR
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &chatv1.OAuthToken{AccessToken: value.AccessToken, ClientId: value.ClientID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: value.Scopes, TokenType: value.TokenType}, nil
+	return encodeOAuthToken(value), nil
+}
+
+func (s *Server) ExchangeOAuthV2(ctx context.Context, input *chatv1.OAuthExchangeRequest) (*chatv1.OAuthToken, error) {
+	value, err := s.implementation.OAuthV2Exchange(ctx, input.GetClientId(), input.GetClientSecret(), input.GetCode(), input.GetRedirectUri(), input.GetUserOnly())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeOAuthToken(value), nil
+}
+
+func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
+	return &chatv1.OAuthToken{
+		AccessToken: value.AccessToken,
+		ClientId:    value.ClientID,
+		AppId:       string(value.AppID),
+		WorkspaceId: string(value.WorkspaceID),
+		UserId:      string(value.UserID),
+		InstallerId: string(value.InstallerID),
+		BotId:       string(value.BotID),
+		Scopes:      value.Scopes,
+		TokenType:   value.TokenType,
+	}
 }
 
 func (s *Server) TeamBillableInfo(ctx context.Context, input *chatv1.BillableInfoRequest) (*chatv1.BillableInfo, error) {
@@ -5398,14 +5460,22 @@ func decodeProtoReadCursor(value *chatv1.ReadCursor) (domain.ReadCursor, error) 
 }
 
 func encodeProtoToken(value domain.TokenRecord) *chatv1.TokenRecord {
-	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: domain.NormalizeScopes(value.Scopes), Revoked: value.Revoked}
+	expiresAt := ""
+	if !value.ExpiresAt.IsZero() {
+		expiresAt = value.ExpiresAt.UTC().Format(time.RFC3339Nano)
+	}
+	return &chatv1.TokenRecord{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), AppId: string(value.AppID), BotId: string(value.BotID), Scopes: domain.NormalizeScopes(value.Scopes), TokenType: value.TokenType, ExpiresAt: expiresAt, Revoked: value.Revoked}
 }
 
 func decodeProtoToken(value *chatv1.TokenRecord) (domain.TokenRecord, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" {
 		return domain.TokenRecord{}, errors.New("typed token record is incomplete")
 	}
-	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Scopes: domain.NormalizeScopes(value.GetScopes()), Revoked: value.GetRevoked()}, nil
+	expiresAt, err := decodeOptionalProtoTime(value.GetExpiresAt())
+	if err != nil {
+		return domain.TokenRecord{}, err
+	}
+	return domain.TokenRecord{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), Scopes: domain.NormalizeScopes(value.GetScopes()), TokenType: value.GetTokenType(), ExpiresAt: expiresAt, Revoked: value.GetRevoked()}, nil
 }
 
 func encodeProtoSession(value domain.SessionRecord) *chatv1.SessionRecord {
@@ -5877,7 +5947,7 @@ func (r Remote) OpenIDConnectToken(ctx context.Context, clientID, clientSecret, 
 		return domain.OpenIDToken{}, err
 	}
 	oauthToken := out.GetOauthToken()
-	return domain.OpenIDToken{OAuthToken: domain.OAuthToken{AccessToken: oauthToken.GetAccessToken(), ClientID: oauthToken.GetClientId(), AppID: domain.AppID(oauthToken.GetAppId()), WorkspaceID: domain.WorkspaceID(oauthToken.GetWorkspaceId()), UserID: domain.UserID(oauthToken.GetUserId()), Scopes: append([]string(nil), oauthToken.GetScopes()...), TokenType: oauthToken.GetTokenType()}, IDToken: out.GetIdToken(), RefreshToken: out.GetRefreshToken()}, nil
+	return domain.OpenIDToken{OAuthToken: decodeOAuthToken(oauthToken), IDToken: out.GetIdToken(), RefreshToken: out.GetRefreshToken()}, nil
 }
 
 func (r Remote) OpenIDConnectUserInfo(ctx context.Context, token string) (domain.OpenIDUserInfo, error) {
@@ -5893,7 +5963,7 @@ func (s *Server) OpenIDConnectToken(ctx context.Context, input *chatv1.OpenIDCon
 	if err != nil {
 		return nil, mapError(err)
 	}
-	return &chatv1.OpenIDConnectTokenResponse{OauthToken: &chatv1.OAuthToken{AccessToken: value.AccessToken, ClientId: value.ClientID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Scopes: value.Scopes, TokenType: value.TokenType}, IdToken: value.IDToken, RefreshToken: value.RefreshToken}, nil
+	return &chatv1.OpenIDConnectTokenResponse{OauthToken: encodeOAuthToken(value.OAuthToken), IdToken: value.IDToken, RefreshToken: value.RefreshToken}, nil
 }
 
 func (s *Server) OpenIDConnectUserInfo(ctx context.Context, input *chatv1.OpenIDConnectUserInfoRequest) (*chatv1.OpenIDConnectUserInfoResponse, error) {
