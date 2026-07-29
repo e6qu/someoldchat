@@ -1830,6 +1830,8 @@ var action=submitter&&submitter.getAttribute('formaction')||form.getAttribute('h
 if(!ownPath(action))return;
 event.preventDefault();
 if(form===composer){if(sending)return;sending=true}
+var activeMessage=document.activeElement&&document.activeElement.closest?document.activeElement.closest('.message'):null;
+var restoreMessageID=activeMessage&&document.activeElement===activeMessage?activeMessage.getAttribute('data-message-id'):'';
 var quiet=form.getAttribute('data-quiet')==='true';
 var body=new FormData(form);
 var unixInput=form.querySelector('[data-unix-seconds="true"]');
@@ -1850,7 +1852,10 @@ return response.text();
 }).then(function(html){
 if(html===null)return null;
 if(quiet){form.hidden=true;return null}
-if(html===''){return refresh(true).then(function(){announce('The conversation was updated.')})}
+if(html===''){return refresh(true).then(function(){
+if(restoreMessageID){var restored=Array.prototype.slice.call(document.querySelectorAll('.message')).find(function(item){return item.getAttribute('data-message-id')===restoreMessageID});focusMessage(restored)}
+announce('The conversation was updated.');
+})}
 var newest=form===composer?form.getAttribute('data-newest'):'';
 if(newest&&ownPath(newest)){
 window.location.assign(newest);

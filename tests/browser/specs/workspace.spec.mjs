@@ -688,16 +688,19 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01] composer formatting, mentions, emoji, d
 
 test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
   await signIn(context);
-  const first = await postThroughTheAPI(request, `keyboard first ${Date.now()}`);
-  const second = await postThroughTheAPI(request, `keyboard second ${Date.now()}`);
-  const last = await postThroughTheAPI(request, `keyboard last ${Date.now()}`);
+  const firstText = `keyboard first ${Date.now()}`;
+  const secondText = `keyboard second ${Date.now()}`;
+  const lastText = `keyboard last ${Date.now()}`;
+  const first = await postThroughTheAPI(request, firstText);
+  const second = await postThroughTheAPI(request, secondText);
+  const last = await postThroughTheAPI(request, lastText);
   await page.goto('/app');
 
   const composer = page.locator('form.composer textarea[name="text"]');
   await composer.fill('');
   await composer.press('ArrowUp');
-  const lastMessage = page.locator('.message', { hasText: `keyboard last` });
-  const secondMessage = page.locator('.message', { hasText: `keyboard second` });
+  const lastMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
+  const secondMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: secondText }) });
   await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('ArrowUp');
@@ -735,7 +738,7 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   await page.keyboard.press('ArrowLeft');
   await expect(page).not.toHaveURL(/thread=/);
 
-  const returned = page.locator('.message', { hasText: `keyboard last` });
+  const returned = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
   await returned.focus();
   await page.keyboard.press('Delete');
   await expect(returned.getByRole('button', { name: 'Delete this message' })).toBeFocused();
