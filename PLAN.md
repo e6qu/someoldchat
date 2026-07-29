@@ -268,7 +268,12 @@ slash-command discovery/escaping semantics are corrected; and the journeys now
 qualify in Chromium, Firefox, and WebKit with representative automated WCAG
 checks. Visual baselines, manual assistive-technology evidence, complete
 API/SDK-to-journey mapping, and live-Slack differential runs remain explicit
-work rather than inferred compatibility.
+work rather than inferred compatibility. Scheduled send now preserves
+channel/thread context and the browser's local time zone, stays out of history
+until delivery, and has a real pending
+list and cancellation journey. Drafts/Sent aggregation, scheduled edit,
+reschedule/send-now and failure history, Later, and reminder execution remain
+the next stateful client slice.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison

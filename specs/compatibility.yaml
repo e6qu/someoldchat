@@ -523,7 +523,10 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
+      - go-test:internal/service:TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation
+      - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
+      - browser-journey:SCHED-02
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
@@ -539,9 +542,11 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
+      - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/scheduler:TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution
       - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
       - go-test:internal/store/sqlstore:TestSQLiteScheduledMessageQuotaCommitsTheCountAndInsertTogether
+      - browser-journey:SCHED-01
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
@@ -556,7 +561,9 @@ operations:
     evidence:
       - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
       - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
+      - go-test:internal/web:TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly
       - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
+      - browser-journey:SCHED-02
       - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
       - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
       - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
