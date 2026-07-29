@@ -3,12 +3,12 @@
 # Terraform resolves one provider version per configuration; the previous
 # ">= 5.0, < 6.0" and ">= 5.0, < 7.0" pair made that impossible.
 terraform {
-  required_version = "1.13.5"
+  required_version = "1.15.8"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "6.55.0"
+      version = "6.56.0"
     }
     random = {
       source  = "hashicorp/random"

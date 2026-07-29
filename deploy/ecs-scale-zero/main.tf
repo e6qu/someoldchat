@@ -3,9 +3,9 @@
 # majors (">= 5.0, < 6.0" here against ">= 5.0, < 7.0" in terraform/ecs-runtime),
 # so a root module consuming both could not `terraform init` at all.
 terraform {
-  required_version = "1.13.5"
+  required_version = "1.15.8"
   required_providers {
-    aws     = { source = "hashicorp/aws", version = "6.55.0" }
+    aws     = { source = "hashicorp/aws", version = "6.56.0" }
     archive = { source = "hashicorp/archive", version = "2.7.1" }
   }
 }
