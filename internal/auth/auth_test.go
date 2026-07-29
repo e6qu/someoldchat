@@ -78,6 +78,9 @@ func TestStoredAuthenticatorUsesPersistedScopes(t *testing.T) {
 	if principal.AppID != "A1" || principal.BotID != "B1" || principal.TokenType != "bot" {
 		t.Fatalf("principal lost app/bot identity: %+v", principal)
 	}
+	if principal.CredentialHash != domain.HashToken("token") || strings.Contains(principal.CredentialHash, "token") {
+		t.Fatalf("principal credential identity is not the one-way token hash: %+v", principal)
+	}
 }
 
 func TestStoredAuthenticatorDistinguishesExpiredToken(t *testing.T) {

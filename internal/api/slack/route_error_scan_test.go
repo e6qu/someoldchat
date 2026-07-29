@@ -527,6 +527,7 @@ func sentinelDrivenCodes() map[string]string {
 		"file_storage_unavailable":  "service.ErrBlobUnavailable, classified by sentinel",
 		"hash_conflict":             "store.ErrConflict, classified by sentinel",
 		"too_many_bookmarks":        "store.ErrBookmarkLimit, classified by sentinel",
+		"restricted_too_many":       "store.ErrScheduledMessageLimit / service.ErrScheduledTooMany, classified by sentinel",
 		"socket_mode_unavailable":   "store.ErrSocketModeConnectionLimit, classified by sentinel",
 		"token_expired":             "auth.ErrTokenExpired, classified by sentinel",
 		"internal_error":            "store.ErrTransient / store.ErrMessageTimestampTaken, classified by sentinel: a storage-engine failure whose retry was exhausted, named apart from the unclassified fatal_error",

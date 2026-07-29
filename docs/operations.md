@@ -190,18 +190,33 @@ The worker continues after a handler delivery failure because it has released
 the records at an explicit retry time. It exits on claim, release, or
 acknowledgement failure so the deployment platform can restart it.
 
-The outbox worker requires `-delivery-format`. Use `record` only for an
+The worker requires `-delivery-format`. Use `record` only for an
 integration that explicitly accepts the internal `events.Record` JSON shape.
-Use `slack-events` with `-app-id` and `-signing-secret` for a Slack Events
-API request URL. That mode translates the durable topic through the shared
-Slack event table, sends only events whose inner shape is complete and allowed
-on the Events API surface, and signs each resulting `event_callback` body.
+Use `slack-events` with the manifest-owned encrypted application credentials
+and `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX`; manual `-app-id` and
+`-signing-secret` flags are rejected. That mode translates the durable topic
+through the shared Slack event table, sends only events whose inner shape is
+complete and allowed on the Events API surface, and signs each resulting
+`event_callback` body.
 Topics with no safe Slack representation are acknowledged without being sent;
 malformed or incomplete typed payloads are permanent producer failures rather
 than retry loops. A record may fan out into several deliveries (for example,
 one `member_joined_channel` event per invited user), each with a distinct
 idempotency key. The request includes `X-Slack-Request-Timestamp`,
 `X-Slack-Signature`, and that key as `Idempotency-Key`.
+
+The same process executes due scheduled messages in both delivery formats.
+`record` is explicitly workspace-scoped; `slack-events` claims due schedules
+across every workspace. Scheduled records retain the creating credential's
+one-way hash, app/bot attribution, thread parent, and terminal delivered or
+failed state. Permanent posting failures are recorded once rather than retried
+forever; transient failures retain their fenced lease and retry path.
+
+Schema 102 cannot reconstruct the exact bearer credential or app identity for
+schedules created by an older release, because the old schema never stored
+either value. Those records remain pending and execute under their original
+author, but they are intentionally absent from exact-token list/delete results.
+New records are fully token-isolated and attributed.
 
 The implementation follows [Slack's Socket Mode guide](https://docs.slack.dev/apis/events-api/using-socket-mode/),
 [Slack's request-signing guide](https://docs.slack.dev/authentication/verifying-requests-from-slack/),
@@ -343,9 +358,10 @@ The published container image at `ghcr.io/e6qu/someoldchat` contains only
 `cmd/server`. `sameoldchat-worker`, `sameoldchat-blobgc`,
 `sameoldchat-socketmode-worker`, `sameoldchat-chatd`, `sameoldchat-activator`,
 and `sameoldchat-ecs-ws-activator` have no published image, so on a container
-platform they must be built from this repository — the root `Dockerfile` for the
-first five by changing the built package, and
-`deploy/ecs-scale-zero/Dockerfile.websocket-edge` for the WebSocket activator.
+platform they must be built from this repository. The ECS module includes
+`deploy/ecs-scale-zero/Dockerfile.worker` and
+`deploy/ecs-scale-zero/Dockerfile.websocket-edge`; other binaries still require
+a repository build.
 `make build` and `make build-static` produce all seven for the systemd profile in
 the deployment guide. Neither worker persists
 queue state locally; a failure releases the durable lease with its retry time,

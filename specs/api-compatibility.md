@@ -28,16 +28,21 @@ evidence:
 4. `behavior-compatible`: local behavior matches the selected contract tests;
 5. `verified-against-slack`: controlled comparison with Slack has passed.
 
-The repository must not remove an operation or lower its status. Pull-request
-CI runs `make contract-ratchet` against the pull request base branch and fails
-if either change occurs. The first code pull request may use a README-only base
-that has no ledger; CI treats that case as an explicit bootstrap and validates
-the new ledger with `make contract-check`. Later pull requests must use the
-existing ledger as their ratchet baseline. New operations may enter the ledger at
-`unimplemented`, which makes unfinished work visible without weakening the
+The repository must not remove an operation or silently lower its status.
+Pull-request CI runs `make contract-ratchet` against the pull request base
+branch. A downgrade is accepted only when the operation carries an `audit`
+record naming the exact prior status, a concrete reason, and reviewable
+evidence. This exception exists so an audit can correct an overstated claim
+instead of making it permanent; it is not a way to remove working behavior
+without review. The first code pull request may use a README-only base that has
+no ledger; CI treats that case as an explicit bootstrap and validates the new
+ledger with `make contract-check`. Later pull requests use the existing ledger
+as their ratchet baseline. New operations may enter the ledger at
+`unimplemented`, which makes unfinished work visible without weakening an
 existing claim. A current official method that is absent from the pinned
 OpenAPI snapshot may enter the ledger with `provenance: slack-reference` only
-when its official method reference and an executable qualification are recorded.
+when its official method reference and an executable qualification are
+recorded.
 
 The current official Slack method reference documents the `canvases` method
 family separately from the pinned OpenAPI snapshot. The six canvases methods are
@@ -46,7 +51,11 @@ are exercised by the local Web API qualification suites. This does not claim
 that the vendored OpenAPI snapshot contains those methods.
 
 Run `make compatibility-report` to print the current operation count and the
-number at or above each evidence level. The implementation target is
+number at or above each evidence level. The report separates the 310-method
+current Slack reference from retained legacy methods so compatibility aliases
+cannot inflate the current denominator. It also reports how many methods name
+method-level executable evidence and how many retain known deviations. The
+implementation target is
 `verified-against-slack` for every operation; the report does not treat a
 schema-compatible handler as behavior verification. A higher status includes
 the evidence represented by every lower status, so the report uses

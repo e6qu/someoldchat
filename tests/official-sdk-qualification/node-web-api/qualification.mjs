@@ -665,21 +665,31 @@ assert.equal(editedBookmark.ok, true);
 assert.equal(editedBookmark.bookmark.title, "Updated SDK bookmark");
 const removedBookmark = await client.bookmarks.remove({ channel_id: "C1", bookmark_id: bookmark.bookmark.id });
 assert.equal(removedBookmark.ok, true);
+const scheduledRoot = await client.chat.postMessage({ channel: "C1", text: "scheduled thread root" });
+const scheduledPostAt = Math.floor(Date.now() / 1000) + 60;
 const scheduled = await client.chat.scheduleMessage({
 	channel: "C1",
 	text: "scheduled qualification",
-	post_at: Math.floor(Date.now() / 1000) + 60,
+	post_at: scheduledPostAt,
+	thread_ts: scheduledRoot.ts,
 });
 assert.equal(scheduled.ok, true);
 assert.equal(typeof scheduled.scheduled_message_id, "string");
-const scheduledList = await client.chat.scheduledMessages.list({ channel: "C1", limit: 10 });
+const scheduledList = await client.chat.scheduledMessages.list({
+	channel: "C1",
+	limit: 10,
+	oldest: String(scheduledPostAt - 1),
+	latest: String(scheduledPostAt + 1),
+});
 assert.equal(scheduledList.ok, true);
 assert.equal(scheduledList.scheduled_messages.length, 1);
+assert.equal(scheduledList.scheduled_messages[0].thread_ts, scheduledRoot.ts);
 const deletedScheduled = await client.chat.deleteScheduledMessage({
 	channel: "C1",
 	scheduled_message_id: scheduled.scheduled_message_id,
 });
 assert.equal(deletedScheduled.ok, true);
+assert.equal((await client.chat.delete({ channel: "C1", ts: scheduledRoot.ts })).ok, true);
 const dndInfo = await client.dnd.info();
 assert.equal(dndInfo.ok, true);
 assert.equal(dndInfo.dnd_enabled, false);

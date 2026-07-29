@@ -236,7 +236,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	s.SeedConversationMember("C2", "U1")
-	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", Scopes: auth.AllScopes()})
+	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: auth.AllScopes()})
 	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "oauth-client", SecretHash: domain.HashToken("oauth-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
@@ -255,7 +255,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	}
 	var authenticator auth.Authenticator
 	if stored {
-		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", Scopes: names}); err != nil {
+		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: names}); err != nil {
 			panic(err)
 		}
 		value, err := auth.NewStored(s)
@@ -264,7 +264,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		}
 		authenticator = value
 	} else {
-		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", Scopes: granted})
+		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: granted})
 		if err != nil {
 			panic(err)
 		}
@@ -3097,13 +3097,70 @@ func TestHistoryCursorAdvancesBoundedPage(t *testing.T) {
 }
 
 func TestScheduleMessageFormAcceptsBlocksWithoutFallbackText(t *testing.T) {
-	req := httptest.NewRequest(http.MethodPost, "/api/chat.scheduleMessage", strings.NewReader("channel=C1&post_at=4102444800&blocks=%5B%7B%22type%22%3A%22divider%22%7D%5D"))
+	form := url.Values{
+		"channel": {"C1"},
+		"post_at": {strconv.FormatInt(time.Now().UTC().Add(time.Hour).Unix(), 10)},
+		"blocks":  {`[{"type":"divider"}]`},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/chat.scheduleMessage", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"blocks":[{"type":"divider"}]`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestScheduledMessageAPIIsScopedToTheExactBearerToken(t *testing.T) {
+	handler, store := testHandlerWithStoredTokenAuth(auth.ScopeChatWrite)
+	store.SeedToken(context.Background(), "other-token", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1",
+		TokenType: "bot", Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	call := func(token, path, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	postAt := time.Now().UTC().Add(time.Hour).Unix()
+	scheduled := call("token", "/api/chat.scheduleMessage", url.Values{
+		"channel": {"C1"}, "text": {"token-owned"}, "post_at": {strconv.FormatInt(postAt, 10)},
+	}.Encode())
+	id, _ := scheduled["scheduled_message_id"].(string)
+	if scheduled["ok"] != true || id == "" {
+		t.Fatalf("schedule response=%v", scheduled)
+	}
+	message, _ := scheduled["message"].(map[string]any)
+	if scheduled["post_at"] != strconv.FormatInt(postAt, 10) || message["bot_id"] != "B1" || message["type"] != "delayed_message" || message["subtype"] != "bot_message" {
+		t.Fatalf("schedule response lost Slack post_at or bot attribution: %v", scheduled)
+	}
+	otherPage := call("other-token", "/api/chat.scheduledMessages.list", "")
+	if items, _ := otherPage["scheduled_messages"].([]any); otherPage["ok"] != true || len(items) != 0 {
+		t.Fatalf("another token saw scheduled messages: %v", otherPage)
+	}
+	otherDelete := call("other-token", "/api/chat.deleteScheduledMessage", url.Values{
+		"channel": {"C1"}, "scheduled_message_id": {id},
+	}.Encode())
+	if otherDelete["error"] != "invalid_scheduled_message_id" {
+		t.Fatalf("another token deleted the schedule: %v", otherDelete)
+	}
+	ownerPage := call("token", "/api/chat.scheduledMessages.list", url.Values{
+		"oldest": {strconv.FormatInt(postAt-1, 10)}, "latest": {strconv.FormatInt(postAt+1, 10)},
+	}.Encode())
+	if items, _ := ownerPage["scheduled_messages"].([]any); ownerPage["ok"] != true || len(items) != 1 {
+		t.Fatalf("creating token could not list its schedule: %v", ownerPage)
 	}
 }
 

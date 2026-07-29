@@ -624,17 +624,27 @@ public final class Qualification {
                     com.slack.api.methods.request.files.remote.FilesRemoteRemoveRequest.builder()
                             .externalId("remote-qualification").build());
             require(remoteRemove.isOk(), "files.remote.remove failed: " + remoteRemove.getError());
+            ChatPostMessageResponse scheduledRoot = methods.chatPostMessage(
+                    com.slack.api.methods.request.chat.ChatPostMessageRequest.builder()
+                            .channel("C1").text("scheduled thread root").build());
+            require(scheduledRoot.isOk() && scheduledRoot.getTs() != null,
+                    "scheduled thread root failed: " + scheduledRoot.getError());
+            int scheduledPostAt = (int) (System.currentTimeMillis() / 1000L) + 60;
             com.slack.api.methods.response.chat.ChatScheduleMessageResponse scheduled = methods.chatScheduleMessage(
                     com.slack.api.methods.request.chat.ChatScheduleMessageRequest.builder()
                             .channel("C1")
                             .text("scheduled qualification")
-                            .postAt((int) (System.currentTimeMillis() / 1000L) + 60)
+                            .postAt(scheduledPostAt)
+                            .threadTs(scheduledRoot.getTs())
                             .build());
             require(scheduled.isOk() && scheduled.getScheduledMessageId() != null,
                     "chat.scheduleMessage failed: " + scheduled.getError());
             com.slack.api.methods.response.chat.scheduled_messages.ChatScheduledMessagesListResponse scheduledList = methods.chatScheduledMessagesList(
                     com.slack.api.methods.request.chat.scheduled_messages.ChatScheduledMessagesListRequest.builder()
-                            .channel("C1").limit(10).build());
+                            .channel("C1").limit(10)
+                            .oldest(Integer.toString(scheduledPostAt - 1))
+                            .latest(Integer.toString(scheduledPostAt + 1))
+                            .build());
             require(scheduledList.isOk() && scheduledList.getScheduledMessages() != null
                             && scheduledList.getScheduledMessages().size() == 1,
                     "chat.scheduledMessages.list failed: " + scheduledList.getError());
@@ -642,6 +652,9 @@ public final class Qualification {
                     com.slack.api.methods.request.chat.ChatDeleteScheduledMessageRequest.builder()
                             .channel("C1").scheduledMessageId(scheduled.getScheduledMessageId()).build());
             require(deletedScheduled.isOk(), "chat.deleteScheduledMessage failed: " + deletedScheduled.getError());
+            require(methods.chatDelete(com.slack.api.methods.request.chat.ChatDeleteRequest.builder()
+                            .channel("C1").ts(scheduledRoot.getTs()).build()).isOk(),
+                    "scheduled thread root cleanup failed");
             com.slack.api.methods.response.dnd.DndInfoResponse dndInfo = methods.dndInfo(
                     com.slack.api.methods.request.dnd.DndInfoRequest.builder().build());
             require(dndInfo.isOk() && !dndInfo.isDndEnabled(), "dnd.info failed: " + dndInfo.getError());

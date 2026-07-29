@@ -45,8 +45,8 @@ func main() {
 func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	flags := flag.NewFlagSet("sameoldchat-worker", flag.ContinueOnError)
 	flags.SetOutput(os.Stderr)
-	backend := flags.String("store", "", "storage backend: memory, sqlite, postgresql, or dqlite (required)")
-	dsn := flags.String("db", "", "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
+	backend := flags.String("store", os.Getenv("SAMEOLDCHAT_STORE"), "storage backend: memory, sqlite, postgresql, or dqlite (required)")
+	dsn := flags.String("db", os.Getenv("SAMEOLDCHAT_DATABASE_URL"), "SQLite or PostgreSQL DSN; required for sqlite and postgresql")
 	dqliteDirectory := flags.String("dqlite-directory", "", "dqlite state directory")
 	dqliteAddress := flags.String("dqlite-address", "", "dqlite node address")
 	dqliteCluster := flags.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
@@ -136,23 +136,30 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			logger.Error("configure outbox worker", "error", err)
 			return exitConfiguration
 		}
-		scheduledWorker, err = scheduler.NewWorker(runtime.ScheduledSource, runtime.Service, *owner, *limit, *lease)
-		if err != nil {
-			logger.Error("configure scheduled worker", "error", err)
-			return exitConfiguration
-		}
 	} else {
 		appEventProcessor = slackapp.EventProcessor{Store: runtime.Store, AppCredentialKey: appCredentialKey, Owner: *owner, Lease: *lease}
+	}
+	// Scheduled delivery is a product worker, not an outbox-format feature.
+	// slack-events is the multi-workspace production mode, so an empty workspace
+	// deliberately claims due schedules across every workspace.
+	scheduledWorker, err = scheduler.NewWorker(runtime.ScheduledSource, runtime.Service, *owner, *limit, *lease)
+	if err != nil {
+		logger.Error("configure scheduled worker", "error", err)
+		return exitConfiguration
 	}
 	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	cycle := func(cycleContext context.Context) (bool, error) {
 		if *deliveryFormat == "slack-events" {
-			count, err := appEventProcessor.RunOnce(cycleContext)
-			if err != nil {
-				logger.Error("Slack Events API delivery failed", "count", count, "error", err)
+			eventCount, eventErr := appEventProcessor.RunOnce(cycleContext)
+			if eventErr != nil {
+				logger.Error("Slack Events API delivery failed", "count", eventCount, "error", eventErr)
 			}
-			return count > 0, err
+			scheduledCount, scheduledErr := scheduledWorker.RunOnce(cycleContext, "")
+			if scheduledErr != nil {
+				logger.Error("scheduled message execution failed", "count", scheduledCount, "error", scheduledErr)
+			}
+			return eventCount > 0 || scheduledCount > 0, errors.Join(eventErr, scheduledErr)
 		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))

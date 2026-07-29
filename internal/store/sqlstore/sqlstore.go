@@ -265,10 +265,14 @@ CREATE TABLE IF NOT EXISTS reminders (
 CREATE INDEX IF NOT EXISTS reminders_user_due ON reminders(workspace_id, user_id, due_at, id);
 CREATE TABLE IF NOT EXISTS scheduled_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), channel_id TEXT NOT NULL REFERENCES conversations(id),
- author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', post_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
- delivered INTEGER NOT NULL DEFAULT 0, lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0
+ author_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', bot_id TEXT NOT NULL DEFAULT '',
+ credential_hash TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '',
+ thread_ts TEXT NOT NULL DEFAULT '', post_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
+ delivered INTEGER NOT NULL DEFAULT 0, delivered_at INTEGER NOT NULL DEFAULT 0, failed_at INTEGER NOT NULL DEFAULT 0,
+ failure_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0
 );
-CREATE INDEX IF NOT EXISTS scheduled_messages_owner ON scheduled_messages(workspace_id, author_id, id);
+CREATE INDEX IF NOT EXISTS scheduled_messages_owner ON scheduled_messages(workspace_id, author_id, post_at, id);
+CREATE INDEX IF NOT EXISTS scheduled_messages_credential ON scheduled_messages(workspace_id, credential_hash, post_at, id);
 CREATE TABLE IF NOT EXISTS user_groups (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, handle TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', creator_id TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
@@ -317,7 +321,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 101
+const schemaVersion = 102
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2126,6 +2130,35 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS message_files_file ON message_files(file_id, message_id)`); err != nil {
 			return fmt.Errorf("index message file shares: %w", err)
+		}
+	}
+	if version < 102 {
+		columns, err := s.tableColumns(ctx, db, "scheduled_messages")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"app_id TEXT NOT NULL DEFAULT ''",
+			"bot_id TEXT NOT NULL DEFAULT ''",
+			"credential_hash TEXT NOT NULL DEFAULT ''",
+			"thread_ts TEXT NOT NULL DEFAULT ''",
+			"delivered_at INTEGER NOT NULL DEFAULT 0",
+			"failed_at INTEGER NOT NULL DEFAULT 0",
+			"failure_code TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate scheduled message field %s: %w", name, err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `UPDATE scheduled_messages SET delivered_at = post_at WHERE delivered = 1 AND delivered_at = 0`); err != nil {
+			return fmt.Errorf("backfill scheduled delivery state: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS scheduled_messages_credential ON scheduled_messages(workspace_id, credential_hash, post_at, id)`); err != nil {
+			return fmt.Errorf("index scheduled message credentials: %w", err)
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -7455,7 +7488,61 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.Text, value.Blocks, value.Attachments, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateScheduledMessageWithinLimit(ctx context.Context, value domain.ScheduledMessage, window time.Duration, limit int, event events.Event) error {
+	if window <= 0 || limit <= 0 {
+		return store.InvalidArgument("scheduled-message window and limit must be positive")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// A no-op update takes the conversation row lock on PostgreSQL and the
+	// database write lock on SQLite before the count. Concurrent schedulers for
+	// one channel therefore cannot both observe slot 30 and commit slot 31.
+	result, err := tx.ExecContext(ctx, `UPDATE conversations SET id = id WHERE id = ? AND workspace_id = ?`, value.Channel, value.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT post_at FROM scheduled_messages WHERE workspace_id = ? AND channel_id = ? AND delivered = 0 AND failed_at = 0 AND post_at >= ? AND post_at <= ? ORDER BY post_at`, value.WorkspaceID, value.Channel, value.PostAt.Add(-window).Unix(), value.PostAt.Add(window).Unix())
+	if err != nil {
+		return err
+	}
+	var nearby []time.Time
+	for rows.Next() {
+		var postAt int64
+		if err := rows.Scan(&postAt); err != nil {
+			rows.Close()
+			return err
+		}
+		nearby = append(nearby, time.Unix(postAt, 0).UTC())
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if store.ScheduledMessageLimitExceeded(nearby, value.PostAt, window, limit) {
+		return store.ErrScheduledMessageLimit
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -7472,6 +7559,34 @@ func scheduledUnixSecondCeil(value time.Time) int64 {
 	return seconds
 }
 
+type rowScanner interface {
+	Scan(...any) error
+}
+
+func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
+	var value domain.ScheduledMessage
+	var postAt, createdAt, deliveredAt, failedAt int64
+	err := row.Scan(
+		&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.AppID, &value.BotID,
+		&value.CredentialHash, &value.Text, &value.Blocks, &value.Attachments, &value.ThreadTimestamp,
+		&postAt, &createdAt, &deliveredAt, &failedAt, &value.FailureCode,
+	)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	value.PostAt = time.Unix(postAt, 0).UTC()
+	value.CreatedAt = time.Unix(createdAt, 0).UTC()
+	if deliveredAt != 0 {
+		value.DeliveredAt = time.Unix(deliveredAt, 0).UTC()
+	}
+	if failedAt != 0 {
+		value.FailedAt = time.Unix(failedAt, 0).UTC()
+	}
+	return value, nil
+}
+
+const scheduledMessageColumns = `id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered_at, failed_at, failure_code`
+
 func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.ScheduledMessagePage{}, err
@@ -7480,7 +7595,7 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	if err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND author_id = ? AND delivered = 0`
+	query := `SELECT ` + scheduledMessageColumns + ` FROM scheduled_messages WHERE workspace_id = ? AND author_id = ? AND delivered = 0 AND failed_at = 0`
 	args := []any{workspace, user}
 	if channel != "" {
 		query += ` AND channel_id = ?`
@@ -7499,13 +7614,10 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	defer rows.Close()
 	items := make([]domain.ScheduledMessage, 0, request.Limit+1)
 	for rows.Next() {
-		var value domain.ScheduledMessage
-		var postAt, createdAt int64
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &value.Attachments, &postAt, &createdAt); err != nil {
+		value, err := scanScheduledMessage(rows)
+		if err != nil {
 			return domain.ScheduledMessagePage{}, err
 		}
-		value.PostAt = time.Unix(postAt, 0).UTC()
-		value.CreatedAt = time.Unix(createdAt, 0).UTC()
 		items = append(items, value)
 	}
 	if err := rows.Err(); err != nil {
@@ -7519,9 +7631,64 @@ func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.Work
 	return page, err
 }
 
+func (s *Store) ListScheduledMessagesForCredential(ctx context.Context, workspace domain.WorkspaceID, filter domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error) {
+	if filter.CredentialHash == "" {
+		return domain.ScheduledMessagePage{}, store.InvalidArgument("scheduled-message credential is required")
+	}
+	if err := store.CheckAscendingPage(filter.Page); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	afterTime, afterID, err := store.ParseScheduledMessageCursor(filter.Page.Cursor)
+	if err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	query := `SELECT ` + scheduledMessageColumns + ` FROM scheduled_messages WHERE workspace_id = ? AND credential_hash = ? AND delivered = 0 AND failed_at = 0`
+	args := []any{workspace, filter.CredentialHash}
+	if filter.Channel != "" {
+		query += ` AND channel_id = ?`
+		args = append(args, filter.Channel)
+	}
+	if !filter.Oldest.IsZero() {
+		query += ` AND post_at >= ?`
+		args = append(args, filter.Oldest.UTC().Unix())
+	}
+	if !filter.Latest.IsZero() {
+		query += ` AND post_at <= ?`
+		args = append(args, filter.Latest.UTC().Unix())
+	}
+	if !afterTime.IsZero() {
+		query += ` AND (post_at > ? OR (post_at = ? AND id > ?))`
+		args = append(args, afterTime.Unix(), afterTime.Unix(), afterID)
+	}
+	query += ` ORDER BY post_at, id LIMIT ?`
+	args = append(args, filter.Page.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.ScheduledMessage, 0, filter.Page.Limit+1)
+	for rows.Next() {
+		value, scanErr := scanScheduledMessage(rows)
+		if scanErr != nil {
+			return domain.ScheduledMessagePage{}, scanErr
+		}
+		items = append(items, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > filter.Page.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:filter.Page.Limit]
+		page.NextCursor, err = domain.NewListCursor(store.ScheduledMessageCursorKey(page.Items[len(page.Items)-1]))
+	}
+	return page, err
+}
+
 func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
 	var postAt sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT MIN(CASE WHEN next_attempt_at > post_at THEN next_attempt_at ELSE post_at END) FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0`, workspace).Scan(&postAt); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT MIN(CASE WHEN next_attempt_at > post_at THEN next_attempt_at ELSE post_at END) FROM scheduled_messages WHERE (? = '' OR workspace_id = ?) AND delivered = 0 AND failed_at = 0`, workspace, workspace).Scan(&postAt); err != nil {
 		return time.Time{}, err
 	}
 	if !postAt.Valid || postAt.Int64 == 0 {
@@ -7554,6 +7721,33 @@ func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.Wor
 	return tx.Commit()
 }
 
+func (s *Store) DeleteScheduledMessageForCredential(ctx context.Context, workspace domain.WorkspaceID, credentialHash string, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
+	if credentialHash == "" {
+		return store.InvalidArgument("scheduled-message credential is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0 AND failed_at = 0 AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, credentialHash, channel, now.Unix())
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]domain.ScheduledMessage, error) {
 	if owner == "" || limit <= 0 || lease <= 0 {
 		return nil, store.InvalidArgument("scheduled claim requires owner, positive limit, and lease")
@@ -7564,20 +7758,17 @@ func (s *Store) ClaimScheduledMessages(ctx context.Context, workspace domain.Wor
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, channel_id, author_id, text, blocks, attachments, post_at, created_at FROM scheduled_messages WHERE workspace_id = ? AND delivered = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY id LIMIT ?`, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
+	rows, err := tx.QueryContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE (? = '' OR workspace_id = ?) AND delivered = 0 AND failed_at = 0 AND post_at <= ? AND (lease_until = 0 OR lease_until <= ?) AND (next_attempt_at = 0 OR next_attempt_at <= ?) ORDER BY post_at, id LIMIT ?`, workspace, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	values := make([]domain.ScheduledMessage, 0, limit)
 	for rows.Next() {
-		var value domain.ScheduledMessage
-		var postAt, createdAt int64
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.Text, &value.Blocks, &value.Attachments, &postAt, &createdAt); err != nil {
-			return nil, err
+		value, scanErr := scanScheduledMessage(rows)
+		if scanErr != nil {
+			return nil, scanErr
 		}
-		value.PostAt = time.Unix(postAt, 0).UTC()
-		value.CreatedAt = time.Unix(createdAt, 0).UTC()
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
@@ -7623,7 +7814,8 @@ func (s *Store) RenewScheduledMessage(ctx context.Context, owner string, id doma
 }
 
 func (s *Store) MarkScheduledMessageDelivered(ctx context.Context, owner string, id domain.ScheduledMessageID) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET delivered = 1, lease_owner = '', lease_until = 0, next_attempt_at = 0 WHERE id = ? AND lease_owner = ? AND delivered = 0 AND lease_until > ?`, id, owner, time.Now().UTC().Unix())
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET delivered = 1, delivered_at = ?, lease_owner = '', lease_until = 0, next_attempt_at = 0 WHERE id = ? AND lease_owner = ? AND delivered = 0 AND failed_at = 0 AND lease_until > ?`, now.Unix(), id, owner, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -7635,6 +7827,33 @@ func (s *Store) MarkScheduledMessageDelivered(ctx context.Context, owner string,
 		return store.ErrLeaseConflict
 	}
 	return nil
+}
+
+func (s *Store) MarkScheduledMessageFailed(ctx context.Context, owner string, id domain.ScheduledMessageID, failureCode string, failedAt time.Time, event events.Event) error {
+	if failureCode == "" {
+		return store.InvalidArgument("scheduled failure code is required")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET failed_at = ?, failure_code = ?, lease_owner = '', lease_until = 0, next_attempt_at = 0 WHERE id = ? AND lease_owner = ? AND delivered = 0 AND failed_at = 0 AND lease_until > ?`, failedAt.UTC().Unix(), failureCode, id, owner, now.Unix())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) ReleaseScheduledMessage(ctx context.Context, owner string, id domain.ScheduledMessageID, next time.Time) error {

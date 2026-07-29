@@ -16,6 +16,13 @@ message ScheduledMessage {
   int64 created_at = 7;
   string blocks = 8;
   string attachments = 9;
+  string app_id = 10;
+  string bot_id = 11;
+  string credential_hash = 12;
+  string thread_ts = 13;
+  int64 delivered_at = 14;
+  int64 failed_at = 15;
+  string failure_code = 16;
 }
 
 message ScheduleMessageRequest {
@@ -26,6 +33,10 @@ message ScheduleMessageRequest {
   int64 post_at = 5;
   string blocks = 6;
   string attachments = 7;
+  string app_id = 8;
+  string bot_id = 9;
+  string credential_hash = 10;
+  string thread_ts = 11;
 }
 
 message ScheduledMessagesRequest {
@@ -34,6 +45,9 @@ message ScheduledMessagesRequest {
   string channel_id = 3;
   int32 limit = 4;
   string cursor = 5;
+  string credential_hash = 6;
+  int64 oldest = 7;
+  int64 latest = 8;
 }
 
 message DeleteScheduledMessageRequest {
@@ -41,6 +55,7 @@ message DeleteScheduledMessageRequest {
   string user_id = 2;
   string channel_id = 3;
   string scheduled_message_id = 4;
+  string credential_hash = 5;
 }
 
 message ScheduledMessagePage {

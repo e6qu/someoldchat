@@ -88,8 +88,12 @@ type Principal struct {
 	UserID      domain.UserID
 	AppID       domain.AppID
 	BotID       domain.BotID
-	TokenType   string
-	Scopes      map[Scope]struct{}
+	// CredentialHash identifies the exact bearer credential without retaining
+	// its secret. Slack scopes scheduled-message listing and deletion to the
+	// token that created the message, not merely to the token's user.
+	CredentialHash string
+	TokenType      string
+	Scopes         map[Scope]struct{}
 }
 
 func (p Principal) HasScope(scope Scope) bool { _, ok := p.Scopes[scope]; return ok }
@@ -617,7 +621,7 @@ func (s Stored) Authenticate(r *http.Request) (Principal, error) {
 	for _, scope := range record.Scopes {
 		scopes[Scope(scope)] = struct{}{}
 	}
-	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, TokenType: record.TokenType, Scopes: scopes}, nil
+	return Principal{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, CredentialHash: domain.HashToken(token), TokenType: record.TokenType, Scopes: scopes}, nil
 }
 
 func NewStatic(token string, principal Principal) (Static, error) {
@@ -638,5 +642,9 @@ func (s Static) Authenticate(r *http.Request) (Principal, error) {
 	if !constantTimeEqual(token, s.token) {
 		return Principal{}, ErrInvalidToken
 	}
-	return s.principal, nil
+	principal := s.principal
+	if principal.CredentialHash == "" {
+		principal.CredentialHash = domain.HashToken(token)
+	}
+	return principal, nil
 }

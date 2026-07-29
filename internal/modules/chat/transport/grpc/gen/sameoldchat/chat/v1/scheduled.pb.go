@@ -22,18 +22,25 @@ const (
 )
 
 type ScheduledMessage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	AuthorId      string                 `protobuf:"bytes,4,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
-	Text          string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
-	PostAt        int64                  `protobuf:"varint,6,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
-	CreatedAt     int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	Blocks        string                 `protobuf:"bytes,8,opt,name=blocks,proto3" json:"blocks,omitempty"`
-	Attachments   string                 `protobuf:"bytes,9,opt,name=attachments,proto3" json:"attachments,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Id             string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	ChannelId      string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	AuthorId       string                 `protobuf:"bytes,4,opt,name=author_id,json=authorId,proto3" json:"author_id,omitempty"`
+	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	PostAt         int64                  `protobuf:"varint,6,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
+	CreatedAt      int64                  `protobuf:"varint,7,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	Blocks         string                 `protobuf:"bytes,8,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments    string                 `protobuf:"bytes,9,opt,name=attachments,proto3" json:"attachments,omitempty"`
+	AppId          string                 `protobuf:"bytes,10,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	BotId          string                 `protobuf:"bytes,11,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	CredentialHash string                 `protobuf:"bytes,12,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
+	ThreadTs       string                 `protobuf:"bytes,13,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	DeliveredAt    int64                  `protobuf:"varint,14,opt,name=delivered_at,json=deliveredAt,proto3" json:"delivered_at,omitempty"`
+	FailedAt       int64                  `protobuf:"varint,15,opt,name=failed_at,json=failedAt,proto3" json:"failed_at,omitempty"`
+	FailureCode    string                 `protobuf:"bytes,16,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ScheduledMessage) Reset() {
@@ -129,17 +136,70 @@ func (x *ScheduledMessage) GetAttachments() string {
 	return ""
 }
 
+func (x *ScheduledMessage) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *ScheduledMessage) GetBotId() string {
+	if x != nil {
+		return x.BotId
+	}
+	return ""
+}
+
+func (x *ScheduledMessage) GetCredentialHash() string {
+	if x != nil {
+		return x.CredentialHash
+	}
+	return ""
+}
+
+func (x *ScheduledMessage) GetThreadTs() string {
+	if x != nil {
+		return x.ThreadTs
+	}
+	return ""
+}
+
+func (x *ScheduledMessage) GetDeliveredAt() int64 {
+	if x != nil {
+		return x.DeliveredAt
+	}
+	return 0
+}
+
+func (x *ScheduledMessage) GetFailedAt() int64 {
+	if x != nil {
+		return x.FailedAt
+	}
+	return 0
+}
+
+func (x *ScheduledMessage) GetFailureCode() string {
+	if x != nil {
+		return x.FailureCode
+	}
+	return ""
+}
+
 type ScheduleMessageRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Text          string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
-	PostAt        int64                  `protobuf:"varint,5,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
-	Blocks        string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
-	Attachments   string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ChannelId      string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Text           string                 `protobuf:"bytes,4,opt,name=text,proto3" json:"text,omitempty"`
+	PostAt         int64                  `protobuf:"varint,5,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
+	Blocks         string                 `protobuf:"bytes,6,opt,name=blocks,proto3" json:"blocks,omitempty"`
+	Attachments    string                 `protobuf:"bytes,7,opt,name=attachments,proto3" json:"attachments,omitempty"`
+	AppId          string                 `protobuf:"bytes,8,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	BotId          string                 `protobuf:"bytes,9,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
+	CredentialHash string                 `protobuf:"bytes,10,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
+	ThreadTs       string                 `protobuf:"bytes,11,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ScheduleMessageRequest) Reset() {
@@ -221,15 +281,46 @@ func (x *ScheduleMessageRequest) GetAttachments() string {
 	return ""
 }
 
+func (x *ScheduleMessageRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *ScheduleMessageRequest) GetBotId() string {
+	if x != nil {
+		return x.BotId
+	}
+	return ""
+}
+
+func (x *ScheduleMessageRequest) GetCredentialHash() string {
+	if x != nil {
+		return x.CredentialHash
+	}
+	return ""
+}
+
+func (x *ScheduleMessageRequest) GetThreadTs() string {
+	if x != nil {
+		return x.ThreadTs
+	}
+	return ""
+}
+
 type ScheduledMessagesRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	ChannelId     string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
-	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor        string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ChannelId      string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Limit          int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor         string                 `protobuf:"bytes,5,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	CredentialHash string                 `protobuf:"bytes,6,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
+	Oldest         int64                  `protobuf:"varint,7,opt,name=oldest,proto3" json:"oldest,omitempty"`
+	Latest         int64                  `protobuf:"varint,8,opt,name=latest,proto3" json:"latest,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ScheduledMessagesRequest) Reset() {
@@ -297,12 +388,34 @@ func (x *ScheduledMessagesRequest) GetCursor() string {
 	return ""
 }
 
+func (x *ScheduledMessagesRequest) GetCredentialHash() string {
+	if x != nil {
+		return x.CredentialHash
+	}
+	return ""
+}
+
+func (x *ScheduledMessagesRequest) GetOldest() int64 {
+	if x != nil {
+		return x.Oldest
+	}
+	return 0
+}
+
+func (x *ScheduledMessagesRequest) GetLatest() int64 {
+	if x != nil {
+		return x.Latest
+	}
+	return 0
+}
+
 type DeleteScheduledMessageRequest struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId             string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	ChannelId          string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
 	ScheduledMessageId string                 `protobuf:"bytes,4,opt,name=scheduled_message_id,json=scheduledMessageId,proto3" json:"scheduled_message_id,omitempty"`
+	CredentialHash     string                 `protobuf:"bytes,5,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -361,6 +474,13 @@ func (x *DeleteScheduledMessageRequest) GetChannelId() string {
 func (x *DeleteScheduledMessageRequest) GetScheduledMessageId() string {
 	if x != nil {
 		return x.ScheduledMessageId
+	}
+	return ""
+}
+
+func (x *DeleteScheduledMessageRequest) GetCredentialHash() string {
+	if x != nil {
+		return x.CredentialHash
 	}
 	return ""
 }
@@ -429,7 +549,7 @@ var File_sameoldchat_chat_v1_scheduled_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
-	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\x87\x02\n" +
+	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xde\x03\n" +
 	"\x10ScheduledMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
@@ -441,7 +561,15 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\a \x01(\x03R\tcreatedAt\x12\x16\n" +
 	"\x06blocks\x18\b \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\t \x01(\tR\vattachments\"\xda\x01\n" +
+	"\vattachments\x18\t \x01(\tR\vattachments\x12\x15\n" +
+	"\x06app_id\x18\n" +
+	" \x01(\tR\x05appId\x12\x15\n" +
+	"\x06bot_id\x18\v \x01(\tR\x05botId\x12'\n" +
+	"\x0fcredential_hash\x18\f \x01(\tR\x0ecredentialHash\x12\x1b\n" +
+	"\tthread_ts\x18\r \x01(\tR\bthreadTs\x12!\n" +
+	"\fdelivered_at\x18\x0e \x01(\x03R\vdeliveredAt\x12\x1b\n" +
+	"\tfailed_at\x18\x0f \x01(\x03R\bfailedAt\x12!\n" +
+	"\ffailure_code\x18\x10 \x01(\tR\vfailureCode\"\xce\x02\n" +
 	"\x16ScheduleMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -450,20 +578,29 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\x04text\x18\x04 \x01(\tR\x04text\x12\x17\n" +
 	"\apost_at\x18\x05 \x01(\x03R\x06postAt\x12\x16\n" +
 	"\x06blocks\x18\x06 \x01(\tR\x06blocks\x12 \n" +
-	"\vattachments\x18\a \x01(\tR\vattachments\"\xa3\x01\n" +
+	"\vattachments\x18\a \x01(\tR\vattachments\x12\x15\n" +
+	"\x06app_id\x18\b \x01(\tR\x05appId\x12\x15\n" +
+	"\x06bot_id\x18\t \x01(\tR\x05botId\x12'\n" +
+	"\x0fcredential_hash\x18\n" +
+	" \x01(\tR\x0ecredentialHash\x12\x1b\n" +
+	"\tthread_ts\x18\v \x01(\tR\bthreadTs\"\xfc\x01\n" +
 	"\x18ScheduledMessagesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x03 \x01(\tR\tchannelId\x12\x14\n" +
 	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\x16\n" +
-	"\x06cursor\x18\x05 \x01(\tR\x06cursor\"\xac\x01\n" +
+	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12'\n" +
+	"\x0fcredential_hash\x18\x06 \x01(\tR\x0ecredentialHash\x12\x16\n" +
+	"\x06oldest\x18\a \x01(\x03R\x06oldest\x12\x16\n" +
+	"\x06latest\x18\b \x01(\x03R\x06latest\"\xd5\x01\n" +
 	"\x1dDeleteScheduledMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"channel_id\x18\x03 \x01(\tR\tchannelId\x120\n" +
-	"\x14scheduled_message_id\x18\x04 \x01(\tR\x12scheduledMessageId\"\xa8\x01\n" +
+	"\x14scheduled_message_id\x18\x04 \x01(\tR\x12scheduledMessageId\x12'\n" +
+	"\x0fcredential_hash\x18\x05 \x01(\tR\x0ecredentialHash\"\xa8\x01\n" +
 	"\x14ScheduledMessagePage\x12T\n" +
 	"\x12scheduled_messages\x18\x01 \x03(\v2%.sameoldchat.chat.v1.ScheduledMessageR\x11scheduledMessages\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +

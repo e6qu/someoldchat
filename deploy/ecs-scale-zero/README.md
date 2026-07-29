@@ -41,6 +41,10 @@ module "chat" {
   lambda_security_group_ids = var.lambda_security_group_ids
   application_image         = var.application_image
   application_task_role_arn = aws_iam_role.chat_task.arn
+  worker_image               = var.worker_image
+  worker_task_role_arn       = aws_iam_role.chat_worker.arn
+  worker_command             = ["-store", "postgresql", "-delivery-format", "slack-events", "-owner", "ecs-worker-1"]
+  worker_secrets             = { SAMEOLDCHAT_DATABASE_URL = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:sameoldchat/database", SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX = "arn:aws:secretsmanager:eu-central-1:123456789012:secret:sameoldchat/app-key" }
   alarm_topic_arn           = aws_sns_topic.operations.arn
 
   # WebSocket tier; see WebSockets below.
@@ -104,6 +108,21 @@ already-established WebSocket between processes: the edge task terminates the
 client socket for its whole lifetime. See [WebSockets](#websockets) below.
 
 The image should be immutable (prefer a digest), contain `/readyz`, and start the server without migrations or other work that is not required for serving requests. `application_task_role_arn` is deliberately required: the application’s AWS permissions must be explicit.
+
+The worker is not scaled with the HTTP tier. It executes scheduled messages and
+delivers installed-app events for every workspace from the shared PostgreSQL
+store, including while the request tier is at zero. Build
+`Dockerfile.worker` from the repository root and pin `worker_image` by digest.
+`worker_command` is validated to select PostgreSQL, the multi-workspace
+`slack-events` mode, and a unique lease owner. The service is a singleton and
+replacements do not overlap, because two tasks sharing that static owner would
+defeat lease fencing. `worker_secrets` must inject both
+`SAMEOLDCHAT_DATABASE_URL` and `SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX` from secret
+ARNs; neither credential is placed in the task command or plain environment.
+The application-credential key must match the application tier.
+The module grants the ECS execution role `secretsmanager:GetSecretValue` only
+for these ARNs. A customer-managed KMS key additionally requires a scoped
+`kms:Decrypt` grant supplied by the parent configuration.
 
 `alarm_topic_arn` is required and receives alarms for activator errors and
 loss of all healthy WebSocket edge targets. The edge target group's health check

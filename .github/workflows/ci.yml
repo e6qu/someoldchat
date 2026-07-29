@@ -178,17 +178,25 @@ jobs:
               --platform "$platform" \
               --file deploy/ecs-scale-zero/Dockerfile.websocket-edge \
               --output "type=local,dest=${RUNNER_TEMP}/edge-${arch}" .
+            docker buildx build \
+              --platform "$platform" \
+              --file deploy/ecs-scale-zero/Dockerfile.worker \
+              --output "type=local,dest=${RUNNER_TEMP}/worker-${arch}" .
           done
 
-      - name: Assert the edge binary matches the requested architecture
+      - name: Assert the deployment binaries match the requested architectures
         run: |
           set -euo pipefail
           expect_amd64="$(file -b "${RUNNER_TEMP}/edge-amd64/ecs-ws-activator")"
           expect_arm64="$(file -b "${RUNNER_TEMP}/edge-arm64/ecs-ws-activator")"
+          worker_amd64="$(file -b "${RUNNER_TEMP}/worker-amd64/sameoldchat-worker")"
+          worker_arm64="$(file -b "${RUNNER_TEMP}/worker-arm64/sameoldchat-worker")"
           echo "amd64: $expect_amd64"
           echo "arm64: $expect_arm64"
           case "$expect_amd64" in *x86-64*) ;; *) echo 'linux/amd64 build did not produce an x86-64 binary' >&2; exit 1 ;; esac
           case "$expect_arm64" in *aarch64*) ;; *) echo 'linux/arm64 build did not produce an aarch64 binary' >&2; exit 1 ;; esac
+          case "$worker_amd64" in *x86-64*) ;; *) echo 'linux/amd64 worker build did not produce an x86-64 binary' >&2; exit 1 ;; esac
+          case "$worker_arm64" in *aarch64*) ;; *) echo 'linux/arm64 worker build did not produce an aarch64 binary' >&2; exit 1 ;; esac
 
   sdk:
     name: Official SDK qualification

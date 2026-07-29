@@ -91,6 +91,9 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_presence", code: codes.InvalidArgument, sentinel: service.ErrInvalidPresence},
 	{key: "service.invalid_snooze", code: codes.InvalidArgument, sentinel: service.ErrInvalidSnooze},
 	{key: "service.invalid_reminder", code: codes.InvalidArgument, sentinel: service.ErrInvalidReminder},
+	{key: "service.scheduled_time_in_past", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeInPast},
+	{key: "service.scheduled_time_too_far", code: codes.InvalidArgument, sentinel: service.ErrScheduledTimeTooFar},
+	{key: "service.scheduled_too_many", code: codes.ResourceExhausted, sentinel: service.ErrScheduledTooMany},
 	{key: "service.invalid_call", code: codes.InvalidArgument, sentinel: service.ErrInvalidCall},
 	{key: "service.invalid_user_group", code: codes.InvalidArgument, sentinel: service.ErrInvalidUserGroup},
 	{key: "service.invalid_ephemeral", code: codes.InvalidArgument, sentinel: service.ErrInvalidEphemeral},
@@ -164,6 +167,7 @@ var errorClasses = []errorClass{
 	// the monolith.
 	{key: "store.socket_mode_connection_limit", code: codes.ResourceExhausted, sentinel: store.ErrSocketModeConnectionLimit},
 	{key: "store.bookmark_limit", code: codes.ResourceExhausted, sentinel: store.ErrBookmarkLimit},
+	{key: "store.scheduled_message_limit", code: codes.ResourceExhausted, sentinel: store.ErrScheduledMessageLimit},
 
 	// Authorisation and preconditions. service.ErrNotWorkspaceAdmin shares
 	// codes.PermissionDenied with service.ErrMessageNotOwned and stays

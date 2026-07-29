@@ -38,10 +38,23 @@ type compatibilityLedger struct {
 }
 
 type operation struct {
-	Method     string `yaml:"method"`
-	Status     string `yaml:"status"`
-	Provenance string `yaml:"provenance"`
-	Reference  string `yaml:"reference"`
+	Method     string          `yaml:"method"`
+	Status     string          `yaml:"status"`
+	Provenance string          `yaml:"provenance"`
+	Reference  string          `yaml:"reference"`
+	Evidence   []string        `yaml:"evidence,omitempty"`
+	Deviations []string        `yaml:"deviations,omitempty"`
+	Audit      *downgradeAudit `yaml:"audit,omitempty"`
+}
+
+// downgradeAudit makes a correction to an overstated evidence level explicit.
+// Compatibility evidence is normally monotonic, but forbidding every downgrade
+// made a false claim permanent. A correction is accepted only when it names the
+// exact prior status and retains both a human reason and reviewable evidence.
+type downgradeAudit struct {
+	DowngradedFrom string   `yaml:"downgraded_from"`
+	Reason         string   `yaml:"reason"`
+	Evidence       []string `yaml:"evidence"`
 }
 
 var statusRank = map[string]int{
@@ -141,6 +154,29 @@ func verify() error {
 		case "unimplemented", "schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack":
 		default:
 			return fmt.Errorf("compatibility ledger operation %q has invalid status %q", operation.Method, operation.Status)
+		}
+		if operation.Audit != nil {
+			if _, ok := statusRank[operation.Audit.DowngradedFrom]; !ok ||
+				statusRank[operation.Status] >= statusRank[operation.Audit.DowngradedFrom] ||
+				strings.TrimSpace(operation.Audit.Reason) == "" ||
+				len(operation.Audit.Evidence) == 0 {
+				return fmt.Errorf("compatibility ledger operation %q has an incomplete downgrade audit", operation.Method)
+			}
+			for _, evidence := range operation.Audit.Evidence {
+				if strings.TrimSpace(evidence) == "" {
+					return fmt.Errorf("compatibility ledger operation %q has empty downgrade evidence", operation.Method)
+				}
+			}
+		}
+		for _, evidence := range operation.Evidence {
+			if strings.TrimSpace(evidence) == "" {
+				return fmt.Errorf("compatibility ledger operation %q has empty evidence", operation.Method)
+			}
+		}
+		for _, deviation := range operation.Deviations {
+			if strings.TrimSpace(deviation) == "" {
+				return fmt.Errorf("compatibility ledger operation %q has an empty deviation", operation.Method)
+			}
 		}
 		seenMethods[operation.Method] = struct{}{}
 		seenCurrentMethods[strings.ToLower(operation.Method)] = struct{}{}
@@ -258,11 +294,19 @@ func ratchet(baseRef string) error {
 		if !ok {
 			return fmt.Errorf("compatibility ledger operation %q was removed", previous.Method)
 		}
-		if statusRank[currentItem.Status] < statusRank[previous.Status] {
+		if statusRank[currentItem.Status] < statusRank[previous.Status] && !auditedDowngrade(previous, currentItem) {
 			return fmt.Errorf("compatibility ledger operation %q regressed from %q to %q", previous.Method, previous.Status, currentItem.Status)
 		}
 	}
 	return nil
+}
+
+func auditedDowngrade(previous, current operation) bool {
+	if current.Audit == nil || current.Audit.DowngradedFrom != previous.Status ||
+		strings.TrimSpace(current.Audit.Reason) == "" || len(current.Audit.Evidence) == 0 {
+		return false
+	}
+	return statusRank[current.Status] < statusRank[previous.Status]
 }
 
 func printReport() error {
@@ -274,26 +318,61 @@ func printReport() error {
 	if err != nil {
 		return fmt.Errorf("decode compatibility ledger: %w", err)
 	}
-	counts := cumulativeEvidenceCounts(ledger.Operations)
-	total := len(ledger.Operations)
+	currentMethods, err := readCurrentCatalog(currentMethodsPath, currentMethodsHash, 310)
+	if err != nil {
+		return fmt.Errorf("read current method catalog: %w", err)
+	}
+	currentSet := make(map[string]struct{}, len(currentMethods))
+	for _, method := range currentMethods {
+		currentSet[method] = struct{}{}
+	}
+	current, legacy := partitionOperations(ledger.Operations, currentSet)
+	printOperationReport("current", current)
+	printOperationReport("legacy", legacy)
+	fmt.Printf("ledger.operations=%d\n", len(ledger.Operations))
+	return nil
+}
+
+func partitionOperations(operations []operation, current map[string]struct{}) ([]operation, []operation) {
+	var currentOperations, legacyOperations []operation
+	for _, item := range operations {
+		if _, ok := current[strings.ToLower(item.Method)]; ok {
+			currentOperations = append(currentOperations, item)
+		} else {
+			legacyOperations = append(legacyOperations, item)
+		}
+	}
+	return currentOperations, legacyOperations
+}
+
+func printOperationReport(prefix string, operations []operation) {
+	counts := cumulativeEvidenceCounts(operations)
 	implemented := 0
 	unimplemented := 0
-	for _, operation := range ledger.Operations {
-		if operation.Status == "unimplemented" {
+	evidenced := 0
+	deviating := 0
+	for _, item := range operations {
+		if item.Status == "unimplemented" {
 			unimplemented++
-			continue
+		} else {
+			implemented++
 		}
-		implemented++
+		if len(item.Evidence) != 0 {
+			evidenced++
+		}
+		if len(item.Deviations) != 0 {
+			deviating++
+		}
 	}
-	fmt.Printf("operations=%d implemented=%d/%d verified-against-slack=%d/%d\n", total, implemented, total, counts["verified-against-slack"], total)
-	fmt.Printf("unimplemented=%d\n", unimplemented)
-	for _, namespace := range unimplementedNamespaces(ledger.Operations) {
-		fmt.Printf("unimplemented.%s=%d\n", namespace.Name, namespace.Count)
+	total := len(operations)
+	fmt.Printf("%s.operations=%d %s.implemented=%d/%d %s.verified-against-slack=%d/%d\n", prefix, total, prefix, implemented, total, prefix, counts["verified-against-slack"], total)
+	fmt.Printf("%s.unimplemented=%d %s.method-evidence=%d/%d %s.known-deviations=%d\n", prefix, unimplemented, prefix, evidenced, total, prefix, deviating)
+	for _, namespace := range unimplementedNamespaces(operations) {
+		fmt.Printf("%s.unimplemented.%s=%d\n", prefix, namespace.Name, namespace.Count)
 	}
 	for _, status := range []string{"schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
-		fmt.Printf("%s-or-better=%d/%d\n", status, counts[status], total)
+		fmt.Printf("%s.%s-or-better=%d/%d\n", prefix, status, counts[status], total)
 	}
-	return nil
 }
 
 type namespaceCount struct {

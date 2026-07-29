@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"sync"
@@ -810,7 +811,12 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	value := domain.ScheduledMessage{WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", Text: "", Blocks: `[{"type":"divider"}]`, Attachments: `[{"text":"attachment"}]`, PostAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second), CreatedAt: time.Now().UTC().Truncate(time.Second)}
+	value := domain.ScheduledMessage{
+		WorkspaceID: "T1", ID: id, Channel: "C1", Author: "U1", AppID: "A1", BotID: "B1",
+		CredentialHash: "credential-one", ThreadTimestamp: "1700000000.000001",
+		Text: "", Blocks: `[{"type":"divider"}]`, Attachments: `[{"text":"attachment"}]`,
+		PostAt: time.Now().UTC().Add(-time.Hour).Truncate(time.Second), CreatedAt: time.Now().UTC().Truncate(time.Second),
+	}
 	if err := s.CreateScheduledMessage(ctx, value, events.Event{ID: "scheduled-1", WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(id), CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
@@ -818,8 +824,16 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	if err != nil || len(page.Items) != 1 || page.Items[0].ID != id || page.Items[0].Blocks != value.Blocks || page.Items[0].Attachments != value.Attachments {
 		t.Fatalf("page=%+v err=%v", page, err)
 	}
+	credentialPage, err := s.ListScheduledMessagesForCredential(ctx, "T1", domain.ScheduledMessageQuery{CredentialHash: "credential-one", Page: domain.PageRequest{Limit: 10}})
+	if err != nil || len(credentialPage.Items) != 1 || credentialPage.Items[0].AppID != "A1" || credentialPage.Items[0].BotID != "B1" || credentialPage.Items[0].ThreadTimestamp != value.ThreadTimestamp {
+		t.Fatalf("credential page=%+v err=%v", credentialPage, err)
+	}
+	otherCredential, err := s.ListScheduledMessagesForCredential(ctx, "T1", domain.ScheduledMessageQuery{CredentialHash: "credential-two", Page: domain.PageRequest{Limit: 10}})
+	if err != nil || len(otherCredential.Items) != 0 {
+		t.Fatalf("another credential saw the schedule: page=%+v err=%v", otherCredential, err)
+	}
 	claimed, err := s.ClaimScheduledMessages(ctx, "T1", "worker-1", 10, time.Minute)
-	if err != nil || len(claimed) != 1 || claimed[0].ID != id || claimed[0].Blocks != value.Blocks || claimed[0].Attachments != value.Attachments {
+	if err != nil || len(claimed) != 1 || claimed[0].ID != id || claimed[0].Blocks != value.Blocks || claimed[0].Attachments != value.Attachments || claimed[0].AppID != value.AppID || claimed[0].ThreadTimestamp != value.ThreadTimestamp {
 		t.Fatalf("claimed=%+v err=%v", claimed, err)
 	}
 	if err := s.MarkScheduledMessageDelivered(ctx, "worker-1", id); err != nil {
@@ -828,6 +842,44 @@ func TestSQLiteScheduledMessagesAreDurable(t *testing.T) {
 	page, err = s.ListScheduledMessages(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("delivered page=%+v err=%v", page, err)
+	}
+}
+
+func TestSQLiteScheduledMessageQuotaCommitsTheCountAndInsertTogether(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, "file:scheduled-quota?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, seed := range []func() error{
+		func() error { return s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}) },
+		func() error { return s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}) },
+		func() error { return s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1"}) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	window := time.Now().UTC().Add(time.Hour).Truncate(5 * time.Minute)
+	for index := 0; index < 31; index++ {
+		value := domain.ScheduledMessage{
+			WorkspaceID: "T1", ID: domain.ScheduledMessageID(fmt.Sprintf("Q-quota-%02d", index)),
+			Channel: "C1", Author: "U1", CredentialHash: "credential",
+			Text: fmt.Sprintf("message %d", index), PostAt: window.Add(time.Duration(index) * time.Second), CreatedAt: time.Now().UTC(),
+		}
+		event := events.Event{ID: domain.EventID(fmt.Sprintf("event-quota-%02d", index)), WorkspaceID: "T1", Topic: "message.scheduled", Payload: string(value.ID), CreatedAt: time.Now().UTC()}
+		err := s.CreateScheduledMessageWithinLimit(ctx, value, 5*time.Minute, 30, event)
+		if index < 30 && err != nil {
+			t.Fatalf("schedule %d: %v", index, err)
+		}
+		if index == 30 && !errors.Is(err, store.ErrScheduledMessageLimit) {
+			t.Fatalf("31st schedule error=%v, want %v", err, store.ErrScheduledMessageLimit)
+		}
+	}
+	page, err := s.ListScheduledMessagesForCredential(ctx, "T1", domain.ScheduledMessageQuery{CredentialHash: "credential", Page: domain.PageRequest{Limit: 100}})
+	if err != nil || len(page.Items) != 30 {
+		t.Fatalf("committed schedules=%d err=%v, want 30", len(page.Items), err)
 	}
 }
 

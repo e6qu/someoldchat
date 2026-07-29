@@ -6517,6 +6517,25 @@ func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
 
 func scheduledMessageResponse(value domain.ScheduledMessage) map[string]any {
 	response := map[string]any{"id": value.ID, "channel_id": value.Channel, "post_at": value.PostAt.Unix(), "date_created": value.CreatedAt.Unix(), "text": value.Text}
+	if value.ThreadTimestamp != "" {
+		response["thread_ts"] = value.ThreadTimestamp
+	}
+	return addScheduledRichContent(response, value)
+}
+
+func scheduledMessagePayloadResponse(value domain.ScheduledMessage) map[string]any {
+	response := map[string]any{"text": value.Text, "type": "delayed_message"}
+	if value.BotID != "" {
+		response["bot_id"] = value.BotID
+		response["subtype"] = "bot_message"
+	}
+	if value.ThreadTimestamp != "" {
+		response["thread_ts"] = value.ThreadTimestamp
+	}
+	return addScheduledRichContent(response, value)
+}
+
+func addScheduledRichContent(response map[string]any, value domain.ScheduledMessage) map[string]any {
 	if value.Blocks != "" {
 		response["blocks"] = json.RawMessage(value.Blocks)
 	}
@@ -6554,17 +6573,38 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		value, parseErr := parseBoolField(raw)
 		return parseErr != nil || value
 	}
-	unsupported := fields["thread_ts"] != "" || fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
+	unsupported := fields["parse"] != "" || unsupportedBoolean("reply_broadcast") || unsupportedBoolean("as_user") || unsupportedBoolean("link_names") || unsupportedBoolean("unfurl_links") || unsupportedBoolean("unfurl_media")
 	if channel == "" || (textValue == "" && blocks == "" && attachments == "") || blockErr != nil || attachmentErr != nil || err != nil || postAt <= 0 || unsupported {
 		writeError(w, "invalid_arguments")
 		return
 	}
-	value, err := h.Messages.ScheduleMessageWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, channel, textValue, blocks, attachments, time.Unix(postAt, 0).UTC())
+	value, err := h.Messages.ScheduleMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageRequest{
+		Channel: channel, Text: textValue, Blocks: blocks, Attachments: attachments,
+		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
+		PostAt:          time.Unix(postAt, 0).UTC(), AppID: principal.AppID, BotID: principal.BotID,
+		CredentialHash: principal.CredentialHash,
+	})
 	if err != nil {
+		if errors.Is(err, service.ErrScheduledTimeInPast) {
+			writeError(w, "time_in_past")
+			return
+		}
+		if errors.Is(err, service.ErrScheduledTimeTooFar) {
+			writeError(w, "time_too_far")
+			return
+		}
+		if errors.Is(err, service.ErrScheduledTooMany) {
+			writeError(w, "restricted_too_many")
+			return
+		}
+		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+			writeError(w, "is_archived")
+			return
+		}
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": value.Channel, "post_at": value.PostAt.Unix(), "scheduled_message_id": value.ID, "message": scheduledMessageResponse(value)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": value.Channel, "post_at": strconv.FormatInt(value.PostAt.Unix(), 10), "scheduled_message_id": value.ID, "message": scheduledMessagePayloadResponse(value)})
 }
 
 func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
@@ -6591,7 +6631,30 @@ func (h Handler) scheduledMessagesList(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	page, err := h.Messages.ScheduledMessages(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.PageRequest{Limit: limit, Cursor: cursor})
+	parseRange := func(name string) (time.Time, error) {
+		raw := strings.TrimSpace(fields[name])
+		if raw == "" {
+			return time.Time{}, nil
+		}
+		seconds, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || seconds < 0 {
+			return time.Time{}, errors.New("invalid scheduled-message range")
+		}
+		return time.Unix(seconds, 0).UTC(), nil
+	}
+	oldest, oldestErr := parseRange("oldest")
+	latest, latestErr := parseRange("latest")
+	if oldestErr != nil || latestErr != nil || (!oldest.IsZero() && !latest.IsZero() && !oldest.Before(latest)) {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	page, err := h.Messages.ScheduledMessagesForCredential(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageQuery{
+		CredentialHash: principal.CredentialHash,
+		Channel:        domain.ConversationID(strings.TrimSpace(fields["channel"])),
+		Oldest:         oldest,
+		Latest:         latest,
+		Page:           domain.PageRequest{Limit: limit, Cursor: cursor},
+	})
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
@@ -6620,7 +6683,7 @@ func (h Handler) deleteScheduledMessage(w http.ResponseWriter, r *http.Request) 
 		writeError(w, "invalid_arguments")
 		return
 	}
-	if err := h.Messages.DeleteScheduledMessage(r.Context(), principal.WorkspaceID, principal.UserID, channel, id); err != nil {
+	if err := h.Messages.DeleteScheduledMessageForCredential(r.Context(), principal.WorkspaceID, principal.UserID, principal.CredentialHash, channel, id); err != nil {
 		writeError(w, mapServiceError(err, "invalid_scheduled_message_id"))
 		return
 	}
@@ -7441,6 +7504,9 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
 	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) {
 		return notFoundReason
+	}
+	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) {
+		return "restricted_too_many"
 	}
 	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
 		return invalidReason

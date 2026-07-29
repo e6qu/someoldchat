@@ -96,8 +96,24 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.postMessage
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/chat.postMessage/
+    deviations:
+      - >-
+        The registered handler does not yet implement every current message
+        argument, including metadata, markdown_text, parse, reply_broadcast,
+        unfurl controls, and message-author customization.
+      - The Web API tier does not yet enforce Slack's per-method posting rate limits.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: >-
+        The 2026-07-29 current-reference audit found that route registration and
+        local message tests had been promoted as full method behavior despite
+        unsupported documented arguments and rate-limit behavior.
+      evidence:
+        - internal/api/slack/handler.go
+        - https://docs.slack.dev/reference/methods/chat.postMessage/
   - method: chat.meMessage
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -243,8 +259,23 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: files.upload
-    status: behavior-compatible
+    status: schema-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/files.upload/
+    deviations:
+      - >-
+        The compatibility route uploads one hosted file but rejects the
+        documented channels, initial_comment, and thread_ts sharing arguments
+        and does not accept content-based editable uploads.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: >-
+        The 2026-07-29 current-reference audit found a deliberate partial
+        implementation recorded as behavior-compatible.
+      evidence:
+        - internal/api/slack/handler.go
+        - internal/api/slack/error_contract_test.go
+        - https://docs.slack.dev/reference/methods/files.upload/
   - method: files.getUploadURLExternal
     status: behavior-compatible
     provenance: slack-reference
@@ -487,16 +518,52 @@ operations:
     provenance: slack-api-specs-openapi
   - method: chat.deleteScheduledMessage
     status: behavior-compatible
-    provenance: slack-api-specs-openapi
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/chat.deleteScheduledMessage/
+    evidence:
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
+      - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - schedules created before schema 102 lack reconstructable token identity and cannot be deleted through an exact-token request
   - method: chat.postEphemeral
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: chat.scheduleMessage
     status: behavior-compatible
-    provenance: slack-api-specs-openapi
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/chat.scheduleMessage/
+    evidence:
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
+      - go-test:internal/scheduler:TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution
+      - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
+      - go-test:internal/store/sqlstore:TestSQLiteScheduledMessageQuotaCommitsTheCountAndInsertTogether
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - markdown_text, metadata, as_user, reply_broadcast, parse, link_names, and unfurl controls are not implemented
+      - tier-wide Web API rate limiting is not implemented
+      - schedules created before schema 102 lack reconstructable app and token attribution
   - method: chat.scheduledMessages.list
     status: behavior-compatible
-    provenance: slack-api-specs-openapi
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/chat.scheduledMessages.list/
+    evidence:
+      - go-test:internal/api/slack:TestScheduledMessageAPIIsScopedToTheExactBearerToken
+      - go-test:internal/service:TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts
+      - go-test:internal/store/sqlstore:TestSQLiteScheduledMessagesAreDurable
+      - official-sdk:tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - official-sdk:tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - official-sdk:tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - org-level team_id selection is not implemented
+      - tier-wide Web API rate limiting is not implemented
+      - schedules created before schema 102 lack reconstructable token identity and are excluded from exact-token results
   - method: chat.unfurl
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1165,18 +1232,16 @@ decisions:
   - method: events-api
     evidence: specs/upstream/slack-api-specs/events-api/slack_common_event_wrapper_schema.json
     decision: >-
-      The event surface is unqualified. slack-events-api-asyncapi and
-      slack-events-wrapper-schema are pinned so the envelope shape is recorded
-      and hashed, not because anything is measured against them. No producer in
-      this system translates an internal events.Record into a Slack event
-      envelope: internal/service publishes identifier-only payloads
-      ({"type":"message.created","message_id":...,"channel_id":...}), and
-      internal/events.Payload guarantees only that a payload is well-formed and
-      self-describing. The Socket Mode and real-time transports do deliver a
-      Slack envelope an official client parses, but the envelopes in
-      tests/official-sdk-qualification are supplied by the fixture, not produced
-      from a record. Until a record-to-envelope translation exists, no operation
-      may claim provenance from either events source.
+      Event compatibility is topic-specific. A real service-created
+      message.created record is hydrated into a Slack message only after
+      installed-bot or connected-user conversation visibility is proved, and
+      current Node, Python, and Java Socket Mode plus Node RTM clients parse that
+      result. Bolt callback qualifications still submit independently
+      constructed signed callbacks, and message change/delete, file
+      share/unshare, and user-token HTTP/Socket subscriptions remain
+      unqualified. The pinned event schemas therefore support only the
+      explicitly qualified message-created slice; they do not promote the
+      whole Events API surface.
   - method: rtm.connect
     evidence: https://docs.slack.dev/reference/methods/rtm.connect/
     decision: >-

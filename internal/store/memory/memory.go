@@ -3779,6 +3779,38 @@ func (s *Store) CreateScheduledMessage(_ context.Context, value domain.Scheduled
 	return nil
 }
 
+func (s *Store) CreateScheduledMessageWithinLimit(_ context.Context, value domain.ScheduledMessage, window time.Duration, limit int, event events.Event) error {
+	if window <= 0 || limit <= 0 {
+		return store.InvalidArgument("scheduled-message window and limit must be positive")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[value.Author]
+	if !ok || user.WorkspaceID != value.WorkspaceID || user.Deleted {
+		return store.ErrNotFound
+	}
+	if _, ok := s.conversations[value.Channel]; !ok {
+		return store.ErrNotFound
+	}
+	if _, exists := s.scheduled[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	nearby := make([]time.Time, 0, limit)
+	for id, scheduled := range s.scheduled {
+		if scheduled.WorkspaceID == value.WorkspaceID && scheduled.Channel == value.Channel &&
+			!s.scheduledDelivered[id] && scheduled.FailedAt.IsZero() &&
+			!scheduled.PostAt.Before(value.PostAt.Add(-window)) && !scheduled.PostAt.After(value.PostAt.Add(window)) {
+			nearby = append(nearby, scheduled.PostAt)
+		}
+	}
+	if store.ScheduledMessageLimitExceeded(nearby, value.PostAt, window, limit) {
+		return store.ErrScheduledMessageLimit
+	}
+	s.scheduled[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) ListScheduledMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return domain.ScheduledMessagePage{}, err
@@ -3807,12 +3839,50 @@ func (s *Store) ListScheduledMessages(_ context.Context, workspace domain.Worksp
 	return page, err
 }
 
+func (s *Store) ListScheduledMessagesForCredential(_ context.Context, workspace domain.WorkspaceID, query domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error) {
+	if query.CredentialHash == "" {
+		return domain.ScheduledMessagePage{}, store.InvalidArgument("scheduled-message credential is required")
+	}
+	if err := store.CheckAscendingPage(query.Page); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	afterTime, afterID, err := store.ParseScheduledMessageCursor(query.Page.Cursor)
+	if err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.ScheduledMessage, 0, query.Page.Limit+1)
+	for _, value := range s.scheduled {
+		if value.WorkspaceID != workspace || value.CredentialHash != query.CredentialHash ||
+			s.scheduledDelivered[value.ID] || !value.FailedAt.IsZero() ||
+			(query.Channel != "" && value.Channel != query.Channel) ||
+			(!query.Oldest.IsZero() && value.PostAt.Before(query.Oldest)) ||
+			(!query.Latest.IsZero() && value.PostAt.After(query.Latest)) ||
+			(!afterTime.IsZero() && (value.PostAt.Before(afterTime) || (value.PostAt.Equal(afterTime) && value.ID <= afterID))) {
+			continue
+		}
+		values = appendSorted(values, value, query.Page.Limit+1, func(left, right domain.ScheduledMessage) bool {
+			return left.PostAt.Before(right.PostAt) || (left.PostAt.Equal(right.PostAt) && left.ID < right.ID)
+		})
+	}
+	hasMore := len(values) > query.Page.Limit
+	if hasMore {
+		values = values[:query.Page.Limit]
+	}
+	page := domain.ScheduledMessagePage{Items: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(store.ScheduledMessageCursorKey(values[len(values)-1]))
+	}
+	return page, err
+}
+
 func (s *Store) EarliestScheduledMessage(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var earliest time.Time
 	for id, value := range s.scheduled {
-		if value.WorkspaceID != workspace || s.scheduledDelivered[id] {
+		if (workspace != "" && value.WorkspaceID != workspace) || s.scheduledDelivered[id] || !value.FailedAt.IsZero() {
 			continue
 		}
 		deadline := value.PostAt.UTC()
@@ -3839,6 +3909,21 @@ func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.Works
 	return nil
 }
 
+func (s *Store) DeleteScheduledMessageForCredential(_ context.Context, workspace domain.WorkspaceID, credentialHash string, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.scheduled[id]
+	lease, leased := s.scheduledLeases[id]
+	if credentialHash == "" || !ok || value.WorkspaceID != workspace || value.CredentialHash != credentialHash || value.Channel != channel ||
+		s.scheduledDelivered[id] || !value.FailedAt.IsZero() || (leased && lease.Expires.After(time.Now().UTC())) {
+		return store.ErrNotFound
+	}
+	delete(s.scheduled, id)
+	delete(s.scheduledNextAttempt, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) ClaimScheduledMessages(_ context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]domain.ScheduledMessage, error) {
 	if owner == "" || limit <= 0 || lease <= 0 {
 		return nil, store.InvalidArgument("scheduled claim requires owner, positive limit, and lease")
@@ -3848,7 +3933,7 @@ func (s *Store) ClaimScheduledMessages(_ context.Context, workspace domain.Works
 	defer s.mu.Unlock()
 	values := make([]domain.ScheduledMessage, 0, len(s.scheduled))
 	for _, value := range s.scheduled {
-		if value.WorkspaceID != workspace || value.PostAt.After(now) || s.scheduledDelivered[value.ID] || s.scheduledNextAttempt[value.ID].After(now) {
+		if (workspace != "" && value.WorkspaceID != workspace) || value.PostAt.After(now) || s.scheduledDelivered[value.ID] || !value.FailedAt.IsZero() || s.scheduledNextAttempt[value.ID].After(now) {
 			continue
 		}
 		active, exists := s.scheduledLeases[value.ID]
@@ -3857,7 +3942,10 @@ func (s *Store) ClaimScheduledMessages(_ context.Context, workspace domain.Works
 		}
 		values = append(values, value)
 	}
-	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	sort.Slice(values, func(left, right int) bool {
+		return values[left].PostAt.Before(values[right].PostAt) ||
+			(values[left].PostAt.Equal(values[right].PostAt) && values[left].ID < values[right].ID)
+	})
 	if len(values) > limit {
 		values = values[:limit]
 	}
@@ -3887,7 +3975,27 @@ func (s *Store) MarkScheduledMessageDelivered(_ context.Context, owner string, i
 		return store.ErrLeaseConflict
 	}
 	s.scheduledDelivered[id] = true
+	value := s.scheduled[id]
+	value.DeliveredAt = time.Now().UTC()
+	s.scheduled[id] = value
 	delete(s.scheduledLeases, id)
+	return nil
+}
+
+func (s *Store) MarkScheduledMessageFailed(_ context.Context, owner string, id domain.ScheduledMessageID, failureCode string, failedAt time.Time, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.scheduledLeases[id]
+	if failureCode == "" || !ok || current.Owner != owner || !current.Expires.After(time.Now().UTC()) {
+		return store.ErrLeaseConflict
+	}
+	value := s.scheduled[id]
+	value.FailureCode = failureCode
+	value.FailedAt = failedAt.UTC()
+	s.scheduled[id] = value
+	delete(s.scheduledLeases, id)
+	delete(s.scheduledNextAttempt, id)
+	s.outbox = append(s.outbox, event)
 	return nil
 }
 

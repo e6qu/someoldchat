@@ -15,18 +15,15 @@ retrieved_at: 2026-07-28T00:00:00Z
 #     opens the socket this product hands it, receives the frames, acknowledges
 #     them, and parses the envelope.
 #
-# What it does not cover is the event *surface*. The Slack-shaped envelopes the
-# transport suites deliver are planted by the fixture
-# (tests/official-sdk-qualification/node-web-api/fixture/main.go), which writes
-# {"type":"event_callback",...,"event":{"type":"message",...}} and
-# {"type":"message",...} under the internal topic message.created. The real
-# producer, internal/service, emits identifiers only
-# ({"type":"message.created","message_id":...,"channel_id":...,"user_id":...,
-# "ts":...}); no component translates a record into a Slack envelope. So the
-# suites prove the transports deliver what an official client parses, and not
-# that this product can produce one from its own records. See the events-api
-# decision in specs/compatibility.yaml. Every entry whose suite is driven by a
-# fixture-supplied envelope says so in its note.
+# Event-surface coverage is method- and topic-specific. Node, Python, and Java
+# Socket Mode qualifications consume a real service-posted message that
+# internal/service hydrates and translates after installed-bot visibility is
+# proved; the Node RTM qualification does the same for the connected user.
+# Bolt callback suites still submit an independently constructed signed event
+# callback, so they qualify framework decoding and request authentication, not
+# producer translation. Message change/delete, file share/unshare, and
+# user-token Events API subscriptions remain outside the qualified slice. See
+# the events-api decision in specs/compatibility.yaml.
 status: qualified
 
 sdks:
@@ -72,9 +69,8 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Consumes and acknowledges a real message created through internal/service,
+      projected only after installed-bot conversation visibility is proved.
   - id: node-rtm-api
     ecosystem: npm
     package: '@slack/rtm-api'
@@ -87,9 +83,8 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/node-rtm-api/qualification.mjs
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Consumes a real message created through internal/service and projected
+      only after connected-user conversation visibility is proved.
   - id: python-slack-sdk
     ecosystem: pypi
     package: slack-sdk
@@ -128,9 +123,8 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/python-socket-mode/qualification.py
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Consumes and acknowledges a real message created through internal/service,
+      projected only after installed-bot conversation visibility is proved.
   - id: java-slack-api
     ecosystem: maven
     package: com.slack.api:slack-api-client
@@ -154,9 +148,8 @@ sdks:
     suite: passed
     suite_path: tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/SocketModeQualification.java
     note: >-
-      Event-surface suite. The Slack envelope it parses is planted by
-      tests/official-sdk-qualification/node-web-api/fixture/main.go, not produced
-      from an internal record; this qualifies the transport, not the event surface.
+      Consumes and acknowledges a real message created through internal/service,
+      projected only after installed-bot conversation visibility is proved.
   - id: deno-slack-runtime
     ecosystem: deno
     package: deno-slack-runtime

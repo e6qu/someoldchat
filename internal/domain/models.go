@@ -735,21 +735,48 @@ type ReminderPage struct {
 }
 
 type ScheduledMessage struct {
-	WorkspaceID WorkspaceID
-	ID          ScheduledMessageID
-	Channel     ConversationID
-	Author      UserID
-	Text        string
-	Blocks      string
-	Attachments string
-	PostAt      time.Time
-	CreatedAt   time.Time
+	WorkspaceID     WorkspaceID
+	ID              ScheduledMessageID
+	Channel         ConversationID
+	Author          UserID
+	AppID           AppID
+	BotID           BotID
+	CredentialHash  string
+	Text            string
+	Blocks          string
+	Attachments     string
+	ThreadTimestamp MessageTimestamp
+	PostAt          time.Time
+	CreatedAt       time.Time
+	DeliveredAt     time.Time
+	FailedAt        time.Time
+	FailureCode     string
 }
 
 type ScheduledMessagePage struct {
 	Items      []ScheduledMessage
 	NextCursor Cursor
 	HasMore    bool
+}
+
+type ScheduledMessageRequest struct {
+	Channel         ConversationID
+	Text            string
+	Blocks          string
+	Attachments     string
+	ThreadTimestamp MessageTimestamp
+	PostAt          time.Time
+	AppID           AppID
+	BotID           BotID
+	CredentialHash  string
+}
+
+type ScheduledMessageQuery struct {
+	CredentialHash string
+	Channel        ConversationID
+	Oldest         time.Time
+	Latest         time.Time
+	Page           PageRequest
 }
 
 type UserGroup struct {
