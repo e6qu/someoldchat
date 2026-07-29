@@ -4,11 +4,56 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 )
+
+func ScheduledMessageCursorKey(value domain.ScheduledMessage) string {
+	return fmt.Sprintf("%020d:%s", value.PostAt.UTC().Unix(), value.ID)
+}
+
+func ParseScheduledMessageCursor(cursor domain.Cursor) (time.Time, domain.ScheduledMessageID, error) {
+	raw, err := domain.DecodeListCursor(cursor)
+	if err != nil || raw == "" {
+		return time.Time{}, "", err
+	}
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return time.Time{}, "", domain.ErrInvalidCursor
+	}
+	seconds, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, "", domain.ErrInvalidCursor
+	}
+	return time.Unix(seconds, 0).UTC(), domain.ScheduledMessageID(parts[1]), nil
+}
+
+// ScheduledMessageLimitExceeded reports whether adding candidate would place
+// more than limit timestamps in any rolling window. A fixed clock bucket is
+// insufficient here: Slack's contract says "within a 5-minute window", so a
+// burst spanning a wall-clock bucket boundary must still be rejected.
+func ScheduledMessageLimitExceeded(existing []time.Time, candidate time.Time, window time.Duration, limit int) bool {
+	if window <= 0 || limit <= 0 {
+		return true
+	}
+	timestamps := append(append([]time.Time(nil), existing...), candidate.UTC())
+	sort.Slice(timestamps, func(left, right int) bool { return timestamps[left].Before(timestamps[right]) })
+	left := 0
+	for right := range timestamps {
+		for timestamps[right].Sub(timestamps[left]) > window {
+			left++
+		}
+		if right-left+1 > limit {
+			return true
+		}
+	}
+	return false
+}
 
 // InternalTopic reports whether an outbox topic carries a repository-internal
 // payload — a blob storage key — that exists only for a dedicated cleanup
@@ -113,6 +158,7 @@ var (
 	ErrInvalidAppApproval        = errors.New("invalid app approval")
 	ErrConflict                  = errors.New("state conflict")
 	ErrBookmarkLimit             = errors.New("bookmark limit reached")
+	ErrScheduledMessageLimit     = errors.New("scheduled message channel window limit reached")
 	ErrSocketModeConnectionLimit = errors.New("Socket Mode connection limit reached")
 	// ErrMessageTimestampTaken reports that another message in the same
 	// conversation already owns the microsecond the new message was given.
@@ -441,12 +487,16 @@ type Store interface {
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
 	CreateScheduledMessage(context.Context, domain.ScheduledMessage, events.Event) error
+	CreateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessage, time.Duration, int, events.Event) error
 	ListScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
+	ListScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
 	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
+	DeleteScheduledMessageForCredential(context.Context, domain.WorkspaceID, string, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
 	ClaimScheduledMessages(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]domain.ScheduledMessage, error)
 	RenewScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Duration) error
 	MarkScheduledMessageDelivered(context.Context, string, domain.ScheduledMessageID) error
+	MarkScheduledMessageFailed(context.Context, string, domain.ScheduledMessageID, string, time.Time, events.Event) error
 	ReleaseScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Time) error
 	CreateUserGroup(context.Context, domain.UserGroup, events.Event) error
 	GetUserGroup(context.Context, domain.WorkspaceID, domain.UserGroupID) (domain.UserGroup, error)

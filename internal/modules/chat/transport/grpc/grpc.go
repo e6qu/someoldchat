@@ -2643,7 +2643,19 @@ func (r Remote) ScheduleMessage(ctx context.Context, workspaceID domain.Workspac
 }
 
 func (r Remote) ScheduledMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
-	out, err := r.scheduled.ScheduledMessages(ctx, &chatv1.ScheduledMessagesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), Limit: int32(request.Limit), Cursor: string(request.Cursor)})
+	return r.ScheduledMessagesForCredential(ctx, workspaceID, userID, domain.ScheduledMessageQuery{
+		CredentialHash: grpcScheduledCredential(workspaceID, userID),
+		Channel:        channel,
+		Page:           request,
+	})
+}
+
+func (r Remote) ScheduledMessagesForCredential(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error) {
+	out, err := r.scheduled.ScheduledMessages(ctx, &chatv1.ScheduledMessagesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(query.Channel),
+		Limit: int32(query.Page.Limit), Cursor: string(query.Page.Cursor), CredentialHash: query.CredentialHash,
+		Oldest: unixOrZero(query.Oldest), Latest: unixOrZero(query.Latest),
+	})
 	if err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
@@ -2659,7 +2671,11 @@ func (r Remote) ScheduledMessages(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (r Remote) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
-	out, err := r.scheduled.DeleteScheduledMessage(ctx, &chatv1.DeleteScheduledMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), ScheduledMessageId: string(id)})
+	return r.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, grpcScheduledCredential(workspaceID, userID), channel, id)
+}
+
+func (r Remote) DeleteScheduledMessageForCredential(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, credentialHash string, channel domain.ConversationID, id domain.ScheduledMessageID) error {
+	out, err := r.scheduled.DeleteScheduledMessage(ctx, &chatv1.DeleteScheduledMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), ScheduledMessageId: string(id), CredentialHash: credentialHash})
 	if err != nil {
 		return err
 	}
@@ -5439,7 +5455,18 @@ func (s *Server) deleteReminderProto(ctx context.Context, input *chatv1.Reminder
 }
 
 func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
-	value, err := s.implementation.ScheduleMessageWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), time.Unix(input.GetPostAt(), 0).UTC())
+	workspaceID := domain.WorkspaceID(input.GetWorkspaceId())
+	userID := domain.UserID(input.GetUserId())
+	credentialHash := input.GetCredentialHash()
+	if credentialHash == "" {
+		credentialHash = grpcScheduledCredential(workspaceID, userID)
+	}
+	value, err := s.implementation.ScheduleMessageAs(ctx, workspaceID, userID, domain.ScheduledMessageRequest{
+		Channel: domain.ConversationID(input.GetChannelId()), Text: input.GetText(), Blocks: input.GetBlocks(),
+		Attachments: input.GetAttachments(), AppID: domain.AppID(input.GetAppId()), BotID: domain.BotID(input.GetBotId()),
+		CredentialHash: credentialHash, ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTs()),
+		PostAt: time.Unix(input.GetPostAt(), 0).UTC(),
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -5448,7 +5475,16 @@ func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.Schedul
 
 func (s *Server) scheduledMessagesProto(ctx context.Context, input *chatv1.ScheduledMessagesRequest) (*chatv1.ScheduledMessagePage, error) {
 	request := protoPageRequest(input.GetLimit(), input.GetCursor())
-	page, err := s.implementation.ScheduledMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), request)
+	workspaceID := domain.WorkspaceID(input.GetWorkspaceId())
+	userID := domain.UserID(input.GetUserId())
+	credentialHash := input.GetCredentialHash()
+	if credentialHash == "" {
+		credentialHash = grpcScheduledCredential(workspaceID, userID)
+	}
+	page, err := s.implementation.ScheduledMessagesForCredential(ctx, workspaceID, userID, domain.ScheduledMessageQuery{
+		CredentialHash: credentialHash, Channel: domain.ConversationID(input.GetChannelId()), Page: request,
+		Oldest: timeFromUnix(input.GetOldest()), Latest: timeFromUnix(input.GetLatest()),
+	})
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -5460,7 +5496,13 @@ func (s *Server) scheduledMessagesProto(ctx context.Context, input *chatv1.Sched
 }
 
 func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.DeleteScheduledMessageRequest) (*chatv1.MutationResponse, error) {
-	if err := s.implementation.DeleteScheduledMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetChannelId()), domain.ScheduledMessageID(input.GetScheduledMessageId())); err != nil {
+	workspaceID := domain.WorkspaceID(input.GetWorkspaceId())
+	userID := domain.UserID(input.GetUserId())
+	credentialHash := input.GetCredentialHash()
+	if credentialHash == "" {
+		credentialHash = grpcScheduledCredential(workspaceID, userID)
+	}
+	if err := s.implementation.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, credentialHash, domain.ConversationID(input.GetChannelId()), domain.ScheduledMessageID(input.GetScheduledMessageId())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -6390,14 +6432,45 @@ func decodeProtoReminder(value *chatv1.Reminder) (domain.Reminder, error) {
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {
-	return &chatv1.ScheduledMessage{WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix()}
+	return &chatv1.ScheduledMessage{
+		WorkspaceId: string(value.WorkspaceID), Id: string(value.ID), ChannelId: string(value.Channel), AuthorId: string(value.Author),
+		Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, PostAt: value.PostAt.Unix(), CreatedAt: value.CreatedAt.Unix(),
+		AppId: string(value.AppID), BotId: string(value.BotID), CredentialHash: value.CredentialHash, ThreadTs: string(value.ThreadTimestamp),
+		DeliveredAt: unixOrZero(value.DeliveredAt), FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
+	}
+}
+
+func grpcScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
+	return domain.HashToken("internal-scheduled\x00" + string(workspaceID) + "\x00" + string(userID))
+}
+
+func unixOrZero(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().Unix()
+}
+
+func timeFromUnix(value int64) time.Time {
+	if value == 0 {
+		return time.Time{}
+	}
+	return time.Unix(value, 0).UTC()
 }
 
 func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.ScheduledMessage, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetId() == "" || value.GetChannelId() == "" || value.GetAuthorId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetPostAt() <= 0 || value.GetCreatedAt() <= 0 {
 		return domain.ScheduledMessage{}, errors.New("typed scheduled message is incomplete")
 	}
-	return domain.ScheduledMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()), Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), PostAt: time.Unix(value.GetPostAt(), 0).UTC(), CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC()}, nil
+	return domain.ScheduledMessage{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), ID: domain.ScheduledMessageID(value.GetId()),
+		Channel: domain.ConversationID(value.GetChannelId()), Author: domain.UserID(value.GetAuthorId()),
+		AppID: domain.AppID(value.GetAppId()), BotID: domain.BotID(value.GetBotId()), CredentialHash: value.GetCredentialHash(),
+		Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(),
+		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), PostAt: time.Unix(value.GetPostAt(), 0).UTC(),
+		CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), DeliveredAt: timeFromUnix(value.GetDeliveredAt()),
+		FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+	}, nil
 }
 
 func decodeProtoUser(value *chatv1.User) (domain.User, error) {
@@ -6867,7 +6940,19 @@ func (r Remote) UpdateMessage(ctx context.Context, workspaceID domain.WorkspaceI
 }
 
 func (r Remote) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
-	out, err := r.scheduled.ScheduleMessage(ctx, &chatv1.ScheduleMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(channel), Text: text, Blocks: blocks, Attachments: attachments, PostAt: postAt.Unix()})
+	return r.ScheduleMessageAs(ctx, workspaceID, userID, domain.ScheduledMessageRequest{
+		Channel: channel, Text: text, Blocks: blocks, Attachments: attachments, PostAt: postAt,
+		CredentialHash: grpcScheduledCredential(workspaceID, userID),
+	})
+}
+
+func (r Remote) ScheduleMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ScheduledMessageRequest) (domain.ScheduledMessage, error) {
+	out, err := r.scheduled.ScheduleMessage(ctx, &chatv1.ScheduleMessageRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ChannelId: string(request.Channel),
+		Text: request.Text, Blocks: request.Blocks, Attachments: request.Attachments, PostAt: request.PostAt.Unix(),
+		AppId: string(request.AppID), BotId: string(request.BotID), CredentialHash: request.CredentialHash,
+		ThreadTs: string(request.ThreadTimestamp),
+	})
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}

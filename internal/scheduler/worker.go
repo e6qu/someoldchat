@@ -6,8 +6,11 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/lease"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 type Source interface {
@@ -15,6 +18,7 @@ type Source interface {
 	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
 	RenewScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Duration) error
 	MarkScheduledMessageDelivered(context.Context, string, domain.ScheduledMessageID) error
+	MarkScheduledMessageFailed(context.Context, string, domain.ScheduledMessageID, string, time.Time, events.Event) error
 	ReleaseScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Time) error
 }
 
@@ -53,7 +57,20 @@ func (w Worker) RunOnce(ctx context.Context, workspace domain.WorkspaceID) (int,
 			return completed, errors.Join(failures, err)
 		}
 		if postErr := w.postWithLease(ctx, item); postErr != nil {
-			failures = errors.Join(failures, postErr)
+			if failureCode := permanentFailureCode(postErr); failureCode != "" {
+				failedAt := time.Now().UTC()
+				event, eventErr := scheduledFailureEvent(item, failureCode, failedAt)
+				if eventErr != nil {
+					failures = errors.Join(failures, eventErr)
+				} else if markErr := w.Source.MarkScheduledMessageFailed(ctx, w.Owner, item.ID, failureCode, failedAt, event); markErr != nil {
+					failures = errors.Join(failures, markErr)
+				} else {
+					completed++
+					continue
+				}
+			} else {
+				failures = errors.Join(failures, postErr)
+			}
 			if releaseErr := w.Source.ReleaseScheduledMessage(ctx, w.Owner, item.ID, time.Now().UTC().Add(w.Lease)); releaseErr != nil {
 				failures = errors.Join(failures, releaseErr)
 			}
@@ -90,8 +107,38 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 			return w.Source.RenewScheduledMessage(renewContext, w.Owner, item.ID, w.Lease)
 		},
 		func(postContext context.Context) error {
-			_, err := w.Poster.PostWithBlocksAndAttachments(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, "", string(item.ID), "")
+			_, err := w.Poster.PostWithBlocksAndAttachments(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, item.ThreadTimestamp, string(item.ID), item.AppID)
 			return err
 		},
 	)
+}
+
+func permanentFailureCode(err error) string {
+	switch {
+	case errors.Is(err, service.ErrNotInConversation):
+		return "not_in_channel"
+	case errors.Is(err, service.ErrConversationAlreadyArchived):
+		return "is_archived"
+	case errors.Is(err, service.ErrInvalidTimestamp):
+		return "invalid_thread_ts"
+	case errors.Is(err, service.ErrInvalidMessage), errors.Is(err, store.ErrInvalidArgument):
+		return "invalid_arguments"
+	case errors.Is(err, store.ErrNotFound):
+		return "channel_not_found"
+	default:
+		return ""
+	}
+}
+
+func scheduledFailureEvent(item domain.ScheduledMessage, failureCode string, failedAt time.Time) (events.Event, error) {
+	id, err := domain.NewEventID()
+	if err != nil {
+		return events.Event{}, err
+	}
+	return events.New(id, item.WorkspaceID, item.Author, events.NewPayload(
+		"message.schedule_failed",
+		events.String("scheduled_message_id", string(item.ID)),
+		events.String("channel_id", string(item.Channel)),
+		events.String("failure_code", failureCode),
+	), failedAt)
 }

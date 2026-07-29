@@ -5,11 +5,13 @@ the Slack behavior it is intended to support. A registered handler or a
 server-rendered control is not counted as complete unless the surrounding user
 journey is usable.
 
-Measured on 2026-07-28:
+Measured on 2026-07-29:
 
-- 225 of Slack's 320 current catalogued Web API methods are registered;
-- 222 are recorded as behavior-compatible, three as SDK-compatible, and none
-  as live-differential `verified-against-slack`;
+- 215 of Slack's 310 current catalogued Web API methods are registered; the
+  320-entry compatibility ledger separately retains ten legacy methods;
+- 210 current methods are recorded as behavior-compatible, three as
+  SDK-compatible, two as schema-compatible, and none as live-differential
+  `verified-against-slack`;
 - the current official Node Web API SDK exercises the product end to end,
   including app manifests, OAuth, Socket Mode, interactions, message streaming,
   Block Kit validation, hosted-datastore CRUD/bulk operations, and an external
@@ -50,7 +52,7 @@ Measured on 2026-07-28:
 | --- | --- | --- |
 | P0 | Activity depth | Activity now covers joined unread conversations and explicit mentions, but it does not yet aggregate thread replies, reminders, notification-policy events, clear state, bulk read, layouts, filters, or custom tabs from Slack's current Activity model. |
 | P0 | Composer depth | Formatting, standard emoji, member mention autocomplete, file preview, and draft recovery work. Custom-emoji browsing, channel autocomplete, pasted-file staging, scheduled send, voice/video clips, and Slack's full shortcuts browser remain. |
-| P1 | Saved and scheduled work | Pins exist and scheduled-message APIs exist, but the client has no Later/saved-items journey, drafts view, scheduled-message management, or reminders UI. |
+| P1 | Saved and scheduled work | Pins exist. Scheduled-message APIs now enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution, but the client has no Later/saved-items journey, drafts view, scheduled-message management, or reminders UI. |
 | P1 | Direct-message lifecycle | DMs can be opened from People, but there is no dedicated DM/group-DM section, participant management, or recent-DM navigation matching Slack. |
 | P1 | Notifications and presence | Basic presence/status APIs exist, but the client has no per-conversation notification preferences, status expiry, snooze/DND controls, typing indicators, or presence-aware member affordances. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |

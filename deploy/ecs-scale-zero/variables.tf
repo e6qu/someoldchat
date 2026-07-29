@@ -88,6 +88,56 @@ variable "application_replicas" {
     error_message = "application_replicas must be positive"
   }
 }
+
+variable "worker_image" {
+  type = string
+  validation {
+    condition     = trimspace(var.worker_image) != ""
+    error_message = "worker_image must be an immutable image reference"
+  }
+}
+variable "worker_task_role_arn" {
+  type = string
+  validation {
+    condition     = trimspace(var.worker_task_role_arn) != ""
+    error_message = "worker_task_role_arn must be explicit"
+  }
+}
+variable "worker_command" {
+  type = list(string)
+  validation {
+    condition = (
+      can(regex("(^|[[:space:]])-store([[:space:]=]+)postgresql([[:space:]]|$)", join(" ", var.worker_command))) &&
+      can(regex("(^|[[:space:]])-delivery-format([[:space:]=]+)slack-events([[:space:]]|$)", join(" ", var.worker_command))) &&
+      can(regex("(^|[[:space:]])-owner([[:space:]=]+)[^[:space:]]+", join(" ", var.worker_command)))
+    )
+    error_message = "worker_command must explicitly select -store postgresql, -delivery-format slack-events, and a unique -owner so scheduled jobs run across every workspace on durable shared state"
+  }
+}
+variable "worker_environment" {
+  type    = map(string)
+  default = {}
+}
+variable "worker_secrets" {
+  type      = map(string)
+  sensitive = true
+  validation {
+    condition = (
+      trimspace(lookup(var.worker_secrets, "SAMEOLDCHAT_DATABASE_URL", "")) != "" &&
+      trimspace(lookup(var.worker_secrets, "SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX", "")) != "" &&
+      alltrue([for arn in values(var.worker_secrets) : can(regex("^arn:[^:]+:secretsmanager:[^:]+:[0-9]{12}:secret:", arn))])
+    )
+    error_message = "worker_secrets must map SAMEOLDCHAT_DATABASE_URL and SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX to AWS Secrets Manager ARNs; neither credential may be written into the task command or plain environment"
+  }
+}
+variable "worker_cpu" {
+  type    = number
+  default = 256
+}
+variable "worker_memory" {
+  type    = number
+  default = 512
+}
 variable "startup_timeout_seconds" {
   type    = number
   default = 20

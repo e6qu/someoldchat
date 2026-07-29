@@ -62,6 +62,17 @@ resource "aws_iam_role_policy_attachment" "execution" {
   role       = aws_iam_role.execution.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
+resource "aws_iam_role_policy" "worker_secrets" {
+  role = aws_iam_role.execution.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = values(var.worker_secrets)
+    }]
+  })
+}
 
 resource "aws_ecs_task_definition" "application" {
   family                   = var.name
@@ -81,6 +92,68 @@ resource "aws_ecs_task_definition" "application" {
   # itself: the HTTP tier is stopped with ecs:StopTask and has no drain, so a
   # task-local store is refused at plan time.
   container_definitions = jsonencode([{ name = var.name, image = var.application_image, essential = true, command = var.application_command, environment = [for k, v in var.application_environment : { name = k, value = v }], portMappings = [{ containerPort = var.application_port, protocol = "tcp" }], logConfiguration = { logDriver = "awslogs", options = { awslogs-group = aws_cloudwatch_log_group.application.name, awslogs-region = data.aws_region.current.region, awslogs-stream-prefix = "application" } } }])
+}
+
+resource "aws_cloudwatch_log_group" "worker" {
+  name              = "/ecs/${var.name}/worker"
+  retention_in_days = var.log_retention_days
+}
+
+# Scheduled messages and app-event delivery must continue while the request
+# tier is at zero. This service is therefore an explicit always-on data-plane
+# component, backed by the shared PostgreSQL store rather than task-local state.
+resource "aws_ecs_task_definition" "worker" {
+  family                   = "${var.name}-worker"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.worker_cpu
+  memory                   = var.worker_memory
+  execution_role_arn       = aws_iam_role.execution.arn
+  task_role_arn            = var.worker_task_role_arn
+  runtime_platform {
+    operating_system_family = "LINUX"
+    cpu_architecture        = "X86_64"
+  }
+  container_definitions = jsonencode([{
+    name      = "${var.name}-worker"
+    image     = var.worker_image
+    essential = true
+    # flag-contract: caller-supplied
+    command     = var.worker_command
+    environment = [for k, v in var.worker_environment : { name = k, value = v }]
+    secrets     = [for k, v in var.worker_secrets : { name = k, valueFrom = v }]
+    logConfiguration = {
+      logDriver = "awslogs"
+      options = {
+        awslogs-group         = aws_cloudwatch_log_group.worker.name
+        awslogs-region        = data.aws_region.current.region
+        awslogs-stream-prefix = "worker"
+      }
+    }
+  }])
+}
+
+resource "aws_ecs_service" "worker" {
+  name             = "${var.name}-worker"
+  cluster          = aws_ecs_cluster.this.id
+  task_definition  = aws_ecs_task_definition.worker.arn
+  desired_count    = 1
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+  # -owner is a lease identity. A rolling overlap would run two processes with
+  # the same owner and defeat fencing, so replacement stops the old singleton
+  # before starting the new one.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+  network_configuration {
+    subnets          = var.private_subnet_ids
+    security_groups  = concat([aws_security_group.application.id], var.application_security_group_ids)
+    assign_public_ip = false
+  }
 }
 
 resource "aws_iam_role" "activator" {

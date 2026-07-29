@@ -230,8 +230,11 @@ type Service interface {
 	ScheduleMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, time.Time) (domain.ScheduledMessage, error)
+	ScheduleMessageAs(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageRequest) (domain.ScheduledMessage, error)
 	ScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
+	ScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID) error
+	DeleteScheduledMessageForCredential(context.Context, domain.WorkspaceID, domain.UserID, string, domain.ConversationID, domain.ScheduledMessageID) error
 	CreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) (domain.UserGroup, error)
 	UpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string, string, string) (domain.UserGroup, error)
 	SetUserGroupEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, bool) (domain.UserGroup, error)

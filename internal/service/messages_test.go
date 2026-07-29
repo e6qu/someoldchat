@@ -1623,6 +1623,76 @@ func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {
 	}
 }
 
+func TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+
+	parent, err := messages.Post(ctx, "T1", "U1", "C1", "parent", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	postAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	first, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
+		Channel: "C1", Text: "threaded", ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt),
+		PostAt: postAt, AppID: "A1", BotID: "B1", CredentialHash: "token-one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AppID != "A1" || first.BotID != "B1" || first.ThreadTimestamp == "" {
+		t.Fatalf("scheduled attribution/thread lost: %+v", first)
+	}
+	if _, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{Channel: "C1", Text: "other token", PostAt: postAt.Add(time.Second), CredentialHash: "token-two"}); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := messages.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{
+		CredentialHash: "token-one", Oldest: postAt.Add(-time.Second), Latest: postAt.Add(time.Second),
+		Page: domain.PageRequest{Limit: 100},
+	})
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != first.ID {
+		t.Fatalf("token/range page=%+v err=%v", page, err)
+	}
+	if err := messages.DeleteScheduledMessageForCredential(ctx, "T1", "U1", "token-two", "C1", first.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another token deleted the schedule: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for _, testCase := range []struct {
+		name   string
+		postAt time.Time
+		want   error
+	}{
+		{name: "past", postAt: now.Add(-time.Second), want: ErrScheduledTimeInPast},
+		{name: "too far", postAt: now.Add(120*24*time.Hour + time.Minute), want: ErrScheduledTimeTooFar},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{Channel: "C1", Text: testCase.name, PostAt: testCase.postAt, CredentialHash: "token-one"})
+			if !errors.Is(err, testCase.want) {
+				t.Fatalf("error=%v, want %v", err, testCase.want)
+			}
+		})
+	}
+
+	window := postAt.Add(10 * time.Minute).Truncate(5 * time.Minute)
+	for index := 0; index < 30; index++ {
+		_, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
+			Channel: "C1", Text: fmt.Sprintf("quota-%d", index), PostAt: window.Add(time.Duration(index) * time.Second), CredentialHash: "token-one",
+		})
+		if err != nil {
+			t.Fatalf("schedule %d: %v", index, err)
+		}
+	}
+	if _, err := messages.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{Channel: "C1", Text: "over quota", PostAt: window.Add(31 * time.Second), CredentialHash: "token-one"}); !errors.Is(err, ErrScheduledTooMany) {
+		t.Fatalf("31st schedule error=%v, want %v", err, ErrScheduledTooMany)
+	}
+}
+
 func TestPostEphemeralWithBlocksPersistsNormalizedEvent(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})

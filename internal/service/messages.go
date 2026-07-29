@@ -39,6 +39,9 @@ var (
 	ErrInvalidPresence             = errors.New("user presence is invalid")
 	ErrInvalidSnooze               = errors.New("snooze duration must be between 1 and 1440 minutes")
 	ErrInvalidReminder             = errors.New("reminder text, user, and time are required")
+	ErrScheduledTimeInPast         = errors.New("scheduled message time is in the past")
+	ErrScheduledTimeTooFar         = errors.New("scheduled message time is more than 120 days away")
+	ErrScheduledTooMany            = errors.New("too many messages are scheduled in the channel window")
 	ErrInvalidUserGroup            = errors.New("user group name, handle, and members are invalid")
 	ErrInvalidCall                 = errors.New("call external id and join URL are required")
 	ErrInvalidEphemeral            = errors.New("ephemeral message recipient, conversation, and text are required")
@@ -3856,18 +3859,33 @@ func (m Messages) ScheduleMessage(ctx context.Context, workspaceID domain.Worksp
 }
 
 func (m Messages) ScheduledMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
+	return m.ScheduledMessagesForCredential(ctx, workspaceID, userID, domain.ScheduledMessageQuery{
+		CredentialHash: internalScheduledCredential(workspaceID, userID),
+		Channel:        channel,
+		Page:           request,
+	})
+}
+
+func (m Messages) ScheduledMessagesForCredential(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.ScheduledMessagePage{}, err
 	}
-	if channel != "" {
-		if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
+	if query.CredentialHash == "" || (!query.Oldest.IsZero() && !query.Latest.IsZero() && !query.Oldest.Before(query.Latest)) {
+		return domain.ScheduledMessagePage{}, store.InvalidArgument("scheduled-message token and time range are invalid")
+	}
+	if query.Channel != "" {
+		if err := m.authorizeConversation(ctx, workspaceID, userID, query.Channel); err != nil {
 			return domain.ScheduledMessagePage{}, err
 		}
 	}
-	return m.Store.ListScheduledMessages(ctx, workspaceID, userID, channel, request)
+	return m.Store.ListScheduledMessagesForCredential(ctx, workspaceID, query)
 }
 
 func (m Messages) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
+	return m.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, internalScheduledCredential(workspaceID, userID), channel, id)
+}
+
+func (m Messages) DeleteScheduledMessageForCredential(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, credentialHash string, channel domain.ConversationID, id domain.ScheduledMessageID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
 	}
@@ -3878,7 +3896,7 @@ func (m Messages) DeleteScheduledMessage(ctx context.Context, workspaceID domain
 	if err != nil {
 		return err
 	}
-	return m.Store.DeleteScheduledMessage(ctx, workspaceID, userID, channel, id, event)
+	return m.Store.DeleteScheduledMessageForCredential(ctx, workspaceID, credentialHash, channel, id, event)
 }
 
 func normalizeUserGroupHandle(value string) string {
@@ -4769,29 +4787,80 @@ func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domai
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
+	return m.ScheduleMessageAs(ctx, workspaceID, userID, domain.ScheduledMessageRequest{
+		Channel:        channel,
+		Text:           text,
+		Blocks:         blocks,
+		Attachments:    attachments,
+		PostAt:         postAt,
+		CredentialHash: internalScheduledCredential(workspaceID, userID),
+	})
+}
+
+func internalScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
+	return domain.HashToken("internal-scheduled\x00" + string(workspaceID) + "\x00" + string(userID))
+}
+
+func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ScheduledMessageRequest) (domain.ScheduledMessage, error) {
+	channel := request.Channel
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, channel); err != nil {
 		return domain.ScheduledMessage{}, err
 	}
-	text = strings.TrimSpace(text)
-	if messagePayloadTooLong(blocks, attachments) {
+	text := strings.TrimSpace(request.Text)
+	if request.CredentialHash == "" || messagePayloadTooLong(request.Blocks, request.Attachments) {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
-	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
-	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || postAt.IsZero() || !postAt.After(time.Now().UTC()) {
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(request.Blocks))
+	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(request.Attachments))
+	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || request.PostAt.IsZero() {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
+	}
+	now := time.Now().UTC()
+	// Slack's post_at contract is whole Unix seconds, and the SQL schema stores
+	// that precision. Normalize before quota bucketing and cursor construction so
+	// local memory composition cannot order the same request differently.
+	postAt := time.Unix(request.PostAt.UTC().Unix(), 0).UTC()
+	if !postAt.After(now) {
+		return domain.ScheduledMessage{}, ErrScheduledTimeInPast
+	}
+	if postAt.After(now.Add(120 * 24 * time.Hour)) {
+		return domain.ScheduledMessage{}, ErrScheduledTimeTooFar
+	}
+	target, err := m.Store.GetConversation(ctx, channel)
+	if err != nil || target.WorkspaceID != workspaceID {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	if target.Archived {
+		return domain.ScheduledMessage{}, ErrConversationAlreadyArchived
+	}
+	if request.ThreadTimestamp != "" {
+		createdAt, parseErr := domain.ParseMessageTimestamp(request.ThreadTimestamp)
+		if parseErr != nil {
+			return domain.ScheduledMessage{}, ErrInvalidTimestamp
+		}
+		parent, parentErr := m.Store.GetMessageByCreatedAt(ctx, channel, createdAt)
+		if parentErr != nil || parent.WorkspaceID != workspaceID {
+			return domain.ScheduledMessage{}, store.ErrNotFound
+		}
 	}
 	id, err := domain.NewScheduledMessageID()
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
-	now := time.Now().UTC()
-	value := domain.ScheduledMessage{WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, PostAt: postAt.UTC(), CreatedAt: now}
+	value := domain.ScheduledMessage{
+		WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID,
+		AppID: request.AppID, BotID: request.BotID, CredentialHash: request.CredentialHash,
+		Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
+		ThreadTimestamp: request.ThreadTimestamp, PostAt: postAt, CreatedAt: now,
+	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("message.scheduled", events.String("scheduled_message_id", string(id)), events.String("channel_id", string(channel)), events.String("post_at", string(domain.NewMessageTimestamp(value.PostAt)))), now)
 	if err != nil {
 		return domain.ScheduledMessage{}, err
 	}
-	if err := m.Store.CreateScheduledMessage(ctx, value, event); err != nil {
+	if err := m.Store.CreateScheduledMessageWithinLimit(ctx, value, 5*time.Minute, 30, event); err != nil {
+		if errors.Is(err, store.ErrScheduledMessageLimit) {
+			return domain.ScheduledMessage{}, ErrScheduledTooMany
+		}
 		return domain.ScheduledMessage{}, err
 	}
 	return value, nil

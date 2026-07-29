@@ -213,20 +213,55 @@ Implement methods in domain waves:
 An operation is complete only after input, authorization, success, warning,
 error, pagination, SDK, SQLite, and dqlite tests pass as applicable.
 
-Implemented. All six waves have handlers: `internal/api/slack/handler.go`
-registers 206 distinct `/api/<method>` routes, and all 206 operations in
-`specs/compatibility.yaml` carry `status: behavior-compatible` with no
-`unimplemented` entry remaining. That covers the files, search, bookmarks,
-user-group, scheduled-message, OAuth, webhook, interactivity, view, canvases,
-`slackLists`, entity, `openid.connect.*`, RTM, and Socket Mode families.
+In progress. The 2026-07-29 post-merge audit reconciled the ledger with Slack's
+current method catalog rather than treating every historical ledger entry as a
+current method:
 
-What that status does and does not assert is worth stating precisely, because
-`behavior-compatible` is the fourth of five ledger levels
-([API compatibility](specs/api-compatibility.md)): it means local behavior
-matches the selected contract tests, not that the behavior has been compared
-with Slack. No operation has reached `verified-against-slack`. Raising them is
-Phase 6's differential verification, and until that runs, the ledger records a
-self-consistent local claim rather than externally confirmed equivalence.
+- Slack's current reference contains 310 methods. SameOldChat registers 215 of
+  them and leaves 95 unimplemented.
+- The 320-entry ledger also retains ten legacy methods for clients that still
+  call them. Those methods are useful compatibility inventory, but they are not
+  part of the current Slack denominator.
+- After correcting the overstated `chat.postMessage` and `files.upload`
+  claims, the ledger records 210 current methods as `behavior-compatible`,
+  three as `sdk-compatible`, two as `schema-compatible`, and none as
+  `verified-against-slack`. A passing route, local test, or SDK parse is not
+  itself live Slack equivalence.
+- Several recorded evidence levels are too high. The ratchet must permit an
+  explicit, reviewed downgrade backed by a concrete deviation; otherwise a
+  false compatibility claim becomes permanent.
+
+The remaining 95 current methods break down as 50 `admin.*`, seven `apps.*`,
+five `assistant.*`, one `auth.*`, ten `conversations.*`, six `functions.*`, one
+`rtm.*`, two `search.*`, four `team.*`, one `users.*`, and eight
+`workflows.*`.
+
+Before another breadth wave, complete the following evidence-backed work in
+order:
+
+1. report current and retained-legacy coverage separately, attach executable
+   method-level evidence to compatibility claims, allow audited corrections,
+   and repair stale SDK/event-platform documentation;
+2. make scheduled messages token-isolated and app-attributed, implement Slack's
+   time-window, quota, pagination, thread, and error contracts, run scheduling
+   in every worker delivery mode across all workspaces, persist terminal
+   failures, and deploy a real worker process;
+3. correct Slack keyboard mappings and slash-command semantics, including
+   `response_url` authorization, `should_escape`, command discovery, built-in
+   commands, and realistic human/bot qualification identities;
+4. add scheduled-send, reminder execution, Drafts & sent, Later, and full
+   Activity journeys to the first-party client;
+5. audit every claimed Web API method's current arguments, authorization,
+   success and error schemas, pagination, rate limits, and official SDK
+   behavior, beginning with `chat.postMessage` and file uploads;
+6. qualify Chromium, Firefox, and WebKit with automated accessibility and visual
+   comparison, then add opt-in differential runs against a dedicated Slack
+   developer workspace.
+
+Phase 5 exits only when each method counted as complete names its current
+official sources, executable evidence, known deviations, and live-comparison
+state. An aggregate green suite is supporting evidence, not a substitute for
+that per-method record.
 
 ### Phase 6: Differential verification and production hardening
 

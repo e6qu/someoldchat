@@ -41,6 +41,57 @@ func TestUnimplementedNamespacesMakesTheRemainingProductSurfaceVisible(t *testin
 	}
 }
 
+func TestPartitionOperationsSeparatesCurrentReferenceFromRetainedLegacyMethods(t *testing.T) {
+	current, legacy := partitionOperations([]operation{
+		{Method: "chat.postMessage", Status: "behavior-compatible"},
+		{Method: "oauth.token", Status: "schema-compatible"},
+		{Method: "CHAT.DELETE", Status: "behavior-compatible"},
+	}, map[string]struct{}{"chat.postmessage": {}, "chat.delete": {}})
+	if len(current) != 2 || current[0].Method != "chat.postMessage" || current[1].Method != "CHAT.DELETE" {
+		t.Fatalf("current=%+v", current)
+	}
+	if len(legacy) != 1 || legacy[0].Method != "oauth.token" {
+		t.Fatalf("legacy=%+v", legacy)
+	}
+}
+
+func TestAuditedDowngradeRequiresTheExactPriorClaimAndReviewableEvidence(t *testing.T) {
+	previous := operation{Method: "chat.postMessage", Status: "behavior-compatible"}
+	valid := operation{
+		Method: "chat.postMessage", Status: "schema-compatible",
+		Audit: &downgradeAudit{
+			DowngradedFrom: "behavior-compatible",
+			Reason:         "the current method reference exposes unsupported arguments",
+			Evidence:       []string{"internal/api/slack/error_contract_test.go"},
+		},
+	}
+	if !auditedDowngrade(previous, valid) {
+		t.Fatal("complete audited downgrade was rejected")
+	}
+	for name, candidate := range map[string]operation{
+		"wrong prior status": {
+			Method: "chat.postMessage", Status: "schema-compatible",
+			Audit: &downgradeAudit{DowngradedFrom: "sdk-compatible", Reason: "reason", Evidence: []string{"test"}},
+		},
+		"missing reason": {
+			Method: "chat.postMessage", Status: "schema-compatible",
+			Audit: &downgradeAudit{DowngradedFrom: "behavior-compatible", Evidence: []string{"test"}},
+		},
+		"missing evidence": {
+			Method: "chat.postMessage", Status: "schema-compatible",
+			Audit: &downgradeAudit{DowngradedFrom: "behavior-compatible", Reason: "reason"},
+		},
+		"not a downgrade": {
+			Method: "chat.postMessage", Status: "verified-against-slack",
+			Audit: &downgradeAudit{DowngradedFrom: "behavior-compatible", Reason: "reason", Evidence: []string{"test"}},
+		},
+	} {
+		if auditedDowngrade(previous, candidate) {
+			t.Errorf("%s was accepted: %+v", name, candidate)
+		}
+	}
+}
+
 // The registration gate is the only thing tying a live Slack route to the
 // compatibility ledger. It used to read one named file and match one method
 // name, so three ways of registering a route were invisible to it: a route

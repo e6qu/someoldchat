@@ -499,18 +499,27 @@ assert edited_bookmark["ok"] is True
 assert edited_bookmark["bookmark"]["title"] == "Updated SDK bookmark"
 removed_bookmark = client.bookmarks_remove(channel_id="C1", bookmark_id=bookmark["bookmark"]["id"])
 assert removed_bookmark["ok"] is True
+scheduled_root = client.chat_postMessage(channel="C1", text="scheduled thread root")
+scheduled_post_at = int(time.time()) + 60
 scheduled = client.chat_scheduleMessage(
-    channel="C1", text="scheduled qualification", post_at=int(time.time()) + 60
+    channel="C1",
+    text="scheduled qualification",
+    post_at=scheduled_post_at,
+    thread_ts=scheduled_root["ts"],
 )
 assert scheduled["ok"] is True
 assert isinstance(scheduled["scheduled_message_id"], str)
-scheduled_list = client.chat_scheduledMessages_list(channel="C1", limit=10)
+scheduled_list = client.chat_scheduledMessages_list(
+    channel="C1", limit=10, oldest=str(scheduled_post_at - 1), latest=str(scheduled_post_at + 1)
+)
 assert scheduled_list["ok"] is True
 assert len(scheduled_list["scheduled_messages"]) == 1
+assert scheduled_list["scheduled_messages"][0]["thread_ts"] == scheduled_root["ts"]
 deleted_scheduled = client.chat_deleteScheduledMessage(
     channel="C1", scheduled_message_id=scheduled["scheduled_message_id"]
 )
 assert deleted_scheduled["ok"] is True
+assert client.chat_delete(channel="C1", ts=scheduled_root["ts"])["ok"] is True
 dnd_info = client.dnd_info()
 assert dnd_info["ok"] is True
 assert dnd_info["dnd_enabled"] is False

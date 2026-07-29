@@ -91,6 +91,53 @@ func servedRemoteConnection(t *testing.T, implementation chatapi.Service, target
 	return remote, connection
 }
 
+func TestRemoteScheduledMessagesPreserveCredentialRangeThreadAndAttribution(t *testing.T) {
+	target := memory.New()
+	target.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	target.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	target.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	target.SeedConversationMember("C1", "U1")
+	remote := servedRemote(t, service.Messages{Store: target}, target)
+	ctx := context.Background()
+
+	parent, err := remote.Post(ctx, "T1", "U1", "C1", "parent", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	postAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	scheduled, err := remote.ScheduleMessageAs(ctx, "T1", "U1", domain.ScheduledMessageRequest{
+		Channel: "C1", Text: "credential-owned", PostAt: postAt,
+		ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt),
+		AppID:           "A1", BotID: "B1", CredentialHash: "credential-one",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduled.AppID != "A1" || scheduled.BotID != "B1" || scheduled.CredentialHash != "credential-one" || scheduled.ThreadTimestamp == "" {
+		t.Fatalf("scheduled message lost transport fields: %+v", scheduled)
+	}
+	other, err := remote.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{
+		CredentialHash: "credential-two", Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(other.Items) != 0 {
+		t.Fatalf("another credential saw schedule: page=%+v err=%v", other, err)
+	}
+	page, err := remote.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{
+		CredentialHash: "credential-one", Channel: "C1",
+		Oldest: postAt.Add(-time.Second), Latest: postAt.Add(time.Second),
+		Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != scheduled.ID {
+		t.Fatalf("credential range page=%+v err=%v", page, err)
+	}
+	if err := remote.DeleteScheduledMessageForCredential(ctx, "T1", "U1", "credential-two", "C1", scheduled.ID); !errors.Is(err, storepkg.ErrNotFound) {
+		t.Fatalf("another credential deleted schedule: %v", err)
+	}
+	if err := remote.DeleteScheduledMessageForCredential(ctx, "T1", "U1", "credential-one", "C1", scheduled.ID); err != nil {
+		t.Fatalf("owner delete: %v", err)
+	}
+}
+
 func TestRemoteRequiresMutualTLS(t *testing.T) {
 	store := memory.New()
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

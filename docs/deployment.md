@@ -10,7 +10,8 @@ Container Service, split across two shipped Terraform modules:
   policy, and the `environment`/`secrets` values a task needs to start; and
 - [deploy/ecs-scale-zero](../deploy/ecs-scale-zero/README.md) owns
   request-triggered task activation and scale-down for the HTTP path, plus the
-  always-on WebSocket edge and the scale-to-zero WebSocket application tier.
+  always-on multi-workspace worker, always-on WebSocket edge, and the
+  scale-to-zero WebSocket application tier.
 
 Both pin the same exact AWS provider version, so one root configuration can
 consume them together. The provider-neutral Go lifecycle activator remains a
@@ -34,9 +35,10 @@ hibernation, wake, fencing, and recovery tests.
 | Azure Container Apps | Native | Conditional single-owner | Use an external PostgreSQL service | Conditional raw-TCP profile; VM profile is a separate qualified option | Blob snapshot, replicas/VMs 0 |
 
 The matrix describes intended capability, not shipped infrastructure. Only the
-Amazon ECS rows have templates in this repository, and even those cover
-request-triggered activation only — the hibernation state machine and snapshot
-and restore procedures are not shipped by either ECS module. There are no
+Amazon ECS rows have templates in this repository, including a durable
+PostgreSQL-backed worker for scheduled messages and app-event delivery, but
+they still lack the hibernation state machine and snapshot and restore
+procedures. There are no
 systemd units, cloud-init files, Cloud Run services, or Container Apps templates
 anywhere in the repository, so the Linux VM, Google Cloud Run, and Azure
 Container Apps rows are targets an operator must build. Using the qualification

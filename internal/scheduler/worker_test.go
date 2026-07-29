@@ -49,6 +49,50 @@ func TestWorkerPostsDueMessageExactlyOnceAcrossClaimReplay(t *testing.T) {
 	}
 }
 
+func TestWorkerExecutesEveryWorkspaceAndPreservesThreadAndAppAttribution(t *testing.T) {
+	ctx := context.Background()
+	source := memory.New()
+	for _, workspace := range []domain.WorkspaceID{"T1", "T2"} {
+		user := domain.UserID("U-" + string(workspace))
+		channel := domain.ConversationID("C-" + string(workspace))
+		source.SeedWorkspace(domain.Workspace{ID: workspace})
+		source.SeedUser(domain.User{ID: user, WorkspaceID: workspace, Name: string(user)})
+		source.SeedConversation(domain.Conversation{ID: channel, WorkspaceID: workspace, Name: "general"})
+		source.SeedConversationMember(channel, user)
+		parent, err := (service.Messages{Store: source}).Post(ctx, workspace, user, channel, "parent", "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		due := time.Now().UTC().Add(-time.Minute)
+		value := domain.ScheduledMessage{
+			WorkspaceID: workspace, ID: domain.ScheduledMessageID("Q-" + string(workspace)),
+			Channel: channel, Author: user, AppID: domain.AppID("A-" + string(workspace)),
+			Text: "reply", ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt), PostAt: due, CreatedAt: due,
+		}
+		if err := source.CreateScheduledMessage(ctx, value, events.Event{ID: domain.EventID("event-" + string(workspace)), WorkspaceID: workspace, Topic: "message.scheduled", Payload: string(value.ID), CreatedAt: due}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	worker, err := NewWorker(source, service.Messages{Store: source}, "multi-workspace-worker", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := worker.RunOnce(ctx, ""); err != nil || count != 2 {
+		t.Fatalf("multi-workspace count=%d err=%v", count, err)
+	}
+	for _, workspace := range []domain.WorkspaceID{"T1", "T2"} {
+		channel := domain.ConversationID("C-" + string(workspace))
+		page, err := source.ListMessages(ctx, channel, domain.PageRequest{Limit: 10})
+		if err != nil || len(page.Messages) != 2 {
+			t.Fatalf("%s messages=%+v err=%v", workspace, page.Messages, err)
+		}
+		reply := page.Messages[1]
+		if reply.Text != "reply" || reply.AppID != domain.AppID("A-"+string(workspace)) || reply.ThreadTimestamp == "" {
+			t.Fatalf("%s scheduled reply lost attribution/thread: %+v", workspace, reply)
+		}
+	}
+}
+
 func TestWorkerReportsRenewalFailureThatArrivesAfterPosting(t *testing.T) {
 	source := &lateRenewalFailureSource{Store: memory.New(), renewStarted: make(chan struct{}), postingReturned: make(chan struct{}), releaseRenewal: make(chan struct{})}
 	source.SeedWorkspace(domain.Workspace{ID: "T1"})
@@ -163,11 +207,11 @@ func TestRunOnceCompletesTheBatchAroundAnItemThatCannotBePosted(t *testing.T) {
 		t.Fatal(err)
 	}
 	count, err := worker.RunOnce(ctx, "T1")
-	if err == nil {
-		t.Fatal("the undeliverable item was reported as delivered")
+	if err != nil {
+		t.Fatalf("permanent delivery failure was not terminally handled: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("completed=%d err=%v, want the deliverable item posted despite its neighbour", count, err)
+	if count != 2 {
+		t.Fatalf("processed=%d err=%v, want the posted and terminally failed items handled", count, err)
 	}
 	page, err := store.ListMessages(ctx, "C1", domain.PageRequest{Limit: 10})
 	if err != nil {
@@ -175,6 +219,13 @@ func TestRunOnceCompletesTheBatchAroundAnItemThatCannotBePosted(t *testing.T) {
 	}
 	if len(page.Messages) != 1 || page.Messages[0].Text != "deliverable" {
 		t.Fatalf("messages=%+v, want the rest of the batch delivered", page.Messages)
+	}
+	claimed, err := store.ClaimScheduledMessages(ctx, "T1", "worker-2", 10, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("terminally handled schedule was reclaimed: %+v", claimed)
 	}
 }
 
