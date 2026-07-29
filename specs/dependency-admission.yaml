@@ -418,11 +418,11 @@ entries:
     kind: terraform-provider
     canonical: registry.terraform.io/hashicorp/aws
     source: https://github.com/hashicorp/terraform-provider-aws
-    version: 6.55.0
-    revision: h1:OO+IuvQJSPmWdN8AyyIEvPJbLvDQpgX/zbktoa9KsJE=
-    published_at: 2026-07-15T17:16:30Z
-    evidence: https://registry.terraform.io/v1/providers/hashicorp/aws/6.55.0
-    checksum: h1:OO+IuvQJSPmWdN8AyyIEvPJbLvDQpgX/zbktoa9KsJE=
+    version: 6.56.0
+    revision: h1:gSTd4VOv0lEjCGP5deZ4hRMBZhIOUbtS4AlCML+3gIo=
+    published_at: 2026-07-22T21:35:23Z
+    evidence: https://registry.terraform.io/v1/providers/hashicorp/aws/6.56.0
+    checksum: h1:gSTd4VOv0lEjCGP5deZ4hRMBZhIOUbtS4AlCML+3gIo=
     provenance: terraform-registry-lock
     license: MPL-2.0
     purpose: AWS deployment modules
@@ -457,11 +457,11 @@ entries:
     kind: tool
     canonical: terraform
     source: https://github.com/hashicorp/terraform
-    version: 1.13.5
-    revision: 328813676aec7a4e2a491484f91b5e0b67847b6c
-    published_at: 2025-11-05T10:33:17Z
-    evidence: https://api.github.com/repos/hashicorp/terraform/commits/328813676aec7a4e2a491484f91b5e0b67847b6c
-    checksum: git:328813676aec7a4e2a491484f91b5e0b67847b6c
+    version: 1.15.8
+    revision: b9e178decf87d274d25ed36bc5a4dbc857e00420
+    published_at: 2026-07-08T17:45:09Z
+    evidence: https://api.github.com/repos/hashicorp/terraform/commits/b9e178decf87d274d25ed36bc5a4dbc857e00420
+    checksum: git:b9e178decf87d274d25ed36bc5a4dbc857e00420
     provenance: github-commit
     license: BUSL-1.1
     purpose: Terraform validation in CI and module apply
