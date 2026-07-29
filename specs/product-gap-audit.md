@@ -18,11 +18,13 @@ Measured on 2026-07-29:
   file upload that becomes one idempotent `file_share` history message. Socket
   Mode now consumes a real posted message projected after installed-bot
   visibility checks rather than a hand-authored callback fixture;
-- 27 Playwright journeys cover the first-party client in Chromium, Firefox,
-  and WebKit. Automated axe checks cover the desktop workspace, command
-  discovery, and a 320-pixel layout; visual-regression baselines, manual
-  assistive-technology qualification, and comparison against a live Slack
-  client remain absent.
+- 27 Playwright scenarios cite 48 of the normative catalog's 101 stable journey
+  IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
+  exercises some part of that journey, not that the whole journey is complete.
+  `make journey-check` now rejects unknown IDs and source-less journey files.
+  Automated axe checks cover the desktop workspace, command discovery, and a
+  320-pixel layout; visual-regression baselines, manual assistive-technology
+  qualification, and comparison against a live Slack client remain absent.
 
 The normative [Slack user-journey catalog](journeys/README.md) records the full
 target separately from this coverage report. A journey omitted from the

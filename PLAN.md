@@ -292,6 +292,14 @@ surface. They are now recorded as `sdk-compatible`, not
 delivery, retirement behavior, and controlled live outcomes have their own
 evidence.
 
+UI evidence is now measured against the normative catalog rather than counted
+from test files: 27 Playwright scenarios currently cite 48 of 101 stable
+journey IDs. `make journey-check` rejects duplicate/unknown IDs and any journey
+file that loses its observation date or official Slack source. The remaining
+53 IDs are printed as an explicit browser gap list; a citation is not promoted
+to full compatibility without the domain, transport, accessibility, visual,
+and differential layers required by the catalog.
+
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for

@@ -48,8 +48,8 @@ jobs:
       - name: Check formatting and generated files
         run: make fmt-check workflow-check container-check module-docs-check module-startup-check task-flags-check dependency-check generated-check proto-lint
 
-      - name: Check contracts and SDK inventory
-        run: make contract-check sdk-inventory-check
+      - name: Check contracts, journeys, and SDK inventory
+        run: make contract-check journey-check sdk-inventory-check
 
       - name: Ratchet compatibility ledger
         env:

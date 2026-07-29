@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -224,6 +224,9 @@ dependency-check:
 contract-check:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck
 
+journey-check:
+	GOCACHE=$(GOCACHE) go run ./cmd/journeycheck
+
 compatibility-report:
 	GOCACHE=$(GOCACHE) go run ./cmd/contractcheck -report
 
@@ -307,7 +310,7 @@ activator-check:
 # contract requires that job to run them.
 check-dqlite: build-dqlite vet-dqlite vuln-check-dqlite test-dqlite
 
-check: fmt-check vet workflow-check container-check module-docs-check module-startup-check task-flags-check dependency-check contract-check sdk-inventory-check proto-lint generated-check activator-check test
+check: fmt-check vet workflow-check container-check module-docs-check module-startup-check task-flags-check dependency-check contract-check journey-check sdk-inventory-check proto-lint generated-check activator-check test
 
 # Everything the pull-request workflow gates on that does not need a service, a
 # second language runtime, or a container build: the `go`, `terraform`, and
