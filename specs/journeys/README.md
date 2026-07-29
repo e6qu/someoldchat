@@ -96,6 +96,12 @@ not define. Its browser coverage report is intentionally a gap report, not a
 compatibility score; citing an ID does not by itself satisfy the evidence table
 above.
 
+For claims whose upstream wording is stable enough to probe,
+`make external-contract-qualification` fetches the current official pages and
+checks the exact behavioral assertions. It is deliberately additive to the
+catalog gate: a reachable link is not evidence that the page still describes
+the behavior our Markdown attributes to it.
+
 ## Catalog
 
 - [Authentication and workspace entry](00-authentication-and-workspaces.md)

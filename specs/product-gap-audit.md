@@ -23,6 +23,10 @@ Measured on 2026-07-29:
   suite records its separately verified completion requests. The fail-closed
   comparison currently observes all 223 methods claimed at `sdk-compatible` or
   above (213 current and ten retained legacy methods);
+- the reminder/Later journey now has a live official-source gate: CI fetches the
+  current Slack Help and developer pages and verifies the exact entry-point,
+  organization, privacy, time-zone, recurrence, guest, editability, retirement,
+  and API-separation claims before running local SDK/browser evidence;
 - 27 Playwright scenarios cite 48 of the normative catalog's 101 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.

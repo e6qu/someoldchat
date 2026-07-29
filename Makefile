@@ -1,4 +1,4 @@
-.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
+.PHONY: all build build-static build-dqlite check-dqlite test test-race test-load test-load-race test-transport-load test-fuzz test-dqlite test-postgres sdk-qualification external-contract-qualification browser-qualification shauth-sso-qualification compatibility-report contract-ratchet journey-check proto-tools generate generate-proto proto-lint proto-breaking generated-check fmt-check vet vet-dqlite workflow-check container-check module-docs-check module-example-check module-startup-check task-flags-check terraform-check activator-check dependency-check vuln-check vuln-check-dqlite contract-check sdk-inventory-check rebase-audit bench profile check check-full clean run
 
 GOCACHE ?= $(CURDIR)/.cache/go-build
 PROTO_BIN ?= $(CURDIR)/.cache/proto-bin
@@ -266,6 +266,9 @@ sdk-inventory-check:
 
 sdk-qualification:
 	./tests/official-sdk-qualification/qualify.sh
+
+external-contract-qualification:
+	./tests/external-contract-qualification/qualify.sh
 
 browser-qualification:
 	npm ci --prefix tests/browser

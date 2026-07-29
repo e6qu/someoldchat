@@ -308,6 +308,14 @@ claimed at `sdk-compatible` or above is absent. The current result is 223 of
 223 claimed methods observed (213 current plus ten retained legacy methods);
 this proves SDK serialization/decoding only, not live Slack equivalence.
 
+The reminder/Later contract is also checked upstream on every SDK CI run.
+`make external-contract-qualification` fetches the current official Slack Help
+and developer pages and fails if their text no longer supports the journey's
+entry points, organization, privacy, local-time default, recurrence, guest,
+editability, retirement, or Later-versus-app-API separation. This detects
+documentation drift; controlled live-workspace behavior and visual comparison
+remain distinct evidence layers.
+
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for

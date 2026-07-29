@@ -102,6 +102,10 @@ claim more.
 
 Implemented evidence:
 
+- `make external-contract-qualification` fetches Slack's current official
+  reminder, Later, and developer references and fails when the source no longer
+  supports the journey's entry points, organization, privacy, time-zone,
+  recurrence, editability, guest, retirement, or API-separation assertions.
 - Playwright drives focused-message `A`, save/unsave, source navigation,
   In progress, Completed, Archived, restore, removal, and automated WCAG checks
   in Chromium, Firefox, and WebKit.
