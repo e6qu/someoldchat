@@ -24,6 +24,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/scheduler"
 	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
@@ -909,6 +910,38 @@ func TestRemindSlashCommandCreatesPrivateChannelReminderListWithoutPosting(t *te
 	if listCommand.Code != http.StatusSeeOther || !strings.Contains(listCommand.Header().Get("Location"), "filter=channel-reminders") {
 		t.Fatalf("/remind list status=%d location=%q", listCommand.Code, listCommand.Header().Get("Location"))
 	}
+}
+
+func TestDeliveredPersonalReminderAppearsInActivityWithItsSource(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messageTime := time.Date(2026, time.July, 28, 10, 0, 0, 0, time.UTC)
+	message := seedMessage(t, s, "M-activity-reminder", "source", messageTime)
+	due := time.Date(2026, time.July, 29, 8, 0, 0, 0, time.UTC)
+	reminder := domain.LaterReminder{
+		ID: "later_reminder_activity", WorkspaceID: "T1", Creator: "U1", UserID: "U1",
+		SourceMessageID: message.ID, SourceConversation: "Cdev", SourceTimestamp: domain.NewMessageTimestamp(messageTime),
+		Target: domain.LaterReminderPersonal, Text: "review the source", DueAt: due,
+		TimeZone: "UTC", CreatedAt: due.Add(-time.Hour), UpdatedAt: due.Add(-time.Hour),
+	}
+	if err := s.CreateLaterReminder(context.Background(), reminder, events.Event{
+		ID: "event-reminder-activity", WorkspaceID: "T1", ActorID: "U1",
+		Topic: "later_reminder.created", Payload: "{}", CreatedAt: reminder.CreatedAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := due.Add(time.Minute)
+	worker, err := scheduler.NewReminderWorker(s, service.Messages{Store: s}, "worker", 10, time.Minute, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count, err := worker.RunOnce(context.Background(), "T1"); err != nil || count != 1 {
+		t.Fatalf("delivery count=%d err=%v", count, err)
+	}
+	activity := get(t, mux, "/app/activity?channel=Cdev")
+	requireContains(t, "REMIND-04 Activity projection", activity.Body.String(),
+		"Personal reminders that have been delivered.", "review the source",
+		`datetime="`+now.Format(time.RFC3339)+`"`, "#message-M-activity-reminder",
+	)
 }
 
 func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *testing.T) {

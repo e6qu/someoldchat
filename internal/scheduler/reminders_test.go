@@ -120,6 +120,67 @@ func TestNextReminderDuePreservesLocalWallClockAcrossDST(t *testing.T) {
 	}
 }
 
+func TestProductWakeDeadlineUsesRemindersAndEveryWorkspace(t *testing.T) {
+	ctx := context.Background()
+	source := memory.New()
+	early := time.Date(2026, time.July, 29, 15, 0, 0, 0, time.UTC)
+	late := early.Add(2 * time.Hour)
+	for _, workspace := range []domain.WorkspaceID{"T1", "T2"} {
+		user := domain.UserID("U-" + workspace)
+		channel := domain.ConversationID("C-" + workspace)
+		if err := source.SeedWorkspace(domain.Workspace{ID: workspace}); err != nil {
+			t.Fatal(err)
+		}
+		if err := source.SeedUser(domain.User{ID: user, WorkspaceID: workspace, Name: string(user)}); err != nil {
+			t.Fatal(err)
+		}
+		if err := source.SeedConversation(domain.Conversation{ID: channel, WorkspaceID: workspace, Name: "general"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := source.SeedConversationMember(channel, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scheduled := domain.ScheduledMessage{
+		ID: "Q-late", WorkspaceID: "T1", Channel: "C-T1", Author: "U-T1",
+		Text: "later", PostAt: late, CreatedAt: early,
+	}
+	if err := source.CreateScheduledMessage(ctx, scheduled, events.Event{ID: "scheduled-wake", WorkspaceID: "T1", Topic: "message.scheduled", Payload: "{}", CreatedAt: early}); err != nil {
+		t.Fatal(err)
+	}
+	reminder := domain.LaterReminder{
+		ID: "later_reminder_wake", WorkspaceID: "T2", Creator: "U-T2", UserID: "U-T2",
+		Target: domain.LaterReminderPersonal, Text: "wake first", DueAt: early,
+		TimeZone: "UTC", CreatedAt: early.Add(-time.Hour), UpdatedAt: early.Add(-time.Hour),
+	}
+	if err := source.CreateLaterReminder(ctx, reminder, events.Event{ID: "reminder-wake", WorkspaceID: "T2", Topic: "later_reminder.created", Payload: "{}", CreatedAt: reminder.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	publisher := &recordingProductDeadline{fence: 7}
+	if err := PublishEarliestProductWakeDeadline(ctx, source, source, publisher); err != nil {
+		t.Fatal(err)
+	}
+	if publisher.publishedFence != 7 || !publisher.deadline.Equal(early) {
+		t.Fatalf("published fence=%d deadline=%s, want fence 7 and %s", publisher.publishedFence, publisher.deadline, early)
+	}
+}
+
+type recordingProductDeadline struct {
+	fence          uint64
+	publishedFence uint64
+	deadline       time.Time
+}
+
+func (p *recordingProductDeadline) Fence(context.Context) (uint64, error) {
+	return p.fence, nil
+}
+
+func (p *recordingProductDeadline) SetWakeDeadline(fence uint64, deadline time.Time) error {
+	p.publishedFence = fence
+	p.deadline = deadline
+	return nil
+}
+
 func reminderStore(t *testing.T) *memory.Store {
 	t.Helper()
 	source := memory.New()
