@@ -226,6 +226,14 @@ func renderSlackInline(text string) string {
 		case '\n':
 			output.WriteString("<br>\n")
 			offset++
+		case '\\':
+			if offset+1 < len(text) && strings.ContainsRune(`\*_~`+"`", rune(text[offset+1])) {
+				output.WriteString(html.EscapeString(text[offset+1 : offset+2]))
+				offset += 2
+				continue
+			}
+			output.WriteByte('\\')
+			offset++
 		case '`':
 			fence := 1
 			if strings.HasPrefix(text[offset:], "```") {
@@ -289,7 +297,7 @@ func renderSlackInline(text string) string {
 			output.WriteByte('>')
 			offset = end + 1
 		default:
-			next := strings.IndexAny(text[offset:], "\n`<*_~")
+			next := strings.IndexAny(text[offset:], "\n\\`<*_~")
 			if next <= 0 {
 				next = len(text) - offset
 			}

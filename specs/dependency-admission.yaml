@@ -529,5 +529,18 @@ entries:
     checksum: sha512-8nKv6+0RJSL9FE4jYOEGXnPeM/Hg12qZpmqzZjRh3qM0Y7c3z1mrOTfFLids72RDQYVh9WpLEfR5WdpNX4fkig==
     provenance: npm-registry-and-vcs-tag
     license: Apache-2.0
-    purpose: Chromium browser qualification
+    purpose: Chromium, Firefox, and WebKit browser qualification
+    runtime: false
+  - id: npm/@axe-core/playwright
+    kind: npm-package
+    canonical: "@axe-core/playwright"
+    source: https://github.com/dequelabs/axe-core-npm
+    version: 4.12.1
+    revision: 5f587f3a6a8aebfd1ca1bfdde5d93d6b4e1abe8f
+    published_at: 2026-06-23T15:31:17Z
+    evidence: https://registry.npmjs.org/@axe-core%2fplaywright/4.12.1
+    checksum: sha512-rMd7xriptqKpP+w5265i4Hdkv2X5kbu6uiBi/B2I7uf3hieRBM3qDCfaKPtxfiYb2mKXfF+yLODJwIx+Jv1GDw==
+    provenance: npm-registry-attestation-and-vcs-commit
+    license: MPL-2.0
+    purpose: automated WCAG checks in the three-engine browser qualification
     runtime: false

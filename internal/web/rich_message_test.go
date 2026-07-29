@@ -7,6 +7,13 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
+func TestSlackMarkupPreservesEscapedFormattingCharacters(t *testing.T) {
+	rendered := string(renderSlackMrkdwn(`release day ¯\\\_(ツ)\_/¯ and \*literal\*`))
+	if rendered != `release day ¯\_(ツ)_/¯ and *literal*` {
+		t.Fatalf("rendered=%q", rendered)
+	}
+}
+
 func TestActionElementListProjectsSupportedBlockKitControlsWithoutInertFakes(t *testing.T) {
 	blocks := decodeMessageBlocks(`[
 		{"type":"actions","block_id":"controls","elements":[

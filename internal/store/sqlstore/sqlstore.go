@@ -3997,7 +3997,7 @@ func (s *Store) CreateAppInstallation(ctx context.Context, value domain.AppInsta
 	if value.AppID == "" || value.WorkspaceID == "" || value.CreatedAt.IsZero() {
 		return store.ErrInvalidAppApproval
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET enabled = excluded.enabled`, value.AppID, value.WorkspaceID, boolInt(value.Enabled), value.CreatedAt.UTC().UnixNano())
+	_, err := s.db.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET created_at = CASE WHEN app_installations.enabled = 0 AND excluded.enabled = 1 THEN excluded.created_at ELSE app_installations.created_at END, enabled = excluded.enabled`, value.AppID, value.WorkspaceID, boolInt(value.Enabled), value.CreatedAt.UTC().UnixNano())
 	return err
 }
 
@@ -4848,7 +4848,7 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	// state transition. Keeping this in the same transaction prevents an
 	// installation write failure from consuming the one-time code while
 	// leaving an orphaned live token behind.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET enabled = 1`, appID, grant.WorkspaceID, now.UnixNano()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET created_at = CASE WHEN app_installations.enabled = 0 THEN excluded.created_at ELSE app_installations.created_at END, enabled = 1`, appID, grant.WorkspaceID, now.UnixNano()); err != nil {
 		return domain.OAuthToken{}, err
 	}
 	token.AccessToken = accessToken

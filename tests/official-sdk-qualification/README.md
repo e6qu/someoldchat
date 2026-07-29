@@ -4,8 +4,8 @@ Qualification is fail-closed. A suite is recorded as passed only after the
 exact pinned artifact has been installed and its executable suite has passed
 against the seeded local fixture.
 
-The Node Web API suite uses `@slack/web-api` 7.19.0, the Node Bolt suite uses
-`@slack/bolt` 4.7.3, the Node Socket Mode suite uses `@slack/socket-mode`
+The Node Web API suite uses `@slack/web-api` 8.0.0, the Node Bolt suite uses
+`@slack/bolt` 5.0.0, the Node Socket Mode suite uses `@slack/socket-mode`
 3.0.0, and the Node Real Time Messaging suite uses `@slack/rtm-api` 7.0.4.
 The Python Web API and Socket Mode suites use `slack-sdk` 3.43.0, the
 Python Bolt suite uses `slack-bolt` 1.28.0, the Java Web API and Socket Mode
@@ -19,6 +19,12 @@ must survive, while explicit empty arrays must remove them. They also parse the
 documented `search.messages` channel, user, permalink, total, legacy paging, and
 pagination fields, including Slack's `cursor="*"` first-page convention and
 100-result clamp.
+
+The official Node Socket Mode client also consumes a manifest-derived slash
+command envelope whose `should_escape` option resolves a user mention, public
+channel, and URL. This proves the escaped payload survives the real SDK's
+envelope parser and acknowledgement path rather than only a hand-authored Go
+fixture.
 
 To run the reproducible Node, Python, and Java suites with artifact hash
 verification, run:
@@ -36,7 +42,7 @@ The individual suite commands remain useful for debugging:
 
 ```sh
 go run ./tests/official-sdk-qualification/node-web-api/fixture
-npm install --prefix /tmp/soc-sdk-web-run @slack/web-api@7.19.0
+npm install --prefix /tmp/soc-sdk-web-run @slack/web-api@8.0.0
 cp tests/official-sdk-qualification/node-web-api/qualification.mjs /tmp/soc-sdk-web-run/qualification.mjs
 node /tmp/soc-sdk-web-run/qualification.mjs
 

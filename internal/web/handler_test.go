@@ -456,7 +456,7 @@ func TestActivityAggregatesJoinedUnreadConversationsAndMentions(t *testing.T) {
 	requireContains(t, "activity navigation", workspace,
 		`id="activity-link"`,
 		`href="/app/activity?channel=Cdev"`,
-		`aria-keyshortcuts="Control+Shift+M Meta+Shift+M"`,
+		`aria-keyshortcuts="Control+3 Control+Shift+3"`,
 	)
 	activity := get(t, mux, "/app/activity?channel=Cdev")
 	if activity.Code != http.StatusOK {
@@ -472,7 +472,7 @@ func TestActivityAggregatesJoinedUnreadConversationsAndMentions(t *testing.T) {
 		"Please review this",
 		`class="slack-mention">@Ada Developer</span>`,
 	)
-	requireContains(t, "activity shortcut", progressiveEnhancementScript, "event.shiftKey", "activityLink", "window.location.assign(activityHref)")
+	requireContains(t, "activity shortcut", progressiveEnhancementScript, "key==='3'", "activityLink", "window.location.assign(activityHref)")
 }
 
 // TestNarrowNavigationKeepsConversationNamesReachable covers the responsive
@@ -1879,7 +1879,7 @@ func TestWorkspaceDiscoversAndDispatchesInstalledAppShortcuts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifest := `{"display_information":{"name":"Tickets"},"features":{"shortcuts":[{"name":"Create ticket","callback_id":"create_ticket","description":"Create a ticket","type":"global"},{"name":"Attach ticket","callback_id":"attach_ticket","description":"Attach this message","type":"message"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
+	manifest := `{"display_information":{"name":"Tickets"},"features":{"slash_commands":[{"command":"/ticket","description":"Create a ticket","usage_hint":"summary","should_escape":true}],"shortcuts":[{"name":"Create ticket","callback_id":"create_ticket","description":"Create a ticket","type":"global"},{"name":"Attach ticket","callback_id":"attach_ticket","description":"Attach this message","type":"message"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
 	if err := s.CreateApp(context.Background(), domain.App{
 		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Tickets", ClientID: "shortcut-client",
 		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
@@ -1900,8 +1900,18 @@ func TestWorkspaceDiscoversAndDispatchesInstalledAppShortcuts(t *testing.T) {
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "app shortcuts", body,
 		"Shortcuts", "Create ticket", "Create a ticket", "More actions", "Attach ticket", "Attach this message",
+		`aria-label="Shortcuts and slash commands"`, `data-slash-command="/ticket"`, "summary", "Tickets",
+		`data-slash-command="/shrug"`,
 		`action="/app/shortcut"`, `name="app_id" value="A1"`, `name="callback_id" value="create_ticket"`,
 	)
+
+	builtIn := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "text": {"/shrug release day"},
+	}.Encode(), true)
+	if builtIn.Code != http.StatusOK {
+		t.Fatalf("built-in status=%d body=%s", builtIn.Code, builtIn.Body)
+	}
+	requireContains(t, "built-in slash response", builtIn.Body.String(), `release day ¯\_(ツ)_/¯`)
 
 	response := postForm(t, mux, "/app/shortcut", url.Values{
 		"_csrf": {auth.CSRFToken("session")}, "channel": {"Cdev"}, "app_id": {"A1"}, "callback_id": {"create_ticket"},

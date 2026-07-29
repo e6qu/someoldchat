@@ -266,7 +266,7 @@ sdk-qualification:
 
 browser-qualification:
 	npm ci --prefix tests/browser
-	npx --prefix tests/browser playwright install --with-deps chromium
+	npx --prefix tests/browser playwright install --with-deps chromium firefox webkit
 	npm test --prefix tests/browser
 
 shauth-sso-qualification:

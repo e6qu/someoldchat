@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,6 +75,12 @@ func (m Messages) DispatchSlashCommand(ctx context.Context, workspaceID domain.W
 	snapshot, parsed, slash, err := m.slashCommandApp(ctx, workspaceID, command)
 	if err != nil {
 		return err
+	}
+	if slash.ShouldEscape {
+		text, err = m.escapeSlashCommandText(ctx, workspaceID, userID, text)
+		if err != nil {
+			return err
+		}
 	}
 	if !parsed.SocketModeEnabled && slash.URL == "" {
 		return ErrAppInteractionUnavailable
@@ -789,16 +796,21 @@ func (m Messages) ListAppShortcuts(ctx context.Context, workspaceID domain.Works
 		return nil, err
 	}
 	shortcutType = strings.TrimSpace(shortcutType)
-	if shortcutType != "global" && shortcutType != "message" {
-		return nil, store.InvalidArgument("shortcut type must be global or message")
+	if shortcutType != "global" && shortcutType != "message" && shortcutType != "slash" {
+		return nil, store.InvalidArgument("shortcut type must be global, message, or slash")
 	}
 	snapshots, err := m.Store.ListInstalledApps(ctx)
 	if err != nil {
 		return nil, err
 	}
 	var result []domain.AppShortcut
+	type slashCandidate struct {
+		shortcut    domain.AppShortcut
+		installedAt time.Time
+	}
+	slashCommands := make(map[string]slashCandidate)
 	for _, snapshot := range snapshots {
-		installed, err := m.appInstalledInWorkspace(ctx, snapshot.App.ID, workspaceID)
+		installation, installed, err := m.appInstallationInWorkspace(ctx, snapshot.App.ID, workspaceID)
 		if err != nil {
 			return nil, err
 		}
@@ -806,7 +818,28 @@ func (m Messages) ListAppShortcuts(ctx context.Context, workspaceID domain.Works
 			continue
 		}
 		parsed, problems := appmanifest.Parse(snapshot.Manifest)
-		if len(problems) != 0 || !parsed.InteractivityEnabled || !containsString(parsed.BotScopes, "commands") {
+		if len(problems) != 0 || !containsString(parsed.BotScopes, "commands") {
+			continue
+		}
+		if shortcutType == "slash" {
+			for _, command := range parsed.SlashCommands {
+				candidate := slashCandidate{
+					shortcut: domain.AppShortcut{
+						AppID: snapshot.App.ID, AppName: snapshot.App.Name, Name: command.Command,
+						Description: command.Description, Type: "slash", Command: command.Command,
+						UsageHint: command.UsageHint, ShouldEscape: command.ShouldEscape,
+					},
+					installedAt: installation.CreatedAt,
+				}
+				current, exists := slashCommands[command.Command]
+				if !exists || candidate.installedAt.After(current.installedAt) ||
+					(candidate.installedAt.Equal(current.installedAt) && string(candidate.shortcut.AppID) > string(current.shortcut.AppID)) {
+					slashCommands[command.Command] = candidate
+				}
+			}
+			continue
+		}
+		if !parsed.InteractivityEnabled {
 			continue
 		}
 		for _, shortcut := range parsed.Shortcuts {
@@ -818,7 +851,16 @@ func (m Messages) ListAppShortcuts(ctx context.Context, workspaceID domain.Works
 			}
 		}
 	}
+	if shortcutType == "slash" {
+		result = make([]domain.AppShortcut, 0, len(slashCommands))
+		for _, candidate := range slashCommands {
+			result = append(result, candidate.shortcut)
+		}
+	}
 	slices.SortFunc(result, func(left, right domain.AppShortcut) int {
+		if order := strings.Compare(strings.ToLower(left.Command), strings.ToLower(right.Command)); order != 0 {
+			return order
+		}
 		if order := strings.Compare(strings.ToLower(left.AppName), strings.ToLower(right.AppName)); order != 0 {
 			return order
 		}
@@ -1216,13 +1258,13 @@ func (m Messages) slashCommandApp(ctx context.Context, workspaceID domain.Worksp
 	var matchedSnapshot domain.AppManifestSnapshot
 	var matchedParsed appmanifest.Parsed
 	var matchedCommand appmanifest.SlashCommand
-	matches := 0
+	var installedAt time.Time
 	for _, snapshot := range snapshots {
 		parsed, problems := appmanifest.Parse(snapshot.Manifest)
 		if len(problems) != 0 {
 			continue
 		}
-		installed, err := m.appInstalledInWorkspace(ctx, snapshot.App.ID, workspaceID)
+		installation, installed, err := m.appInstallationInWorkspace(ctx, snapshot.App.ID, workspaceID)
 		if err != nil {
 			return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, appmanifest.SlashCommand{}, err
 		}
@@ -1231,16 +1273,16 @@ func (m Messages) slashCommandApp(ctx context.Context, workspaceID domain.Worksp
 		}
 		for _, candidate := range parsed.SlashCommands {
 			if candidate.Command == command {
-				matches++
-				matchedSnapshot, matchedParsed, matchedCommand = snapshot, parsed, candidate
+				if matchedSnapshot.App.ID == "" || installation.CreatedAt.After(installedAt) ||
+					(installation.CreatedAt.Equal(installedAt) && string(snapshot.App.ID) > string(matchedSnapshot.App.ID)) {
+					matchedSnapshot, matchedParsed, matchedCommand = snapshot, parsed, candidate
+					installedAt = installation.CreatedAt
+				}
 			}
 		}
 	}
-	if matches == 0 {
+	if matchedSnapshot.App.ID == "" {
 		return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, appmanifest.SlashCommand{}, ErrSlashCommandNotFound
-	}
-	if matches > 1 {
-		return domain.AppManifestSnapshot{}, appmanifest.Parsed{}, appmanifest.SlashCommand{}, store.ErrConflict
 	}
 	return matchedSnapshot, matchedParsed, matchedCommand, nil
 }
@@ -1271,16 +1313,119 @@ func (m Messages) installedApp(ctx context.Context, workspaceID domain.Workspace
 }
 
 func (m Messages) appInstalledInWorkspace(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) (bool, error) {
+	_, installed, err := m.appInstallationInWorkspace(ctx, appID, workspaceID)
+	return installed, err
+}
+
+func (m Messages) appInstallationInWorkspace(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) (domain.AppInstallation, bool, error) {
 	installations, err := m.Store.ListAppInstallations(ctx, appID)
 	if err != nil {
-		return false, err
+		return domain.AppInstallation{}, false, err
 	}
 	for _, installation := range installations {
 		if installation.WorkspaceID == workspaceID && installation.Enabled {
-			return true, nil
+			return installation, true, nil
 		}
 	}
-	return false, nil
+	return domain.AppInstallation{}, false, nil
+}
+
+var (
+	slashUserReference    = regexp.MustCompile(`(^|[[:space:](])@([[:alnum:]_.-]+)`)
+	slashChannelReference = regexp.MustCompile(`(^|[[:space:](])#([[:alnum:]_-]+)`)
+	slashURLReference     = regexp.MustCompile(`https?://[^\s<>]+`)
+)
+
+// escapeSlashCommandText implements the manifest's should_escape contract
+// before either HTTP or Socket Mode delivery. Slack resolves human-readable
+// mentions to stable IDs and wraps links; keeping this in the service makes
+// local and remote composition produce the same app payload.
+func (m Messages) escapeSlashCommandText(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, text string) (string, error) {
+	users := make(map[string]domain.UserID)
+	var cursor domain.Cursor
+	for {
+		page, err := m.Store.ListUsers(ctx, workspaceID, domain.PageRequest{Limit: 200, Cursor: cursor})
+		if err != nil {
+			return "", err
+		}
+		for _, user := range page.Users {
+			if user.Deleted {
+				continue
+			}
+			for _, name := range []string{user.Name, user.Profile.DisplayName} {
+				if name = strings.ToLower(strings.TrimSpace(name)); name != "" && !strings.ContainsAny(name, " \t\r\n") {
+					users[name] = user.ID
+				}
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	channels := make(map[string]domain.Conversation)
+	cursor = ""
+	for {
+		page, err := m.Store.ListConversations(ctx, workspaceID, userID, domain.ConversationListRequest{Limit: 200, Cursor: cursor})
+		if err != nil {
+			return "", err
+		}
+		for _, conversation := range page.Conversations {
+			if conversation.Name != "" && !conversation.IsDirect && !conversation.IsGroupDirect {
+				channels[strings.ToLower(conversation.Name)] = conversation
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	text = slashUserReference.ReplaceAllStringFunc(text, func(match string) string {
+		prefixLength := 0
+		if match[0] != '@' {
+			prefixLength = 1
+		}
+		name := strings.ToLower(match[prefixLength+1:])
+		if id := users[name]; id != "" {
+			return match[:prefixLength] + "<@" + string(id) + ">"
+		}
+		return match
+	})
+	text = slashChannelReference.ReplaceAllStringFunc(text, func(match string) string {
+		prefixLength := 0
+		if match[0] != '#' {
+			prefixLength = 1
+		}
+		name := strings.ToLower(match[prefixLength+1:])
+		conversation, ok := channels[name]
+		if !ok {
+			return match
+		}
+		if conversation.IsPrivate {
+			return match[:prefixLength] + "<#" + string(conversation.ID) + "|>"
+		}
+		return match[:prefixLength] + "<#" + string(conversation.ID) + "|" + conversation.Name + ">"
+	})
+	indices := slashURLReference.FindAllStringIndex(text, -1)
+	if len(indices) == 0 {
+		return strings.TrimSpace(text), nil
+	}
+	var escaped strings.Builder
+	last := 0
+	for _, index := range indices {
+		escaped.WriteString(text[last:index[0]])
+		link := text[index[0]:index[1]]
+		if index[0] > 0 && text[index[0]-1] == '<' {
+			escaped.WriteString(link)
+		} else {
+			escaped.WriteByte('<')
+			escaped.WriteString(link)
+			escaped.WriteByte('>')
+		}
+		last = index[1]
+	}
+	escaped.WriteString(text[last:])
+	return strings.TrimSpace(escaped.String()), nil
 }
 
 func (m Messages) postSignedAppForm(ctx context.Context, target string, app domain.App, form url.Values) ([]byte, error) {

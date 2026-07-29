@@ -105,7 +105,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	manifest := `{"display_information":{"name":"Interactions"},"features":{"slash_commands":[{"command":"/deploy","url":"` + receiver.URL + `","description":"Deploy"}],"shortcuts":[{"name":"Create deployment","callback_id":"create_deployment","description":"Create a deployment","type":"global"},{"name":"Attach deployment","callback_id":"attach_deployment","description":"Attach this message","type":"message"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"` + receiver.URL + `","message_menu_options_url":"` + receiver.URL + `"}}}`
+	manifest := `{"display_information":{"name":"Interactions"},"features":{"slash_commands":[{"command":"/deploy","url":"` + receiver.URL + `","description":"Deploy","usage_hint":"environment [runbook]","should_escape":true}],"shortcuts":[{"name":"Create deployment","callback_id":"create_deployment","description":"Create a deployment","type":"global"},{"name":"Attach deployment","callback_id":"attach_deployment","description":"Attach this message","type":"message"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"interactivity":{"is_enabled":true,"request_url":"` + receiver.URL + `","message_menu_options_url":"` + receiver.URL + `"}}}`
 	if err := repository.CreateApp(ctx,
 		domain.App{
 			ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Interactions", ClientID: "client",
@@ -126,7 +126,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	messages := Messages{Store: repository, AppCredentialKey: key, AppHTTPClient: receiver.Client()}
 
-	if err := messages.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/deploy", "production", "https://chat.example.test"); err != nil {
+	if err := messages.DispatchSlashCommand(ctx, "T1", "U1", "C1", "", "/deploy", "ask @alice in #general https://example.com/runbook", "https://chat.example.test"); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -136,7 +136,7 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	for field, want := range map[string]string{
 		"api_app_id": "A1", "team_id": "T1", "team_domain": "test",
 		"channel_id": "C1", "channel_name": "general", "user_id": "U1",
-		"user_name": "alice", "command": "/deploy", "text": "production",
+		"user_name": "alice", "command": "/deploy", "text": "ask <@U1> in <#C1|general> <https://example.com/runbook>",
 		"token": verificationToken,
 	} {
 		if got := slash.form.Get(field); got != want {
@@ -212,6 +212,11 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := messages.DispatchAppShortcut(ctx, "T1", "U1", "C1", "A1", "create_deployment", "", "https://chat.example.test"); err != nil {
 		t.Fatal(err)
+	}
+	slashCommands, err := messages.ListAppShortcuts(ctx, "T1", "U1", "slash")
+	if err != nil || len(slashCommands) != 1 || slashCommands[0].Command != "/deploy" ||
+		slashCommands[0].UsageHint != "environment [runbook]" || !slashCommands[0].ShouldEscape {
+		t.Fatalf("slash commands=%+v err=%v", slashCommands, err)
 	}
 	if err := messages.DispatchAppShortcut(ctx, "T1", "U1", "C1", "A1", "attach_deployment", original.ID, "https://chat.example.test"); err != nil {
 		t.Fatal(err)
@@ -366,6 +371,58 @@ func TestHTTPAppInteractionsUseSignedSlackPayloadsAndDurableCapabilities(t *test
 	}
 	if err := messages.HandleAppResponse(ctx, responseToken, `{"response_type":"in_channel","text":"exhausted"}`); err != ErrInvalidAppResponse {
 		t.Fatalf("exhausted response URL error=%v, want %v", err, ErrInvalidAppResponse)
+	}
+}
+
+func TestSlashCommandCollisionUsesMostRecentlyInstalledApp(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Unix(1700000000, 0).UTC()
+	create := func(appID domain.AppID, installedAt time.Time) {
+		t.Helper()
+		manifest := `{"display_information":{"name":"` + string(appID) + `"},"features":{"slash_commands":[{"command":"/deploy","description":"Deploy from ` + string(appID) + `"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"socket_mode_enabled":true}}`
+		if err := repository.CreateApp(ctx, domain.App{
+			ID: appID, DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: string(appID), ClientID: "client-" + string(appID),
+			SigningSecretHash: "signing", SigningSecretCiphertext: "sealed-signing",
+			VerificationTokenHash: "verification", VerificationTokenCiphertext: "sealed-verification",
+			ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: base, UpdatedAt: base,
+		}, domain.AppManifestRevision{
+			AppID: appID, Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: base,
+		}, domain.OAuthClient{ID: "client-" + string(appID), SecretHash: "client-secret", AppID: appID}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: appID, WorkspaceID: "T1", Enabled: true, CreatedAt: installedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	create("A1", base)
+	create("A2", base.Add(time.Minute))
+	messages := Messages{Store: repository}
+
+	selected, _, _, err := messages.slashCommandApp(ctx, "T1", "/deploy")
+	if err != nil || selected.App.ID != "A2" {
+		t.Fatalf("selected=%s err=%v, want most recently installed A2", selected.App.ID, err)
+	}
+	commands, err := messages.ListAppShortcuts(ctx, "T1", "U1", "slash")
+	if err != nil || len(commands) != 1 || commands[0].AppID != "A2" {
+		t.Fatalf("commands=%+v err=%v, want only effective A2 command", commands, err)
+	}
+
+	if err := repository.UninstallApp(ctx, "T1", "A1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: base.Add(2 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	selected, _, _, err = messages.slashCommandApp(ctx, "T1", "/deploy")
+	if err != nil || selected.App.ID != "A1" {
+		t.Fatalf("selected=%s err=%v, want reinstalled A1", selected.App.ID, err)
 	}
 }
 

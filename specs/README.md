@@ -4,6 +4,7 @@ These files are normative. `MUST`, `MUST NOT`, `SHOULD`, and `MAY` have their
 usual requirements-language meanings.
 
 - [Product](product.md)
+- [Slack user journeys](journeys/README.md)
 - [Slack API and SDK compatibility](api-compatibility.md)
 - [Persistence](persistence.md)
 - [Application scale-to-zero](scale-to-zero.md)

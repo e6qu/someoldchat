@@ -761,6 +761,9 @@ type AppShortcut struct {
 	CallbackId    string                 `protobuf:"bytes,4,opt,name=callback_id,json=callbackId,proto3" json:"callback_id,omitempty"`
 	Description   string                 `protobuf:"bytes,5,opt,name=description,proto3" json:"description,omitempty"`
 	Type          string                 `protobuf:"bytes,6,opt,name=type,proto3" json:"type,omitempty"`
+	Command       string                 `protobuf:"bytes,7,opt,name=command,proto3" json:"command,omitempty"`
+	UsageHint     string                 `protobuf:"bytes,8,opt,name=usage_hint,json=usageHint,proto3" json:"usage_hint,omitempty"`
+	ShouldEscape  bool                   `protobuf:"varint,9,opt,name=should_escape,json=shouldEscape,proto3" json:"should_escape,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -835,6 +838,27 @@ func (x *AppShortcut) GetType() string {
 		return x.Type
 	}
 	return ""
+}
+
+func (x *AppShortcut) GetCommand() string {
+	if x != nil {
+		return x.Command
+	}
+	return ""
+}
+
+func (x *AppShortcut) GetUsageHint() string {
+	if x != nil {
+		return x.UsageHint
+	}
+	return ""
+}
+
+func (x *AppShortcut) GetShouldEscape() bool {
+	if x != nil {
+		return x.ShouldEscape
+	}
+	return false
 }
 
 type AppShortcutListRequest struct {
@@ -1634,7 +1658,7 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\aoptions\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AppOptionR\aoptions\"D\n" +
 	"\x12AppResponseRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12\x18\n" +
-	"\apayload\x18\x02 \x01(\tR\apayload\"\xaa\x01\n" +
+	"\apayload\x18\x02 \x01(\tR\apayload\"\x88\x02\n" +
 	"\vAppShortcut\x12\x15\n" +
 	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x19\n" +
 	"\bapp_name\x18\x02 \x01(\tR\aappName\x12\x12\n" +
@@ -1642,7 +1666,11 @@ const file_sameoldchat_chat_v1_interactions_proto_rawDesc = "" +
 	"\vcallback_id\x18\x04 \x01(\tR\n" +
 	"callbackId\x12 \n" +
 	"\vdescription\x18\x05 \x01(\tR\vdescription\x12\x12\n" +
-	"\x04type\x18\x06 \x01(\tR\x04type\"h\n" +
+	"\x04type\x18\x06 \x01(\tR\x04type\x12\x18\n" +
+	"\acommand\x18\a \x01(\tR\acommand\x12\x1d\n" +
+	"\n" +
+	"usage_hint\x18\b \x01(\tR\tusageHint\x12#\n" +
+	"\rshould_escape\x18\t \x01(\bR\fshouldEscape\"h\n" +
 	"\x16AppShortcutListRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +

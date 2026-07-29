@@ -93,7 +93,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	interactionManifest := `{"display_information":{"name":"Socket Qualification"},"features":{"slash_commands":[{"command":"/sdk-deploy","description":"Exercise Socket Mode slash commands"}],"shortcuts":[{"name":"Create SDK deployment","callback_id":"create_sdk_deployment","description":"Exercise a global shortcut","type":"global"}]},"oauth_config":{"scopes":{"bot":["chat:write","commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
+	interactionManifest := `{"display_information":{"name":"Socket Qualification"},"features":{"slash_commands":[{"command":"/sdk-deploy","description":"Exercise Socket Mode slash commands","usage_hint":"owner channel runbook","should_escape":true}],"shortcuts":[{"name":"Create SDK deployment","callback_id":"create_sdk_deployment","description":"Exercise a global shortcut","type":"global"}]},"oauth_config":{"scopes":{"bot":["chat:write","commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
 	if err := store.CreateApp(context.Background(),
 		domain.App{ID: "A2", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Socket Qualification", ClientID: "interaction-client", SigningSecretHash: domain.HashToken("interaction-signing"), SigningSecretCiphertext: interactionSigningCiphertext, VerificationTokenHash: domain.HashToken("interaction-verification"), VerificationTokenCiphertext: interactionVerificationCiphertext, ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now},
 		domain.AppManifestRevision{AppID: "A2", Version: 1, Manifest: interactionManifest, CreatedBy: "U1", CreatedAt: now},
@@ -239,7 +239,7 @@ func main() {
 		_, _ = w.Write([]byte(payload))
 	})
 	mux.HandleFunc("POST /qualification/socket-slash", func(w http.ResponseWriter, r *http.Request) {
-		if err := messages.DispatchSlashCommand(r.Context(), "T1", "U1", "C1", "", "/sdk-deploy", "production", "http://127.0.0.1:18080"); err != nil {
+		if err := messages.DispatchSlashCommand(r.Context(), "T1", "U1", "C1", "", "/sdk-deploy", "ask @alice in #general https://example.com/runbook", "http://127.0.0.1:18080"); err != nil {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}

@@ -1567,6 +1567,9 @@ func (s *Store) CreateAppInstallation(_ context.Context, value domain.AppInstall
 		if existing.Enabled == value.Enabled {
 			return nil
 		}
+		if !existing.Enabled && value.Enabled {
+			existing.CreatedAt = value.CreatedAt
+		}
 		existing.Enabled = value.Enabled
 		s.appInstallations[key] = existing
 		return nil
