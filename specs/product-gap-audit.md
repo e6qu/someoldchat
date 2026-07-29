@@ -18,6 +18,11 @@ Measured on 2026-07-29:
   file upload that becomes one idempotent `file_share` history message. Socket
   Mode now consumes a real posted message projected after installed-bot
   visibility checks rather than a hand-authored callback fixture;
+- the official SDK qualification fixture records the exact Web API method paths
+  emitted by the pinned Node, Python, and Java clients, while the Deno runtime
+  suite records its separately verified completion requests. The fail-closed
+  comparison currently observes all 223 methods claimed at `sdk-compatible` or
+  above (213 current and ten retained legacy methods);
 - 27 Playwright scenarios cite 48 of the normative catalog's 101 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
@@ -105,9 +110,10 @@ App-platform work must remain dependency-ordered:
 
 ## Qualification gaps
 
-Official SDK qualification proves that genuine clients can serialize requests
-and parse SameOldChat responses. It does not prove live Slack equivalence. The
-remaining evidence layers are:
+Official SDK qualification now proves, method by method, that genuine clients
+issued a request and parsed SameOldChat's response; a large neighboring test
+can no longer lend SDK evidence to an uncalled method. It still does not prove
+live Slack equivalence. The remaining evidence layers are:
 
 1. pin per-method current argument/response/error schemas, not only the current
    method index;

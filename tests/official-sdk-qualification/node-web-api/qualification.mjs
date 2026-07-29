@@ -170,6 +170,19 @@ const createdListItem = await client.apiCall("slackLists.items.create", {
 });
 assert.equal(createdListItem.ok, true);
 assert.match(createdListItem.item.id, /^Rec/);
+const listItemInfo = await client.apiCall("slackLists.items.info", {
+	list_id: createdList.list.id,
+	id: createdListItem.item.id,
+});
+assert.equal(listItemInfo.ok, true);
+assert.equal(listItemInfo.item.id, createdListItem.item.id);
+const updatedList = await client.apiCall("slackLists.update", {
+	id: createdList.list.id,
+	name: "SDK qualification list updated",
+	todo_mode: true,
+});
+assert.equal(updatedList.ok, true);
+assert.equal(updatedList.list.name, "SDK qualification list updated");
 const listedItems = await client.apiCall("slackLists.items.list", { list_id: createdList.list.id, limit: 10 });
 assert.equal(listedItems.ok, true);
 assert.equal(listedItems.items.length, 1);
@@ -181,6 +194,24 @@ assert.equal((await client.apiCall("slackLists.access.set", {
 	list_id: createdList.list.id,
 	access_level: "read",
 	channel_ids: ["C1"],
+})).ok, true);
+assert.equal((await client.apiCall("slackLists.access.delete", {
+	list_id: createdList.list.id,
+	channel_ids: ["C1"],
+})).ok, true);
+const listItemTwo = await client.apiCall("slackLists.items.create", {
+	list_id: createdList.list.id,
+	initial_fields: [{ column_id: "title", value: "second row" }],
+});
+const listItemThree = await client.apiCall("slackLists.items.create", {
+	list_id: createdList.list.id,
+	initial_fields: [{ column_id: "title", value: "third row" }],
+});
+assert.equal(listItemTwo.ok, true);
+assert.equal(listItemThree.ok, true);
+assert.equal((await client.apiCall("slackLists.items.deleteMultiple", {
+	list_id: createdList.list.id,
+	ids: [listItemTwo.item.id, listItemThree.item.id],
 })).ok, true);
 const startedListDownload = await client.apiCall("slackLists.download.start", { list_id: createdList.list.id, include_archived: true });
 assert.equal(startedListDownload.ok, true);

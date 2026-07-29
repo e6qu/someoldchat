@@ -300,6 +300,14 @@ file that loses its observation date or official Slack source. The remaining
 to full compatibility without the domain, transport, accessibility, visual,
 and differential layers required by the catalog.
 
+SDK evidence is now measured at the HTTP boundary too. The pinned official
+Node, Python, and Java clients record every `/api/{method}` path they actually
+request, and the Deno runtime records its two verified function-completion
+requests at its own receiver. `make sdk-qualification` fails if any operation
+claimed at `sdk-compatible` or above is absent. The current result is 223 of
+223 claimed methods observed (213 current plus ten retained legacy methods);
+this proves SDK serialization/decoding only, not live Slack equivalence.
+
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
