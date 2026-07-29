@@ -71,6 +71,47 @@ func TestConversationNameMigrationRepairsDuplicatesBeforeAddingConstraint(t *tes
 	}
 }
 
+func TestVersion85MigrationAddsViewAppIDBeforeCreatingItsIndex(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "version-85-views.sqlite")
+	first, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `DROP INDEX views_published_user_app`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `ALTER TABLE views DROP COLUMN app_id`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `UPDATE schema_migrations SET version = 85 WHERE version = ?`, schemaVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	columns, err := migrated.tableColumns(ctx, migrated.db, "views")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !columns["app_id"] {
+		t.Fatal("version 85 migration did not add views.app_id")
+	}
+	var indexes int
+	if err := migrated.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'views_published_user_app'`).Scan(&indexes); err != nil {
+		t.Fatal(err)
+	}
+	if indexes != 1 {
+		t.Fatalf("views_published_user_app indexes = %d, want 1", indexes)
+	}
+}
+
 func TestSQLiteFindUserByEmailIsCaseInsensitiveAndMigrated(t *testing.T) {
 	s, err := Open(context.Background(), "file:email_lookup?mode=memory&cache=shared")
 	if err != nil {
