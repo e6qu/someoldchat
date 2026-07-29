@@ -986,12 +986,15 @@ type AppOption struct {
 }
 
 type AppShortcut struct {
-	AppID       AppID
-	AppName     string
-	Name        string
-	CallbackID  string
-	Description string
-	Type        string
+	AppID        AppID
+	AppName      string
+	Name         string
+	CallbackID   string
+	Description  string
+	Type         string
+	Command      string
+	UsageHint    string
+	ShouldEscape bool
 }
 
 // AppConfigurationToken authenticates the manifest-management APIs. Only

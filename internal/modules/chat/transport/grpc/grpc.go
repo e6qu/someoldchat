@@ -2314,6 +2314,7 @@ func (r Remote) ListAppShortcuts(ctx context.Context, workspaceID domain.Workspa
 		values = append(values, domain.AppShortcut{
 			AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), Name: value.GetName(),
 			CallbackID: value.GetCallbackId(), Description: value.GetDescription(), Type: value.GetType(),
+			Command: value.GetCommand(), UsageHint: value.GetUsageHint(), ShouldEscape: value.GetShouldEscape(),
 		})
 	}
 	return values, nil
@@ -4439,6 +4440,7 @@ func (s *Server) ListAppShortcuts(ctx context.Context, input *chatv1.AppShortcut
 		out.Shortcuts = append(out.Shortcuts, &chatv1.AppShortcut{
 			AppId: string(value.AppID), AppName: value.AppName, Name: value.Name,
 			CallbackId: value.CallbackID, Description: value.Description, Type: value.Type,
+			Command: value.Command, UsageHint: value.UsageHint, ShouldEscape: value.ShouldEscape,
 		})
 	}
 	return out, nil

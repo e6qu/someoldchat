@@ -33,6 +33,7 @@ so every inferred or observed behavior must retain its provenance.
 ## Governing specifications
 
 - [Product specification](specs/product.md)
+- [Slack user-journey contract](specs/journeys/README.md)
 - [API compatibility specification](specs/api-compatibility.md)
 - [Persistence specification](specs/persistence.md)
 - [Scale-to-zero specification](specs/scale-to-zero.md)
@@ -239,24 +240,35 @@ five `assistant.*`, one `auth.*`, ten `conversations.*`, six `functions.*`, one
 Before another breadth wave, complete the following evidence-backed work in
 order:
 
-1. report current and retained-legacy coverage separately, attach executable
+1. maintain the normative Slack-matching journey catalog under
+   `specs/journeys/`, map every browser/API/SDK/differential test to stable
+   journey IDs, and keep implementation coverage in the separate gap audit;
+2. report current and retained-legacy coverage separately, attach executable
    method-level evidence to compatibility claims, allow audited corrections,
    and repair stale SDK/event-platform documentation;
-2. make scheduled messages token-isolated and app-attributed, implement Slack's
+3. make scheduled messages token-isolated and app-attributed, implement Slack's
    time-window, quota, pagination, thread, and error contracts, run scheduling
    in every worker delivery mode across all workspaces, persist terminal
    failures, and deploy a real worker process;
-3. correct Slack keyboard mappings and slash-command semantics, including
+4. correct Slack keyboard mappings and slash-command semantics, including
    `response_url` authorization, `should_escape`, command discovery, built-in
    commands, and realistic human/bot qualification identities;
-4. add scheduled-send, reminder execution, Drafts & sent, Later, and full
+5. add scheduled-send, reminder execution, Drafts & sent, Later, and full
    Activity journeys to the first-party client;
-5. audit every claimed Web API method's current arguments, authorization,
+6. audit every claimed Web API method's current arguments, authorization,
    success and error schemas, pagination, rate limits, and official SDK
    behavior, beginning with `chat.postMessage` and file uploads;
-6. qualify Chromium, Firefox, and WebKit with automated accessibility and visual
+7. qualify Chromium, Firefox, and WebKit with automated accessibility and visual
    comparison, then add opt-in differential runs against a dedicated Slack
    developer workspace.
+
+Current sweep status (2026-07-29): the normative catalog and stable-ID mapping
+for all 25 first-party browser journeys are in place; Slack web keyboard and
+slash-command discovery/escaping semantics are corrected; and the journeys now
+qualify in Chromium, Firefox, and WebKit with representative automated WCAG
+checks. Visual baselines, manual assistive-technology evidence, complete
+API/SDK-to-journey mapping, and live-Slack differential runs remain explicit
+work rather than inferred compatibility.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison

@@ -89,6 +89,9 @@ message AppShortcut {
   string callback_id = 4;
   string description = 5;
   string type = 6;
+  string command = 7;
+  string usage_hint = 8;
+  bool should_escape = 9;
 }
 
 message AppShortcutListRequest {

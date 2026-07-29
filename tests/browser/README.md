@@ -1,7 +1,7 @@
 # Browser qualification
 
-This suite runs the seeded local application in Chromium and exercises the
-browser journey that server-side tests cannot observe: session-authenticated
+This suite runs 25 seeded journeys in Chromium, Firefox, and WebKit and
+exercises behavior that server-side tests cannot observe: session-authenticated
 workspace entry, public-channel preview and joining, message posting with the
 advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
 Slack-style message focus, chronological arrow/Home/End navigation, and
@@ -18,6 +18,13 @@ reload, does not invent a sign-in route when the local fixture has no provider,
 and verifies the revoked session cannot reopen a protected page. Provider-backed
 qualification separately verifies the configured sign-in destination.
 
+Every test title carries one or more stable IDs from the normative
+[Slack user-journey catalog](../../specs/journeys/README.md). The suite also
+runs `@axe-core/playwright` 4.12.1 against the desktop workspace, the
+conversation-switcher dialog, and a 320-pixel narrow viewport. Those automated
+WCAG 2.0/2.1 A/AA and WCAG 2.2 AA checks complement, but do not replace, manual
+screen-reader, keyboard, zoom, and live-Slack comparison evidence.
+
 Run it from the repository root:
 
 ```sh
@@ -26,11 +33,13 @@ make browser-qualification
 
 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` may point at an already-installed
 Chromium-compatible executable. This is an explicit browser coordinate for
-developer workstations; CI continues to install and run the lockfile-matched
-Playwright Chromium build.
+developer workstations; CI otherwise installs and runs the lockfile-matched
+Playwright browser builds.
 
 The suite uses the pinned Playwright version in `package.json` and the lock
-file. It starts `cmd/server` with the local in-memory store and a disposable
+file. The explicit Chromium executable override does not weaken Firefox or
+WebKit qualification; those engines always use Playwright's lockfile-matched
+builds. It starts `cmd/server` with the local in-memory store and a disposable
 browser session. It does not test a production deployment or use a remote
 authorization provider.
 

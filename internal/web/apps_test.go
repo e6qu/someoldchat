@@ -48,6 +48,10 @@ func TestDeveloperAppConsoleCoversCreateEditInstallTokensAndDelete(t *testing.T)
 		t.Fatalf("reload status=%d body=%s", reloaded.Code, reloaded.Body)
 	}
 	requireMissing(t, "reloaded app", reloaded.Body.String(), "Save these app credentials now", "Client secret", "Signing secret")
+	retainedMethod := postForm(t, mux, "/app/developer/apps?app="+url.QueryEscape(string(appID)), "", false)
+	if retainedMethod.Code != http.StatusSeeOther || retainedMethod.Header().Get("Location") != "/app/developer/apps?app="+url.QueryEscape(string(appID)) {
+		t.Fatalf("retained-method reload status=%d location=%q body=%s", retainedMethod.Code, retainedMethod.Header().Get("Location"), retainedMethod.Body)
+	}
 
 	updatedManifest := strings.Replace(manifest, `"Alerts"`, `"Incident alerts"`, 1)
 	updated := postForm(t, mux, "/app/developer/apps/update", url.Values{"app_id": {string(appID)}, "manifest": {updatedManifest}}.Encode(), false)

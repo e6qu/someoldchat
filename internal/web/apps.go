@@ -35,7 +35,13 @@ const starterAppManifest = `{
   }
 }`
 
-const developerAppsScript = `<script>(function(){var secret=document.querySelector('[data-one-time-secret][data-return]');if(!secret||!window.history||typeof window.history.replaceState!=='function')return;var target=secret.getAttribute('data-return');if(typeof target!=='string'||target.charAt(0)!=='/'||target.charAt(1)==='/')return;window.history.replaceState(null,'',target)})();</script>`
+// A one-time credential is rendered in the POST response because its plaintext
+// cannot be recovered for a later GET. replaceState alone changed the visible
+// URL but WebKit retained the POST method for reload. Replacing the POST entry
+// and then pushing a same-document GET-shaped entry makes refresh fetch the
+// safe app page. If Back reaches the replaced entry, immediately navigating to
+// that safe GET prevents the cached secret document from resurfacing.
+const developerAppsScript = `<script>(function(){var secret=document.querySelector('[data-one-time-secret][data-return]');if(!secret||!window.history||typeof window.history.replaceState!=='function'||typeof window.history.pushState!=='function')return;var target=secret.getAttribute('data-return');if(typeof target!=='string'||target.charAt(0)!=='/'||target.charAt(1)==='/')return;window.history.replaceState({oneTimeSecret:false},'',target);window.history.pushState({oneTimeSecret:true},'',target);window.addEventListener('popstate',function(){window.location.replace(target)},{once:true})})();</script>`
 
 type developerAppsData struct {
 	Apps            []domain.App
@@ -105,6 +111,22 @@ func (h Handler) developerApps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderDeveloperApps(w, r, principal, csrf, r.URL.Query().Get("app"), "", "", nil, nil, http.StatusOK)
+}
+
+// WebKit retains the method of the original POST response when History API
+// replaces its URL, so refreshing a one-time credential page can POST the safe
+// app URL. This endpoint is deliberately read-only: it authenticates and
+// converts that retained-method reload into the canonical GET without
+// repeating app creation or returning the secret again.
+func (h Handler) reloadDeveloperApps(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.developerPrincipal(w, r); !ok {
+		return
+	}
+	target := "/app/developer/apps"
+	if appID := strings.TrimSpace(r.URL.Query().Get("app")); appID != "" {
+		target += "?app=" + url.QueryEscape(appID)
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
 func (h Handler) createDeveloperApp(w http.ResponseWriter, r *http.Request) {

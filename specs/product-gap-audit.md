@@ -18,17 +18,25 @@ Measured on 2026-07-29:
   file upload that becomes one idempotent `file_share` history message. Socket
   Mode now consumes a real posted message projected after installed-bot
   visibility checks rather than a hand-authored callback fixture;
-- 24 Chromium Playwright journeys cover the first-party client. There is no
-  Firefox/WebKit run, visual-regression baseline, automated accessibility scan,
-  or comparison against a live Slack client.
+- 25 Playwright journeys cover the first-party client in Chromium, Firefox,
+  and WebKit. Automated axe checks cover the desktop workspace, command
+  discovery, and a 320-pixel layout; visual-regression baselines, manual
+  assistive-technology qualification, and comparison against a live Slack
+  client remain absent.
+
+The normative [Slack user-journey catalog](journeys/README.md) records the full
+target separately from this coverage report. A journey omitted from the
+working list below remains a gap if it is present in that catalog; current
+implementation MUST NOT narrow the target.
 
 ## First-party UI journeys
 
 ### Working end to end
 
 - authenticated workspace entry and terminal sign-out;
-- Activity navigation with Slack's `Ctrl+Shift+M` shortcut, joined-conversation
-  unread aggregation, and explicit mention results;
+- Activity navigation with Slack web's `Control+3` on macOS and
+  `Control+Shift+3` on Windows/Linux, joined-conversation unread aggregation,
+  and explicit mention results;
 - public channels, joining, DMs, channel creation, message send/edit/delete,
   threads, reactions, pins, read state, message search, hosted-file upload,
   first-class file messages, authenticated downloads, and live timeline delivery;
@@ -58,7 +66,7 @@ Measured on 2026-07-29:
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
 | P1 | App administration | Manifest JSON editing is real, but install-time incoming-webhook selection, event-delivery health/retries, scope explanation, token inventory/revocation, distribution, external-auth providers, and hosted-datastore browsing are absent. |
 | P2 | Canvases, lists, and workflows | API slices exist, but these are not first-class workspace surfaces and workflow creation/execution is incomplete. |
-| P2 | Client breadth | Browser evidence is Chromium-only and semantic. Cross-browser, accessibility, performance-budget, screenshot-differential, and live-Slack visual comparisons remain unqualified. |
+| P2 | Client breadth | The semantic journeys now run in Chromium, Firefox, and WebKit, with automated WCAG checks for representative desktop, dialog, and narrow states. Performance budgets, screenshot differential, manual assistive-technology coverage, and live-Slack comparisons remain unqualified. |
 
 ## Web API and app-platform gaps
 
@@ -100,8 +108,8 @@ remaining evidence layers are:
    method index;
 2. run response fixtures through current Node, Python, and Java SDK types where
    those SDKs expose the method;
-3. run the first-party UI in Chromium, Firefox, and WebKit with automated
-   accessibility checks;
+3. add manual screen-reader, zoom, reduced-motion, and complete keyboard-only
+   qualification to the existing three-engine automated accessibility gate;
 4. maintain visual baselines for desktop and narrow layouts;
 5. run opt-in differential tests against a dedicated live Slack sandbox and
    promote only observed methods to `verified-against-slack`.

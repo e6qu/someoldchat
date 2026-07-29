@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import AxeBuilder from '@axe-core/playwright';
 
 const SESSION = 'browser-session';
 const API_TOKEN = 'xoxb-browser';
@@ -12,6 +13,14 @@ async function signIn(context) {
       url: 'http://127.0.0.1:18080',
     },
   ]);
+}
+
+async function slackModifiers(page) {
+  const apple = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || ''));
+  return {
+    primary: apple ? 'Meta' : 'Control',
+    activity: apple ? 'Control+3' : 'Control+Shift+3',
+  };
 }
 
 // A test can leave the shared development channel, so restore the membership
@@ -45,7 +54,15 @@ async function postPayloadThroughTheAPI(request, body) {
   return payload;
 }
 
-test('workspace supports the core browser journey', async ({ page, context }) => {
+async function expectNoSeriousAccessibilityViolations(page) {
+  const results = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
+    .analyze();
+  const violations = results.violations.filter(({ impact }) => impact === 'serious' || impact === 'critical');
+  expect(violations, JSON.stringify(violations, null, 2)).toEqual([]);
+}
+
+test('[AUTH-01 MSG-01 COMP-01 SEARCH-01] workspace supports the core browser journey', async ({ page, context }) => {
   await signIn(context);
 
   await page.goto('/app');
@@ -97,7 +114,22 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
   await expect(page.locator('.channel-title')).toHaveText('# general');
 });
 
-test('a file upload becomes a real message and an authenticated download', async ({ page, context }) => {
+test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA automation', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  const { primary } = await slackModifiers(page);
+  await page.locator('form.composer textarea[name="text"]').press(`${primary}+k`);
+  await expect(page.getByRole('dialog', { name: 'Jump to a conversation' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('button', { name: 'Close conversation switcher' }).click();
+  await page.setViewportSize({ width: 320, height: 720 });
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
+test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an authenticated download', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -127,7 +159,7 @@ test('a file upload becomes a real message and an authenticated download', async
   expect(Buffer.concat(chunks).toString()).toBe('browser file contents');
 });
 
-test('developer app console creates, validates, edits, and deletes a real app', async ({ page, context }) => {
+test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, and deletes a real app', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
   await page.getByRole('link', { name: 'Developer apps', exact: true }).click();
@@ -159,6 +191,11 @@ test('developer app console creates, validates, edits, and deletes a real app', 
   await expect(page.locator('.secret code')).toHaveCount(4);
   await expect(page.getByRole('link', { name: 'Open install flow' })).toHaveAttribute('href', /scope=chat%3Awrite/);
 
+  // The one-time POST response must replace its history entry with the safe
+  // GET URL before refresh. Waiting for the secret alone can observe the DOM
+  // before the trailing history script has run, which made WebKit reload the
+  // POST-only /create route.
+  await expect(page).toHaveURL(/\/app\/developer\/apps\?app=/);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Save these app credentials now' })).toHaveCount(0);
   await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
@@ -183,7 +220,7 @@ test('developer app console creates, validates, edits, and deletes a real app', 
   await expect(page.getByText('You have not created an app yet.')).toBeVisible();
 });
 
-test('JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {
+test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {
   const stamp = Date.now();
   const blockHeader = `Deployment complete ${stamp}`;
   await postPayloadThroughTheAPI(request, {
@@ -325,6 +362,7 @@ test('JSON-authored blocks, attachments, and unfurls render as usable messages',
   await expect(blockMessage.locator('.message-text')).toHaveCount(0);
   await expect(blockMessage.getByText(`notification fallback ${stamp}`, { exact: true })).toHaveCount(0);
   await expect(blockMessage.getByText('Edit', { exact: true })).toHaveCount(0);
+  await blockMessage.hover();
   await expect(blockMessage.getByText('Delete', { exact: true })).toBeVisible();
 
   const currentBlockMessage = page.locator('.message', { hasText: currentBlockTitle });
@@ -361,12 +399,15 @@ test('JSON-authored blocks, attachments, and unfurls render as usable messages',
 // message partial resolved `$.CSRFToken` against a type that had no such field.
 // Nothing in either suite opened a thread, so the whole feature was broken in a
 // released product without a failing test.
-test('opening a thread renders the thread and its composer', async ({ page, context, request }) => {
+test('[THREAD-01 THREAD-02] opening a thread renders the thread and its composer', async ({ page, context, request }) => {
   await signIn(context);
-  const root = await postThroughTheAPI(request, `thread root ${Date.now()}`);
+  const rootText = `thread root ${Date.now()}`;
+  const root = await postThroughTheAPI(request, rootText);
 
   await page.goto('/app');
-  const reply = page.locator('.message').last().getByRole('link', { name: 'Reply in thread' });
+  const rootMessage = page.locator('.message', { hasText: rootText });
+  await rootMessage.hover();
+  const reply = rootMessage.getByRole('link', { name: 'Reply in thread' });
   const target = await reply.getAttribute('href');
   // Navigating to the reply link's own target asserts the status directly. This
   // response was 503 for every thread in the workspace.
@@ -391,11 +432,12 @@ test('opening a thread renders the thread and its composer', async ({ page, cont
 
 // The composer advertised "Enter to send · Shift+Enter for a new line" and no
 // keydown handler existed anywhere, so Enter only inserted a newline.
-test('the composer honours the keyboard contract it advertises', async ({ page, context }) => {
+test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web keyboard contracts', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
   const composer = page.locator('form.composer textarea[name="text"]');
+  const { primary, activity } = await slackModifiers(page);
   const continued = `first line ${Date.now()}`;
   await composer.fill(continued);
   await composer.press('Shift+Enter');
@@ -409,35 +451,54 @@ test('the composer honours the keyboard contract it advertises', async ({ page, 
   await expect(page.locator('.message-text').last()).toHaveText(sent);
   await expect(composer).toHaveValue('');
 
-  // Slack's global search shortcut works from the composer, and Escape returns
-  // to composing without submitting or losing text.
+  // APP-05: slash opens installed/built-in command discovery in the composer;
+  // choosing /shrug invokes the built-in instead of posting the raw command.
+  await composer.fill('/shr');
+  const commandList = page.getByRole('listbox', { name: 'Shortcuts and slash commands' });
+  await expect(commandList).toBeVisible();
+  await expect(commandList.getByRole('option', { name: /\/shrug/ })).toBeVisible();
+  await composer.press('Enter');
+  await expect(composer).toHaveValue('/shrug ');
+  await composer.pressSequentially('release day');
+  await composer.press('Enter');
+  await expect(page.locator('.message-text').last()).toContainText('release day ¯\\_(ツ)_/¯');
+
+  // NAV-02: Slack web's global search shortcut is Control/Command+G, and
+  // Escape returns to composing without submitting or losing text.
   await composer.fill('draft survives search');
-  await composer.press('Control+k');
+  await composer.press(`${primary}+g`);
   const search = page.locator('#workspace-search');
   await expect(search).toBeFocused();
   await search.press('Escape');
   await expect(composer).toBeFocused();
   await expect(composer).toHaveValue('draft survives search');
 
-  // Slash is the no-modifier search shortcut when the reader is not editing.
-  await page.locator('.channel-title').click();
-  await page.keyboard.press('/');
-  await expect(search).toBeFocused();
+  // NAV-03: Control/Command+K is the conversation switcher, not search.
+  await composer.press(`${primary}+k`);
+  const switcher = page.getByRole('dialog', { name: 'Jump to a conversation' });
+  await expect(switcher).toBeVisible();
+  await expect(switcher.getByPlaceholder('Jump to a conversation')).toBeFocused();
+  await switcher.getByRole('button', { name: 'Close conversation switcher' }).click();
+  await expect(composer).toBeFocused();
+  await expect(composer).toHaveValue('draft survives search');
 
-  await page.keyboard.press('Control+Shift+m');
+  // Slack's dedicated Activity chord is desktop-only. Slack web uses the
+  // navigation-tab shortcut (Activity is the default third tab).
+  await page.keyboard.press(activity);
   await expect(page).toHaveURL(/\/app\/activity/);
   await expect(page.getByRole('heading', { name: 'Unread conversations' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Mentions' })).toBeVisible();
 });
 
-test('composer formatting, mentions, emoji, drafts, and file preview are functional', async ({ page, context }) => {
+test('[COMP-02 COMP-03 DRAFT-01 FILE-01] composer formatting, mentions, emoji, drafts, and file preview are functional', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
   const composer = page.locator('form.composer textarea[name="text"]');
+  const { primary } = await slackModifiers(page);
   await composer.fill('format me');
   await composer.evaluate((field) => field.setSelectionRange(0, field.value.length));
-  await page.getByRole('button', { name: 'Bold' }).click();
+  await composer.press(`${primary}+b`);
   await expect(composer).toHaveValue('*format me*');
 
   await composer.evaluate((field) => field.setSelectionRange(field.value.length, field.value.length));
@@ -478,7 +539,7 @@ test('composer formatting, mentions, emoji, drafts, and file preview are functio
   await expect(composer).toHaveValue('');
 });
 
-test('message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
+test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
   await signIn(context);
   const first = await postThroughTheAPI(request, `keyboard first ${Date.now()}`);
   const second = await postThroughTheAPI(request, `keyboard second ${Date.now()}`);
@@ -540,7 +601,7 @@ test('message reading and actions honour Slack keyboard navigation', async ({ pa
 // Public channels are intentionally readable before joining, but that does not
 // make their mutation controls usable. The UI must offer the real membership
 // transition first and reveal the composer only after it succeeds.
-test('a public-channel preview can be joined and posted to', async ({ page, context, request }) => {
+test('[CONV-01 COMP-01] a public-channel preview can be joined and posted to', async ({ page, context, request }) => {
   const leave = await request.post('/api/conversations.leave', {
     headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
     data: { channel: CHANNEL },
@@ -567,7 +628,7 @@ test('a public-channel preview can be joined and posted to', async ({ page, cont
   await expect(page.locator('.message-text').last()).toHaveText(sent);
 });
 
-test('conversation details manage a channel without falling back to the API', async ({ page, context }) => {
+test('[CONV-03 CONV-04] conversation details manage a channel without falling back to the API', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -610,7 +671,7 @@ test('conversation details manage a channel without falling back to the API', as
 // The page closed its EventSource on the first submit and never reopened it, and
 // separately suppressed every event while the autofocused composer held focus —
 // so in the default state live delivery never reached the timeline at all.
-test('live delivery keeps reaching the timeline after posting', async ({ page, context, request }) => {
+test('[RESILIENCE-01] live delivery keeps reaching the timeline after posting', async ({ page, context, request }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -635,7 +696,7 @@ test('live delivery keeps reaching the timeline after posting', async ({ page, c
 
 // Reactions and pins persisted but were never rendered, and every mutation
 // answered with a redirect that dropped the open thread and history position.
-test('reactions and pins render and reverse in place', async ({ page, context, request }) => {
+test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ page, context, request }) => {
   await signIn(context);
   await postThroughTheAPI(request, `reaction target ${Date.now()}`);
   await page.goto('/app');
@@ -666,7 +727,7 @@ test('reactions and pins render and reverse in place', async ({ page, context, r
   await expect(target.locator('.pinned')).toHaveCount(0);
 });
 
-test('a member can edit and delete their own message in place', async ({ page, context }) => {
+test('[MSG-03 MSG-04] a member can edit and delete their own message in place', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -692,7 +753,7 @@ test('a member can edit and delete their own message in place', async ({ page, c
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(0);
 });
 
-test('channel creation is reachable and conversation shortcuts switch channels', async ({ page, context }) => {
+test('[CONV-02 NAV-04] channel creation is reachable and conversation shortcuts switch channels', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -721,7 +782,7 @@ test('channel creation is reachable and conversation shortcuts switch channels',
   await expect(page).toHaveURL(createdURL);
 });
 
-test('profile editing presents one human-facing photo field and saves status', async ({ page, context }) => {
+test('[PROFILE-02 STATUS-01] profile editing presents one human-facing photo field and saves status', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app/members');
 
@@ -737,7 +798,7 @@ test('profile editing presents one human-facing photo field and saves status', a
   await expect(page.getByText(status, { exact: false }).first()).toBeVisible();
 });
 
-test('theme choice persists across workspace pages', async ({ page, context }) => {
+test('[NAV-06] theme choice persists across workspace pages', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -750,7 +811,7 @@ test('theme choice persists across workspace pages', async ({ page, context }) =
 
 // A failed post added a class no stylesheet defined, so the failure was
 // invisible and the typed message was lost with no explanation.
-test('a rejected post explains itself and keeps the draft', async ({ page, context }) => {
+test('[COMP-01 RESILIENCE-04] a rejected post explains itself and keeps the draft', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -775,6 +836,7 @@ test('a rejected post explains itself and keeps the draft', async ({ page, conte
   await page.unroute('**/app/message*');
   const target = page.locator('.message').last();
   await page.route('**/app/pin*', (route) => route.abort());
+  await target.hover();
   await target.getByRole('button', { name: 'Pin' }).click();
   const actionError = page.locator('#action-feedback');
   await expect(actionError).toBeVisible();
@@ -785,7 +847,7 @@ test('a rejected post explains itself and keeps the draft', async ({ page, conte
 
 // The old 64px rail gave every channel the same # glyph and every DM the same @
 // glyph. Accessible names did not help a sighted mobile reader choose one.
-test('the narrow layout exposes named navigation and keeps the thread reachable', async ({ page, context, request }) => {
+test('[RESPONSIVE-01 A11Y-01 THREAD-01] the narrow layout exposes named navigation and keeps the thread reachable', async ({ page, context, request }) => {
   await signIn(context);
   const root = await postThroughTheAPI(request, `narrow thread ${Date.now()}`);
   await page.setViewportSize({ width: 480, height: 900 });
@@ -833,9 +895,9 @@ test('the narrow layout exposes named navigation and keeps the thread reachable'
   await expect(toggle).toBeFocused();
 });
 
-test('named mobile navigation survives without JavaScript', async ({ browser }) => {
+test('[RESPONSIVE-01] named mobile navigation survives without JavaScript', async ({ browser, baseURL }) => {
   const context = await browser.newContext({
-    baseURL: 'http://127.0.0.1:18080',
+    baseURL,
     javaScriptEnabled: false,
     viewport: { width: 480, height: 900 },
   });
@@ -854,7 +916,7 @@ test('named mobile navigation survives without JavaScript', async ({ browser }) 
 // `GET /app` is the only entry point; a template edit used to be able to take it
 // down entirely, because the handler rewrote its own rendered HTML afterwards
 // and returned 503 when the expected substring was not found exactly once.
-test('the workspace entry point renders without post-processing its own markup', async ({ page, context }) => {
+test('[RESILIENCE-03] the workspace entry point renders without post-processing its own markup', async ({ page, context }) => {
   await signIn(context);
   const response = await page.goto('/app');
   expect(response.status()).toBe(200);
@@ -873,7 +935,7 @@ test('the workspace entry point renders without post-processing its own markup',
 // the browser with a live CSRF token in it. The policy is also the only thing
 // that can silently disable the whole client, so this asserts the page runs
 // clean under it.
-test('the workspace is protected and its own scripts run under its policy', async ({ page, context }) => {
+test('[AUTH-01] the workspace is protected and its own scripts run under its policy', async ({ page, context }) => {
   await signIn(context);
 
   const violations = [];
@@ -906,7 +968,7 @@ test('the workspace is protected and its own scripts run under its policy', asyn
 // Nothing stopped a second submit: the button was never disabled and there was
 // no in-flight flag, so a held Enter or a double click on a slow link posted the
 // same message twice.
-test('a second submit while the first is in flight posts one message', async ({ page, context }) => {
+test('[RESILIENCE-02 COMP-01] a second submit while the first is in flight posts one message', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -934,7 +996,7 @@ test('a second submit while the first is in flight posts one message', async ({ 
 // Sending from a window of older history used to store the message and then
 // refresh the historical window over it: the message appeared for a moment and
 // vanished, and the reader had no way to know it had been sent.
-test('a message sent while reading older history is not lost', async ({ page, context, request }) => {
+test('[MSG-01 RESILIENCE-01] a message sent while reading older history is not lost', async ({ page, context, request }) => {
   await signIn(context);
   for (let index = 0; index < 55; index += 1) {
     await postThroughTheAPI(request, `history filler ${index} ${Date.now()}`);
@@ -959,7 +1021,7 @@ test('a message sent while reading older history is not lost', async ({ page, co
 // every session the remaining tests would use. Placing this earlier makes every
 // later test fail with 401 for a reason that has nothing to do with what it
 // asserts.
-test('signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
+test('[AUTH-03] signing out ends the session and the signed-out page is terminal', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 

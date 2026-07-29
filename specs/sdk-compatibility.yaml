@@ -70,7 +70,10 @@ sdks:
     suite_path: tests/official-sdk-qualification/node-socket-mode/qualification.mjs
     note: >-
       Consumes and acknowledges a real message created through internal/service,
-      projected only after installed-bot conversation visibility is proved.
+      projected only after installed-bot conversation visibility is proved. It
+      also parses and acknowledges a manifest-derived slash command after
+      should_escape resolves a user, channel, and URL in the service-produced
+      payload.
   - id: node-rtm-api
     ecosystem: npm
     package: '@slack/rtm-api'

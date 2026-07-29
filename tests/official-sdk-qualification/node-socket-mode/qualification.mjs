@@ -97,7 +97,7 @@ const slash = expectedDelivery("slash_commands", (body) => {
   assert.equal(body.channel_id, "C1");
   assert.equal(body.user_id, "U1");
   assert.equal(body.command, "/sdk-deploy");
-  assert.equal(body.text, "production");
+  assert.equal(body.text, "ask <@U1> in <#C1|general> <https://example.com/runbook>");
   assert.match(body.trigger_id, /^trigger_/);
   assert.match(body.response_url, /^http:\/\/127\.0\.0\.1:18080\/app-response\//);
 }, { text: "SDK deployment queued" });

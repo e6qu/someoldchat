@@ -215,6 +215,14 @@ func TestSQLiteOAuthBotGrantPersistsBotIdentity(t *testing.T) {
 	if installations, err := s.ListAppInstallations(ctx, "A1"); err != nil || len(installations) != 0 {
 		t.Fatalf("uninstalled installations=%+v err=%v", installations, err)
 	}
+	reinstalledAt := time.Now().UTC().Add(time.Minute)
+	if err := s.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: reinstalledAt}); err != nil {
+		t.Fatal(err)
+	}
+	installations, err := s.ListAppInstallations(ctx, "A1")
+	if err != nil || len(installations) != 1 || !installations[0].CreatedAt.Equal(reinstalledAt) {
+		t.Fatalf("reinstalled installations=%+v err=%v, want created_at %s", installations, err, reinstalledAt)
+	}
 }
 
 // TestSQLiteOAuthCodeConcurrentRedemptionIsSingleUse exercises the transaction
