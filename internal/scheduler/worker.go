@@ -90,7 +90,7 @@ func (w Worker) postWithLease(ctx context.Context, item domain.ScheduledMessage)
 			return w.Source.RenewScheduledMessage(renewContext, w.Owner, item.ID, w.Lease)
 		},
 		func(postContext context.Context) error {
-			_, err := w.Poster.PostWithBlocksAndAttachments(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, "", string(item.ID))
+			_, err := w.Poster.PostWithBlocksAndAttachments(postContext, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, "", string(item.ID), "")
 			return err
 		},
 	)

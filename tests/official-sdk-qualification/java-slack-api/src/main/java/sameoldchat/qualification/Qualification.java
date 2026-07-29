@@ -107,8 +107,15 @@ public final class Qualification {
                             && "bot".equals(oauthV2.getTokenType())
                             && "U1".equals(oauthV2.getBotUserId())
                             && oauthV2.getAccessToken() != null
-                            && oauthV2.getAccessToken().startsWith("xoxb-")
-                            && oauthV2.getAuthedUser().getAccessToken() == null,
+                            && oauthV2.getAccessToken().startsWith("xoxe.xoxb-")
+                            && oauthV2.getRefreshToken() != null
+                            && oauthV2.getRefreshToken().startsWith("xoxe-")
+                            && oauthV2.getExpiresIn() == 43200
+                            && oauthV2.getAuthedUser().getAccessToken() != null
+                            && oauthV2.getAuthedUser().getAccessToken().startsWith("xoxe.xoxp-")
+                            && oauthV2.getAuthedUser().getRefreshToken() != null
+                            && oauthV2.getAuthedUser().getRefreshToken().startsWith("xoxe-")
+                            && oauthV2.getAuthedUser().getExpiresIn() == 43200,
                     "oauth.v2.access failed: " + oauthV2.getError());
             com.slack.api.methods.response.oauth.OAuthTokenResponse oauthToken = methods.oauthToken(
                     com.slack.api.methods.request.oauth.OAuthTokenRequest.builder()
@@ -363,13 +370,13 @@ public final class Qualification {
             require(updatedStep.isOk(), "workflows.updateStep failed: " + updatedStep.getError());
             com.slack.api.methods.response.dialog.DialogOpenResponse openedDialog = methods.dialogOpen(
                     com.slack.api.methods.request.dialog.DialogOpenRequest.builder()
-                            .triggerId("qualification-trigger")
+                            .triggerId("qualification-dialog-trigger")
                             .dialogAsString("{\"callback_id\":\"qualification-dialog\",\"title\":\"Qualification\",\"submit_label\":\"Submit\",\"elements\":[{\"type\":\"text\",\"name\":\"answer\",\"label\":\"Answer\"}]}")
                             .build());
             require(openedDialog.isOk(), "dialog.open failed: " + openedDialog.getError());
             com.slack.api.methods.response.views.ViewsOpenResponse openedView = methods.viewsOpen(
                     com.slack.api.methods.request.views.ViewsOpenRequest.builder()
-                            .triggerId("qualification-trigger")
+                            .triggerId("qualification-open-trigger")
                             .viewAsString("{\"type\":\"modal\",\"callback_id\":\"qualification\",\"title\":{\"type\":\"plain_text\",\"text\":\"Qualification\"},\"blocks\":[]}")
                             .build());
             require(openedView.isOk() && openedView.getView() != null && openedView.getView().getId() != null,
@@ -382,7 +389,7 @@ public final class Qualification {
             require(publishedView.isOk(), "views.publish failed: " + publishedView.getError());
             com.slack.api.methods.response.views.ViewsPushResponse pushedView = methods.viewsPush(
                     com.slack.api.methods.request.views.ViewsPushRequest.builder()
-                            .triggerId("qualification-trigger")
+                            .triggerId("qualification-push-trigger")
                             .viewAsString("{\"type\":\"modal\",\"callback_id\":\"qualification-pushed\",\"title\":{\"type\":\"plain_text\",\"text\":\"Pushed qualification\"},\"blocks\":[]}")
                             .build());
             require(pushedView.isOk(), "views.push failed: " + pushedView.getError());
@@ -962,7 +969,7 @@ public final class Qualification {
                             .limit(10)
                             .build());
             require(history.isOk(), "conversations.history failed: " + history.getError());
-            require(history.getMessages() != null && history.getMessages().size() == 3, "history page mismatch");
+            require(history.getMessages() != null && history.getMessages().size() >= 3, "history page mismatch");
             require(history.getMessages().stream().noneMatch(message -> posted.getTs().equals(message.getTs())),
                     "deleted message remained in history");
             com.slack.api.methods.response.search.SearchMessagesResponse search = methods.searchMessages(

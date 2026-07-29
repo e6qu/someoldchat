@@ -367,7 +367,8 @@ func (h LoginHandler) backchannelLogout(w http.ResponseWriter, r *http.Request) 
 func (h LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	secureHeaders(w, entryContentSecurityPolicy)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	links, count, err := h.providerLinks(r.Context())
+	returnTo := safeLocalReturn(r.URL.Query().Get("return_to"))
+	links, count, err := h.providerLinks(r.Context(), returnTo)
 	message := "Choose your organization’s authorization source."
 	status := http.StatusOK
 	if err != nil {
@@ -382,7 +383,7 @@ func (h LoginHandler) login(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>Sign in · SameOldChat</title><style>:root{color-scheme:light dark;--bg:#f8f8fa;--panel:#fff;--text:#1d1c1d;--muted:#5e5e65;--line:#d5d5da;--accent:#611f69;--focus:#1264a3}@media(prefers-color-scheme:dark){:root{--bg:#1a1d21;--panel:#222529;--text:#f4f4f5;--muted:#c7c7cc;--line:#4a4e55;--accent:#7c2d86;--focus:#5bb8ff}}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--bg);color:var(--text);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.card{width:min(440px,100%);padding:32px;background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:0 14px 42px #0002}h1{margin:0 0 10px;font-size:2rem}p{margin:0 0 22px;color:var(--muted)}.provider{display:block;margin:12px 0;padding:12px 16px;border-radius:7px;background:var(--accent);color:#fff;text-align:center;text-decoration:none;font-weight:800}.provider:focus-visible{outline:3px solid var(--focus);outline-offset:3px}</style></head><body><main class="card"><h1>Sign in to SameOldChat</h1><p role="status">`+template.HTMLEscapeString(message)+`</p>`+links+`</main></body></html>`)
 }
 
-func (h LoginHandler) providerLinks(ctx context.Context) (string, int, error) {
+func (h LoginHandler) providerLinks(ctx context.Context, returnTo string) (string, int, error) {
 	var result strings.Builder
 	names := make([]string, 0, len(h.providers))
 	for name := range h.providers {
@@ -400,6 +401,10 @@ func (h LoginHandler) providerLinks(ctx context.Context) (string, int, error) {
 		}
 		result.WriteString(`<a class="provider" href="/auth/`)
 		result.WriteString(name)
+		if returnTo != "" {
+			result.WriteString(`?return_to=`)
+			result.WriteString(url.QueryEscape(returnTo))
+		}
 		result.WriteString(`">Continue with `)
 		result.WriteString(providerLabel(name))
 		result.WriteString(`</a>`)
@@ -449,7 +454,8 @@ func (h LoginHandler) begin(w http.ResponseWriter, r *http.Request, name string)
 		http.Error(w, "authorization nonce unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	payload := name + "\x00" + state + "\x00" + verifier + "\x00" + nonce
+	returnTo := safeLocalReturn(r.URL.Query().Get("return_to"))
+	payload := name + "\x00" + state + "\x00" + verifier + "\x00" + nonce + "\x00" + returnTo
 	signature := signState(h.stateKey, payload)
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: base64.RawURLEncoding.EncodeToString([]byte(payload + "\x00" + signature)), Path: "/auth/", MaxAge: 600, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
 	query := url.Values{"client_id": {provider.ClientID}, "redirect_uri": {h.callbackURL(name)}, "response_type": {"code"}, "scope": {strings.Join(provider.Scopes, " ")}, "state": {state}, "code_challenge": {pkceChallenge(verifier)}, "code_challenge_method": {"S256"}}
@@ -487,7 +493,7 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	// The state value is the per-request secret an authorization-code injection
 	// attacker has to guess, so it is compared with the same constant-time
 	// primitive as the signature beside it.
-	if len(parts) != 5 || parts[0] != name || !hmac.Equal([]byte(parts[4]), []byte(signState(h.stateKey, strings.Join(parts[:4], "\x00")))) || !hmac.Equal([]byte(parts[1]), []byte(strings.TrimSpace(r.URL.Query().Get("state")))) {
+	if len(parts) != 6 || parts[0] != name || !hmac.Equal([]byte(parts[5]), []byte(signState(h.stateKey, strings.Join(parts[:5], "\x00")))) || !hmac.Equal([]byte(parts[1]), []byte(strings.TrimSpace(r.URL.Query().Get("state")))) {
 		http.Error(w, "authorization state is invalid", http.StatusBadRequest)
 		return
 	}
@@ -559,7 +565,23 @@ func (h LoginHandler) callback(w http.ResponseWriter, r *http.Request, name stri
 	}
 	http.SetCookie(w, auth.SessionCookie(sessionToken, cookieMaxAge, h.cookieDomain))
 	http.SetCookie(w, &http.Cookie{Name: "sameoldchat_oauth_state", Value: "", Path: "/auth/", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})
-	http.Redirect(w, r, "/app", http.StatusSeeOther)
+	target := safeLocalReturn(parts[4])
+	if target == "" {
+		target = "/app"
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func safeLocalReturn(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || len(raw) > 2048 || !strings.HasPrefix(raw, "/") || strings.HasPrefix(raw, "//") {
+		return ""
+	}
+	target, err := url.Parse(raw)
+	if err != nil || target.IsAbs() || target.Host != "" || target.User != nil {
+		return ""
+	}
+	return target.RequestURI()
 }
 
 // ErrUnverifiedProviderEmail rejects an account link derived from an email

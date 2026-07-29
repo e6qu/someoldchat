@@ -19,6 +19,166 @@ message MarkReadRequest {
   string timestamp = 4;
 }
 
+message SlashCommandRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string thread_timestamp = 4;
+  string command = 5;
+  string text = 6;
+  string response_base_url = 7;
+}
+
+message BlockActionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string message_id = 3;
+  string block_id = 4;
+  string action_id = 5;
+  string action_type = 6;
+  string value = 7;
+  string response_base_url = 8;
+}
+
+message ViewBlockActionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string view_id = 4;
+  string block_id = 5;
+  string action_id = 6;
+  string action_type = 7;
+  string value = 8;
+  string state_json = 9;
+  string response_base_url = 10;
+}
+
+message AppOptionQueryRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string app_id = 4;
+  string message_id = 5;
+  string view_id = 6;
+  string block_id = 7;
+  string action_id = 8;
+  string value = 9;
+  string response_base_url = 10;
+}
+
+message AppOption {
+  string text = 1;
+  string value = 2;
+  string description = 3;
+  string group = 4;
+}
+
+message AppOptionListResponse {
+  repeated AppOption options = 1;
+}
+
+message AppResponseRequest {
+  string token = 1;
+  string payload = 2;
+}
+
+message AppShortcut {
+  string app_id = 1;
+  string app_name = 2;
+  string name = 3;
+  string callback_id = 4;
+  string description = 5;
+  string type = 6;
+}
+
+message AppShortcutListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string type = 3;
+}
+
+message AppShortcutListResponse {
+  repeated AppShortcut shortcuts = 1;
+}
+
+message AppShortcutDispatchRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string app_id = 4;
+  string callback_id = 5;
+  string message_id = 6;
+  string response_base_url = 7;
+}
+
+message InteractionMutationResponse {
+  bool ok = 1;
+}
+
+message SocketModeInteraction {
+  string envelope_id = 1;
+  string app_id = 2;
+  string workspace_id = 3;
+  string user_id = 4;
+  string type = 5;
+  string payload = 6;
+  string response_token_hash = 7;
+  string response_conversation_id = 8;
+  string response_original_message_id = 9;
+  string response_thread_timestamp = 10;
+  string response_created_at = 11;
+  string response_expires_at = 12;
+  int32 response_uses_remaining = 13;
+  string created_at = 14;
+  int32 retry_count = 15;
+  string retry_reason = 16;
+  bool found = 17;
+  string lease_owner = 18;
+  string lease_expires_at = 19;
+  string retry_at = 20;
+  string acknowledged_at = 21;
+  string response_app_id = 22;
+  string response_workspace_id = 23;
+  string response_user_id = 24;
+}
+
+message SocketModeInteractionClaimRequest {
+  string app_id = 1;
+  string owner = 2;
+  int64 lease_nanos = 3;
+}
+
+message SocketModeInteractionAckRequest {
+  string app_id = 1;
+  string envelope_id = 2;
+  string owner = 3;
+}
+
+message SocketModeInteractionReleaseRequest {
+  string app_id = 1;
+  string envelope_id = 2;
+  string owner = 3;
+  string reason = 4;
+  string retry_at = 5;
+}
+
+message SocketModeInteractionResponseRequest {
+  string app_id = 1;
+  string envelope_id = 2;
+  bytes payload = 3;
+}
+
 service InteractionsService {
   rpc MarkRead(MarkReadRequest) returns (ReadCursor);
+  rpc DispatchSlashCommand(SlashCommandRequest) returns (InteractionMutationResponse);
+  rpc DispatchBlockAction(BlockActionRequest) returns (InteractionMutationResponse);
+  rpc DispatchViewBlockAction(ViewBlockActionRequest) returns (InteractionMutationResponse);
+  rpc LoadAppOptions(AppOptionQueryRequest) returns (AppOptionListResponse);
+  rpc ListAppShortcuts(AppShortcutListRequest) returns (AppShortcutListResponse);
+  rpc DispatchAppShortcut(AppShortcutDispatchRequest) returns (InteractionMutationResponse);
+  rpc HandleAppResponse(AppResponseRequest) returns (InteractionMutationResponse);
+  rpc ClaimSocketModeInteraction(SocketModeInteractionClaimRequest) returns (SocketModeInteraction);
+  rpc AckSocketModeInteraction(SocketModeInteractionAckRequest) returns (InteractionMutationResponse);
+  rpc ReleaseSocketModeInteraction(SocketModeInteractionReleaseRequest) returns (InteractionMutationResponse);
+  rpc HandleSocketModeResponse(SocketModeInteractionResponseRequest) returns (InteractionMutationResponse);
 }

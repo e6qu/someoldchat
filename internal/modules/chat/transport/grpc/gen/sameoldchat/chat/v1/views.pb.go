@@ -34,6 +34,9 @@ type View struct {
 	PreviousViewId    string                 `protobuf:"bytes,9,opt,name=previous_view_id,json=previousViewId,proto3" json:"previous_view_id,omitempty"`
 	CreatedAtUnixNano int64                  `protobuf:"varint,10,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
 	UpdatedAtUnixNano int64                  `protobuf:"varint,11,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	AppId             string                 `protobuf:"bytes,12,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	ErrorsJson        string                 `protobuf:"bytes,13,opt,name=errors_json,json=errorsJson,proto3" json:"errors_json,omitempty"`
+	StateJson         string                 `protobuf:"bytes,14,opt,name=state_json,json=stateJson,proto3" json:"state_json,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -145,12 +148,34 @@ func (x *View) GetUpdatedAtUnixNano() int64 {
 	return 0
 }
 
+func (x *View) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *View) GetErrorsJson() string {
+	if x != nil {
+		return x.ErrorsJson
+	}
+	return ""
+}
+
+func (x *View) GetStateJson() string {
+	if x != nil {
+		return x.StateJson
+	}
+	return ""
+}
+
 type OpenViewRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	TriggerId     string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
 	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -213,6 +238,13 @@ func (x *OpenViewRequest) GetPayload() string {
 	return ""
 }
 
+func (x *OpenViewRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
 type PublishViewRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -220,6 +252,7 @@ type PublishViewRequest struct {
 	TargetUserId  string                 `protobuf:"bytes,3,opt,name=target_user_id,json=targetUserId,proto3" json:"target_user_id,omitempty"`
 	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
 	Hash          string                 `protobuf:"bytes,5,opt,name=hash,proto3" json:"hash,omitempty"`
+	AppId         string                 `protobuf:"bytes,6,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -289,12 +322,20 @@ func (x *PublishViewRequest) GetHash() string {
 	return ""
 }
 
+func (x *PublishViewRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
 type PushViewRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	TriggerId     string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
 	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -357,6 +398,13 @@ func (x *PushViewRequest) GetPayload() string {
 	return ""
 }
 
+func (x *PushViewRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
 type UpdateViewRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -365,6 +413,7 @@ type UpdateViewRequest struct {
 	ExternalId    string                 `protobuf:"bytes,4,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
 	Payload       string                 `protobuf:"bytes,5,opt,name=payload,proto3" json:"payload,omitempty"`
 	Hash          string                 `protobuf:"bytes,6,opt,name=hash,proto3" json:"hash,omitempty"`
+	AppId         string                 `protobuf:"bytes,7,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -441,11 +490,454 @@ func (x *UpdateViewRequest) GetHash() string {
 	return ""
 }
 
+func (x *UpdateViewRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+type CurrentModalViewRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CurrentModalViewRequest) Reset() {
+	*x = CurrentModalViewRequest{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CurrentModalViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CurrentModalViewRequest) ProtoMessage() {}
+
+func (x *CurrentModalViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CurrentModalViewRequest.ProtoReflect.Descriptor instead.
+func (*CurrentModalViewRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CurrentModalViewRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CurrentModalViewRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+type AppHomeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId         string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppHomeRequest) Reset() {
+	*x = AppHomeRequest{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppHomeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppHomeRequest) ProtoMessage() {}
+
+func (x *AppHomeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppHomeRequest.ProtoReflect.Descriptor instead.
+func (*AppHomeRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AppHomeRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AppHomeRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *AppHomeRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+type AppHomeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	App           *InstalledApp          `protobuf:"bytes,1,opt,name=app,proto3" json:"app,omitempty"`
+	View          *View                  `protobuf:"bytes,2,opt,name=view,proto3" json:"view,omitempty"`
+	Published     bool                   `protobuf:"varint,3,opt,name=published,proto3" json:"published,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppHomeResponse) Reset() {
+	*x = AppHomeResponse{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppHomeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppHomeResponse) ProtoMessage() {}
+
+func (x *AppHomeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppHomeResponse.ProtoReflect.Descriptor instead.
+func (*AppHomeResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AppHomeResponse) GetApp() *InstalledApp {
+	if x != nil {
+		return x.App
+	}
+	return nil
+}
+
+func (x *AppHomeResponse) GetView() *View {
+	if x != nil {
+		return x.View
+	}
+	return nil
+}
+
+func (x *AppHomeResponse) GetPublished() bool {
+	if x != nil {
+		return x.Published
+	}
+	return false
+}
+
+type ViewSubmissionRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId  string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	ViewId          string                 `protobuf:"bytes,4,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`
+	StateJson       string                 `protobuf:"bytes,5,opt,name=state_json,json=stateJson,proto3" json:"state_json,omitempty"`
+	ResponseBaseUrl string                 `protobuf:"bytes,6,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *ViewSubmissionRequest) Reset() {
+	*x = ViewSubmissionRequest{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ViewSubmissionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ViewSubmissionRequest) ProtoMessage() {}
+
+func (x *ViewSubmissionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ViewSubmissionRequest.ProtoReflect.Descriptor instead.
+func (*ViewSubmissionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ViewSubmissionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ViewSubmissionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ViewSubmissionRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *ViewSubmissionRequest) GetViewId() string {
+	if x != nil {
+		return x.ViewId
+	}
+	return ""
+}
+
+func (x *ViewSubmissionRequest) GetStateJson() string {
+	if x != nil {
+		return x.StateJson
+	}
+	return ""
+}
+
+func (x *ViewSubmissionRequest) GetResponseBaseUrl() string {
+	if x != nil {
+		return x.ResponseBaseUrl
+	}
+	return ""
+}
+
+type ViewInteractionResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ErrorsJson    string                 `protobuf:"bytes,1,opt,name=errors_json,json=errorsJson,proto3" json:"errors_json,omitempty"`
+	Pending       bool                   `protobuf:"varint,2,opt,name=pending,proto3" json:"pending,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ViewInteractionResult) Reset() {
+	*x = ViewInteractionResult{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ViewInteractionResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ViewInteractionResult) ProtoMessage() {}
+
+func (x *ViewInteractionResult) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ViewInteractionResult.ProtoReflect.Descriptor instead.
+func (*ViewInteractionResult) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ViewInteractionResult) GetErrorsJson() string {
+	if x != nil {
+		return x.ErrorsJson
+	}
+	return ""
+}
+
+func (x *ViewInteractionResult) GetPending() bool {
+	if x != nil {
+		return x.Pending
+	}
+	return false
+}
+
+type CloseViewRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId  string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	ViewId          string                 `protobuf:"bytes,4,opt,name=view_id,json=viewId,proto3" json:"view_id,omitempty"`
+	Clear           bool                   `protobuf:"varint,5,opt,name=clear,proto3" json:"clear,omitempty"`
+	ResponseBaseUrl string                 `protobuf:"bytes,6,opt,name=response_base_url,json=responseBaseUrl,proto3" json:"response_base_url,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CloseViewRequest) Reset() {
+	*x = CloseViewRequest{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseViewRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseViewRequest) ProtoMessage() {}
+
+func (x *CloseViewRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseViewRequest.ProtoReflect.Descriptor instead.
+func (*CloseViewRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *CloseViewRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *CloseViewRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *CloseViewRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *CloseViewRequest) GetViewId() string {
+	if x != nil {
+		return x.ViewId
+	}
+	return ""
+}
+
+func (x *CloseViewRequest) GetClear() bool {
+	if x != nil {
+		return x.Clear
+	}
+	return false
+}
+
+func (x *CloseViewRequest) GetResponseBaseUrl() string {
+	if x != nil {
+		return x.ResponseBaseUrl
+	}
+	return ""
+}
+
+type ViewMutationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ViewMutationResponse) Reset() {
+	*x = ViewMutationResponse{}
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ViewMutationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ViewMutationResponse) ProtoMessage() {}
+
+func (x *ViewMutationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_views_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ViewMutationResponse.ProtoReflect.Descriptor instead.
+func (*ViewMutationResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_views_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ViewMutationResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_views_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\n" +
-	"\x1fsameoldchat/chat/v1/views.proto\x12\x13sameoldchat.chat.v1\"\xe3\x02\n" +
+	"\x1fsameoldchat/chat/v1/views.proto\x12\x13sameoldchat.chat.v1\x1a\x1esameoldchat/chat/v1/apps.proto\"\xba\x03\n" +
 	"\x04View\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x17\n" +
@@ -460,25 +952,33 @@ const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\x10previous_view_id\x18\t \x01(\tR\x0epreviousViewId\x12/\n" +
 	"\x14created_at_unix_nano\x18\n" +
 	" \x01(\x03R\x11createdAtUnixNano\x12/\n" +
-	"\x14updated_at_unix_nano\x18\v \x01(\x03R\x11updatedAtUnixNano\"\x86\x01\n" +
+	"\x14updated_at_unix_nano\x18\v \x01(\x03R\x11updatedAtUnixNano\x12\x15\n" +
+	"\x06app_id\x18\f \x01(\tR\x05appId\x12\x1f\n" +
+	"\verrors_json\x18\r \x01(\tR\n" +
+	"errorsJson\x12\x1d\n" +
+	"\n" +
+	"state_json\x18\x0e \x01(\tR\tstateJson\"\x9d\x01\n" +
 	"\x0fOpenViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\tR\apayload\"\xa4\x01\n" +
+	"\apayload\x18\x04 \x01(\tR\apayload\x12\x15\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\"\xbb\x01\n" +
 	"\x12PublishViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
 	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\x12\x18\n" +
 	"\apayload\x18\x04 \x01(\tR\apayload\x12\x12\n" +
-	"\x04hash\x18\x05 \x01(\tR\x04hash\"\x86\x01\n" +
+	"\x04hash\x18\x05 \x01(\tR\x04hash\x12\x15\n" +
+	"\x06app_id\x18\x06 \x01(\tR\x05appId\"\x9d\x01\n" +
 	"\x0fPushViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\tR\apayload\"\xb7\x01\n" +
+	"\apayload\x18\x04 \x01(\tR\apayload\x12\x15\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\"\xce\x01\n" +
 	"\x11UpdateViewRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x17\n" +
@@ -486,13 +986,52 @@ const file_sameoldchat_chat_v1_views_proto_rawDesc = "" +
 	"\vexternal_id\x18\x04 \x01(\tR\n" +
 	"externalId\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\tR\apayload\x12\x12\n" +
-	"\x04hash\x18\x06 \x01(\tR\x04hash2\xcc\x02\n" +
+	"\x04hash\x18\x06 \x01(\tR\x04hash\x12\x15\n" +
+	"\x06app_id\x18\a \x01(\tR\x05appId\"U\n" +
+	"\x17CurrentModalViewRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"c\n" +
+	"\x0eAppHomeRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\"\x93\x01\n" +
+	"\x0fAppHomeResponse\x123\n" +
+	"\x03app\x18\x01 \x01(\v2!.sameoldchat.chat.v1.InstalledAppR\x03app\x12-\n" +
+	"\x04view\x18\x02 \x01(\v2\x19.sameoldchat.chat.v1.ViewR\x04view\x12\x1c\n" +
+	"\tpublished\x18\x03 \x01(\bR\tpublished\"\xe0\x01\n" +
+	"\x15ViewSubmissionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x17\n" +
+	"\aview_id\x18\x04 \x01(\tR\x06viewId\x12\x1d\n" +
+	"\n" +
+	"state_json\x18\x05 \x01(\tR\tstateJson\x12*\n" +
+	"\x11response_base_url\x18\x06 \x01(\tR\x0fresponseBaseUrl\"R\n" +
+	"\x15ViewInteractionResult\x12\x1f\n" +
+	"\verrors_json\x18\x01 \x01(\tR\n" +
+	"errorsJson\x12\x18\n" +
+	"\apending\x18\x02 \x01(\bR\apending\"\xd2\x01\n" +
+	"\x10CloseViewRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x17\n" +
+	"\aview_id\x18\x04 \x01(\tR\x06viewId\x12\x14\n" +
+	"\x05clear\x18\x05 \x01(\bR\x05clear\x12*\n" +
+	"\x11response_base_url\x18\x06 \x01(\tR\x0fresponseBaseUrl\"&\n" +
+	"\x14ViewMutationResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\x9e\x06\n" +
 	"\fViewsService\x12K\n" +
 	"\bOpenView\x12$.sameoldchat.chat.v1.OpenViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12Q\n" +
 	"\vPublishView\x12'.sameoldchat.chat.v1.PublishViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12K\n" +
 	"\bPushView\x12$.sameoldchat.chat.v1.PushViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12O\n" +
 	"\n" +
-	"UpdateView\x12&.sameoldchat.chat.v1.UpdateViewRequest\x1a\x19.sameoldchat.chat.v1.ViewBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"UpdateView\x12&.sameoldchat.chat.v1.UpdateViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12[\n" +
+	"\x10CurrentModalView\x12,.sameoldchat.chat.v1.CurrentModalViewRequest\x1a\x19.sameoldchat.chat.v1.View\x12T\n" +
+	"\aAppHome\x12#.sameoldchat.chat.v1.AppHomeRequest\x1a$.sameoldchat.chat.v1.AppHomeResponse\x12X\n" +
+	"\vOpenAppHome\x12#.sameoldchat.chat.v1.AppHomeRequest\x1a$.sameoldchat.chat.v1.AppHomeResponse\x12d\n" +
+	"\n" +
+	"SubmitView\x12*.sameoldchat.chat.v1.ViewSubmissionRequest\x1a*.sameoldchat.chat.v1.ViewInteractionResult\x12]\n" +
+	"\tCloseView\x12%.sameoldchat.chat.v1.CloseViewRequest\x1a).sameoldchat.chat.v1.ViewMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_views_proto_rawDescOnce sync.Once
@@ -506,28 +1045,48 @@ func file_sameoldchat_chat_v1_views_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_views_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_views_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_sameoldchat_chat_v1_views_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_sameoldchat_chat_v1_views_proto_goTypes = []any{
-	(*View)(nil),               // 0: sameoldchat.chat.v1.View
-	(*OpenViewRequest)(nil),    // 1: sameoldchat.chat.v1.OpenViewRequest
-	(*PublishViewRequest)(nil), // 2: sameoldchat.chat.v1.PublishViewRequest
-	(*PushViewRequest)(nil),    // 3: sameoldchat.chat.v1.PushViewRequest
-	(*UpdateViewRequest)(nil),  // 4: sameoldchat.chat.v1.UpdateViewRequest
+	(*View)(nil),                    // 0: sameoldchat.chat.v1.View
+	(*OpenViewRequest)(nil),         // 1: sameoldchat.chat.v1.OpenViewRequest
+	(*PublishViewRequest)(nil),      // 2: sameoldchat.chat.v1.PublishViewRequest
+	(*PushViewRequest)(nil),         // 3: sameoldchat.chat.v1.PushViewRequest
+	(*UpdateViewRequest)(nil),       // 4: sameoldchat.chat.v1.UpdateViewRequest
+	(*CurrentModalViewRequest)(nil), // 5: sameoldchat.chat.v1.CurrentModalViewRequest
+	(*AppHomeRequest)(nil),          // 6: sameoldchat.chat.v1.AppHomeRequest
+	(*AppHomeResponse)(nil),         // 7: sameoldchat.chat.v1.AppHomeResponse
+	(*ViewSubmissionRequest)(nil),   // 8: sameoldchat.chat.v1.ViewSubmissionRequest
+	(*ViewInteractionResult)(nil),   // 9: sameoldchat.chat.v1.ViewInteractionResult
+	(*CloseViewRequest)(nil),        // 10: sameoldchat.chat.v1.CloseViewRequest
+	(*ViewMutationResponse)(nil),    // 11: sameoldchat.chat.v1.ViewMutationResponse
+	(*InstalledApp)(nil),            // 12: sameoldchat.chat.v1.InstalledApp
 }
 var file_sameoldchat_chat_v1_views_proto_depIdxs = []int32{
-	1, // 0: sameoldchat.chat.v1.ViewsService.OpenView:input_type -> sameoldchat.chat.v1.OpenViewRequest
-	2, // 1: sameoldchat.chat.v1.ViewsService.PublishView:input_type -> sameoldchat.chat.v1.PublishViewRequest
-	3, // 2: sameoldchat.chat.v1.ViewsService.PushView:input_type -> sameoldchat.chat.v1.PushViewRequest
-	4, // 3: sameoldchat.chat.v1.ViewsService.UpdateView:input_type -> sameoldchat.chat.v1.UpdateViewRequest
-	0, // 4: sameoldchat.chat.v1.ViewsService.OpenView:output_type -> sameoldchat.chat.v1.View
-	0, // 5: sameoldchat.chat.v1.ViewsService.PublishView:output_type -> sameoldchat.chat.v1.View
-	0, // 6: sameoldchat.chat.v1.ViewsService.PushView:output_type -> sameoldchat.chat.v1.View
-	0, // 7: sameoldchat.chat.v1.ViewsService.UpdateView:output_type -> sameoldchat.chat.v1.View
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	12, // 0: sameoldchat.chat.v1.AppHomeResponse.app:type_name -> sameoldchat.chat.v1.InstalledApp
+	0,  // 1: sameoldchat.chat.v1.AppHomeResponse.view:type_name -> sameoldchat.chat.v1.View
+	1,  // 2: sameoldchat.chat.v1.ViewsService.OpenView:input_type -> sameoldchat.chat.v1.OpenViewRequest
+	2,  // 3: sameoldchat.chat.v1.ViewsService.PublishView:input_type -> sameoldchat.chat.v1.PublishViewRequest
+	3,  // 4: sameoldchat.chat.v1.ViewsService.PushView:input_type -> sameoldchat.chat.v1.PushViewRequest
+	4,  // 5: sameoldchat.chat.v1.ViewsService.UpdateView:input_type -> sameoldchat.chat.v1.UpdateViewRequest
+	5,  // 6: sameoldchat.chat.v1.ViewsService.CurrentModalView:input_type -> sameoldchat.chat.v1.CurrentModalViewRequest
+	6,  // 7: sameoldchat.chat.v1.ViewsService.AppHome:input_type -> sameoldchat.chat.v1.AppHomeRequest
+	6,  // 8: sameoldchat.chat.v1.ViewsService.OpenAppHome:input_type -> sameoldchat.chat.v1.AppHomeRequest
+	8,  // 9: sameoldchat.chat.v1.ViewsService.SubmitView:input_type -> sameoldchat.chat.v1.ViewSubmissionRequest
+	10, // 10: sameoldchat.chat.v1.ViewsService.CloseView:input_type -> sameoldchat.chat.v1.CloseViewRequest
+	0,  // 11: sameoldchat.chat.v1.ViewsService.OpenView:output_type -> sameoldchat.chat.v1.View
+	0,  // 12: sameoldchat.chat.v1.ViewsService.PublishView:output_type -> sameoldchat.chat.v1.View
+	0,  // 13: sameoldchat.chat.v1.ViewsService.PushView:output_type -> sameoldchat.chat.v1.View
+	0,  // 14: sameoldchat.chat.v1.ViewsService.UpdateView:output_type -> sameoldchat.chat.v1.View
+	0,  // 15: sameoldchat.chat.v1.ViewsService.CurrentModalView:output_type -> sameoldchat.chat.v1.View
+	7,  // 16: sameoldchat.chat.v1.ViewsService.AppHome:output_type -> sameoldchat.chat.v1.AppHomeResponse
+	7,  // 17: sameoldchat.chat.v1.ViewsService.OpenAppHome:output_type -> sameoldchat.chat.v1.AppHomeResponse
+	9,  // 18: sameoldchat.chat.v1.ViewsService.SubmitView:output_type -> sameoldchat.chat.v1.ViewInteractionResult
+	11, // 19: sameoldchat.chat.v1.ViewsService.CloseView:output_type -> sameoldchat.chat.v1.ViewMutationResponse
+	11, // [11:20] is the sub-list for method output_type
+	2,  // [2:11] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_views_proto_init() }
@@ -535,13 +1094,14 @@ func file_sameoldchat_chat_v1_views_proto_init() {
 	if File_sameoldchat_chat_v1_views_proto != nil {
 		return
 	}
+	file_sameoldchat_chat_v1_apps_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_views_proto_rawDesc), len(file_sameoldchat_chat_v1_views_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

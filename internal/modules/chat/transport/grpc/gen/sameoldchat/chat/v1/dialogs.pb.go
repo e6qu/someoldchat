@@ -27,6 +27,7 @@ type OpenDialogRequest struct {
 	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	TriggerId     string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
 	Payload       string                 `protobuf:"bytes,4,opt,name=payload,proto3" json:"payload,omitempty"`
+	AppId         string                 `protobuf:"bytes,5,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -89,6 +90,13 @@ func (x *OpenDialogRequest) GetPayload() string {
 	return ""
 }
 
+func (x *OpenDialogRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
 type DialogMutationResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -137,13 +145,14 @@ var File_sameoldchat_chat_v1_dialogs_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_dialogs_proto_rawDesc = "" +
 	"\n" +
-	"!sameoldchat/chat/v1/dialogs.proto\x12\x13sameoldchat.chat.v1\"\x88\x01\n" +
+	"!sameoldchat/chat/v1/dialogs.proto\x12\x13sameoldchat.chat.v1\"\x9f\x01\n" +
 	"\x11OpenDialogRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
 	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x18\n" +
-	"\apayload\x18\x04 \x01(\tR\apayload\"(\n" +
+	"\apayload\x18\x04 \x01(\tR\apayload\x12\x15\n" +
+	"\x06app_id\x18\x05 \x01(\tR\x05appId\"(\n" +
 	"\x16DialogMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok2s\n" +
 	"\x0eDialogsService\x12a\n" +

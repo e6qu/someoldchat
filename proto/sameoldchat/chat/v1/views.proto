@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/apps.proto";
+
 message View {
   string id = 1;
   string workspace_id = 2;
@@ -16,6 +18,9 @@ message View {
   string previous_view_id = 9;
   int64 created_at_unix_nano = 10;
   int64 updated_at_unix_nano = 11;
+  string app_id = 12;
+  string errors_json = 13;
+  string state_json = 14;
 }
 
 message OpenViewRequest {
@@ -23,6 +28,7 @@ message OpenViewRequest {
   string user_id = 2;
   string trigger_id = 3;
   string payload = 4;
+  string app_id = 5;
 }
 
 message PublishViewRequest {
@@ -31,6 +37,7 @@ message PublishViewRequest {
   string target_user_id = 3;
   string payload = 4;
   string hash = 5;
+  string app_id = 6;
 }
 
 message PushViewRequest {
@@ -38,6 +45,7 @@ message PushViewRequest {
   string user_id = 2;
   string trigger_id = 3;
   string payload = 4;
+  string app_id = 5;
 }
 
 message UpdateViewRequest {
@@ -47,6 +55,51 @@ message UpdateViewRequest {
   string external_id = 4;
   string payload = 5;
   string hash = 6;
+  string app_id = 7;
+}
+
+message CurrentModalViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message AppHomeRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message AppHomeResponse {
+  InstalledApp app = 1;
+  View view = 2;
+  bool published = 3;
+}
+
+message ViewSubmissionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string view_id = 4;
+  string state_json = 5;
+  string response_base_url = 6;
+}
+
+message ViewInteractionResult {
+  string errors_json = 1;
+  bool pending = 2;
+}
+
+message CloseViewRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string view_id = 4;
+  bool clear = 5;
+  string response_base_url = 6;
+}
+
+message ViewMutationResponse {
+  bool ok = 1;
 }
 
 service ViewsService {
@@ -54,4 +107,9 @@ service ViewsService {
   rpc PublishView(PublishViewRequest) returns (View);
   rpc PushView(PushViewRequest) returns (View);
   rpc UpdateView(UpdateViewRequest) returns (View);
+  rpc CurrentModalView(CurrentModalViewRequest) returns (View);
+  rpc AppHome(AppHomeRequest) returns (AppHomeResponse);
+  rpc OpenAppHome(AppHomeRequest) returns (AppHomeResponse);
+  rpc SubmitView(ViewSubmissionRequest) returns (ViewInteractionResult);
+  rpc CloseView(CloseViewRequest) returns (ViewMutationResponse);
 }

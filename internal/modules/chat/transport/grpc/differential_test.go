@@ -3,6 +3,7 @@ package grpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -12,6 +13,7 @@ import (
 	"net"
 	"path"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	storepkg "github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -165,7 +168,7 @@ func newParity(t *testing.T, testCase parityCase) parity {
 	build := func(name string) chatWorld {
 		target := memory.New()
 		seed(t, target)
-		implementation := service.Messages{Store: target}
+		implementation := service.Messages{Store: target, AppCredentialKey: bytes.Repeat([]byte("k"), 32)}
 		if testCase.blobs {
 			blobs, err := blob.NewFilesystem(t.TempDir(), 1<<20)
 			if err != nil {
@@ -385,11 +388,47 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "missing modal lifecycle state agrees across the composition seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				_, currentErr := chat.CurrentModalView(ctx, "T1", "U1")
+				_, submitErr := chat.SubmitView(ctx, "T1", "U1", "C1", "V-missing", `{"values":{}}`, "https://chat.example.test")
+				closeErr := chat.CloseView(ctx, "T1", "U1", "C1", "V-missing", false, "https://chat.example.test")
+				return []bool{
+					errors.Is(currentErr, storepkg.ErrNotFound),
+					errors.Is(submitErr, storepkg.ErrNotFound),
+					errors.Is(closeErr, storepkg.ErrNotFound),
+				}, nil
+			},
+		},
+		{
 			name:         "post to an unknown conversation",
 			wantSentinel: storepkg.ErrNotFound,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				_, err := chat.Post(ctx, "T1", "U1", "C-missing", "hello", "", "")
 				return nil, err
+			},
+		},
+		{
+			name: "recipient-scoped ephemeral messages cross the composition seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.PostEphemeral(ctx, "T1", "U1", "C1", "U2", "plain"); err != nil {
+					return nil, err
+				}
+				if _, err := chat.PostEphemeralWithBlocks(ctx, "T1", "U1", "C1", "U2", "", `[{"type":"divider"}]`); err != nil {
+					return nil, err
+				}
+				if _, err := chat.PostEphemeralWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "U2", "", "", `[{"text":"attachment"}]`, "A1"); err != nil {
+					return nil, err
+				}
+				values, err := chat.ListEphemeralMessages(ctx, "T1", "U2", "C1", 10)
+				if err != nil {
+					return nil, err
+				}
+				result := make([]any, 0, len(values))
+				for _, value := range values {
+					result = append(result, []any{value.Text, value.Blocks, value.Attachments, value.AppID, value.ID != "", !value.CreatedAt.IsZero()})
+				}
+				return result, nil
 			},
 		},
 		{
@@ -732,6 +771,48 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "streaming message lifecycle preserves state and metadata across the composition seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				parent, err := chat.Post(ctx, "T1", "U2", "C1", "question", "", "")
+				if err != nil {
+					return nil, err
+				}
+				stream, err := chat.StartMessageStream(ctx, "T1", "U1", domain.MessageStreamStart{
+					Conversation: "C1", ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt), AppID: "A1", BotID: "B1",
+					RecipientTeamID: "T1", RecipientUserID: "U2", MarkdownText: "**answer",
+					TaskDisplayMode: "plan", Username: "Assistant", IconURL: "https://example.com/bot.png",
+				})
+				if err != nil {
+					return nil, err
+				}
+				mutation := domain.MessageStreamMutation{
+					Conversation: "C1", Timestamp: domain.NewMessageTimestamp(stream.CreatedAt), AppID: "A1",
+					Chunks: `[{"type":"markdown_text","text":"**"},{"type":"task_update","id":"task","title":"Answer","status":"complete"}]`,
+				}
+				stream, err = chat.AppendMessageStream(ctx, "T1", "U1", mutation)
+				if err != nil {
+					return nil, err
+				}
+				mutation.Chunks = ""
+				mutation.MarkdownText = " done"
+				mutation.Blocks = `[{"type":"divider"}]`
+				mutation.Metadata = `{"event_type":"answer","event_payload":{"id":"R1"}}`
+				stream, err = chat.StopMessageStream(ctx, "T1", "U1", mutation)
+				if err != nil {
+					return nil, err
+				}
+				var state domain.MessageStreamState
+				if err := json.Unmarshal([]byte(stream.StreamState), &state); err != nil {
+					return nil, err
+				}
+				return []any{
+					stream.Conversation, stream.AuthorID, stream.AppID, stream.Text, stream.Blocks,
+					stream.Metadata, state.Active, len(state.Tasks), stream.ThreadTimestamp != "",
+					state.BotID, state.TaskDisplayMode, state.Username, state.IconURL,
+				}, nil
+			},
+		},
+		{
 			name: "user lookups return the stored record",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				byID, err := chat.UserInfo(ctx, "T1", "U1", "U1")
@@ -852,7 +933,15 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				return []any{file.Name, file.Title, file.Size, opened.Name, bytes.Equal(readBack, content), len(page.Files), page.HasMore}, nil
+				shared, err := chat.ShareFile(ctx, "T1", "U1", file.ID, "C1", "")
+				if err != nil {
+					return nil, err
+				}
+				history, err := chat.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				return []any{file.Name, file.Title, file.Size, opened.Name, bytes.Equal(readBack, content), len(page.Files), page.HasMore, len(shared.Files), len(history.Messages), len(history.Messages[0].Files), history.Messages[0].Files[0].Name}, nil
 			},
 		},
 		{
@@ -1072,6 +1161,284 @@ func parityCases() []parityCase {
 				return []any{initial.Enabled, snoozed.SnoozeEnabled(reference), ended.SnoozeEnabled(reference)}, nil
 			},
 		},
+		{
+			name: "application event leases survive the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Unix(1700000000, 0).UTC()
+				manifest := `{"display_information":{"name":"Events"},"settings":{"socket_mode_enabled":true,"event_subscriptions":{"bot_events":["reaction_added"]}}}`
+				requireSeed(t, target.CreateApp(context.Background(), domain.App{
+					ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Events", ClientID: "event-client",
+					SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+					VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+					ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now,
+				}, domain.AppManifestRevision{
+					AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+				}, domain.OAuthClient{ID: "event-client", SecretHash: "client-hash", AppID: "A1"}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+				}))
+				requireSeed(t, target.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "events-bot"}))
+				requireSeed(t, target.SeedConversationMember("C1", "UBOT"))
+				requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
+					ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "events-bot", UpdatedAt: now,
+				}))
+				event, err := events.New("EV1", "T1", "U1", events.NewPayload("reaction.added",
+					events.String("message_id", "M1"),
+					events.String("channel_id", "C1"),
+					events.String("ts", "1700000000.000000"),
+					events.String("reaction", "wave"),
+					events.String("user_id", "U1"),
+				), now)
+				requireSeed(t, err)
+				requireSeed(t, target.AppendEvent(context.Background(), event))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				first, firstAttempt, firstReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-1", time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if !found {
+					return nil, errors.New("first event lease was not found")
+				}
+				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
+					return nil, err
+				}
+				second, secondAttempt, secondReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if !found {
+					return nil, errors.New("released event lease was not found")
+				}
+				if err := chat.AckAppEvent(ctx, "A1", "socket", "connection-2", second.Sequence); err != nil {
+					return nil, err
+				}
+				return []any{
+					first.Sequence, first.Event.ID, first.Event.WorkspaceID, first.Event.ActorID, first.Event.Topic, first.Event.Payload,
+					firstAttempt, firstReason, second.Sequence, secondAttempt, secondReason,
+				}, nil
+			},
+		},
+		{
+			name: "Socket Mode interaction leases and response payloads survive the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Unix(1700000000, 0).UTC()
+				requireSeed(t, target.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "socket-bot"}))
+				requireSeed(t, target.SeedConversationMember("C1", "UBOT"))
+				requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
+					ID: "B1", AppID: "A1", WorkspaceID: "T1", UserID: "UBOT", Name: "socket-bot", UpdatedAt: now,
+				}))
+				response := domain.AppResponseURL{
+					TokenHash: "response-hash", AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+					ConversationID: "C1", CreatedAt: now, ExpiresAt: time.Now().UTC().Add(time.Hour), UsesRemaining: 5,
+				}
+				requireSeed(t, target.CreateAppInteractionCapabilities(context.Background(), domain.AppTrigger{
+					TokenHash: "trigger-hash", AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+					CreatedAt: now, ExpiresAt: time.Now().UTC().Add(time.Hour),
+				}, response))
+				requireSeed(t, target.CreateSocketModeInteraction(context.Background(), domain.SocketModeInteraction{
+					EnvelopeID: "EN1", AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+					Type: "slash_commands", Payload: `{"command":"/deploy"}`, Response: response, CreatedAt: now,
+				}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				first, found, err := chat.ClaimSocketModeInteraction(ctx, "A1", "connection-1", time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if !found {
+					return nil, errors.New("first interaction lease was not found")
+				}
+				if err := chat.ReleaseSocketModeInteraction(ctx, "A1", first.EnvelopeID, "connection-1", "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
+					return nil, err
+				}
+				second, found, err := chat.ClaimSocketModeInteraction(ctx, "A1", "connection-2", time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if !found {
+					return nil, errors.New("released interaction lease was not found")
+				}
+				if err := chat.HandleSocketModeResponse(ctx, "A1", second.EnvelopeID, []byte(`{"text":"deployment queued"}`)); err != nil {
+					return nil, err
+				}
+				if err := chat.AckSocketModeInteraction(ctx, "A1", second.EnvelopeID, "connection-2"); err != nil {
+					return nil, err
+				}
+				ephemeral, err := chat.ListEphemeralMessages(ctx, "T1", "U1", "C1", 10)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					first.EnvelopeID, first.Type, first.Payload, second.RetryCount, second.RetryReason,
+					len(ephemeral), ephemeral[0].Text, ephemeral[0].AppID,
+				}, nil
+			},
+		},
+		{
+			name: "application shortcut discovery and dispatch survive the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Unix(1700000000, 0).UTC()
+				verification, err := secretbox.Seal(bytes.Repeat([]byte("k"), 32), "app:A1:verification-token", "verification-token")
+				requireSeed(t, err)
+				manifest := `{"display_information":{"name":"Shortcuts"},"features":{"shortcuts":[{"name":"Create ticket","callback_id":"create_ticket","description":"Create a ticket","type":"global"},{"name":"Attach ticket","callback_id":"attach_ticket","description":"Attach this message","type":"message"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
+				requireSeed(t, target.CreateApp(context.Background(), domain.App{
+					ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Shortcuts", ClientID: "shortcut-client",
+					SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+					VerificationTokenHash: domain.HashToken("verification-token"), VerificationTokenCiphertext: verification,
+					ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now,
+				}, domain.AppManifestRevision{
+					AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+				}, domain.OAuthClient{ID: "shortcut-client", SecretHash: "client-hash", AppID: "A1"}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+				}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				shortcuts, err := chat.ListAppShortcuts(ctx, "T1", "U1", "global")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DispatchAppShortcut(ctx, "T1", "U1", "C1", "A1", "create_ticket", "", "https://chat.example.test"); err != nil {
+					return nil, err
+				}
+				interaction, found, err := chat.ClaimSocketModeInteraction(ctx, "A1", "connection-1", time.Minute)
+				if err != nil {
+					return nil, err
+				}
+				if !found {
+					return nil, errors.New("shortcut interaction was not found")
+				}
+				if err := chat.AckSocketModeInteraction(ctx, "A1", interaction.EnvelopeID, "connection-1"); err != nil {
+					return nil, err
+				}
+				var payload map[string]any
+				if err := json.Unmarshal([]byte(interaction.Payload), &payload); err != nil {
+					return nil, err
+				}
+				return []any{
+					len(shortcuts), shortcuts[0].AppID, shortcuts[0].AppName, shortcuts[0].Name,
+					shortcuts[0].CallbackID, shortcuts[0].Description, shortcuts[0].Type,
+					interaction.Type, payload["type"], payload["callback_id"], payload["api_app_id"],
+				}, nil
+			},
+		},
+		{
+			name: "hosted app datastore CRUD survives the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Unix(1700000000, 0).UTC()
+				manifest := `{"display_information":{"name":"Hosted"},"oauth_config":{"scopes":{"bot":["datastore:read","datastore:write"]}},"settings":{"is_hosted":true,"function_runtime":"slack"},"datastores":{"incidents":{"primary_key":"id","attributes":{"id":{"type":"string"},"title":{"type":"string"},"priority":{"type":"integer"}}}}}`
+				requireSeed(t, target.CreateApp(context.Background(), domain.App{
+					ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Hosted", ClientID: "hosted-client",
+					SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+					VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+					ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+				}, domain.AppManifestRevision{
+					AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+				}, domain.OAuthClient{ID: "hosted-client", SecretHash: "client-hash", AppID: "A1"}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+				}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				put, err := chat.PutAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{
+					`{"id":"INC-1","title":"Investigate","priority":1}`,
+					`{"id":"INC-2","title":"Mitigate","priority":2}`,
+				}, false)
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.PutAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{
+					`{"id":"INC-1","priority":3}`,
+				}, true)
+				if err != nil {
+					return nil, err
+				}
+				got, err := chat.GetAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-2", "INC-1", "missing"})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-2"}); err != nil {
+					return nil, err
+				}
+				remaining, err := chat.GetAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-1", "INC-2"})
+				if err != nil {
+					return nil, err
+				}
+				return []any{put, updated, got, remaining}, nil
+			},
+		},
+		{
+			name: "developer app manifest lifecycle",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				configuration, err := chat.IssueAppConfigurationToken(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				manifest := `{"display_information":{"name":"Example"},"oauth_config":{"redirect_urls":["https://example.test/oauth"],"scopes":{"bot":["chat:write"]}},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}`
+				problems, err := chat.ValidateAppManifest(ctx, configuration.Token, "", manifest)
+				if err != nil {
+					return nil, err
+				}
+				app, credentials, err := chat.CreateAppFromManifest(ctx, configuration.Token, manifest, "")
+				if err != nil {
+					return nil, err
+				}
+				exportedApp, exported, err := chat.ExportAppManifest(ctx, configuration.Token, app.ID)
+				if err != nil {
+					return nil, err
+				}
+				apps, err := chat.ListDeveloperApps(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				detail, detailManifest, err := chat.GetDeveloperApp(ctx, "T1", "U1", app.ID)
+				if err != nil {
+					return nil, err
+				}
+				appToken, err := chat.IssueDeveloperAppToken(ctx, "T1", "U1", app.ID, []string{"connections:write"})
+				if err != nil {
+					return nil, err
+				}
+				updatedManifest := `{"display_information":{"name":"Updated"},"oauth_config":{"redirect_urls":["https://example.test/oauth"],"scopes":{"bot":["chat:write"]}},"settings":{"socket_mode_enabled":true,"token_rotation_enabled":true}}`
+				updated, err := chat.UpdateAppFromManifest(ctx, configuration.Token, app.ID, updatedManifest)
+				if err != nil {
+					return nil, err
+				}
+				oauthRequest := domain.OAuthAuthorizationRequest{ClientID: credentials.ClientID, WorkspaceID: "T1", UserID: "U1", RedirectURI: "https://example.test/oauth", BotScopes: []string{"chat:write"}, State: "state"}
+				inspected, err := chat.InspectOAuthAuthorization(ctx, oauthRequest)
+				if err != nil {
+					return nil, err
+				}
+				authorized, err := chat.AuthorizeOAuth(ctx, oauthRequest)
+				if err != nil {
+					return nil, err
+				}
+				oauthToken, err := chat.OAuthV2Exchange(ctx, credentials.ClientID, credentials.ClientSecret, authorized.Code, authorized.RedirectURI, false)
+				if err != nil {
+					return nil, err
+				}
+				refreshed, err := chat.OAuthV2Refresh(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.RefreshToken)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.OAuthV2ExchangeToken(ctx, credentials.ClientID, credentials.ClientSecret, oauthToken.AccessToken); !errors.Is(err, service.ErrInvalidOAuth) {
+					return nil, fmt.Errorf("rotating token accepted by oauth.v2.exchange: %w", err)
+				}
+				rotated, err := chat.RotateAppConfigurationToken(ctx, configuration.RefreshToken)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteDeveloperApp(ctx, rotated.Token, app.ID); err != nil {
+					return nil, err
+				}
+				return []any{len(problems), app.Name, credentials.ClientID == app.ClientID, exportedApp.ID == app.ID, exported == manifest, len(apps), detail.ID == app.ID, detailManifest == manifest, strings.HasPrefix(appToken.Token, "xapp-"), appToken.AppID == app.ID, strings.Join(appToken.Scopes, " "), updated.Name, updated.ManifestVersion, inspected.AppName, authorized.Code != "", authorized.BotID != "", authorized.BotUserID != "", strings.HasPrefix(oauthToken.AccessToken, "xoxe.xoxb-"), oauthToken.RefreshToken != "", strings.HasPrefix(refreshed.AccessToken, "xoxe.xoxb-"), refreshed.RefreshToken != ""}, nil
+			},
+		},
 	}
 }
 
@@ -1230,6 +1597,9 @@ var parityGaps = map[string]struct{}{
 	"DeleteReminder":                          {},
 	"DeleteScheduledMessage":                  {},
 	"DeleteUserPhoto":                         {},
+	"DispatchBlockAction":                     {},
+	"DispatchViewBlockAction":                 {},
+	"DispatchSlashCommand":                    {},
 	"Emojis":                                  {},
 	"EndCall":                                 {},
 	"EndDND":                                  {},
@@ -1239,30 +1609,32 @@ var parityGaps = map[string]struct{}{
 	"GetListDownload":                         {},
 	"GetListItem":                             {},
 	"GetSocketModeCursor":                     {},
+	"HandleAppResponse":                       {},
 	"IntegrationLogs":                         {},
 	"InviteConversationMembers":               {},
 	"JoinConversation":                        {},
 	"KickConversationMember":                  {},
 	"LeaveConversation":                       {},
+	"ListWorkspaceApps":                       {},
 	"ListAccessLogs":                          {},
 	"ListAppEventsAfter":                      {},
+	"ListUserEventsAfter":                     {},
 	"ListAppInstallations":                    {},
 	"ListEventsAfter":                         {},
 	"LookupAppToken":                          {},
 	"LookupCanvasSections":                    {},
+	"LoadAppOptions":                          {},
 	"MigrationExchange":                       {},
 	"OAuthExchange":                           {},
-	"OAuthV2Exchange":                         {},
 	"OpenConversation":                        {},
 	"OpenDialog":                              {},
+	"OpenAppHome":                             {},
 	"OpenIDConnectToken":                      {},
 	"OpenIDConnectUserInfo":                   {},
 	"OpenPublicFile":                          {},
 	"OpenView":                                {},
+	"AppHome":                                 {},
 	"Permalink":                               {},
-	"PostEphemeral":                           {},
-	"PostEphemeralWithBlocks":                 {},
-	"PostEphemeralWithBlocksAndAttachments":   {},
 	"PostIncomingWebhook":                     {},
 	"PostIncomingWebhookWithAttachments":      {},
 	"PostWithBlocks":                          {},

@@ -5,13 +5,17 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"html/template"
+	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +33,7 @@ type Handler struct {
 	Channel         domain.ConversationID
 	CookieDomain    string
 	Login           *LoginHandler
+	PublicURL       string
 	ReleaseRevision string
 }
 
@@ -57,6 +62,26 @@ func (h *Handler) SetReleaseRevision(revision string) error {
 		revision = revision[:12]
 	}
 	h.ReleaseRevision = revision
+	return nil
+}
+
+func ValidatePublicURL(value string) error {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return errors.New("web public URL must be an absolute HTTPS URL")
+	}
+	return nil
+}
+
+func (h *Handler) SetPublicURL(value string) error {
+	if err := ValidatePublicURL(value); err != nil {
+		return err
+	}
+	parsed, _ := url.Parse(strings.TrimSpace(value))
+	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	h.PublicURL = parsed.String()
 	return nil
 }
 
@@ -109,6 +134,11 @@ var liveEventTopics = []string{
 	"reaction.removed",
 	"pin.added",
 	"pin.removed",
+	"view.opened",
+	"view.pushed",
+	"view.updated",
+	"view.submitted",
+	"view.closed",
 }
 
 // ---------------------------------------------------------------------------
@@ -131,11 +161,15 @@ type messageList struct {
 
 type messageView struct {
 	ID            string
+	MessageID     string
 	Anchor        string
 	AuthorName    string
 	AuthorInitial string
+	AvatarURL     string
+	AvatarEmoji   string
+	IsApp         bool
 	Text          string
-	DisplayText   string
+	DisplayText   template.HTML
 	Blocks        []messageBlockView
 	Attachments   []messageAttachmentView
 	Unfurls       []messageAttachmentView
@@ -156,6 +190,21 @@ type messageView struct {
 	Channel       string
 	ChannelName   string
 	ChannelPrefix string
+	AppID         string
+	CanInteract   bool
+	Streaming     bool
+	Ephemeral     bool
+	Shortcuts     []domain.AppShortcut
+	Files         []fileView
+}
+
+type fileView struct {
+	Name        string
+	Title       string
+	MIMEType    string
+	Size        string
+	DownloadURL string
+	Deleted     bool
 }
 
 type reactionView struct {
@@ -169,6 +218,26 @@ type conversationView struct {
 	Name        string
 	Current     bool
 	UnreadCount int
+}
+
+type conversationDetailsView struct {
+	ID          string
+	Name        string
+	IsChannel   bool
+	Topic       string
+	Purpose     string
+	Type        string
+	Archived    bool
+	Members     []memberView
+	Invitees    []memberView
+	Truncated   bool
+	CloseURL    string
+	CanEdit     bool
+	CanInvite   bool
+	CanLeave    bool
+	CanClose    bool
+	CanArchive  bool
+	ArchiveVerb string
 }
 
 type pageData struct {
@@ -188,6 +257,7 @@ type pageData struct {
 	ShowAdmin         bool
 	IsMember          bool
 	CanPost           bool
+	CanUpload         bool
 	CanJoin           bool
 	CanCreate         bool
 	JoinURL           string
@@ -200,14 +270,20 @@ type pageData struct {
 	// NewestURL is set when the rendered window is not the newest one, so a
 	// post made while reading older history can take the reader to where the
 	// message actually landed instead of refreshing a window that cannot hold it.
-	NewestURL   string
-	AtLatest    bool
-	Notice      string
-	Error       string
-	Draft       string
-	ComposeURL  string
-	TimelineURL string
-	ThreadURL   string
+	NewestURL       string
+	AtLatest        bool
+	Notice          string
+	Error           string
+	Draft           string
+	ComposeURL      string
+	UploadURL       string
+	TimelineURL     string
+	ThreadURL       string
+	GlobalShortcuts []domain.AppShortcut
+	ComposerMembers []memberView
+	Apps            []domain.InstalledApp
+	Modal           *modalView
+	Details         *conversationDetailsView
 }
 
 type memberView struct {
@@ -241,6 +317,20 @@ type searchData struct {
 	Searched bool
 }
 
+type activityConversationView struct {
+	Name        string
+	Prefix      string
+	UnreadCount int
+	URL         string
+}
+
+type activityData struct {
+	Channel  string
+	Unread   []activityConversationView
+	Mentions []messageView
+	Notice   string
+}
+
 type identityData struct {
 	Heading   string
 	Username  string
@@ -255,6 +345,19 @@ type identityData struct {
 type errorData struct {
 	Heading string
 	Message string
+}
+
+type oauthConsentData struct {
+	Action              string
+	AppName             string
+	BotScopes           []string
+	UserScopes          []string
+	CSRFToken           string
+	ClientID            string
+	RedirectURI         string
+	State               string
+	CodeChallenge       string
+	CodeChallengeMethod string
 }
 
 // ---------------------------------------------------------------------------
@@ -363,22 +466,43 @@ const pageStyle = `<style>
 .message:hover{background:var(--hover)}
 .message:focus{background:var(--hover);outline:3px solid var(--focus);outline-offset:-1px}
 .message:target{background:var(--hover);outline:2px solid var(--focus)}
-.avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}
+.avatar{height:36px;width:36px;border-radius:6px;background:linear-gradient(135deg,#2f7f9c,#0a6b4f);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;text-transform:uppercase;overflow:hidden}.avatar img{width:100%;height:100%;object-fit:cover}.avatar.avatar-emoji{font-size:10px;text-transform:none;overflow-wrap:anywhere}
 .message-body{min-width:0}
-.message-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.message-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.app-label{padding:1px 4px;border-radius:3px;background:var(--hover);color:var(--muted);font-size:10px;font-weight:800;letter-spacing:.04em}
 .author{font-weight:800}
 .time{color:var(--muted);font-size:12px}
 .pinned{color:var(--muted);font-size:12px;font-weight:700}
 .message-text{margin:2px 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.message-files{display:grid;gap:7px;margin:7px 0;max-width:520px}
+.message-file{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}
+.message-file-icon{display:grid;place-items:center;width:34px;height:34px;border-radius:6px;background:var(--accent);color:var(--on-accent);font-size:11px;font-weight:800}
+.message-file-copy{display:grid;min-width:0}.message-file-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}.message-file-meta{color:var(--muted);font-size:12px}
+.upload-form{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin:7px 0}.upload-form label{display:grid;gap:3px;color:var(--muted);font-size:12px}.upload-form input{max-width:260px}
 .message-blocks,.message-attachments,.message-unfurls{display:grid;gap:8px;margin:8px 0}
 .message-block{white-space:pre-wrap;overflow-wrap:anywhere}
+.formatted-text{white-space:normal;overflow-wrap:anywhere}.formatted-text>:first-child{margin-top:0}.formatted-text>:last-child{margin-bottom:0}.formatted-text p{margin:0 0 8px}.formatted-text h1,.formatted-text h2,.formatted-text h3,.formatted-text h4,.formatted-text h5,.formatted-text h6{margin:12px 0 6px;line-height:1.25}.formatted-text ul,.formatted-text ol{margin:6px 0;padding-left:24px}.formatted-text blockquote{margin:6px 0;padding-left:12px;border-left:4px solid var(--line);color:var(--muted)}.formatted-text pre{max-width:100%;overflow:auto;margin:6px 0;padding:10px;border-radius:6px;background:var(--hover);white-space:pre}.formatted-text code{padding:1px 3px;border-radius:3px;background:var(--hover);font-family:ui-monospace,SFMono-Regular,Consolas,monospace}.formatted-text pre code{padding:0;background:transparent}.formatted-text a{color:var(--action)}.slack-mention{padding:1px 3px;border-radius:3px;background:color-mix(in srgb,var(--action) 15%,transparent);color:var(--action)}
 .message-block.header{font-size:17px;font-weight:800}
 .message-block.context{color:var(--muted);font-size:12px}
 .message-block.divider{border:0;border-top:1px solid var(--line);margin:5px 0}
 .message-block-fields,.attachment-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:6px 14px;margin:6px 0 0;padding:0;list-style:none}
 .message-block-fields li,.attachment-fields li{white-space:pre-wrap}
+.block-table-wrap{max-width:100%;overflow:auto}.block-table{border-collapse:collapse;width:max-content;min-width:100%;font-size:13px}.block-table th,.block-table td{border:1px solid var(--line);padding:6px 9px;vertical-align:top;white-space:pre-wrap}.block-table th{background:var(--hover);font-weight:700;text-align:left}
+.message-block.task-card{max-width:560px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel)}.message-block.task-card.error{border-color:var(--danger)}.message-block.task-card.plan{border-left:4px solid var(--accent)}.message-block.task-card.dense{padding:6px 10px;font-size:13px}.stream-task-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.stream-task-status{color:var(--muted);font-size:12px;font-weight:700}.stream-task-details,.stream-task-output{margin-top:6px;color:var(--muted)}.stream-task-sources{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 0;padding:0;list-style:none}.streaming-label{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}.streaming-label::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--ok);animation:stream-pulse 1.2s ease-in-out infinite}@keyframes stream-pulse{50%{opacity:.3}}
+.message-block.alert{max-width:620px;padding:10px 12px;border-left:4px solid var(--muted);border-radius:5px;background:var(--hover)}.message-block.alert.info{border-color:#1264a3}.message-block.alert.warning{border-color:#d29b05}.message-block.alert.error{border-color:var(--danger)}.message-block.alert.success{border-color:var(--ok)}
+.message-block.card{max-width:560px;padding:0;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}.block-card-hero{display:block;width:100%;max-height:280px;object-fit:cover}.block-card-content{padding:12px}.block-card-heading{display:flex;align-items:flex-start;gap:9px}.block-card-heading>div{display:grid;gap:2px}.block-card-icon{width:36px;height:36px;border-radius:6px;object-fit:cover}.block-card-title,.block-card-subtitle{display:block}.block-card-subtitle,.block-card-subtext{color:var(--muted);font-size:13px}.block-card-body{margin-top:10px}.block-card-subtext{margin-top:8px}.message-block.carousel{max-width:min(720px,100%);overflow-x:auto;padding-bottom:6px}.block-carousel-track{display:flex;gap:10px;scroll-snap-type:x mandatory}.block-carousel-card{min-width:min(320px,80vw);max-width:360px;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;scroll-snap-align:start}
+.message-block.plan{max-width:620px}.block-plan{border:1px solid var(--line);border-radius:9px;background:var(--panel);overflow:hidden}.block-plan-title{display:block;padding:10px 12px;border-bottom:1px solid var(--line)}.block-plan-tasks{display:grid}.block-plan-task{padding:10px 12px;border-bottom:1px solid var(--line)}.block-plan-task:last-child{border-bottom:0}
+.message-block.container{width:100%}.message-block.container.narrow{max-width:420px}.message-block.container.standard{max-width:620px}.message-block.container.wide{max-width:780px}.message-block.container.full{max-width:none}.block-container-frame{display:block;border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden}.block-container-frame>summary,.block-container-frame>header{display:flex;align-items:center;gap:9px;padding:11px 13px}.block-container-frame>summary{cursor:pointer}.block-container-frame>summary::marker{color:var(--muted)}.block-container-frame>header.with-divider{border-bottom:1px solid var(--line)}.block-container-icon{width:36px;height:36px;border-radius:6px;object-fit:cover}.block-container-heading{display:grid;gap:2px}.block-container-heading>span{color:var(--muted);font-size:13px}.block-container-children{display:grid;gap:8px;padding:4px 13px 13px}.block-container-child{min-width:0}
+.message-block.data-visualization{max-width:680px}.block-chart{margin:0;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.block-chart>figcaption{margin-bottom:12px;font-weight:800}.block-chart-pie-layout{display:flex;align-items:center;gap:18px}.block-chart-pie-graphic{width:150px;aspect-ratio:1;border-radius:50%;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--fg) 12%,transparent);flex:0 0 auto}.block-chart-legend{display:flex;flex-wrap:wrap;gap:7px 14px;margin:10px 0 0;padding:0;list-style:none;font-size:12px}.block-chart-pie-layout>.block-chart-legend{display:grid;margin:0}.block-chart-legend li{display:flex;align-items:center;gap:6px}.block-chart-legend strong{margin-left:auto}.block-chart-swatch{width:9px;height:9px;border-radius:2px;flex:0 0 auto}.block-chart-bars{display:grid;gap:8px}.block-chart-bar-group{display:grid;grid-template-columns:minmax(90px,1fr) 3fr;align-items:center;gap:8px}.block-chart-category{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);font-size:12px}.block-chart-bar-series{display:grid;gap:3px}.block-chart-bar{display:block;min-width:2px;height:8px;border-radius:3px}.block-chart-svg{display:block;width:100%;height:auto;max-height:240px;overflow:visible}.block-chart-axis{stroke:var(--line);stroke-width:1}.block-chart-data{margin-top:10px;font-size:12px}.block-chart-data>summary{cursor:pointer;color:var(--muted)}@media(max-width:600px){.block-chart-pie-layout{align-items:flex-start;flex-direction:column}.block-chart-pie-graphic{width:120px}.block-chart-bar-group{grid-template-columns:80px 1fr}}
 .message-block-actions{display:flex;flex-wrap:wrap;gap:6px;margin:5px 0 0;padding:0;list-style:none}
-.message-block-actions li{border:1px solid var(--line);border-radius:5px;padding:4px 8px;background:var(--panel-strong);font-weight:700}
+.ephemeral-label{color:var(--muted);font-size:12px;font-style:italic}
+.message-block-actions form,.message-block-actions>div{display:inline-flex;align-items:center;gap:6px}
+.block-action{border:1px solid var(--field-line);border-radius:5px;padding:5px 10px;background:var(--panel-strong);color:var(--text);font:inherit;font-weight:700}
+.block-action:hover{background:var(--hover)}
+.block-action:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.block-action-select{max-width:min(320px,70vw)}
+.external-select{display:flex;flex-wrap:wrap;align-items:center;gap:6px}.external-select-status{width:100%;margin:0;color:var(--muted);font-size:12px}
+.block-action-options{display:flex;flex-wrap:wrap;gap:5px 10px;margin:0;padding:0;border:0}
+.block-action-options label{display:inline-flex;align-items:center;gap:4px}
 .message-media{display:block;max-width:min(520px,100%);max-height:360px;margin-top:7px;border-radius:8px;object-fit:contain}
 .message-attachment{border-left:4px solid var(--line);border-radius:4px;background:var(--panel-strong);padding:9px 12px;overflow-wrap:anywhere}
 .message-attachment .pretext{margin:0 0 6px}
@@ -401,6 +525,21 @@ const pageStyle = `<style>
 .composer{border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:10px}
 .composer.is-error{border-color:var(--danger)}
 .composer textarea{width:100%;min-height:44px;resize:vertical;border:0;outline:0;background:transparent;color:var(--text)}
+.composer-toolbar{display:flex;align-items:center;gap:3px;border-bottom:1px solid var(--line);padding:0 0 7px;margin-bottom:6px;position:relative}
+.composer-tool,.composer-menu>summary{display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:28px;border:0;border-radius:5px;background:transparent;color:var(--muted);font-weight:700;cursor:pointer;padding:0 7px}
+.composer-tool:hover,.composer-tool:focus-visible,.composer-menu>summary:hover,.composer-menu>summary:focus-visible{background:var(--panel);color:var(--text)}
+.composer-menu{position:relative}
+.composer-menu>summary{list-style:none}
+.composer-menu>summary::-webkit-details-marker{display:none}
+.composer-popover{position:absolute;z-index:8;left:0;bottom:34px;min-width:210px;max-width:min(320px,80vw);max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
+.composer-popover button{display:flex;width:100%;gap:8px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
+.composer-popover button:hover,.composer-popover button:focus-visible,.composer-popover button[aria-selected="true"]{background:var(--panel)}
+.emoji-grid{display:grid;grid-template-columns:repeat(6,36px);min-width:auto}
+.emoji-grid button{justify-content:center;font-size:18px;padding:5px}
+.mention-suggestions{position:absolute;z-index:9;left:8px;bottom:42px;min-width:220px;max-width:min(360px,80vw);max-height:210px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
+.mention-suggestions button{display:flex;width:100%;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
+.mention-suggestions button:hover,.mention-suggestions button:focus-visible,.mention-suggestions button[aria-selected="true"]{background:var(--panel)}
+.upload-preview{margin:5px 0 0;color:var(--muted);font-size:13px}
 .composer-footer{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .composer-tools{margin:0;color:var(--muted);font-size:13px}
 .send{border:0;border-radius:5px;background:var(--ok);color:var(--on-strong);font-weight:700;padding:7px 14px}
@@ -451,6 +590,14 @@ const workspaceRefinements = `<style>
 .message-actions summary{color:var(--muted);font-size:12px;cursor:pointer;list-style:none}
 .message-actions summary::-webkit-details-marker{display:none}
 .message-actions details[open]>form{position:absolute;z-index:5;right:0;top:34px;display:flex;width:max-content;max-width:min(480px,80vw);padding:9px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.shortcut-list{display:grid;gap:3px;min-width:220px;padding:6px}
+.message-actions details[open]>.shortcut-list{position:absolute;z-index:5;right:0;top:34px;width:max-content;max-width:min(360px,80vw);border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
+.shortcut-list form{display:block}
+.shortcut-list button{display:block;width:100%;padding:7px 9px;text-align:left}
+.shortcut-list small{display:block;color:var(--muted);font-weight:400}
+.composer-shortcuts{position:relative}
+.composer-shortcuts summary{cursor:pointer;color:var(--muted);font-weight:700}
+.composer-shortcuts[open]>.shortcut-list{position:absolute;z-index:6;left:0;bottom:30px;border:1px solid var(--line);border-radius:7px;background:var(--panel-strong);box-shadow:var(--shadow)}
 .message-actions .edit-message{width:min(420px,70vw)}
 .message-actions .edit-message textarea{width:min(320px,55vw);min-height:64px;resize:vertical;border:1px solid var(--field-line);border-radius:4px;background:var(--panel-strong);color:var(--text);padding:5px 7px}
 .message-actions .delete-message button{color:var(--danger);font-weight:700}
@@ -475,6 +622,31 @@ const workspaceRefinements = `<style>
 .conversation-gate strong{display:block;margin-bottom:2px}
 .conversation-gate p{margin:0;color:var(--muted);font-size:13px}
 .join-button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);font-weight:800;padding:8px 18px;white-space:nowrap}
+.conversation-details-backdrop{position:fixed;inset:0;z-index:18;display:grid;place-items:center;padding:24px;background:#0009}
+.conversation-details{width:min(720px,calc(100vw - 32px));max-height:min(820px,calc(100vh - 32px));overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);box-shadow:0 24px 80px #0007}
+.conversation-details-head{position:sticky;top:0;z-index:1;display:flex;align-items:flex-start;gap:16px;padding:18px 20px;border-bottom:1px solid var(--line);background:var(--panel-strong)}
+.conversation-details-head h2{margin:0;font-size:21px}.conversation-details-head p{margin:3px 0 0;color:var(--muted);font-size:13px}
+.conversation-details-close{margin-left:auto;border-radius:6px;padding:5px 9px;color:var(--muted);font-size:22px;line-height:1;text-decoration:none}.conversation-details-close:hover{background:var(--hover);color:var(--text)}
+.conversation-details-body{display:grid;gap:20px;padding:18px 20px}
+.conversation-details-section{display:grid;gap:10px}.conversation-details-section h3{margin:0;font-size:15px}
+.conversation-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
+.conversation-facts div{padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}.conversation-facts dt{color:var(--muted);font-size:12px;font-weight:700}.conversation-facts dd{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.conversation-settings{display:grid;gap:10px}.conversation-setting{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px}.conversation-setting label{display:grid;gap:4px;font-size:12px;font-weight:700}
+.conversation-setting input,.conversation-setting textarea,.conversation-setting select{width:100%;min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.conversation-setting textarea{min-height:70px;resize:vertical}
+.conversation-setting button,.conversation-danger button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 12px;font-weight:800}.conversation-setting button:hover{background:var(--hover)}
+.conversation-members{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:7px;margin:0;padding:0;list-style:none}.conversation-member{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:7px}.conversation-member-avatar{width:26px;height:26px;display:grid;place-items:center;border-radius:5px;background:var(--hover);font-size:11px;font-weight:800}.conversation-member-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.conversation-danger{display:flex;flex-wrap:wrap;gap:8px;padding-top:16px;border-top:1px solid var(--line)}.conversation-danger form{display:inline-flex}.conversation-danger button{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 50%,var(--line))}
+.conversation-details-note{margin:0;color:var(--muted);font-size:13px}
+.modal-backdrop{position:fixed;inset:0;z-index:20;display:grid;place-items:center;padding:24px;background:#0009}
+.app-modal{display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:min(620px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);box-shadow:0 24px 80px #0007;overflow:hidden}
+.modal-head,.modal-foot{display:flex;align-items:center;gap:12px;padding:16px 20px}
+.modal-head{border-bottom:1px solid var(--line)}.modal-head h2{margin:0;font-size:20px}.modal-app{color:var(--muted);font-size:12px}
+.modal-close-x{margin-left:auto;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:24px;line-height:1;padding:4px 8px}.modal-close-x:hover{background:var(--hover);color:var(--text)}
+.modal-form{display:contents}.modal-body{overflow:auto;padding:18px 20px}.modal-block{margin:0 0 16px}.modal-block.header{font-size:18px;font-weight:800}.modal-block.context{color:var(--muted);font-size:12px}.modal-block.divider{border:0;border-top:1px solid var(--line)}
+.modal-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}.modal-actions .block-action-options{width:100%}.modal-actions textarea{min-height:72px}
+.modal-input{display:grid;gap:6px}.modal-input>label,.modal-legend{font-weight:700}.modal-input input:not([type=radio]):not([type=checkbox]),.modal-input textarea,.modal-input select{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:9px 10px;font:inherit}.modal-input textarea{min-height:96px;resize:vertical}.modal-input select[multiple]{min-height:120px}
+.modal-hint{margin:0;color:var(--muted);font-size:12px}.modal-error{margin:0;color:var(--danger);font-size:13px;font-weight:700}.modal-options{display:grid;gap:7px;margin:0;padding:0;border:0}.modal-options label{display:flex;align-items:flex-start;gap:7px}
+.modal-foot{justify-content:flex-end;border-top:1px solid var(--line)}.modal-button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:8px 16px;font-weight:800}.modal-button.primary{border-color:var(--ok);background:var(--ok);color:var(--on-strong)}.modal-button:disabled{opacity:.55}
 @media(max-width:800px){
 .brand{display:none}
 html.js .nav-toggle{display:grid;place-items:center;flex:0 0 auto;width:34px;height:34px;border:1px solid #ffffff8a;border-radius:6px;background:transparent;color:var(--on-accent);font-size:21px;line-height:1}
@@ -499,6 +671,8 @@ html.js .sidebar.is-open{transform:translateX(0)}
 .conversation-gate{align-items:stretch;flex-direction:column}
 .join-button{width:100%}
 .new-channel{position:relative;margin-left:4px;margin-right:4px}
+.conversation-details-backdrop{padding:0;align-items:end}.conversation-details{width:100%;max-height:calc(100vh - 48px);border-radius:12px 12px 0 0}.conversation-facts{grid-template-columns:minmax(0,1fr)}.conversation-setting{grid-template-columns:minmax(0,1fr)}.conversation-setting button{width:100%}
+.modal-backdrop{padding:0;align-items:end}.app-modal{width:100%;max-height:calc(100vh - 48px);border-radius:12px 12px 0 0}
 }
 @media(hover:none){
 .message-actions{position:static;margin-top:2px;padding:0;border:0;background:transparent;box-shadow:none;opacity:1}
@@ -512,7 +686,7 @@ const attachmentPartial = `{{define "attachment"}}
   {{if .Title}}{{if .TitleURL}}<a class="attachment-title" href="{{.TitleURL}}" rel="noreferrer noopener">{{.Title}}</a>{{else}}<strong class="attachment-title">{{.Title}}</strong>{{end}}{{end}}
   {{if .Text}}<p class="attachment-text">{{.Text}}</p>{{end}}
   {{if .Fields}}<ul class="attachment-fields">{{range .Fields}}<li>{{if .Title}}<strong>{{.Title}}</strong><br>{{end}}{{.Value}}</li>{{end}}</ul>{{end}}
-  {{if .Blocks}}<div class="message-blocks">{{range .Blocks}}{{if eq .Kind "divider"}}<hr class="message-block divider">{{else}}<div class="message-block {{.Kind}}">{{.Text}}{{if .Fields}}<ul class="message-block-fields">{{range .Fields}}<li>{{.}}</li>{{end}}</ul>{{end}}</div>{{end}}{{end}}</div>{{end}}
+  {{if .Blocks}}<div class="message-blocks">{{range $block := .Blocks}}{{if eq $block.Kind "divider"}}<hr class="message-block divider">{{else}}<div class="message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else}}{{$block.Text}}{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{.}}</th>{{else}}<td>{{.}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}</div>{{end}}{{end}}</div>{{end}}
   {{if .ImageURL}}<img class="message-media" src="{{.ImageURL}}" alt="{{.ImageAlt}}" loading="lazy">{{end}}
   {{if .Footer}}<div class="attachment-footer">{{.Footer}}</div>{{end}}
   {{if .SourceURL}}<a class="unfurl-source" href="{{.SourceURL}}" rel="noreferrer noopener">{{.SourceURL}}</a>{{end}}
@@ -521,23 +695,51 @@ const attachmentPartial = `{{define "attachment"}}
 
 const messagesPartial = `{{define "messages"}}
 {{range $message := .Messages}}
-<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="Message from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
-  <div class="avatar" aria-hidden="true">{{$message.AuthorInitial}}</div>
+<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
+  <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
   <div class="message-body">
     <div class="message-head">
-      <span class="author">{{$message.AuthorName}}</span>
-      <time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>
+      <span class="author">{{$message.AuthorName}}</span>{{if $message.IsApp}}<span class="app-label">APP</span>{{end}}
+      <time class="time" datetime="{{$message.MachineTime}}">{{$message.DisplayTime}}</time>{{if $message.Streaming}}<span class="streaming-label" role="status">Responding…</span>{{end}}
       {{if $message.Pinned}}<span class="pinned">Pinned</span>{{end}}
+      {{if $message.Ephemeral}}<span class="ephemeral-label">Only visible to you</span>{{end}}
     </div>
     {{if $message.DisplayText}}<p class="message-text">{{$message.DisplayText}}</p>{{end}}
+    {{if $message.Files}}<div class="message-files" aria-label="Shared files">{{range $file := $message.Files}}
+      <div class="message-file">
+        <span class="message-file-icon" aria-hidden="true">FILE</span>
+        <span class="message-file-copy"><span class="message-file-title">{{$file.Title}}</span><span class="message-file-meta">{{$file.Name}} · {{$file.MIMEType}} · {{$file.Size}}</span></span>
+        {{if $file.Deleted}}<span class="message-file-meta">Deleted</span>{{else}}<a href="{{$file.DownloadURL}}" download>Download</a>{{end}}
+      </div>{{end}}</div>{{end}}
     {{if $message.Blocks}}
     <div class="message-blocks" aria-label="Structured message">
       {{range $block := $message.Blocks}}
         {{if eq $block.Kind "divider"}}<hr class="message-block divider">
         {{else}}<div class="message-block {{$block.Kind}}">
-          {{if $block.Text}}<div>{{$block.Text}}</div>{{end}}
-          {{if $block.Fields}}<ul class="message-block-fields">{{range $field := $block.Fields}}<li>{{$field}}</li>{{end}}</ul>{{end}}
-          {{if $block.ActionText}}<ul class="message-block-actions" aria-label="Message actions">{{range $action := $block.ActionText}}<li>{{$action}}</li>{{end}}</ul>{{end}}
+          {{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div>{{$block.Text}}</div>{{end}}
+          {{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}
+          {{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}
+          {{if and $message.CanInteract $block.Actions}}<div class="message-block-actions" aria-label="Message actions">{{range $action := $block.Actions}}
+            {{if $action.Dispatch}}<form method="post" action="/app/interaction" hx-post="/app/interaction">{{else}}<div>
+              {{end}}
+              <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+              <input type="hidden" name="message_id" value="{{$message.MessageID}}">
+              <input type="hidden" name="app_id" value="{{$message.AppID}}">
+              <input type="hidden" name="block_id" value="{{$action.BlockID}}">
+              <input type="hidden" name="action_id" value="{{$action.ActionID}}">
+              <input type="hidden" name="action_type" value="{{$action.Type}}">
+              <input type="hidden" name="channel" value="{{$message.Channel}}">
+              {{if eq $action.Control "button"}}<input type="hidden" name="value" value="{{$action.Value}}">{{if $action.Dispatch}}<button class="block-action{{if $action.Tone}} feedback-{{$action.Tone}}{{end}}" type="submit"{{if $action.AccessibilityLabel}} aria-label="{{$action.AccessibilityLabel}}"{{end}}>{{$action.Text}}</button>{{end}}
+              {{else if eq $action.Control "date"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="date" name="value" value="{{$action.Value}}" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
+              {{else if eq $action.Control "time"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="time" name="value" value="{{$action.Value}}" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
+              {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="value" data-unix-seconds="true" required></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
+              {{else if eq $action.Control "radio"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="radio" name="value" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}} required> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
+              {{else if eq $action.Control "checkbox"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="checkbox" name="value" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}
+              {{else if eq $action.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$message.AppID}}" data-message-id="{{$message.MessageID}}" data-block-id="{{$action.BlockID}}" data-action-id="{{$action.ActionID}}" data-channel="{{$message.Channel}}" data-min-query="{{$action.MinQueryLength}}"><label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="search" data-options-query placeholder="{{$action.Text}}" minlength="{{$action.MinQueryLength}}"></label><button class="block-action" type="button" data-options-load>Search</button><label><span class="sr-only">Results</span><select class="block-action block-action-select" name="value" data-options-results{{if $action.Multiple}} multiple{{end}}{{if not $action.Options}} disabled{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit" data-options-choose{{if not $action.Options}} disabled{{end}}>Choose</button>{{end}}<p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
+              {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if eq $action.Control "textarea"}}<textarea class="block-action" name="value" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="value" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}{{if $action.Dispatch}}<button class="block-action" type="submit">Send</button>{{end}}
+              {{else}}<label><span class="sr-only">{{$action.Text}}</span><select class="block-action block-action-select" name="value"{{if $action.Multiple}} multiple{{end}} required>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label>{{if $action.Dispatch}}<button class="block-action" type="submit">Choose</button>{{end}}{{end}}
+            {{if $action.Dispatch}}</form>{{else}}</div>{{end}}
+          {{end}}</div>{{end}}
           {{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
           {{if $block.LinkURL}}<a href="{{$block.LinkURL}}" rel="noreferrer noopener">{{$block.LinkLabel}}</a>{{end}}
         </div>{{end}}
@@ -571,7 +773,7 @@ const messagesPartial = `{{define "messages"}}
       {{end}}
     </ul>
     {{end}}
-    <div class="message-actions">
+    {{if not $message.Ephemeral}}<div class="message-actions">
       <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
       {{if $.CanReact}}
       <details>
@@ -589,6 +791,23 @@ const messagesPartial = `{{define "messages"}}
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
         <button type="submit">{{if $message.Pinned}}Unpin{{else}}Pin{{end}}</button>
       </form>
+      {{end}}
+      {{if $message.Shortcuts}}
+      <details>
+        <summary>More actions</summary>
+        <div class="shortcut-list" role="menu">
+          {{range $shortcut := $message.Shortcuts}}
+          <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <input type="hidden" name="channel" value="{{$message.Channel}}">
+            <input type="hidden" name="message_id" value="{{$message.MessageID}}">
+            <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
+            <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
+            <button type="submit" role="menuitem">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
+          </form>
+          {{end}}
+        </div>
+      </details>
       {{end}}
       {{if $message.CanEdit}}
       <details>
@@ -610,7 +829,7 @@ const messagesPartial = `{{define "messages"}}
         </form>
       </details>
       {{end}}
-    </div>
+    </div>{{end}}
   </div>
 </article>
 {{else}}
@@ -620,7 +839,7 @@ const messagesPartial = `{{define "messages"}}
 
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
 {{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + appOptionsScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell">
@@ -648,9 +867,13 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </div>
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
+        <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity" aria-keyshortcuts="Control+Shift+M Meta+Shift+M"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span></a>
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
+        <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
+        <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
         {{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
       </nav>
+      {{if .Apps}}<nav class="side-section" aria-label="Apps"><div class="side-label">Apps</div>{{range .Apps}}<a class="side-link" href="/app/apps/{{.ID}}?channel={{$.Channel}}"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">{{.Name}}</span></a>{{end}}</nav>{{end}}
       <nav class="side-section" aria-label="Channels">
         <div class="side-label">Channels</div>
         {{range .Channels}}
@@ -711,6 +934,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           </form>
           {{end}}
           {{if .ThreadTimestamp}}<a href="/app?channel={{.Channel}}">Back to channel</a>{{end}}
+          <a href="/app?channel={{.Channel}}&amp;details=1" aria-label="Open conversation details">Details</a>
         </div>
       </header>
       <div class="timeline-wrap">
@@ -727,11 +951,53 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <div class="composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
         {{if .CanPost}}
+        {{if .GlobalShortcuts}}<details class="composer-shortcuts"><summary>Shortcuts</summary><div class="shortcut-list" role="menu">{{range $shortcut := .GlobalShortcuts}}
+          <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <input type="hidden" name="channel" value="{{$.Channel}}">
+            <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
+            <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
+            <button type="submit" role="menuitem">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
+          </form>{{end}}</div></details>{{end}}
+        {{if .CanUpload}}<details class="composer-shortcuts"><summary>Attach a file</summary>
+          <form class="upload-form" method="post" action="{{.UploadURL}}" enctype="multipart/form-data">
+            <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+            <label for="upload-file">File<input id="upload-file" type="file" name="file" required aria-describedby="upload-preview"></label>
+            <p class="upload-preview" id="upload-preview" role="status">No file selected.</p>
+            <label>Title (optional)<input type="text" name="title" maxlength="255"></label>
+            <button type="submit">Upload and send</button>
+          </form>
+        </details>{{end}}
         <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}">
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <div class="composer-toolbar" role="toolbar" aria-label="Message formatting and insertions">
+            <button class="composer-tool" type="button" data-wrap="*" aria-label="Bold" aria-controls="text"><strong>B</strong></button>
+            <button class="composer-tool" type="button" data-wrap="_" aria-label="Italic" aria-controls="text"><em>I</em></button>
+            <button class="composer-tool" type="button" data-wrap="~" aria-label="Strikethrough" aria-controls="text"><s>S</s></button>
+            <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
+            <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
+            <details class="composer-menu"><summary role="button" aria-label="Choose an emoji" aria-controls="emoji-picker">☺</summary>
+              <div class="composer-popover emoji-grid" id="emoji-picker" role="menu" aria-label="Emoji">
+                <button type="button" data-insert=":thumbsup:" role="menuitem" aria-label="Thumbs up">👍</button>
+                <button type="button" data-insert=":heart:" role="menuitem" aria-label="Heart">❤️</button>
+                <button type="button" data-insert=":joy:" role="menuitem" aria-label="Joy">😂</button>
+                <button type="button" data-insert=":tada:" role="menuitem" aria-label="Party popper">🎉</button>
+                <button type="button" data-insert=":eyes:" role="menuitem" aria-label="Eyes">👀</button>
+                <button type="button" data-insert=":wave:" role="menuitem" aria-label="Wave">👋</button>
+              </div>
+            </details>
+            {{if .ComposerMembers}}<details class="composer-menu"><summary role="button" aria-label="Mention a person" aria-controls="mention-picker">@</summary>
+              <div class="composer-popover" id="mention-picker" role="menu" aria-label="Conversation members">{{range .ComposerMembers}}
+                <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" role="menuitem">@{{.Name}}{{if .IsSelf}} (you){{end}}</button>{{end}}
+              </div>
+            </details>{{end}}
+          </div>
           <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
-          <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter" aria-autocomplete="list" aria-controls="mention-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          {{if .ComposerMembers}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
+            <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}">@{{.Name}}{{if .IsSelf}} (you){{end}}</button>{{end}}
+          </div>{{end}}
           {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
           <div class="composer-footer">
             <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line</span>
@@ -746,7 +1012,6 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <p>Your current permissions allow reading messages but not posting them.</p>
             {{else}}
             <strong>Join {{.ChannelPrefix}}{{.ChannelName}} to take part.</strong>
-            <p>You can read this public channel before joining. Join to post, react, pin, and track unread messages.</p>
             {{end}}
           </div>
           {{if .CanJoin}}
@@ -761,6 +1026,111 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     </main>
   </div>
 </div>
+{{if .Details}}
+<div class="conversation-details-backdrop">
+  <section class="conversation-details" role="dialog" aria-modal="true" aria-labelledby="conversation-details-title">
+    <header class="conversation-details-head">
+      <div><h2 id="conversation-details-title">{{if .Details.IsChannel}}# {{end}}{{.Details.Name}}</h2><p>{{.Details.Type}}{{if .Details.Archived}} · Archived{{end}}</p></div>
+      <a class="conversation-details-close" href="{{.Details.CloseURL}}" aria-label="Close conversation details">×</a>
+    </header>
+    <div class="conversation-details-body">
+      <section class="conversation-details-section" aria-labelledby="conversation-about-heading">
+        <h3 id="conversation-about-heading">About</h3>
+        <dl class="conversation-facts">
+          <div><dt>Topic</dt><dd>{{if .Details.Topic}}{{.Details.Topic}}{{else}}No topic set{{end}}</dd></div>
+          <div><dt>Purpose</dt><dd>{{if .Details.Purpose}}{{.Details.Purpose}}{{else}}No purpose set{{end}}</dd></div>
+        </dl>
+        {{if .Details.CanEdit}}
+        <div class="conversation-settings">
+          <form class="conversation-setting" method="post" action="/app/conversation/rename?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="conversation-name">Channel name<input id="conversation-name" name="name" value="{{.Details.Name}}" maxlength="80" required></label>
+            <button type="submit">Rename</button>
+          </form>
+          <form class="conversation-setting" method="post" action="/app/conversation/topic?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="conversation-topic">Topic<textarea id="conversation-topic" name="topic" maxlength="250">{{.Details.Topic}}</textarea></label>
+            <button type="submit">Save topic</button>
+          </form>
+          <form class="conversation-setting" method="post" action="/app/conversation/purpose?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="conversation-purpose">Purpose<textarea id="conversation-purpose" name="purpose" maxlength="250">{{.Details.Purpose}}</textarea></label>
+            <button type="submit">Save purpose</button>
+          </form>
+        </div>
+        {{end}}
+      </section>
+      <section class="conversation-details-section" aria-labelledby="conversation-members-heading">
+        <h3 id="conversation-members-heading">Members ({{len .Details.Members}})</h3>
+        <ul class="conversation-members">{{range .Details.Members}}<li class="conversation-member"><span class="conversation-member-avatar" aria-hidden="true">{{.AuthorInitial}}</span><span class="conversation-member-name">{{.Name}}</span></li>{{end}}</ul>
+        {{if .Details.Truncated}}<p class="conversation-details-note">This workspace has more than 1,000 members. Use the member directory to find people outside this list.</p>{{end}}
+        {{if .Details.CanInvite}}
+          {{if .Details.Invitees}}
+          <form class="conversation-setting" method="post" action="/app/conversation/invite?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="conversation-invitee">Add a person<select id="conversation-invitee" name="user" required><option value="" selected disabled>Choose a workspace member</option>{{range .Details.Invitees}}<option value="{{.ID}}">{{.Name}}</option>{{end}}</select></label>
+            <button type="submit">Add</button>
+          </form>
+          {{else}}<p class="conversation-details-note">Every available workspace member is already in this channel.</p>{{end}}
+        {{end}}
+      </section>
+      {{if or .Details.CanArchive .Details.CanLeave .Details.CanClose}}
+      <section class="conversation-danger" aria-label="Conversation actions">
+        {{if .Details.CanArchive}}<form method="post" action="/app/conversation/archive?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Details.Archived}}false{{else}}true{{end}}"><button type="submit">{{.Details.ArchiveVerb}} channel</button></form>{{end}}
+        {{if .Details.CanLeave}}<form method="post" action="/app/conversation/leave?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Leave channel</button></form>{{end}}
+        {{if .Details.CanClose}}<form method="post" action="/app/conversation/leave?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Close conversation</button></form>{{end}}
+      </section>
+      {{end}}
+    </div>
+  </section>
+</div>
+{{end}}
+{{if .Modal}}
+<div class="modal-backdrop">
+  <section class="app-modal" role="dialog" aria-modal="true" aria-labelledby="app-modal-title">
+    <form id="modal-close-form" method="post" action="/app/view/close?channel={{.Channel}}">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Modal.ID}}"><input type="hidden" name="clear" value="{{.Modal.ClearOnClose}}">
+    </form>
+    <header class="modal-head"><div><h2 id="app-modal-title">{{.Modal.Title}}</h2><span class="modal-app">App modal</span></div><button class="modal-close-x" type="submit" form="modal-close-form" formnovalidate aria-label="Close {{.Modal.Title}}">×</button></header>
+    <form class="modal-form" method="post" action="/app/view/submit?channel={{.Channel}}">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="view_id" value="{{.Modal.ID}}">
+      <div class="modal-body">
+      {{if .Modal.Error}}<p class="form-error" role="alert" tabindex="-1" autofocus>{{.Modal.Error}}</p>{{end}}
+      {{range $block := .Modal.Blocks}}
+        {{if $block.Input}}{{$input := $block.Input}}
+        <div class="modal-block modal-input">
+          {{if or (eq $input.Control "radio") (eq $input.Control "checkbox")}}<fieldset class="modal-options"{{if $block.Error}} aria-describedby="modal-error-{{$input.Index}}"{{end}}><legend class="modal-legend">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</legend>
+            {{range $option := $input.Options}}<label><input type="{{if eq $input.Control "radio"}}radio{{else}}checkbox{{end}}" name="input_{{$input.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}{{if and (eq $input.Control "radio") (not $input.Optional)}} required{{end}}> <span>{{$option.Text}}</span></label>{{end}}
+          </fieldset>
+          {{else}}<label for="modal-input-{{$input.Index}}">{{$input.Label}}{{if $input.Optional}} <span class="modal-hint">(optional)</span>{{end}}</label>
+            {{if eq $input.Control "textarea"}}<textarea id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}" placeholder="{{$input.Placeholder}}"{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{$input.Value}}</textarea>
+            {{else if eq $input.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Modal.AppID}}" data-view-id="{{$.Modal.ID}}" data-block-id="{{$input.BlockID}}" data-action-id="{{$input.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$input.MinQueryLength}}"><input id="modal-input-{{$input.Index}}" type="search" data-options-query placeholder="{{$input.Placeholder}}" minlength="{{$input.MinQueryLength}}"><button class="block-action" type="button" data-options-load>Search</button><select name="input_{{$input.Index}}" data-options-results{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if not $input.Options}} disabled{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select><p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
+            {{else if eq $input.Control "select"}}<select id="modal-input-{{$input.Index}}" name="input_{{$input.Index}}"{{if $input.Multiple}} multiple{{end}}{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}><option value=""{{if not $input.Optional}} disabled{{end}}>{{$input.Placeholder}}</option>{{range $option := $input.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select>
+            {{else}}<input id="modal-input-{{$input.Index}}" type="{{if eq $input.Control "date"}}date{{else if eq $input.Control "time"}}time{{else if eq $input.Control "datetime"}}datetime-local{{else if eq $input.Control "email"}}email{{else if eq $input.Control "url"}}url{{else if eq $input.Control "number"}}number{{else}}text{{end}}" name="input_{{$input.Index}}" value="{{$input.Value}}" placeholder="{{$input.Placeholder}}"{{if not $input.Optional}} required{{end}}{{if $block.Error}} aria-invalid="true" aria-describedby="modal-error-{{$input.Index}}"{{end}}>{{end}}
+          {{end}}
+          {{if $input.Hint}}<p class="modal-hint">{{$input.Hint}}</p>{{end}}{{if $block.Error}}<p class="modal-error" id="modal-error-{{$input.Index}}" role="alert">{{$block.Error}}</p>{{end}}
+        </div>
+        {{else if eq $block.Kind "divider"}}<hr class="modal-block divider">
+        {{else}}<div class="modal-block message-block {{$block.Kind}}">{{if $block.HTML}}<div class="formatted-text">{{$block.HTML}}</div>{{else if $block.Text}}<div>{{$block.Text}}</div>{{end}}{{if $block.Fields}}<ul class="message-block-fields">{{range $index, $field := $block.Fields}}<li>{{with index $block.FieldHTML $index}}{{.}}{{else}}{{$field}}{{end}}</li>{{end}}</ul>{{end}}{{if $block.Table}}<div class="block-table-wrap"><table class="block-table">{{if $block.Caption}}<caption>{{$block.Caption}}</caption>{{end}}<tbody>{{range $rowIndex, $row := $block.Table}}<tr>{{range $cell := $row}}{{if and $block.HeaderRow (eq $rowIndex 0)}}<th scope="col">{{$cell}}</th>{{else}}<td>{{$cell}}</td>{{end}}{{end}}</tr>{{end}}</tbody></table></div>{{end}}{{if $block.ImageURL}}<img class="message-media" src="{{$block.ImageURL}}" alt="{{$block.ImageAlt}}" loading="lazy">{{end}}
+          {{if $block.Actions}}<div class="modal-actions" aria-label="App actions">{{range $action := $block.Actions}}
+            {{if eq $action.Control "button"}}<button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>{{$action.Text}}</button>
+            {{else if eq $action.Control "date"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="date" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
+            {{else if eq $action.Control "time"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="time" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
+            {{else if eq $action.Control "datetime"}}<label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="datetime-local" name="action_{{$action.Index}}" value="{{$action.Value}}"></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
+            {{else if eq $action.Control "radio"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="radio" name="action_{{$action.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
+            {{else if eq $action.Control "checkbox"}}<fieldset class="block-action-options"><legend class="sr-only">{{$action.Text}}</legend>{{range $option := $action.Options}}<label><input type="checkbox" name="action_{{$action.Index}}" value="{{$option.Value}}"{{if $option.Selected}} checked{{end}}> {{$option.Text}}</label>{{end}}</fieldset><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>
+            {{else if or (eq $action.Control "text") (eq $action.Control "textarea") (eq $action.Control "email") (eq $action.Control "url") (eq $action.Control "number")}}{{if eq $action.Control "textarea"}}<textarea class="block-action" name="action_{{$action.Index}}" placeholder="{{$action.Text}}">{{$action.Value}}</textarea>{{else}}<input class="block-action" type="{{$action.Control}}" name="action_{{$action.Index}}" value="{{$action.Value}}" placeholder="{{$action.Text}}">{{end}}<button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Send</button>
+            {{else if eq $action.Control "external"}}<div class="external-select" data-app-options data-app-id="{{$.Modal.AppID}}" data-view-id="{{$.Modal.ID}}" data-block-id="{{$action.BlockID}}" data-action-id="{{$action.ActionID}}" data-channel="{{$.Channel}}" data-min-query="{{$action.MinQueryLength}}"><label><span class="sr-only">{{$action.Text}}</span><input class="block-action" type="search" data-options-query placeholder="{{$action.Text}}" minlength="{{$action.MinQueryLength}}"></label><button class="block-action" type="button" data-options-load>Search</button><label><span class="sr-only">Results</span><select class="block-action block-action-select" name="action_{{$action.Index}}" data-options-results{{if $action.Multiple}} multiple{{end}}{{if not $action.Options}} disabled{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" data-options-choose formnovalidate{{if not $action.Options}} disabled{{end}}>Choose</button><p class="external-select-status" data-options-status role="status"></p><noscript>Dynamic options require JavaScript in this client.</noscript></div>
+            {{else}}<label><span class="sr-only">{{$action.Text}}</span><select class="block-action block-action-select" name="action_{{$action.Index}}"{{if $action.Multiple}} multiple{{end}}>{{range $option := $action.Options}}<option value="{{$option.Value}}"{{if $option.Selected}} selected{{end}}>{{$option.Text}}</option>{{end}}</select></label><button class="block-action" type="submit" name="modal_action" value="{{$action.Index}}" formaction="/app/view/action?channel={{$.Channel}}" formnovalidate>Choose</button>{{end}}
+          {{end}}</div>{{end}}
+        </div>{{end}}
+      {{end}}
+      </div>
+      <footer class="modal-foot"><button class="modal-button" type="submit" form="modal-close-form" formnovalidate>{{.Modal.Close}}</button>{{if .Modal.Submit}}<button class="modal-button primary" type="submit"{{if .Modal.SubmitDisabled}} disabled aria-disabled="true"{{end}}>{{.Modal.Submit}}</button>{{end}}</footer>
+    </form>
+  </section>
+</div>
+{{end}}
 {{end}}
 ` + messagesPartial
 
@@ -835,6 +1205,33 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 
 var membersTemplate = mustPage(membersMarkup)
 
+const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldChat{{end}}
+{{define "styles"}}<style>
+.oauth-shell{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--panel)}
+.oauth-card{width:min(560px,100%);background:var(--panel-strong);border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:var(--shadow)}
+.oauth-card h1{margin:0 0 8px;font-size:26px}.oauth-card h2{font-size:15px;margin:22px 0 8px}.oauth-card p{color:var(--muted)}
+.scope-list{margin:0;padding:0;list-style:none;display:grid;gap:7px}.scope-list li{border:1px solid var(--line);border-radius:7px;padding:9px 11px;background:var(--panel)}
+.oauth-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}.oauth-actions button{border-radius:6px;padding:9px 15px;font-weight:800}
+.deny{border:1px solid var(--field-line);background:var(--panel-strong);color:var(--text)}.approve{border:0;background:var(--ok);color:var(--on-strong)}
+</style>{{end}}
+{{define "content"}}<main class="oauth-shell"><section class="oauth-card" aria-labelledby="oauth-title">
+<h1 id="oauth-title">Authorize {{.AppName}}</h1><p>This app is asking to access your SameOldChat workspace. Review every permission before continuing.</p>
+{{if .BotScopes}}<h2>What the app’s bot can do</h2><ul class="scope-list">{{range .BotScopes}}<li><strong>{{.}}</strong></li>{{end}}</ul>{{end}}
+{{if .UserScopes}}<h2>What the app can do as you</h2><ul class="scope-list">{{range .UserScopes}}<li><strong>{{.}}</strong></li>{{end}}</ul>{{end}}
+<form method="post" action="{{.Action}}">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<input type="hidden" name="client_id" value="{{.ClientID}}">
+<input type="hidden" name="redirect_uri" value="{{.RedirectURI}}">
+<input type="hidden" name="scope" value="{{range $i,$v := .BotScopes}}{{if $i}},{{end}}{{$v}}{{end}}">
+<input type="hidden" name="user_scope" value="{{range $i,$v := .UserScopes}}{{if $i}},{{end}}{{$v}}{{end}}">
+<input type="hidden" name="state" value="{{.State}}">
+<input type="hidden" name="code_challenge" value="{{.CodeChallenge}}">
+<input type="hidden" name="code_challenge_method" value="{{.CodeChallengeMethod}}">
+<div class="oauth-actions"><button class="deny" type="submit" name="decision" value="deny">Cancel</button><button class="approve" type="submit" name="decision" value="approve">Allow</button></div>
+</form></section></main>{{end}}`
+
+var oauthConsentTemplate = mustPage(oauthConsentMarkup)
+
 const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
@@ -861,6 +1258,26 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search messages</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">Messages matching “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to find messages.</p>{{end}}</div><section class="results" aria-label="Results">{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if .Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
 
 var searchTemplate = mustPage(searchMarkup)
+
+const activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(920px,calc(100% - 32px));margin:28px auto 48px;display:grid;gap:24px}.activity-section{display:grid;gap:9px}.activity-section h2{margin:0;font-size:20px}.section-copy{margin:0;color:var(--muted)}
+.unread-list,.activity-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.unread-link,.activity-item{display:block;padding:13px 15px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:inherit;text-decoration:none}.unread-link:hover,.activity-item:hover{border-color:var(--action)}
+.unread-link{display:flex;align-items:center;gap:9px;font-weight:700}.unread-count{margin-left:auto;min-width:26px;border-radius:14px;background:var(--accent);color:var(--on-accent);padding:2px 8px;text-align:center;font-size:12px}
+.activity-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.empty{margin:0;padding:18px;border:1px dashed var(--line);border-radius:9px;color:var(--muted)}
+@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,920px);margin-top:18px}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1></header><main class="layout">
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+<section class="activity-section" aria-labelledby="unread-heading"><h2 id="unread-heading">Unread conversations</h2><p class="section-copy">Open a conversation to review its unread messages.</p>
+<ul class="unread-list">{{range .Unread}}<li><a class="unread-link" href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span class="unread-count" aria-label="{{.UnreadCount}} unread messages">{{.UnreadCount}}</span></a></li>{{else}}<li class="empty">You’re caught up on joined conversations.</li>{{end}}</ul></section>
+<section class="activity-section" aria-labelledby="mentions-heading"><h2 id="mentions-heading">Mentions</h2><p class="section-copy">Recent messages that explicitly mention you.</p>
+<ul class="activity-list">{{range .Mentions}}<li><a class="activity-item" href="{{.Permalink}}"><span class="activity-head"><span class="activity-author">{{.AuthorName}}</span><time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="activity-meta">{{.ChannelPrefix}}{{.ChannelName}}</span></span><div class="activity-text">{{.DisplayText}}</div></a></li>{{else}}<li class="empty">No recent mentions.</li>{{end}}</ul></section>
+</main>{{end}}`
+
+var activityTemplate = mustPage(activityMarkup)
 
 const identityMarkup = `{{define "title"}}{{.Heading}} · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -940,7 +1357,11 @@ var progressiveEnhancementScript = localTimeScript + `<script>(function(){
 var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
 var text=document.getElementById('text');
+var mentionSuggestions=document.getElementById('mention-suggestions');
+var uploadFile=document.getElementById('upload-file');
+var uploadPreview=document.getElementById('upload-preview');
 var search=document.getElementById('workspace-search');
+var activityLink=document.getElementById('activity-link');
 var errorBox=document.getElementById('composer-error');
 var actionBox=document.getElementById('action-feedback');
 var status=document.getElementById('live-status');
@@ -953,11 +1374,71 @@ var inFlight=null;
 var scheduled=null;
 var sending=false;
 var streamState='';
+var mentionStart=-1;
+var draftKey=composer?'sameoldchat-draft:'+composer.getAttribute('action'):'';
 function localize(root){if(window.sameoldchatLocalTimes)window.sameoldchatLocalTimes(root)}
 function announce(message){if(status)status.textContent=message}
 function showError(message,form){var box=form===composer?errorBox:actionBox;if(!box){window.alert(message);return}box.textContent=message;box.hidden=false;if(form===composer&&composer)composer.classList.add('is-error');box.scrollIntoView({block:'nearest'});box.focus()}
 function clearError(form){var box=form===composer?errorBox:actionBox;if(!box)return;box.textContent='';box.hidden=true;if(form===composer&&composer)composer.classList.remove('is-error')}
 function failure(error,form){var message=error&&error.message?String(error.message).trim():'';if(message.charAt(0)==='<')message='';if(message.length>200)message=message.slice(0,200);if(message)return message;return form===composer?'The request could not be completed. Your message was kept in the composer.':'The request could not be completed. Nothing was changed.'}
+function persistDraft(){
+if(!text||!draftKey)return;
+try{if(text.value)localStorage.setItem(draftKey,text.value);else localStorage.removeItem(draftKey)}catch(error){}
+}
+function replaceComposerRange(start,end,value,selectStart,selectEnd){
+if(!text)return;
+var before=text.value.slice(0,start);
+var suffix=text.value.slice(end);
+text.value=before+value+suffix;
+var first=typeof selectStart==='number'?start+selectStart:start+value.length;
+var last=typeof selectEnd==='number'?start+selectEnd:first;
+text.focus();
+text.setSelectionRange(first,last);
+persistDraft();
+text.dispatchEvent(new Event('input',{bubbles:true}));
+}
+function currentMention(){
+if(!text)return null;
+var cursor=text.selectionStart;
+var before=text.value.slice(0,cursor);
+var match=/(^|\s)@([^\s@<>]*)$/.exec(before);
+if(!match)return null;
+return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
+}
+function mentionOptions(){return mentionSuggestions?Array.prototype.slice.call(mentionSuggestions.querySelectorAll('[data-mention-user]')).filter(function(option){return !option.hidden}):[]}
+function hideMentions(){
+mentionStart=-1;
+if(mentionSuggestions)mentionSuggestions.hidden=true;
+if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
+}
+function updateMentions(){
+if(!mentionSuggestions||!text){hideMentions();return}
+var mention=currentMention();
+if(!mention){hideMentions();return}
+mentionStart=mention.start;
+var visible=0;
+var options=mentionSuggestions.querySelectorAll('[data-mention-user]');
+for(var index=0;index<options.length;index++){
+var name=(options[index].getAttribute('data-mention-name')||'').toLowerCase();
+var show=visible<8&&name.indexOf(mention.query)!==-1;
+options[index].hidden=!show;
+options[index].setAttribute('aria-selected',show&&visible===0?'true':'false');
+if(show){options[index].id='mention-option-'+visible;visible++}else{options[index].removeAttribute('id')}
+}
+mentionSuggestions.hidden=visible===0;
+text.setAttribute('aria-expanded',visible?'true':'false');
+if(visible)text.setAttribute('aria-activedescendant','mention-option-0');else text.removeAttribute('aria-activedescendant');
+}
+function chooseMention(option){
+if(!text||!option)return;
+var mention=currentMention();
+var start=mention?mention.start:mentionStart;
+if(start<0)start=text.selectionStart;
+replaceComposerRange(start,text.selectionStart,'<@'+option.getAttribute('data-mention-user')+'> ',undefined,undefined);
+hideMentions();
+var details=option.closest('details');
+if(details)details.open=false;
+}
 function setNav(open,focus){
 if(!nav||!navToggle||!navScrim)return;
 var mobile=!!(narrow&&narrow.matches);
@@ -1035,6 +1516,42 @@ var action=form.getAttribute('hx-post');
 if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
+document.addEventListener('click',function(event){
+var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user]'):null;
+if(!control||!composer||!composer.contains(control)||!text)return;
+if(control.hasAttribute('data-mention-user')){chooseMention(control);return}
+var start=text.selectionStart;
+var end=text.selectionEnd;
+var wrapper=control.getAttribute('data-wrap');
+if(wrapper!==null){
+var selected=text.value.slice(start,end);
+if(!selected)selected='text';
+var wrapped=wrapper+selected+wrapper;
+replaceComposerRange(start,end,wrapped,wrapper.length,wrapper.length+selected.length);
+return;
+}
+var inserted=control.getAttribute('data-insert');
+if(inserted===null)return;
+var offset=parseInt(control.getAttribute('data-select-offset'),10);
+var length=parseInt(control.getAttribute('data-select-length'),10);
+replaceComposerRange(start,end,inserted,isNaN(offset)?undefined:offset,isNaN(offset)||isNaN(length)?undefined:offset+length);
+var details=control.closest('details');
+if(details)details.open=false;
+});
+if(text&&composer){
+if(!text.value&&draftKey){try{var saved=localStorage.getItem(draftKey);if(saved)text.value=saved}catch(error){}}
+persistDraft();
+text.addEventListener('input',function(){persistDraft();updateMentions()});
+text.addEventListener('click',updateMentions);
+}
+if(uploadFile&&uploadPreview)uploadFile.addEventListener('change',function(){
+var file=uploadFile.files&&uploadFile.files[0];
+if(!file){uploadPreview.textContent='No file selected.';return}
+var size=file.size;
+var unit='B';
+if(size>=1048576){size=size/1048576;unit='MiB'}else if(size>=1024){size=size/1024;unit='KiB'}
+uploadPreview.textContent=file.name+' · '+(unit==='B'?size:String(Math.round(size*10)/10))+' '+unit;
+});
 document.addEventListener('submit',function(event){
 var form=event.target.closest('form');
 if(!form||!form.hasAttribute('hx-post'))return;
@@ -1044,6 +1561,8 @@ event.preventDefault();
 if(form===composer){if(sending)return;sending=true}
 var quiet=form.getAttribute('data-quiet')==='true';
 var body=new FormData(form);
+var unixInput=form.querySelector('[data-unix-seconds="true"]');
+if(unixInput&&unixInput.value){var unixMillis=new Date(unixInput.value).getTime();if(!isNaN(unixMillis))body.set('value',String(Math.floor(unixMillis/1000)))}
 var sent=text?text.value:'';
 var button=form.querySelector('button[type=submit]');
 if(button)button.disabled=true;
@@ -1068,13 +1587,24 @@ var target=document.querySelector(form.getAttribute('hx-target'));
 if(!target)throw new Error('The page could not be updated. Reload to see the message.');
 target.insertAdjacentHTML('beforeend',html);
 localize(target);
-if(form===composer&&text){if(text.value===sent)text.value='';text.focus()}else{form.reset()}
+if(form===composer&&text){if(text.value===sent){text.value='';persistDraft()}text.focus()}else{form.reset()}
 toBottom(target);
 toBottom(document.getElementById('timeline'));
 return refresh(true);
 }).catch(function(error){showError(failure(error,form),form)}).then(release,release);
 });
 if(text&&composer){text.addEventListener('keydown',function(event){
+if(mentionSuggestions&&!mentionSuggestions.hidden){
+var options=mentionOptions();
+var selected=options.findIndex(function(option){return option.getAttribute('aria-selected')==='true'});
+if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+event.preventDefault();
+if(options.length){if(selected<0)selected=0;else selected=event.key==='ArrowDown'?(selected+1)%options.length:(selected+options.length-1)%options.length;for(var optionIndex=0;optionIndex<options.length;optionIndex++){options[optionIndex].setAttribute('aria-selected',optionIndex===selected?'true':'false');options[optionIndex].removeAttribute('id')}options[selected].id='mention-option-active';text.setAttribute('aria-activedescendant','mention-option-active')}
+return;
+}
+if(event.key==='Escape'){event.preventDefault();hideMentions();return}
+if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&options.length){event.preventDefault();chooseMention(options[selected<0?0:selected]);return}
+}
 if(event.key==='ArrowUp'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&text.value===''){
 var target=composer.getAttribute('hx-target');
 var region=target&&target.charAt(0)==='#'?document.querySelector(target):document.getElementById('timeline');
@@ -1089,6 +1619,10 @@ composer.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 })}
 document.addEventListener('keydown',function(event){
 var key=typeof event.key==='string'?event.key.toLowerCase():'';
+if(event.key==='Escape'){
+var modalClose=document.getElementById('modal-close-form');
+if(modalClose){event.preventDefault();if(typeof modalClose.requestSubmit==='function')modalClose.requestSubmit();else modalClose.submit();return}
+}
 if(event.key==='Tab'&&nav&&nav.classList.contains('is-open')){
 var focusable=navFocusables();
 if(focusable.length){
@@ -1103,6 +1637,14 @@ if(event.key==='Escape'&&nav&&nav.classList.contains('is-open')){
 event.preventDefault();
 setNav(false,false);
 if(navToggle)navToggle.focus();
+return;
+}
+if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&key==='m'){
+if(!activityLink)return;
+var activityHref=activityLink.getAttribute('href');
+if(!ownPath(activityHref))return;
+event.preventDefault();
+window.location.assign(activityHref);
 return;
 }
 if((event.ctrlKey||event.metaKey)&&!event.altKey&&key==='k'){
@@ -1175,6 +1717,7 @@ try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cur
 var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
 var deliver=function(event){
 if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}
+if(event.type.indexOf('view.')===0){window.location.reload();return}
 var live=regions(false);
 if(!live.length){announce('New activity is available in this conversation.');return}
 scheduleRefresh();
@@ -1190,7 +1733,8 @@ topics.forEach(function(topic){stream.addEventListener(topic,deliver)});
 var markRead=document.getElementById('mark-read');
 if(markRead)submitQuietly(markRead);
 toBottom(document.getElementById('timeline'));
-if(text)text.focus();
+var activeModal=document.querySelector('[aria-modal="true"]');
+if(activeModal){var modalFocus=activeModal.querySelector('input:not([type=hidden]),textarea,select,button');if(modalFocus)modalFocus.focus()}else if(text)text.focus();
 })();</script>`
 
 func liveEventTopicsLiteral() string {
@@ -1223,17 +1767,46 @@ func (h Handler) Register(mux *http.ServeMux) {
 		mux.HandleFunc("POST /api/admin.auth.users.set", h.authUserSet)
 	}
 	mux.HandleFunc("GET /app", h.index)
+	mux.HandleFunc("GET /oauth/authorize", h.oauthAuthorize)
+	mux.HandleFunc("POST /oauth/authorize", h.oauthAuthorize)
+	mux.HandleFunc("GET /oauth/v2/authorize", h.oauthAuthorize)
+	mux.HandleFunc("POST /oauth/v2/authorize", h.oauthAuthorize)
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
+	mux.HandleFunc("GET /app/activity", h.activity)
 	mux.HandleFunc("GET /app/members", h.members)
+	mux.HandleFunc("GET /app/apps", h.workspaceApps)
+	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
+	mux.HandleFunc("POST /app/apps/{appID}/action", h.appHomeAction)
+	mux.HandleFunc("GET /app/developer/apps", h.developerApps)
+	mux.HandleFunc("POST /app/developer/apps/create", h.createDeveloperApp)
+	mux.HandleFunc("POST /app/developer/apps/update", h.updateDeveloperApp)
+	mux.HandleFunc("POST /app/developer/apps/delete", h.deleteDeveloperApp)
+	mux.HandleFunc("POST /app/developer/apps/configuration-token", h.issueDeveloperConfigurationToken)
+	mux.HandleFunc("POST /app/developer/apps/app-token", h.issueDeveloperAppToken)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/join", h.joinConversation)
 	mux.HandleFunc("POST /app/message", h.postMessage)
+	mux.HandleFunc("POST /app/file", h.uploadFile)
+	mux.HandleFunc("GET /app/files/{fileID}", h.downloadFile)
+	mux.HandleFunc("POST /app/interaction", h.appInteraction)
+	mux.HandleFunc("POST /app/shortcut", h.appShortcut)
+	mux.HandleFunc("POST /app/view/submit", h.viewSubmit)
+	mux.HandleFunc("POST /app/view/action", h.viewAction)
+	mux.HandleFunc("POST /app/view/close", h.viewClose)
+	mux.HandleFunc("POST /app/options", h.appOptions)
+	mux.HandleFunc("POST /app-response/{token}", h.appResponse)
 	mux.HandleFunc("POST /app/message/update", h.updateMessage)
 	mux.HandleFunc("POST /app/message/delete", h.deleteMessage)
 	mux.HandleFunc("POST /app/conversation/create", h.createConversation)
 	mux.HandleFunc("POST /app/conversation/open", h.openConversation)
+	mux.HandleFunc("POST /app/conversation/invite", h.inviteConversationMember)
+	mux.HandleFunc("POST /app/conversation/rename", h.renameConversation)
+	mux.HandleFunc("POST /app/conversation/topic", h.setConversationTopic)
+	mux.HandleFunc("POST /app/conversation/purpose", h.setConversationPurpose)
+	mux.HandleFunc("POST /app/conversation/archive", h.setConversationArchived)
+	mux.HandleFunc("POST /app/conversation/leave", h.leaveConversation)
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
 	mux.HandleFunc("POST /app/reaction/remove", h.removeReaction)
 	mux.HandleFunc("POST /app/pin", h.addPin)
@@ -1247,7 +1820,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 // "reload": a token that no longer matches the session is a page that has been
 // open too long, a foreign origin is an attack, and no session is a sign-in.
 func (h Handler) requireCSRF(w http.ResponseWriter, r *http.Request) bool {
-	err := auth.ValidateCSRF(r)
+	return h.acceptCSRFResult(w, r, auth.ValidateCSRF(r))
+}
+
+func (h Handler) acceptCSRFResult(w http.ResponseWriter, r *http.Request, err error) bool {
 	switch {
 	case err == nil:
 		return true
@@ -1285,9 +1861,12 @@ func (h Handler) writeMutationError(w http.ResponseWriter, r *http.Request, stat
 // composerState carries a rejected submission back into the page so a failed
 // post keeps the text the user typed and says what went wrong.
 type composerState struct {
-	Draft   string
-	Message string
-	Status  int
+	Draft          string
+	Message        string
+	Notice         string
+	Status         int
+	ModalErrors    map[string]string
+	ModalSubmitted modalFormState
 }
 
 // historyReader is a principal that has been checked for
@@ -1322,6 +1901,151 @@ func (h Handler) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderApp(w, r, reader, composerState{Status: http.StatusOK})
+}
+
+func (h Handler) oauthAuthorize(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
+		if r.Method == http.MethodGet && errors.Is(err, auth.ErrNotAuthenticated) && h.Login != nil {
+			target := "/login?return_to=" + url.QueryEscape(r.URL.RequestURI())
+			http.Redirect(w, r, target, http.StatusSeeOther)
+			return
+		}
+		h.writeAuthError(w, err)
+		return
+	}
+	if r.Method == http.MethodPost {
+		h.completeOAuthAuthorization(w, r, principal)
+		return
+	}
+	fields, ok := singleValues(r.URL.Query())
+	if !ok {
+		h.writePageError(w, http.StatusBadRequest, "That authorization request is invalid", "One of its fields was supplied more than once.")
+		return
+	}
+	if responseType := strings.TrimSpace(fields["response_type"]); responseType != "" && responseType != "code" {
+		h.writePageError(w, http.StatusBadRequest, "That authorization request is invalid", "This server supports the authorization code flow.")
+		return
+	}
+	if team := strings.TrimSpace(fields["team"]); team != "" && team != string(principal.WorkspaceID) {
+		h.writePageError(w, http.StatusBadRequest, "That workspace is not available", "The requested app installation belongs to a different workspace.")
+		return
+	}
+	request := oauthAuthorizationRequest(principal, fields)
+	value, err := h.Messages.InspectOAuthAuthorization(r.Context(), request)
+	if err != nil {
+		h.writeOAuthAuthorizationError(w, err)
+		return
+	}
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNoToken)
+		return
+	}
+	h.writeHTML(w, oauthConsentTemplate, oauthConsentData{
+		Action:              r.URL.Path,
+		AppName:             value.AppName,
+		BotScopes:           value.BotScopes,
+		UserScopes:          value.UserScopes,
+		CSRFToken:           auth.CSRFToken(sessionCookie.Value),
+		ClientID:            value.ClientID,
+		RedirectURI:         value.RedirectURI,
+		State:               value.State,
+		CodeChallenge:       value.CodeChallenge,
+		CodeChallengeMethod: value.CodeChallengeMethod,
+	}, http.StatusOK, "authorization consent is temporarily unavailable")
+}
+
+func (h Handler) completeOAuthAuthorization(w http.ResponseWriter, r *http.Request, principal auth.Principal) {
+	fields, ok := h.decodeMutation(w, r, "The authorization request could not be read. Return to the app and try again.")
+	if !ok {
+		return
+	}
+	request := oauthAuthorizationRequest(principal, fields)
+	if strings.TrimSpace(fields["decision"]) == "deny" {
+		value, err := h.Messages.InspectOAuthAuthorization(r.Context(), request)
+		if err != nil {
+			h.writeOAuthAuthorizationError(w, err)
+			return
+		}
+		redirectOAuthAuthorization(w, r, value.RedirectURI, value.State, "", "access_denied")
+		return
+	}
+	if strings.TrimSpace(fields["decision"]) != "approve" {
+		h.writePageError(w, http.StatusBadRequest, "Choose whether to allow this app", "The app was not authorized because no decision was selected.")
+		return
+	}
+	value, err := h.Messages.AuthorizeOAuth(r.Context(), request)
+	if err != nil {
+		h.writeOAuthAuthorizationError(w, err)
+		return
+	}
+	redirectOAuthAuthorization(w, r, value.RedirectURI, value.State, value.Code, "")
+}
+
+func oauthAuthorizationRequest(principal auth.Principal, fields map[string]string) domain.OAuthAuthorizationRequest {
+	return domain.OAuthAuthorizationRequest{
+		ClientID:            strings.TrimSpace(fields["client_id"]),
+		WorkspaceID:         principal.WorkspaceID,
+		UserID:              principal.UserID,
+		RedirectURI:         strings.TrimSpace(fields["redirect_uri"]),
+		BotScopes:           splitOAuthScopes(fields["scope"]),
+		UserScopes:          splitOAuthScopes(fields["user_scope"]),
+		State:               strings.TrimSpace(fields["state"]),
+		CodeChallenge:       strings.TrimSpace(fields["code_challenge"]),
+		CodeChallengeMethod: strings.TrimSpace(fields["code_challenge_method"]),
+	}
+}
+
+func splitOAuthScopes(raw string) []string {
+	return domain.NormalizeScopes(strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ' ' || r == '\t' || r == '\n'
+	}))
+}
+
+func singleValues(values url.Values) (map[string]string, bool) {
+	result := make(map[string]string, len(values))
+	for name, entries := range values {
+		if len(entries) != 1 {
+			return nil, false
+		}
+		result[name] = entries[0]
+	}
+	return result, true
+}
+
+func (h Handler) writeOAuthAuthorizationError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrInvalidOAuthClient):
+		h.writePageError(w, http.StatusBadRequest, "That app could not be found", "The client ID does not identify an active app.")
+	case errors.Is(err, service.ErrInvalidOAuth), errors.Is(err, service.ErrInvalidAppManifest):
+		h.writePageError(w, http.StatusBadRequest, "That authorization request is invalid", "The redirect address, requested permissions, or PKCE parameters do not match the app configuration.")
+	case errors.Is(err, store.ErrNotFound):
+		h.writePageError(w, http.StatusForbidden, "That app cannot be installed here", "Your account or workspace is not eligible for this installation.")
+	default:
+		h.writePageError(w, http.StatusServiceUnavailable, "Authorization is temporarily unavailable", "Nothing was installed. Return to the app and try again.")
+	}
+}
+
+func redirectOAuthAuthorization(w http.ResponseWriter, r *http.Request, rawRedirect, state, code, failure string) {
+	target, err := url.Parse(rawRedirect)
+	if err != nil {
+		http.Error(w, "authorization redirect is invalid", http.StatusBadRequest)
+		return
+	}
+	query := target.Query()
+	if code != "" {
+		query.Set("code", code)
+	}
+	if failure != "" {
+		query.Set("error", failure)
+	}
+	if state != "" {
+		query.Set("state", state)
+	}
+	target.RawQuery = query.Encode()
+	secureHeaders(w, workspaceContentSecurityPolicy)
+	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 
 // markRead advances the reader's unread cursor.
@@ -1415,7 +2139,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	names := h.newUserNames(r.Context(), principal)
 	notices := make([]string, 0, 3)
-	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names})
+	timeline, timelineNotice := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: csrfToken, Messages: history.Messages, Thread: threadTimestamp, Before: string(before), Member: isMember, Names: names, IncludeEphemeral: before == "" && threadTimestamp == ""})
 	if timelineNotice != "" {
 		notices = append(notices, timelineNotice)
 	}
@@ -1454,10 +2178,73 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		workspaceName = "SameOldChat"
 	}
 	channelPrefix := "#"
+	channelName := conversationName(conversation)
 	if conversation.IsDirect || conversation.IsGroupDirect {
 		channelPrefix = ""
+		if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+			channelName = participants
+		}
 	}
-	canJoin := !isMember && !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect && principal.HasScope(auth.ScopeChannelsManage)
+	canJoin := !isMember && !conversation.Archived && !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect && principal.HasScope(auth.ScopeChannelsManage)
+	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
+	var composerMembers []memberView
+	if canPost {
+		memberPage, memberErr := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: memberWindow})
+		if memberErr != nil {
+			notices = append(notices, "Mention suggestions are temporarily unavailable.")
+		} else {
+			composerMembers = make([]memberView, 0, len(memberPage.Users))
+			for _, user := range memberPage.Users {
+				if user.Deleted {
+					continue
+				}
+				name := displayName(user)
+				composerMembers = append(composerMembers, memberView{ID: string(user.ID), Name: name, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
+			}
+			sort.Slice(composerMembers, func(left, right int) bool {
+				return strings.ToLower(composerMembers[left].Name) < strings.ToLower(composerMembers[right].Name)
+			})
+			if memberPage.HasMore {
+				notices = append(notices, "Mention suggestions show the first 100 conversation members.")
+			}
+		}
+	}
+	var globalShortcuts []domain.AppShortcut
+	if isMember && principal.HasScope(auth.ScopeChatWrite) && threadTimestamp == "" {
+		globalShortcuts, err = h.Messages.ListAppShortcuts(r.Context(), principal.WorkspaceID, principal.UserID, "global")
+		if err != nil {
+			notices = append(notices, "App shortcuts are temporarily unavailable.")
+		}
+	}
+	workspaceApps, appsErr := h.Messages.ListWorkspaceApps(r.Context(), principal.WorkspaceID, principal.UserID)
+	if appsErr != nil {
+		notices = append(notices, "Installed apps are temporarily unavailable.")
+	}
+	var modal *modalView
+	currentModal, modalErr := h.Messages.CurrentModalView(r.Context(), principal.WorkspaceID, principal.UserID)
+	if modalErr == nil {
+		failures := make(map[string]string, len(currentModal.Errors)+len(state.ModalErrors))
+		for blockID, message := range currentModal.Errors {
+			failures[blockID] = message
+		}
+		for blockID, message := range state.ModalErrors {
+			failures[blockID] = message
+		}
+		modal, modalErr = h.newModalView(r.Context(), principal, currentModal, failures, state.ModalSubmitted)
+	}
+	if modalErr != nil && !errors.Is(modalErr, store.ErrNotFound) {
+		notices = append(notices, "An app modal is temporarily unavailable.")
+	}
+	if state.Notice != "" {
+		notices = append(notices, state.Notice)
+	}
+	var details *conversationDetailsView
+	if strings.TrimSpace(r.URL.Query().Get("details")) == "1" {
+		details, err = h.newConversationDetails(r.Context(), principal, workspace, conversation, isMember)
+		if err != nil {
+			notices = append(notices, "Conversation details are temporarily unavailable.")
+		}
+	}
 
 	data := pageData{
 		Timeline:        timeline,
@@ -1466,7 +2253,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Channels:        conversations.Channels,
 		Directs:         conversations.Directs,
 		Channel:         string(channel),
-		ChannelName:     conversationName(conversation),
+		ChannelName:     channelName,
 		ChannelPrefix:   channelPrefix,
 		ChannelMeta:     conversationMeta(conversation),
 		WorkspaceName:   workspaceName,
@@ -1474,7 +2261,8 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		ShowProfile:     h.canShowIdentity(),
 		ShowAdmin:       h.canShowAuthorizationAdmin(r.Context(), principal),
 		IsMember:        isMember,
-		CanPost:         isMember && principal.HasScope(auth.ScopeChatWrite),
+		CanPost:         canPost,
+		CanUpload:       isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
 		CanJoin:         canJoin,
 		CanCreate:       principal.HasScope(auth.ScopeChannelsManage),
 		Username:        username,
@@ -1484,8 +2272,14 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Error:           state.Message,
 		Draft:           state.Draft,
 		ComposeURL:      mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
+		UploadURL:       mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
 		TimelineURL:     fragmentURL(string(channel), "", string(before)),
 		ThreadURL:       fragmentURL(string(channel), threadTimestamp, ""),
+		GlobalShortcuts: globalShortcuts,
+		ComposerMembers: composerMembers,
+		Apps:            workspaceApps,
+		Modal:           modal,
+		Details:         details,
 	}
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
@@ -1569,7 +2363,7 @@ func (h Handler) timeline(w http.ResponseWriter, r *http.Request) {
 		}
 		messages = history.Messages
 	}
-	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal)})
+	list, _ := h.newMessageList(r.Context(), principal, messageListRequest{Conversation: conversation, CSRFToken: auth.CSRFToken(sessionCookie.Value), Messages: messages, Thread: threadTimestamp, Before: string(before), ThreadPane: threadTimestamp != "", Member: isMember, Names: h.newUserNames(r.Context(), principal), IncludeEphemeral: before == "" && threadTimestamp == ""})
 	h.writeFragment(w, list)
 }
 
@@ -1619,14 +2413,15 @@ func (h Handler) historyWindow(ctx context.Context, principal auth.Principal, ch
 // conversation it belongs to, the messages in it, and the view state that its
 // controls have to return to.
 type messageListRequest struct {
-	Conversation domain.Conversation
-	CSRFToken    string
-	Messages     []domain.Message
-	Thread       string
-	Before       string
-	ThreadPane   bool
-	Member       bool
-	Names        *userNames
+	Conversation     domain.Conversation
+	CSRFToken        string
+	Messages         []domain.Message
+	Thread           string
+	Before           string
+	ThreadPane       bool
+	Member           bool
+	Names            *userNames
+	IncludeEphemeral bool
 }
 
 // newMessageList builds the single type the message partial renders. It also
@@ -1636,6 +2431,33 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 	conversation := request.Conversation
 	csrfToken := request.CSRFToken
 	messages := request.Messages
+	ephemeralIDs := make(map[domain.MessageID]struct{})
+	if request.IncludeEphemeral {
+		values, err := h.Messages.ListEphemeralMessages(ctx, principal.WorkspaceID, principal.UserID, request.Conversation.ID, timelineWindow)
+		if err != nil {
+			// The durable channel history remains useful when the private
+			// response projection is temporarily unavailable; report that
+			// degradation beside it instead of blanking the conversation.
+			values = nil
+		}
+		for _, value := range values {
+			ephemeralIDs[value.ID] = struct{}{}
+			messages = append(messages, domain.Message{
+				ID: value.ID, WorkspaceID: value.WorkspaceID, Conversation: value.Conversation,
+				AuthorID: value.AuthorID, AppID: value.AppID, Text: value.Text, Blocks: value.Blocks,
+				Attachments: value.Attachments, CreatedAt: value.CreatedAt,
+			})
+		}
+		sort.Slice(messages, func(left, right int) bool {
+			if messages[left].CreatedAt.Equal(messages[right].CreatedAt) {
+				return messages[left].ID < messages[right].ID
+			}
+			return messages[left].CreatedAt.Before(messages[right].CreatedAt)
+		})
+		if len(messages) > timelineWindow {
+			messages = messages[len(messages)-timelineWindow:]
+		}
+	}
 	threadTimestamp := request.Thread
 	before := request.Before
 	names := request.Names
@@ -1671,21 +2493,42 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 	}
 	readReactions := principal.HasScope(auth.ScopeReactionsRead) || principal.HasScope(auth.ScopeReactionsWrite)
+	var messageShortcuts []domain.AppShortcut
+	if request.Member {
+		var err error
+		messageShortcuts, err = h.Messages.ListAppShortcuts(ctx, principal.WorkspaceID, principal.UserID, "message")
+		if err != nil && notice == "" {
+			notice = "App message shortcuts are temporarily unavailable."
+		}
+	}
+	actionCatalog := appActionOptionCatalog{}
 	for _, message := range messages {
 		// Deletion is soft in the store and leaves the text in place, so every
 		// region has to drop the row rather than trust the read to have done it.
 		if message.Deleted {
 			continue
 		}
+		_, ephemeral := ephemeralIDs[message.ID]
 		timestamp := string(domain.NewMessageTimestamp(message.CreatedAt))
 		author := names.name(message.AuthorID)
-		content := newRichMessageContent(message)
-		ownsMessage := request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite)
+		presentation := decodeMessageStreamPresentation(message.StreamState)
+		if presentation.Username != "" {
+			author = presentation.Username
+		}
+		displayMessage := message
+		displayMessage.Text = resolveSlackUserMentions(message.Text, names)
+		content := newRichMessageContent(displayMessage)
+		actionCatalog.enrich(ctx, h, principal, content.Blocks)
+		ownsMessage := !ephemeral && request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite)
 		view := messageView{
 			ID:            anchorPrefix + string(message.ID),
+			MessageID:     string(message.ID),
 			Anchor:        anchorPrefix + messageAnchor(message.ID),
 			AuthorName:    author,
 			AuthorInitial: initial(author),
+			AvatarURL:     presentation.IconURL,
+			AvatarEmoji:   presentation.IconEmoji,
+			IsApp:         message.AppID != "",
 			Text:          message.Text,
 			DisplayText:   content.Text,
 			Blocks:        content.Blocks,
@@ -1706,13 +2549,31 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			// an API-authored rich message would erase its blocks and
 			// attachments on save, so rich messages retain deletion but are
 			// edited through the Slack API that can round-trip their structure.
-			CanEdit:   ownsMessage && !hasStructuredMessageContent(message.Blocks) && !hasStructuredMessageContent(message.Attachments),
-			CanDelete: ownsMessage,
+			CanEdit:     ownsMessage && !hasStructuredMessageContent(message.Blocks) && !hasStructuredMessageContent(message.Attachments),
+			CanDelete:   ownsMessage,
+			AppID:       string(message.AppID),
+			CanInteract: request.Member && message.AppID != "",
+			Streaming:   messageStreamActive(message.StreamState),
+			Ephemeral:   ephemeral,
+		}
+		for _, file := range message.Files {
+			title := strings.TrimSpace(file.Title)
+			if title == "" {
+				title = file.Name
+			}
+			view.Files = append(view.Files, fileView{
+				Name: file.Name, Title: title, MIMEType: file.MIMEType,
+				Size: formatFileSize(file.Size), Deleted: file.Deleted,
+				DownloadURL: "/app/files/" + url.PathEscape(string(file.ID)),
+			})
+		}
+		if !ephemeral {
+			view.Shortcuts = messageShortcuts
 		}
 		if _, ok := pinned[message.ID]; ok {
 			view.Pinned = true
 		}
-		if readReactions {
+		if readReactions && !ephemeral {
 			reactions, _, _, err := h.Messages.Reactions(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.MessageTimestamp(timestamp), domain.PageRequest{Limit: reactionWindow})
 			if err != nil && notice == "" {
 				notice = "Reactions are temporarily unavailable."
@@ -1722,6 +2583,115 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		list.Messages = append(list.Messages, view)
 	}
 	return list, notice
+}
+
+func formatFileSize(size int64) string {
+	const unit = int64(1024)
+	if size < unit {
+		return strconv.FormatInt(size, 10) + " B"
+	}
+	value, suffix := float64(size), "KiB"
+	for _, candidate := range []string{"KiB", "MiB", "GiB", "TiB"} {
+		suffix = candidate
+		value /= float64(unit)
+		if value < float64(unit) || candidate == "TiB" {
+			break
+		}
+	}
+	return strconv.FormatFloat(value, 'f', 1, 64) + " " + suffix
+}
+
+type appActionOptionCatalog struct {
+	usersLoaded         bool
+	conversationsLoaded bool
+	users               []messageActionOptionView
+	conversations       []messageActionOptionView
+	channels            []messageActionOptionView
+}
+
+func (c *appActionOptionCatalog) enrich(ctx context.Context, h Handler, principal auth.Principal, blocks []messageBlockView) {
+	for blockIndex := range blocks {
+		for actionIndex := range blocks[blockIndex].Actions {
+			action := &blocks[blockIndex].Actions[actionIndex]
+			switch action.Type {
+			case "users_select", "multi_users_select":
+				c.loadUsers(ctx, h, principal)
+				action.Options = cloneActionOptions(c.users)
+			case "conversations_select", "multi_conversations_select":
+				c.loadConversations(ctx, h, principal)
+				action.Options = cloneActionOptions(c.conversations)
+			case "channels_select", "multi_channels_select":
+				c.loadConversations(ctx, h, principal)
+				action.Options = cloneActionOptions(c.channels)
+			default:
+				continue
+			}
+			markSelectedOptions(action.Options, action.InitialValues)
+		}
+	}
+}
+
+func (c *appActionOptionCatalog) loadUsers(ctx context.Context, h Handler, principal auth.Principal) {
+	if c.usersLoaded {
+		return
+	}
+	c.usersLoaded = true
+	var cursor domain.Cursor
+	for pageIndex := 0; pageIndex < 5; pageIndex++ {
+		page, err := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 200, Cursor: cursor})
+		if err != nil {
+			return
+		}
+		for _, user := range page.Users {
+			if !user.Deleted {
+				c.users = append(c.users, messageActionOptionView{Text: displayName(user), Value: string(user.ID)})
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	sort.Slice(c.users, func(left, right int) bool {
+		return strings.ToLower(c.users[left].Text) < strings.ToLower(c.users[right].Text)
+	})
+}
+
+func (c *appActionOptionCatalog) loadConversations(ctx context.Context, h Handler, principal auth.Principal) {
+	if c.conversationsLoaded {
+		return
+	}
+	c.conversationsLoaded = true
+	var cursor domain.Cursor
+	for pageIndex := 0; pageIndex < 5; pageIndex++ {
+		page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
+			Limit: 200, Cursor: cursor, ExcludeArchived: true,
+		})
+		if err != nil {
+			return
+		}
+		for _, conversation := range page.Conversations {
+			label := conversationName(conversation)
+			if !conversation.IsDirect && !conversation.IsGroupDirect {
+				label = "#" + label
+			}
+			option := messageActionOptionView{Text: label, Value: string(conversation.ID)}
+			c.conversations = append(c.conversations, option)
+			if !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect {
+				c.channels = append(c.channels, option)
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	sort.Slice(c.conversations, func(left, right int) bool { return c.conversations[left].Text < c.conversations[right].Text })
+	sort.Slice(c.channels, func(left, right int) bool { return c.channels[left].Text < c.channels[right].Text })
+}
+
+func cloneActionOptions(values []messageActionOptionView) []messageActionOptionView {
+	return append([]messageActionOptionView(nil), values...)
 }
 
 func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID) []reactionView {
@@ -1819,9 +2789,201 @@ func (h Handler) participantNames(ctx context.Context, principal auth.Principal,
 	return strings.Join(names, ", ")
 }
 
+// newConversationDetails loads the channel drawer only when a reader opens it.
+// The normal timeline therefore does not turn one page view into up to twenty
+// directory queries. Slack caps an invite at 1,000 users; the same bound keeps
+// this human-facing selector finite and makes an oversized workspace explicit
+// instead of silently pretending that the first page is the full membership.
+func (h Handler) newConversationDetails(ctx context.Context, principal auth.Principal, workspace domain.Workspace, conversation domain.Conversation, isMember bool) (*conversationDetailsView, error) {
+	const maxDirectoryPages = 10
+
+	membersByID := make(map[domain.UserID]struct{})
+	members := make([]memberView, 0)
+	cursor := domain.Cursor("")
+	truncated := false
+	for pageNumber := 0; pageNumber < maxDirectoryPages; pageNumber++ {
+		page, err := h.Messages.ConversationMembers(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
+		if err != nil {
+			return nil, err
+		}
+		for _, user := range page.Users {
+			if user.Deleted {
+				continue
+			}
+			name := displayName(user)
+			membersByID[user.ID] = struct{}{}
+			members = append(members, memberView{ID: string(user.ID), Name: name, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pageNumber == maxDirectoryPages-1 {
+			truncated = true
+		}
+	}
+
+	canManage := isMember && principal.HasScope(auth.ScopeChannelsManage)
+	isChannel := !conversation.IsDirect && !conversation.IsGroupDirect
+	invitees := make([]memberView, 0)
+	if canManage && isChannel && !conversation.Archived {
+		cursor = ""
+		for pageNumber := 0; pageNumber < maxDirectoryPages; pageNumber++ {
+			page, err := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
+			if err != nil {
+				return nil, err
+			}
+			for _, user := range page.Users {
+				if user.Deleted {
+					continue
+				}
+				if _, exists := membersByID[user.ID]; exists {
+					continue
+				}
+				name := displayName(user)
+				invitees = append(invitees, memberView{ID: string(user.ID), Name: name, AuthorInitial: initial(name)})
+			}
+			if !page.HasMore || page.NextCursor == "" {
+				break
+			}
+			cursor = page.NextCursor
+			if pageNumber == maxDirectoryPages-1 {
+				truncated = true
+			}
+		}
+	}
+	sort.Slice(members, func(left, right int) bool { return members[left].Name < members[right].Name })
+	sort.Slice(invitees, func(left, right int) bool { return invitees[left].Name < invitees[right].Name })
+
+	required := false
+	for _, requiredChannel := range workspace.DefaultChannelIDs {
+		if requiredChannel == conversation.ID {
+			required = true
+			break
+		}
+	}
+	name := conversationName(conversation)
+	conversationType := "Channel"
+	switch {
+	case conversation.IsDirect:
+		conversationType = "Direct message"
+		if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
+			name = participants
+		}
+	case conversation.IsGroupDirect:
+		conversationType = "Group direct message"
+		if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
+			name = participants
+		}
+	case conversation.IsPrivate:
+		conversationType = "Private channel"
+	}
+	archiveVerb := "Archive"
+	if conversation.Archived {
+		archiveVerb = "Unarchive"
+	}
+	return &conversationDetailsView{
+		ID:          string(conversation.ID),
+		Name:        name,
+		IsChannel:   isChannel,
+		Topic:       conversation.Topic,
+		Purpose:     conversation.Purpose,
+		Type:        conversationType,
+		Archived:    conversation.Archived,
+		Members:     members,
+		Invitees:    invitees,
+		Truncated:   truncated,
+		CloseURL:    appURL(string(conversation.ID), "", "", "", ""),
+		CanEdit:     canManage && isChannel && !conversation.Archived,
+		CanInvite:   canManage && isChannel && !conversation.Archived,
+		CanLeave:    canManage && isChannel && !conversation.Archived && !required,
+		CanClose:    canManage && !isChannel,
+		CanArchive:  canManage && isChannel && !required,
+		ArchiveVerb: archiveVerb,
+	}, nil
+}
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
+
+func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	data := activityData{Channel: channel}
+	var cursor domain.Cursor
+	for pageIndex := 0; pageIndex < 10; pageIndex++ {
+		page, pageErr := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
+			Limit: conversationWindow, Cursor: cursor, ExcludeArchived: false,
+		})
+		if pageErr != nil {
+			data.Notice = "Unread conversations are temporarily unavailable."
+			break
+		}
+		for _, conversation := range page.Conversations {
+			if conversation.UnreadCount == 0 {
+				continue
+			}
+			member, memberErr := h.Messages.IsConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
+			if memberErr != nil {
+				data.Notice = "Some unread conversations could not be checked."
+				continue
+			}
+			if !member {
+				continue
+			}
+			name, prefix := conversationName(conversation), "#"
+			if conversation.IsDirect || conversation.IsGroupDirect {
+				prefix = ""
+				if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+					name = participants
+				}
+			}
+			data.Unread = append(data.Unread, activityConversationView{
+				Name: name, Prefix: prefix, UnreadCount: conversation.UnreadCount,
+				URL: appURL(string(conversation.ID), "", "", "", ""),
+			})
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pageIndex == 9 {
+			data.Notice = strings.TrimSpace(data.Notice + " Activity is limited to the first 1,000 conversations.")
+		}
+	}
+	sort.Slice(data.Unread, func(left, right int) bool {
+		if data.Unread[left].UnreadCount != data.Unread[right].UnreadCount {
+			return data.Unread[left].UnreadCount > data.Unread[right].UnreadCount
+		}
+		return strings.ToLower(data.Unread[left].Name) < strings.ToLower(data.Unread[right].Name)
+	})
+	if principal.HasScope(auth.ScopeSearchRead) {
+		results, searchErr := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, "<@"+string(principal.UserID)+">", domain.PageRequest{Limit: searchWindow})
+		if searchErr != nil {
+			data.Notice = strings.TrimSpace(data.Notice + " Mentions are temporarily unavailable.")
+		} else {
+			messages := make([]domain.Message, 0, len(results.Messages))
+			for _, message := range results.Messages {
+				if message.AuthorID != principal.UserID {
+					messages = append(messages, message)
+				}
+			}
+			slices.Reverse(messages)
+			data.Mentions = h.newResultViews(r.Context(), principal, messages, h.newUserNames(r.Context(), principal))
+		}
+	} else {
+		data.Notice = strings.TrimSpace(data.Notice + " Your session cannot search mentions.")
+	}
+	h.writeHTML(w, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
+}
 
 func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeSearchRead)
@@ -1892,12 +3054,15 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 		if cursor, err := domain.NewMessageCursor(boundary); err == nil {
 			before = string(cursor)
 		}
+		displayMessage := message
+		displayMessage.Text = resolveSlackUserMentions(message.Text, names)
 		views = append(views, messageView{
 			ID:            string(message.ID),
 			Anchor:        messageAnchor(message.ID),
 			AuthorName:    author,
 			AuthorInitial: initial(author),
 			Text:          message.Text,
+			DisplayText:   newRichMessageContent(displayMessage).Text,
 			MachineTime:   message.CreatedAt.UTC().Format(time.RFC3339Nano),
 			DisplayTime:   formatTime(message.CreatedAt),
 			Channel:       string(message.Conversation),
@@ -2208,7 +3373,13 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channel := h.requestChannel(r)
-	message, err := h.Messages.Post(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["text"], domain.MessageTimestamp(fields["thread_ts"]), "")
+	command, commandText, isSlashCommand := slashCommandInput(fields["text"])
+	var message domain.Message
+	if isSlashCommand {
+		err = h.Messages.DispatchSlashCommand(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(fields["thread_ts"]), command, commandText, h.responseBaseURL(r))
+	} else {
+		message, err = h.Messages.Post(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["text"], domain.MessageTimestamp(fields["thread_ts"]), "")
+	}
 	if err != nil {
 		status := http.StatusServiceUnavailable
 		reason := "The message could not be sent because the workspace store is temporarily unavailable."
@@ -2226,9 +3397,25 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusForbidden
 			reason = "You are not a member of this conversation, so the message was not sent."
 		}
+		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+			status = http.StatusConflict
+			reason = "This conversation is archived, so new messages cannot be sent."
+		}
 		if errors.Is(err, store.ErrNotFound) {
 			status = http.StatusNotFound
 			reason = "That conversation is no longer available."
+		}
+		if errors.Is(err, service.ErrSlashCommandNotFound) {
+			status = http.StatusNotFound
+			reason = "That slash command is not installed in this workspace."
+		}
+		if errors.Is(err, service.ErrSlashCommandInThread) {
+			status = http.StatusBadRequest
+			reason = "Slash commands cannot be used in threads."
+		}
+		if errors.Is(err, service.ErrAppInteractionUnavailable) || errors.Is(err, service.ErrInvalidAppResponse) {
+			status = http.StatusBadGateway
+			reason = "The app did not accept that command. Your command was not posted as a message."
 		}
 		w.Header().Set("Vary", "HX-Request")
 		if r.Header.Get("HX-Request") == "true" {
@@ -2250,6 +3437,15 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		h.renderApp(w, r, reader, composerState{Draft: fields["text"], Message: reason, Status: status})
 		return
 	}
+	if isSlashCommand {
+		w.Header().Set("Vary", "HX-Request")
+		if r.Header.Get("HX-Request") == "true" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		http.Redirect(w, r, h.viewURL(r, ""), http.StatusSeeOther)
+		return
+	}
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
 		sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName)
@@ -2268,6 +3464,281 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])), http.StatusSeeOther)
+}
+
+const (
+	maxWorkspaceUploadBytes  = 100 << 20
+	maxWorkspaceUploadFields = 1 << 20
+)
+
+func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if !principal.HasScope(auth.ScopeChatWrite) {
+		h.writeAuthError(w, auth.ErrMissingScope)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxWorkspaceUploadBytes+maxWorkspaceUploadFields)
+	if err := r.ParseMultipartForm(maxWorkspaceUploadFields); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That file could not be read", "Choose one file smaller than 100 MiB and try again.")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	if !h.acceptCSRFResult(w, r, auth.ValidateCSRFValue(r, r.FormValue(auth.CSRFTokenFieldName))) {
+		return
+	}
+	headers := r.MultipartForm.File["file"]
+	if len(headers) != 1 {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Choose one file", "Exactly one file must be selected before it can be sent.")
+		return
+	}
+	header := headers[0]
+	source, err := header.Open()
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That file could not be opened", "Choose the file again and retry.")
+		return
+	}
+	defer source.Close()
+	name := strings.TrimSpace(header.Filename)
+	title := strings.TrimSpace(r.FormValue("title"))
+	if title == "" {
+		title = name
+	}
+	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	file, err := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, name, title, mimeType, header.Size, source)
+	if err != nil {
+		status, reason := http.StatusServiceUnavailable, "The file store is temporarily unavailable. Nothing was sent."
+		if errors.Is(err, service.ErrInvalidFile) {
+			status, reason = http.StatusBadRequest, "The selected file is empty or its metadata is not valid."
+		}
+		h.writeMutationError(w, r, status, "That file was not uploaded", reason)
+		return
+	}
+	channel := h.requestChannel(r)
+	thread := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("thread")))
+	if _, err := h.Messages.ShareFile(r.Context(), principal.WorkspaceID, principal.UserID, file.ID, channel, thread); err != nil {
+		cleanupErr := h.Messages.DeleteFile(r.Context(), principal.WorkspaceID, principal.UserID, file.ID)
+		reason := "The file was not sent and the incomplete upload was removed."
+		if cleanupErr != nil {
+			reason = "The file was not sent. Its incomplete upload could not be removed automatically."
+		}
+		status := http.StatusServiceUnavailable
+		if errors.Is(err, service.ErrNotInConversation) {
+			status, reason = http.StatusForbidden, "You are not a member of this conversation, so the file was not sent."
+		} else if errors.Is(err, service.ErrConversationAlreadyArchived) {
+			status, reason = http.StatusConflict, "This conversation is archived, so the file was not sent."
+		} else if errors.Is(err, service.ErrInvalidTimestamp) {
+			status, reason = http.StatusBadRequest, "That thread is not a message in this conversation."
+		} else if errors.Is(err, store.ErrNotFound) {
+			status, reason = http.StatusNotFound, "That conversation or file is no longer available."
+		}
+		h.writeMutationError(w, r, status, "That file was not sent", reason)
+		return
+	}
+	h.redirectMutation(w, r, h.viewURL(r, string(thread)))
+}
+
+func (h Handler) downloadFile(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fileID := domain.FileID(strings.TrimSpace(r.PathValue("fileID")))
+	file, source, err := h.Messages.OpenFile(r.Context(), principal.WorkspaceID, principal.UserID, fileID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			h.writePageError(w, http.StatusNotFound, "That file is not available", "It may have been deleted or is not shared with a conversation you can access.")
+			return
+		}
+		h.writePageError(w, http.StatusServiceUnavailable, "That file could not be opened", "The file store is temporarily unavailable.")
+		return
+	}
+	defer source.Close()
+	disposition := mime.FormatMediaType("attachment", map[string]string{"filename": file.Name})
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", disposition)
+	w.Header().Set("Content-Length", strconv.FormatInt(file.Size, 10))
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_, _ = io.Copy(w, source)
+}
+
+func slashCommandInput(text string) (string, string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return "", "", false
+	}
+	end := strings.IndexAny(text, " \t\r\n")
+	if end < 0 {
+		return text, "", true
+	}
+	return text[:end], strings.TrimSpace(text[end:]), true
+}
+
+func (h Handler) appInteraction(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeAppInteractionMutation(w, r)
+	if !ok {
+		return
+	}
+	value := fields["value"]
+	if strings.TrimSpace(fields["action_type"]) == "datetimepicker" && strings.TrimSpace(value) != "" {
+		if _, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64); err != nil {
+			parsed, parseErr := time.ParseInLocation("2006-01-02T15:04", strings.TrimSpace(value), time.Local)
+			if parseErr != nil {
+				h.writeMutationError(w, r, http.StatusBadRequest, "That app action could not be read", "Choose a valid date and time.")
+				return
+			}
+			value = strconv.FormatInt(parsed.Unix(), 10)
+		}
+	}
+	action := domain.AppBlockAction{
+		MessageID: domain.MessageID(strings.TrimSpace(fields["message_id"])),
+		BlockID:   strings.TrimSpace(fields["block_id"]),
+		ActionID:  strings.TrimSpace(fields["action_id"]),
+		Type:      strings.TrimSpace(fields["action_type"]),
+		Value:     value,
+	}
+	if err := h.Messages.DispatchBlockAction(r.Context(), principal.WorkspaceID, principal.UserID, action, h.responseBaseURL(r)); err != nil {
+		status := http.StatusBadGateway
+		reason := "The app did not accept that action. Nothing was changed."
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			status, reason = http.StatusNotFound, "That app message is no longer available."
+		case errors.Is(err, service.ErrAppInteractionUnavailable):
+			status, reason = http.StatusConflict, "This app has no interactive endpoint available."
+		case errors.Is(err, service.ErrInvalidAppResponse):
+			status, reason = http.StatusBadGateway, "The app returned a response that could not be applied."
+		}
+		h.writeMutationError(w, r, status, "That app action did not run", reason)
+		return
+	}
+	target := h.viewURL(r, "")
+	h.redirectMutation(w, r, target)
+}
+
+func (h Handler) appShortcut(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "That shortcut could not be read from the form. Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	callbackID := strings.TrimSpace(fields["callback_id"])
+	if channel == "" || appID == "" || callbackID == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That shortcut is incomplete", "Reload the conversation and try again.")
+		return
+	}
+	if err := h.Messages.DispatchAppShortcut(
+		r.Context(), principal.WorkspaceID, principal.UserID, channel, appID, callbackID,
+		domain.MessageID(strings.TrimSpace(fields["message_id"])), h.responseBaseURL(r),
+	); err != nil {
+		status := http.StatusBadGateway
+		reason := "The app did not accept that shortcut. Nothing was changed."
+		switch {
+		case errors.Is(err, store.ErrNotFound):
+			status, reason = http.StatusNotFound, "That app shortcut is no longer available."
+		case errors.Is(err, service.ErrAppInteractionUnavailable):
+			status, reason = http.StatusConflict, "This app has no interactive endpoint available."
+		case errors.Is(err, store.ErrConflict):
+			status, reason = http.StatusConflict, "That shortcut configuration is ambiguous."
+		}
+		h.writeMutationError(w, r, status, "That app shortcut did not run", reason)
+		return
+	}
+	h.redirectMutation(w, r, h.viewURL(r, ""))
+}
+
+func (h Handler) decodeAppInteractionMutation(w http.ResponseWriter, r *http.Request) (map[string]string, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
+	var parseErr error
+	if strings.HasPrefix(strings.ToLower(r.Header.Get("Content-Type")), "multipart/form-data") {
+		parseErr = r.ParseMultipartForm(maxFormBody)
+	} else {
+		parseErr = r.ParseForm()
+	}
+	if parseErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That app action could not be read", "Reload the conversation and try again.")
+		return nil, false
+	}
+	fields := make(map[string]string, len(r.Form))
+	for name, values := range r.Form {
+		if name == "value" {
+			switch len(values) {
+			case 0:
+			case 1:
+				fields[name] = values[0]
+			default:
+				encoded, err := json.Marshal(values)
+				if err != nil {
+					h.writeMutationError(w, r, http.StatusBadRequest, "That app action could not be read", "Reload the conversation and try again.")
+					return nil, false
+				}
+				fields[name] = string(encoded)
+			}
+			continue
+		}
+		if len(values) != 1 {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That app action could not be read", "Reload the conversation and try again.")
+			return nil, false
+		}
+		fields[name] = values[0]
+	}
+	if !h.requireCSRF(w, r) {
+		return nil, false
+	}
+	return fields, true
+}
+
+func (h Handler) appResponse(w http.ResponseWriter, r *http.Request) {
+	secureHeaders(w, workspaceContentSecurityPolicy)
+	body, err := io.ReadAll(io.LimitReader(r.Body, service.MaxMessageBodyBytes+1))
+	if err != nil || len(body) > service.MaxMessageBodyBytes {
+		http.Error(w, "invalid response payload", http.StatusBadRequest)
+		return
+	}
+	if err := h.Messages.HandleAppResponse(r.Context(), r.PathValue("token"), string(body)); err != nil {
+		if errors.Is(err, service.ErrInvalidAppResponse) {
+			http.Error(w, "response URL is invalid, expired, or exhausted", http.StatusNotFound)
+			return
+		}
+		http.Error(w, "response could not be applied", http.StatusServiceUnavailable)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h Handler) responseBaseURL(r *http.Request) string {
+	if h.PublicURL != "" {
+		return h.PublicURL
+	}
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]); forwarded == "http" || forwarded == "https" {
+		scheme = forwarded
+	}
+	return scheme + "://" + r.Host
 }
 
 func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
@@ -2496,6 +3967,169 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
 }
 
+func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The member invitation could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	target := domain.UserID(strings.TrimSpace(fields["user"]))
+	if target == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Choose a person to add", "No workspace member was selected, so nobody was added.")
+		return
+	}
+	if _, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, []domain.UserID{target}); err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Join the channel before inviting another person.")
+		case errors.Is(err, service.ErrInvalidConversation):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That person cannot be added here", "Members can be added to public and private channels, not direct conversations.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That person is no longer available", "The member or channel no longer exists.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The person was not added", "The workspace store is temporarily unavailable. Nothing was changed.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, conversationDetailsURL(channel))
+}
+
+func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The channel name could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	if _, err := h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["name"]); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidConversation):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That channel name is not valid", "Use a unique channel name between one and 80 characters.")
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Only a channel member can rename it.")
+		case errors.Is(err, store.ErrAlreadyExists):
+			h.writeMutationError(w, r, http.StatusConflict, "That channel name is already in use", "Choose another name.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was renamed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The channel was not renamed", "The workspace store is temporarily unavailable. Nothing was changed.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, conversationDetailsURL(channel))
+}
+
+func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
+	h.setConversationText(w, r, "topic")
+}
+
+func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) {
+	h.setConversationText(w, r, "purpose")
+}
+
+func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, field string) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The channel details could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	if field == "topic" {
+		_, err = h.Messages.SetConversationTopic(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields[field])
+	} else {
+		_, err = h.Messages.SetConversationPurpose(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields[field])
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidConversation):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That channel "+field+" is too long", "Use at most 250 characters.")
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this conversation", "Only a conversation member can change its "+field+".")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That conversation is no longer available", "Nothing was changed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The "+field+" was not saved", "The workspace store is temporarily unavailable. Nothing was changed.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, conversationDetailsURL(channel))
+}
+
+func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The archive request could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	archived, err := strconv.ParseBool(strings.TrimSpace(fields["archived"]))
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That archive request is not valid", "Nothing was changed.")
+		return
+	}
+	channel := h.requestChannel(r)
+	if _, err := h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotArchiveDefault):
+			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be archived", "Only public and private channels that are not required by the workspace can be archived.")
+		case errors.Is(err, service.ErrConversationAlreadyArchived), errors.Is(err, service.ErrConversationNotArchived):
+			h.redirectMutation(w, r, conversationDetailsURL(channel))
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was changed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The channel archive state was not changed", "The workspace store is temporarily unavailable. Nothing was changed.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, conversationDetailsURL(channel))
+}
+
+func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The leave request could not be read from the form. Reload the page and try again."); !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusConflict, "You have already left this conversation", "No membership was changed.")
+		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotLeaveDefault):
+			h.writeMutationError(w, r, http.StatusBadRequest, "This conversation cannot be left", "Required workspace channels cannot be left.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That conversation is no longer available", "Nothing was changed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The conversation was not left", "The workspace store is temporarily unavailable. Your membership was not changed.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(channel), "", "", "", ""))
+}
+
+func conversationDetailsURL(channel domain.ConversationID) string {
+	return "/app?" + url.Values{"channel": {string(channel)}, "details": {"1"}}.Encode()
+}
+
 func normalizeUserIDs(raw string) ([]domain.UserID, error) {
 	parts := strings.Split(raw, ",")
 	users := make([]domain.UserID, 0, len(parts))
@@ -2561,7 +4195,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
@@ -2750,6 +4384,64 @@ func (n *userNames) name(id domain.UserID) string {
 	}
 	n.cache[id] = resolved
 	return resolved
+}
+
+// resolveSlackUserMentions adds a human label to bare Slack user references for
+// first-party presentation without changing the stored message. References
+// inside code spans and fenced code blocks stay literal, as Slack rendering
+// requires.
+func resolveSlackUserMentions(text string, names *userNames) string {
+	if !strings.Contains(text, "<@") || names == nil {
+		return text
+	}
+	var output strings.Builder
+	for offset := 0; offset < len(text); {
+		if strings.HasPrefix(text[offset:], "```") {
+			end := strings.Index(text[offset+3:], "```")
+			if end < 0 {
+				output.WriteString(text[offset:])
+				break
+			}
+			end += offset + 6
+			output.WriteString(text[offset:end])
+			offset = end
+			continue
+		}
+		if text[offset] == '`' {
+			end := strings.IndexByte(text[offset+1:], '`')
+			if end < 0 {
+				output.WriteString(text[offset:])
+				break
+			}
+			end += offset + 2
+			output.WriteString(text[offset:end])
+			offset = end
+			continue
+		}
+		if strings.HasPrefix(text[offset:], "<@") {
+			end := strings.IndexByte(text[offset+2:], '>')
+			if end >= 0 {
+				end += offset + 2
+				id := text[offset+2 : end]
+				if id != "" && !strings.ContainsAny(id, "| \t\r\n<>") {
+					label := strings.Join(strings.Fields(strings.NewReplacer("|", " ", "<", " ", ">", " ").Replace(names.name(domain.UserID(id)))), " ")
+					if label != "" {
+						output.WriteString("<@")
+						output.WriteString(id)
+						output.WriteByte('|')
+						output.WriteByte('@')
+						output.WriteString(label)
+						output.WriteByte('>')
+						offset = end + 1
+						continue
+					}
+				}
+			}
+		}
+		output.WriteByte(text[offset])
+		offset++
+	}
+	return output.String()
 }
 
 func displayName(user domain.User) string {

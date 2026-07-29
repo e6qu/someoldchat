@@ -251,11 +251,11 @@ func TestSQLiteViewLifecycleIsDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	value := domain.View{ID: "V1", WorkspaceID: "T1", UserID: "U1", Type: "home", ExternalID: "home-1", Payload: `{"type":"home","blocks":[]}`, Hash: "hash-1", RootViewID: "V1", CreatedAt: now, UpdatedAt: now}
+	value := domain.View{ID: "V1", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Type: "home", ExternalID: "home-1", Payload: `{"type":"home","blocks":[]}`, Hash: "hash-1", RootViewID: "V1", CreatedAt: now, UpdatedAt: now}
 	if err := s.CreateView(ctx, value, events.Event{ID: "EV1", WorkspaceID: "T1", Topic: "view.created", Payload: "V1", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := s.GetPublishedView(ctx, "T1", "U1")
+	loaded, err := s.GetPublishedView(ctx, "T1", "U1", "A1")
 	if err != nil || loaded.Payload != value.Payload || loaded.ExternalID != value.ExternalID {
 		t.Fatalf("loaded=%+v err=%v", loaded, err)
 	}
@@ -565,6 +565,57 @@ func TestSQLitePublicFileSharingIsDurable(t *testing.T) {
 	}
 	if _, err := s.GetPublicFile(ctx, "pub_test"); err != store.ErrNotFound {
 		t.Fatalf("revoked lookup err=%v", err)
+	}
+}
+
+func TestSQLiteFileShareMessageIsAtomicAndDurable(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "file-message.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1_700_000_000, 123_000_000).UTC()
+	file := domain.File{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report", MIMEType: "text/plain", BlobKey: "T1/F1", Size: 12, CreatedAt: created}
+	if err := s.CreateFile(ctx, file, events.Event{ID: "E-file", WorkspaceID: "T1", Topic: "file.created", CreatedAt: created}); err != nil {
+		t.Fatal(err)
+	}
+	existing := domain.Message{ID: "M-existing", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "existing", CreatedAt: created}
+	if err := s.CreateMessage(ctx, existing, events.Event{ID: "E-existing", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+	conflict := domain.Message{ID: "M-conflict", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created}
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, conflict, events.Event{ID: "E-conflict", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}); !errors.Is(err, store.ErrMessageTimestampTaken) {
+		t.Fatalf("conflicting share error=%v", err)
+	}
+	metadata, err := s.GetFile(ctx, "F1")
+	if err != nil || len(metadata.SharedChannels) != 0 {
+		t.Fatalf("failed message left a share behind: file=%+v err=%v", metadata, err)
+	}
+	shared := domain.Message{ID: "M-shared", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created.Add(time.Microsecond)}
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, shared, events.Event{ID: "E-shared", WorkspaceID: "T1", Topic: "message.created", CreatedAt: shared.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	stored, err := s.GetMessage(ctx, "M-shared")
+	if err != nil || len(stored.Files) != 1 || stored.Files[0].ID != "F1" || len(stored.Files[0].SharedChannels) != 1 || stored.Files[0].SharedChannels[0] != "C1" {
+		t.Fatalf("stored file message=%+v err=%v", stored, err)
 	}
 }
 
@@ -965,7 +1016,11 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if plaintextCount != 0 {
 		t.Fatal("token was stored in plaintext")
 	}
-	want := domain.Message{ID: "msg_1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "hello", CreatedAt: time.Unix(100, 123000000).UTC()}
+	want := domain.Message{
+		ID: "msg_1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", AppID: "A1",
+		Text: "hello", Metadata: `{"event_type":"test","event_payload":{"id":"1"}}`,
+		StreamState: `{"active":true}`, CreatedAt: time.Unix(100, 123000000).UTC(),
+	}
 	if err := s.CreateMessage(context.Background(), want, events.Event{ID: "evt_1", WorkspaceID: "T1", Topic: "message.created", Payload: string(want.ID), CreatedAt: want.CreatedAt}, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -973,7 +1028,9 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err != nil || len(got.Messages) != 1 {
 		t.Fatalf("got = %+v, err = %v", got, err)
 	}
-	if got.Messages[0].Text != want.Text || !got.Messages[0].CreatedAt.Equal(want.CreatedAt) {
+	if got.Messages[0].Text != want.Text || got.Messages[0].Metadata != want.Metadata ||
+		got.Messages[0].StreamState != want.StreamState || got.Messages[0].AppID != want.AppID ||
+		!got.Messages[0].CreatedAt.Equal(want.CreatedAt) {
 		t.Fatalf("got = %+v, want = %+v", got.Messages[0], want)
 	}
 	reply := domain.Message{ID: "msg_reply", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "reply", ThreadTimestamp: domain.NewMessageTimestamp(want.CreatedAt), CreatedAt: time.Unix(101, 0).UTC()}
@@ -1863,7 +1920,7 @@ func TestSQLiteExternalUploadBatchCompletionIsAtomicAndDurable(t *testing.T) {
 	}
 	completions := []domain.ExternalUploadCompletion{{ID: uploads[0].ID, Title: files[0].Title}, {ID: uploads[1].ID, Title: files[1].Title}}
 	emitted := []events.Event{{ID: "file-event-1", WorkspaceID: "T1", Topic: "file.created", Payload: "file_1", CreatedAt: created}, {ID: "file-event-2", WorkspaceID: "T1", Topic: "file.created", Payload: "file_2", CreatedAt: created}}
-	if err := s.CompleteExternalUploads(ctx, completions, files, []domain.ConversationID{"C1"}, emitted); err != nil {
+	if err := s.CompleteExternalUploads(ctx, completions, files, []domain.ConversationID{"C1"}, emitted, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {

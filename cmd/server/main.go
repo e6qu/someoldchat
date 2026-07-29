@@ -27,6 +27,7 @@ import (
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
 	"github.com/sameoldchat/sameoldchat/internal/realtime"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/web"
@@ -113,6 +114,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	authPublicURL := flags.String("auth-public-url", os.Getenv("SAMEOLDCHAT_AUTH_PUBLIC_URL"), "public HTTPS URL used for authorization callbacks")
 	authCookieDomain := flags.String("auth-cookie-domain", os.Getenv("SAMEOLDCHAT_AUTH_COOKIE_DOMAIN"), "optional parent DNS domain for SameOldChat session cookies")
 	authStateKeyHex := flags.String("auth-state-key-hex", os.Getenv("SAMEOLDCHAT_AUTH_STATE_KEY_HEX"), "HMAC key for authorization state, at least 32 bytes of hex")
+	appCredentialKeyHex := flags.String("app-credential-key-hex", os.Getenv("SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"), "AES-256 key used to encrypt application signing credentials")
 	bootstrapAdminEmail := flags.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial local workspace administrator")
 	appToken := flags.String("app-token", os.Getenv("SAMEOLDCHAT_APP_TOKEN"), "Socket Mode app-level token")
 	appID := flags.String("app-id", os.Getenv("SAMEOLDCHAT_APP_ID"), "Socket Mode app identifier")
@@ -150,7 +152,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		blobDirectory: *blobDirectory, blobS3Bucket: *blobS3Bucket, blobS3Prefix: *blobS3Prefix,
 		chatAddress: *chatAddress, chatCA: *chatCA, chatServerName: *chatServerName, chatClientCert: *chatClientCert, chatClientKey: *chatClientKey,
 		apiToken: *apiToken, sessionToken: *sessionToken,
-		authWorkspace: *authWorkspace, authLookupUser: *authLookupUser, authPublicURL: *authPublicURL, authStateKeyHex: *authStateKeyHex,
+		authWorkspace: *authWorkspace, authLookupUser: *authLookupUser, authPublicURL: *authPublicURL, authStateKeyHex: *authStateKeyHex, appCredentialKeyHex: *appCredentialKeyHex,
 		bootstrapAdminEmail: *bootstrapAdminEmail, appToken: *appToken, appID: *appID, socketHost: *socketHost,
 		googleClientID: *googleClientID, googleClientSecret: *googleClientSecret,
 		githubClientID: *githubClientID, githubClientSecret: *githubClientSecret,
@@ -193,7 +195,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			logger.Error("parse dqlite cluster", "error", err)
 			return exitConfiguration
 		}
-		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail})
+		runtime, err := localchat.Open(applicationContext, localchat.Config{Backend: localchat.Backend(settings.storeName), DSN: resolved.databaseDSN, DqliteDirectory: settings.dqliteDirectory, DqliteAddress: settings.dqliteAddress, DqliteCluster: cluster, DqliteDatabase: settings.dqliteDatabase, BlobDirectory: settings.blobDirectory, BlobS3Bucket: settings.blobS3Bucket, BlobS3Prefix: settings.blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: settings.bootstrapAdminEmail, AppCredentialKey: resolved.appCredentialKey})
 		if err != nil {
 			return startupFailure(applicationContext, logger, "open local chat", err)
 		}
@@ -326,12 +328,18 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	slackHandler.Register(mux)
 	if socketModeStore != nil {
 		slackHandler.ConfigureSocketMode(socketmode.Service{Store: socketModeStore, Host: resolved.socketHost, TLS: *socketTLS}, socketModeAuth)
-		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Events: chatService, Cursors: chatService, Responses: socketmode.ResponseRecorder{Store: chatService}, Logger: logger})
+		mux.Handle("/socket-mode", socketmode.Handler{Store: socketModeStore, Queue: chatService, Interactions: chatService, Responses: chatService, Logger: logger})
 	}
 	webHandler, err := web.NewHandler(chatService, webAuthenticator, sessionRevoker, defaultConversation, *authCookieDomain)
 	if err != nil {
 		logger.Error("configure web", "error", err)
 		return exitConfiguration
+	}
+	if strings.TrimSpace(settings.authPublicURL) != "" {
+		if publicErr := webHandler.SetPublicURL(settings.authPublicURL); publicErr != nil {
+			logger.Error("configure web public URL", "error", publicErr)
+			return exitConfiguration
+		}
 	}
 	// Release identity is exposed by every deployment, not only one that
 	// configures an external provider. Nesting this under `providerCredentials`
@@ -561,6 +569,7 @@ type startupConfig struct {
 	authLookupUser      string
 	authPublicURL       string
 	authStateKeyHex     string
+	appCredentialKeyHex string
 	bootstrapAdminEmail string
 	appToken            string
 	appID               string
@@ -587,6 +596,7 @@ type resolvedConfig struct {
 	apiToken              string
 	sessionToken          string
 	authStateKey          []byte
+	appCredentialKey      []byte
 	scopes                []string
 	externalAuthorization bool
 }
@@ -687,6 +697,15 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 		if c.chatAddress != "" || c.chatCA != "" || c.chatServerName != "" || c.chatClientCert != "" || c.chatClientKey != "" {
 			return resolvedConfig{}, errors.New("distributed chat settings supplied for local composition")
 		}
+		if strings.TrimSpace(c.appCredentialKeyHex) != "" {
+			key, err := secretbox.ParseKeyHex(c.appCredentialKeyHex)
+			if err != nil {
+				return resolvedConfig{}, fmt.Errorf("-app-credential-key-hex %w", err)
+			}
+			resolved.appCredentialKey = key
+		} else if c.storeName != string(localchat.BackendMemory) {
+			return resolvedConfig{}, errors.New("-app-credential-key-hex is required for durable local storage")
+		}
 	case "grpc":
 		if c.chatAddress == "" || c.chatCA == "" || c.chatServerName == "" || c.chatClientCert == "" || c.chatClientKey == "" {
 			return resolvedConfig{}, errors.New("grpc chat requires address, server CA/name, and client certificate/key")
@@ -710,6 +729,11 @@ func (c startupConfig) resolve() (resolvedConfig, error) {
 		resolved.lookupUser = strings.TrimSpace(c.authLookupUser)
 	}
 	resolved.externalAuthorization = c.googleClientID != "" || c.googleClientSecret != "" || c.githubClientID != "" || c.githubClientSecret != "" || c.entraClientID != "" || c.entraClientSecret != "" || c.oidcIssuer != "" || c.oidcClientID != "" || c.oidcClientSecret != ""
+	if strings.TrimSpace(c.authPublicURL) != "" {
+		if err := web.ValidatePublicURL(c.authPublicURL); err != nil {
+			return resolvedConfig{}, fmt.Errorf("-auth-public-url %w", err)
+		}
+	}
 	if resolved.externalAuthorization {
 		if strings.TrimSpace(c.authWorkspace) == "" || strings.TrimSpace(c.authLookupUser) == "" || strings.TrimSpace(c.authPublicURL) == "" || strings.TrimSpace(c.authStateKeyHex) == "" {
 			return resolvedConfig{}, errors.New("external authorization requires -auth-workspace, -auth-lookup-user, -auth-public-url, and -auth-state-key-hex")
@@ -787,6 +811,7 @@ func (c startupConfig) localOnlySettings() []string {
 		{flag: "-blob-s3-bucket", value: c.blobS3Bucket},
 		{flag: "-blob-s3-prefix", value: c.blobS3Prefix},
 		{flag: "-bootstrap-admin-email", value: c.bootstrapAdminEmail},
+		{flag: "-app-credential-key-hex", value: c.appCredentialKeyHex},
 		{flag: "-app-token", value: c.appToken},
 		{flag: "-app-id", value: c.appID},
 	} {

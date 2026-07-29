@@ -41,8 +41,8 @@ var TargetProfiles = map[string]TargetProfile{
 	}},
 }
 
-func ProvideChatServiceLocal(dependencies store.Store, blobs blob.Store) api.Service {
-	return service.Messages{Store: dependencies, Blob: blobs}
+func ProvideChatServiceLocal(dependencies store.Store, blobs blob.Store, appCredentialKey []byte) api.Service {
+	return service.Messages{Store: dependencies, Blob: blobs, AppCredentialKey: appCredentialKey}
 }
 
 func ProvideChatServiceRemote(connection grpc.ClientConnInterface) (api.Service, auth.TokenStore, auth.SessionStore, auth.SessionRevoker, error) {

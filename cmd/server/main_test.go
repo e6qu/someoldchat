@@ -246,7 +246,7 @@ func TestConfigurationFaultsExitTwo(t *testing.T) {
 func TestStartupInterruptedByShutdownIsACleanStop(t *testing.T) {
 	stopped, cancel := context.WithCancel(context.Background())
 	cancel()
-	arguments := []string{"-chat-mode", "local", "-store", "sqlite", "-db", filepath.Join(t.TempDir(), "chat.db"), "-api-token", "xoxb-test", "-addr", "127.0.0.1:0"}
+	arguments := []string{"-chat-mode", "local", "-store", "sqlite", "-db", filepath.Join(t.TempDir(), "chat.db"), "-api-token", "xoxb-test", "-addr", "127.0.0.1:0", "-app-credential-key-hex", strings.Repeat("01", 32)}
 	if code := run(stopped, discardLogger(), arguments); code != 0 {
 		t.Fatalf("a startup interrupted by SIGTERM exited %d, want 0", code)
 	}

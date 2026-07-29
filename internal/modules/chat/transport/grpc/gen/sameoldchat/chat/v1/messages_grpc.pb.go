@@ -21,10 +21,15 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	MessagesService_Post_FullMethodName                           = "/sameoldchat.chat.v1.MessagesService/Post"
 	MessagesService_PostWithBlocks_FullMethodName                 = "/sameoldchat.chat.v1.MessagesService/PostWithBlocks"
+	MessagesService_ShareFile_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/ShareFile"
 	MessagesService_PostEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/PostEphemeral"
+	MessagesService_ListEphemeral_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/ListEphemeral"
 	MessagesService_Update_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Update"
 	MessagesService_UpdateWithBlocks_FullMethodName               = "/sameoldchat.chat.v1.MessagesService/UpdateWithBlocks"
 	MessagesService_UpdateMessage_FullMethodName                  = "/sameoldchat.chat.v1.MessagesService/UpdateMessage"
+	MessagesService_StartMessageStream_FullMethodName             = "/sameoldchat.chat.v1.MessagesService/StartMessageStream"
+	MessagesService_AppendMessageStream_FullMethodName            = "/sameoldchat.chat.v1.MessagesService/AppendMessageStream"
+	MessagesService_StopMessageStream_FullMethodName              = "/sameoldchat.chat.v1.MessagesService/StopMessageStream"
 	MessagesService_Unfurl_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Unfurl"
 	MessagesService_Delete_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Delete"
 	MessagesService_Permalink_FullMethodName                      = "/sameoldchat.chat.v1.MessagesService/Permalink"
@@ -42,10 +47,15 @@ const (
 type MessagesServiceClient interface {
 	Post(ctx context.Context, in *PostRequest, opts ...grpc.CallOption) (*Message, error)
 	PostWithBlocks(ctx context.Context, in *PostWithBlocksRequest, opts ...grpc.CallOption) (*Message, error)
+	ShareFile(ctx context.Context, in *ShareFileRequest, opts ...grpc.CallOption) (*Message, error)
 	PostEphemeral(ctx context.Context, in *PostEphemeralRequest, opts ...grpc.CallOption) (*EphemeralMessage, error)
+	ListEphemeral(ctx context.Context, in *EphemeralMessagesRequest, opts ...grpc.CallOption) (*EphemeralMessagesResponse, error)
 	Update(ctx context.Context, in *UpdateRequest, opts ...grpc.CallOption) (*Message, error)
 	UpdateWithBlocks(ctx context.Context, in *UpdateWithBlocksRequest, opts ...grpc.CallOption) (*Message, error)
 	UpdateMessage(ctx context.Context, in *UpdateMessageRequest, opts ...grpc.CallOption) (*Message, error)
+	StartMessageStream(ctx context.Context, in *StartMessageStreamRequest, opts ...grpc.CallOption) (*Message, error)
+	AppendMessageStream(ctx context.Context, in *MutateMessageStreamRequest, opts ...grpc.CallOption) (*Message, error)
+	StopMessageStream(ctx context.Context, in *MutateMessageStreamRequest, opts ...grpc.CallOption) (*Message, error)
 	Unfurl(ctx context.Context, in *UnfurlRequest, opts ...grpc.CallOption) (*Message, error)
 	Delete(ctx context.Context, in *DeleteRequest, opts ...grpc.CallOption) (*Message, error)
 	Permalink(ctx context.Context, in *PermalinkRequest, opts ...grpc.CallOption) (*PermalinkResponse, error)
@@ -85,10 +95,30 @@ func (c *messagesServiceClient) PostWithBlocks(ctx context.Context, in *PostWith
 	return out, nil
 }
 
+func (c *messagesServiceClient) ShareFile(ctx context.Context, in *ShareFileRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_ShareFile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *messagesServiceClient) PostEphemeral(ctx context.Context, in *PostEphemeralRequest, opts ...grpc.CallOption) (*EphemeralMessage, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(EphemeralMessage)
 	err := c.cc.Invoke(ctx, MessagesService_PostEphemeral_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) ListEphemeral(ctx context.Context, in *EphemeralMessagesRequest, opts ...grpc.CallOption) (*EphemeralMessagesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EphemeralMessagesResponse)
+	err := c.cc.Invoke(ctx, MessagesService_ListEphemeral_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +149,36 @@ func (c *messagesServiceClient) UpdateMessage(ctx context.Context, in *UpdateMes
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Message)
 	err := c.cc.Invoke(ctx, MessagesService_UpdateMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) StartMessageStream(ctx context.Context, in *StartMessageStreamRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_StartMessageStream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) AppendMessageStream(ctx context.Context, in *MutateMessageStreamRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_AppendMessageStream_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) StopMessageStream(ctx context.Context, in *MutateMessageStreamRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, MessagesService_StopMessageStream_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -221,10 +281,15 @@ func (c *messagesServiceClient) PostIncomingWebhook(ctx context.Context, in *Inc
 type MessagesServiceServer interface {
 	Post(context.Context, *PostRequest) (*Message, error)
 	PostWithBlocks(context.Context, *PostWithBlocksRequest) (*Message, error)
+	ShareFile(context.Context, *ShareFileRequest) (*Message, error)
 	PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error)
+	ListEphemeral(context.Context, *EphemeralMessagesRequest) (*EphemeralMessagesResponse, error)
 	Update(context.Context, *UpdateRequest) (*Message, error)
 	UpdateWithBlocks(context.Context, *UpdateWithBlocksRequest) (*Message, error)
 	UpdateMessage(context.Context, *UpdateMessageRequest) (*Message, error)
+	StartMessageStream(context.Context, *StartMessageStreamRequest) (*Message, error)
+	AppendMessageStream(context.Context, *MutateMessageStreamRequest) (*Message, error)
+	StopMessageStream(context.Context, *MutateMessageStreamRequest) (*Message, error)
 	Unfurl(context.Context, *UnfurlRequest) (*Message, error)
 	Delete(context.Context, *DeleteRequest) (*Message, error)
 	Permalink(context.Context, *PermalinkRequest) (*PermalinkResponse, error)
@@ -249,8 +314,14 @@ func (UnimplementedMessagesServiceServer) Post(context.Context, *PostRequest) (*
 func (UnimplementedMessagesServiceServer) PostWithBlocks(context.Context, *PostWithBlocksRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostWithBlocks not implemented")
 }
+func (UnimplementedMessagesServiceServer) ShareFile(context.Context, *ShareFileRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method ShareFile not implemented")
+}
 func (UnimplementedMessagesServiceServer) PostEphemeral(context.Context, *PostEphemeralRequest) (*EphemeralMessage, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostEphemeral not implemented")
+}
+func (UnimplementedMessagesServiceServer) ListEphemeral(context.Context, *EphemeralMessagesRequest) (*EphemeralMessagesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEphemeral not implemented")
 }
 func (UnimplementedMessagesServiceServer) Update(context.Context, *UpdateRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Update not implemented")
@@ -260,6 +331,15 @@ func (UnimplementedMessagesServiceServer) UpdateWithBlocks(context.Context, *Upd
 }
 func (UnimplementedMessagesServiceServer) UpdateMessage(context.Context, *UpdateMessageRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateMessage not implemented")
+}
+func (UnimplementedMessagesServiceServer) StartMessageStream(context.Context, *StartMessageStreamRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartMessageStream not implemented")
+}
+func (UnimplementedMessagesServiceServer) AppendMessageStream(context.Context, *MutateMessageStreamRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppendMessageStream not implemented")
+}
+func (UnimplementedMessagesServiceServer) StopMessageStream(context.Context, *MutateMessageStreamRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method StopMessageStream not implemented")
 }
 func (UnimplementedMessagesServiceServer) Unfurl(context.Context, *UnfurlRequest) (*Message, error) {
 	return nil, status.Error(codes.Unimplemented, "method Unfurl not implemented")
@@ -344,6 +424,24 @@ func _MessagesService_PostWithBlocks_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessagesService_ShareFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ShareFileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).ShareFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_ShareFile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).ShareFile(ctx, req.(*ShareFileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MessagesService_PostEphemeral_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PostEphemeralRequest)
 	if err := dec(in); err != nil {
@@ -358,6 +456,24 @@ func _MessagesService_PostEphemeral_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MessagesServiceServer).PostEphemeral(ctx, req.(*PostEphemeralRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_ListEphemeral_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EphemeralMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).ListEphemeral(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_ListEphemeral_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).ListEphemeral(ctx, req.(*EphemeralMessagesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -412,6 +528,60 @@ func _MessagesService_UpdateMessage_Handler(srv interface{}, ctx context.Context
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(MessagesServiceServer).UpdateMessage(ctx, req.(*UpdateMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_StartMessageStream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartMessageStreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).StartMessageStream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_StartMessageStream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).StartMessageStream(ctx, req.(*StartMessageStreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_AppendMessageStream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MutateMessageStreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).AppendMessageStream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_AppendMessageStream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).AppendMessageStream(ctx, req.(*MutateMessageStreamRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_StopMessageStream_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MutateMessageStreamRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).StopMessageStream(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_StopMessageStream_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).StopMessageStream(ctx, req.(*MutateMessageStreamRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -594,8 +764,16 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _MessagesService_PostWithBlocks_Handler,
 		},
 		{
+			MethodName: "ShareFile",
+			Handler:    _MessagesService_ShareFile_Handler,
+		},
+		{
 			MethodName: "PostEphemeral",
 			Handler:    _MessagesService_PostEphemeral_Handler,
+		},
+		{
+			MethodName: "ListEphemeral",
+			Handler:    _MessagesService_ListEphemeral_Handler,
 		},
 		{
 			MethodName: "Update",
@@ -608,6 +786,18 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateMessage",
 			Handler:    _MessagesService_UpdateMessage_Handler,
+		},
+		{
+			MethodName: "StartMessageStream",
+			Handler:    _MessagesService_StartMessageStream_Handler,
+		},
+		{
+			MethodName: "AppendMessageStream",
+			Handler:    _MessagesService_AppendMessageStream_Handler,
+		},
+		{
+			MethodName: "StopMessageStream",
+			Handler:    _MessagesService_StopMessageStream_Handler,
 		},
 		{
 			MethodName: "Unfurl",

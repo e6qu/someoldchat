@@ -2,12 +2,14 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -20,6 +22,7 @@ import (
 )
 
 type Remote struct {
+	apps          chatv1.AppsServiceClient
 	auth          chatv1.AuthServiceClient
 	chat          chatv1.ChatServiceClient
 	conversations chatv1.ConversationsServiceClient
@@ -96,6 +99,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 	}
 	conn = mappedClientConn{ClientConnInterface: conn}
 	return Remote{
+		apps:          chatv1.NewAppsServiceClient(conn),
 		auth:          chatv1.NewAuthServiceClient(conn),
 		chat:          chatv1.NewChatServiceClient(conn),
 		conversations: chatv1.NewConversationsServiceClient(conn),
@@ -310,6 +314,17 @@ func (r Remote) callParticipants(ctx context.Context, add bool, workspaceID doma
 func (r Remote) Post(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
 	in := &chatv1.PostRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Text: text, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey}
 	out, err := r.messages.Post(ctx, in)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, conversationID domain.ConversationID, threadTimestamp domain.MessageTimestamp) (domain.Message, error) {
+	out, err := r.messages.ShareFile(ctx, &chatv1.ShareFileRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), FileId: string(fileID),
+		ConversationId: string(conversationID), ThreadTimestamp: string(threadTimestamp),
+	})
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -1857,39 +1872,115 @@ func decodeProtoView(value *chatv1.View) (domain.View, error) {
 	if value == nil {
 		return domain.View{}, errors.New("view response is nil")
 	}
-	return domain.View{ID: domain.ViewID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), ExternalID: value.GetExternalId(), Payload: value.GetPayload(), Hash: value.GetHash(), RootViewID: domain.ViewID(value.GetRootViewId()), PreviousViewID: domain.ViewID(value.GetPreviousViewId()), CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC()}, nil
+	result := domain.View{ID: domain.ViewID(value.GetId()), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), ExternalID: value.GetExternalId(), Payload: value.GetPayload(), State: value.GetStateJson(), Hash: value.GetHash(), RootViewID: domain.ViewID(value.GetRootViewId()), PreviousViewID: domain.ViewID(value.GetPreviousViewId()), CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC()}
+	if raw := strings.TrimSpace(value.GetErrorsJson()); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &result.Errors); err != nil {
+			return domain.View{}, err
+		}
+	}
+	return result, nil
 }
 
-func (r Remote) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID, payload string) (domain.View, error) {
-	out, err := r.views.OpenView(ctx, &chatv1.OpenViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: triggerID, Payload: payload})
+func (r Remote) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
+	out, err := r.views.OpenView(ctx, &chatv1.OpenViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload})
 	if err != nil {
 		return domain.View{}, err
 	}
 	return decodeProtoView(out)
 }
 
-func (r Remote) PublishView(ctx context.Context, workspaceID domain.WorkspaceID, userID, target domain.UserID, payload, hash string) (domain.View, error) {
-	out, err := r.views.PublishView(ctx, &chatv1.PublishViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TargetUserId: string(target), Payload: payload, Hash: hash})
+func (r Remote) PublishView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, target domain.UserID, payload, hash string) (domain.View, error) {
+	out, err := r.views.PublishView(ctx, &chatv1.PublishViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TargetUserId: string(target), Payload: payload, Hash: hash})
 	if err != nil {
 		return domain.View{}, err
 	}
 	return decodeProtoView(out)
 }
 
-func (r Remote) PushView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID, payload string) (domain.View, error) {
-	out, err := r.views.PushView(ctx, &chatv1.PushViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: triggerID, Payload: payload})
+func (r Remote) AppHome(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.InstalledApp, domain.View, error) {
+	out, err := r.views.AppHome(ctx, &chatv1.AppHomeRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.InstalledApp{}, domain.View{}, err
+	}
+	return decodeProtoAppHome(out)
+}
+
+func (r Remote) OpenAppHome(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.InstalledApp, domain.View, error) {
+	out, err := r.views.OpenAppHome(ctx, &chatv1.AppHomeRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.InstalledApp{}, domain.View{}, err
+	}
+	return decodeProtoAppHome(out)
+}
+
+func decodeProtoAppHome(out *chatv1.AppHomeResponse) (domain.InstalledApp, domain.View, error) {
+	if out == nil {
+		return domain.InstalledApp{}, domain.View{}, errors.New("typed app home response is nil")
+	}
+	app, err := decodeProtoInstalledApp(out.GetApp())
+	if err != nil {
+		return domain.InstalledApp{}, domain.View{}, err
+	}
+	if !out.GetPublished() {
+		return app, domain.View{}, nil
+	}
+	view, err := decodeProtoView(out.GetView())
+	if err != nil {
+		return domain.InstalledApp{}, domain.View{}, err
+	}
+	return app, view, nil
+}
+
+func (r Remote) PushView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
+	out, err := r.views.PushView(ctx, &chatv1.PushViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload})
 	if err != nil {
 		return domain.View{}, err
 	}
 	return decodeProtoView(out)
 }
 
-func (r Remote) UpdateView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, viewID, externalID, payload, hash string) (domain.View, error) {
-	out, err := r.views.UpdateView(ctx, &chatv1.UpdateViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ViewId: viewID, ExternalId: externalID, Payload: payload, Hash: hash})
+func (r Remote) UpdateView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, viewID, externalID, payload, hash string) (domain.View, error) {
+	out, err := r.views.UpdateView(ctx, &chatv1.UpdateViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), ViewId: viewID, ExternalId: externalID, Payload: payload, Hash: hash})
 	if err != nil {
 		return domain.View{}, err
 	}
 	return decodeProtoView(out)
+}
+
+func (r Remote) CurrentModalView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.View, error) {
+	out, err := r.views.CurrentModalView(ctx, &chatv1.CurrentModalViewRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.View{}, err
+	}
+	return decodeProtoView(out)
+}
+
+func (r Remote) SubmitView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, viewID domain.ViewID, stateJSON, responseBaseURL string) (domain.ViewInteractionResult, error) {
+	out, err := r.views.SubmitView(ctx, &chatv1.ViewSubmissionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		ViewId: string(viewID), StateJson: stateJSON, ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return domain.ViewInteractionResult{}, err
+	}
+	result := domain.ViewInteractionResult{Pending: out.GetPending()}
+	if raw := strings.TrimSpace(out.GetErrorsJson()); raw != "" {
+		if err := json.Unmarshal([]byte(raw), &result.Errors); err != nil {
+			return domain.ViewInteractionResult{}, err
+		}
+	}
+	return result, nil
+}
+
+func (r Remote) CloseView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, viewID domain.ViewID, clear bool, responseBaseURL string) error {
+	out, err := r.views.CloseView(ctx, &chatv1.CloseViewRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		ViewId: string(viewID), Clear: clear, ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "close view")
 }
 
 func (r Remote) WorkflowStepCompleted(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, executeID, outputs string) error {
@@ -1925,8 +2016,8 @@ func (r Remote) WorkflowUpdateStep(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
-func (r Remote) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID, payload string) error {
-	out, err := r.dialogs.OpenDialog(ctx, &chatv1.OpenDialogRequest{WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: triggerID, Payload: payload})
+func (r Remote) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) error {
+	out, err := r.dialogs.OpenDialog(ctx, &chatv1.OpenDialogRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload})
 	if err != nil {
 		return err
 	}
@@ -2018,18 +2109,45 @@ func (r Remote) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, cod
 	return decodeOAuthToken(out), nil
 }
 
-func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
-	return domain.OAuthToken{
-		AccessToken: value.GetAccessToken(),
-		ClientID:    value.GetClientId(),
-		AppID:       domain.AppID(value.GetAppId()),
-		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
-		UserID:      domain.UserID(value.GetUserId()),
-		InstallerID: domain.UserID(value.GetInstallerId()),
-		BotID:       domain.BotID(value.GetBotId()),
-		Scopes:      append([]string(nil), value.GetScopes()...),
-		TokenType:   value.GetTokenType(),
+func (r Remote) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (domain.OAuthToken, error) {
+	out, err := r.oauth.RefreshOAuthV2(ctx, &chatv1.OAuthExchangeRequest{ClientId: clientID, ClientSecret: clientSecret, RefreshToken: refreshToken})
+	if err != nil {
+		return domain.OAuthToken{}, err
 	}
+	return decodeOAuthToken(out), nil
+}
+
+func (r Remote) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecret, token string) (domain.OAuthToken, error) {
+	out, err := r.oauth.ExchangeOAuthV2Token(ctx, &chatv1.OAuthExchangeRequest{ClientId: clientID, ClientSecret: clientSecret, Token: token})
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	return decodeOAuthToken(out), nil
+}
+
+func decodeOAuthToken(value *chatv1.OAuthToken) domain.OAuthToken {
+	token := domain.OAuthToken{
+		AccessToken:            value.GetAccessToken(),
+		ClientID:               value.GetClientId(),
+		AppID:                  domain.AppID(value.GetAppId()),
+		WorkspaceID:            domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID:                 domain.UserID(value.GetUserId()),
+		InstallerID:            domain.UserID(value.GetInstallerId()),
+		BotID:                  domain.BotID(value.GetBotId()),
+		Scopes:                 append([]string(nil), value.GetScopes()...),
+		TokenType:              value.GetTokenType(),
+		AuthedUserAccessToken:  value.GetAuthedUserAccessToken(),
+		AuthedUserScopes:       append([]string(nil), value.GetAuthedUserScopes()...),
+		RefreshToken:           value.GetRefreshToken(),
+		AuthedUserRefreshToken: value.GetAuthedUserRefreshToken(),
+	}
+	if value.GetExpiresAtUnixNano() != 0 {
+		token.ExpiresAt = time.Unix(0, value.GetExpiresAtUnixNano()).UTC()
+	}
+	if value.GetAuthedUserExpiresAtUnixNano() != 0 {
+		token.AuthedUserExpiresAt = time.Unix(0, value.GetAuthedUserExpiresAtUnixNano()).UTC()
+	}
+	return token
 }
 
 func (r Remote) TeamBillableInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, targetID domain.UserID) (domain.BillableInfo, error) {
@@ -2158,6 +2276,68 @@ func (r Remote) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return decodeProtoReadCursor(out)
 }
 
+func (r Remote) DispatchSlashCommand(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, threadTimestamp domain.MessageTimestamp, command, text, responseBaseURL string) error {
+	out, err := r.interactions.DispatchSlashCommand(ctx, &chatv1.SlashCommandRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		ThreadTimestamp: string(threadTimestamp), Command: command, Text: text, ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "slash command dispatch")
+}
+
+func (r Remote) DispatchBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, action domain.AppBlockAction, responseBaseURL string) error {
+	out, err := r.interactions.DispatchBlockAction(ctx, &chatv1.BlockActionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), MessageId: string(action.MessageID),
+		BlockId: action.BlockID, ActionId: action.ActionID, ActionType: action.Type, Value: action.Value,
+		ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "block action dispatch")
+}
+
+func (r Remote) ListAppShortcuts(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, shortcutType string) ([]domain.AppShortcut, error) {
+	out, err := r.interactions.ListAppShortcuts(ctx, &chatv1.AppShortcutListRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Type: shortcutType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.AppShortcut, 0, len(out.GetShortcuts()))
+	for _, value := range out.GetShortcuts() {
+		if value == nil {
+			return nil, errors.New("typed application shortcut is missing")
+		}
+		values = append(values, domain.AppShortcut{
+			AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), Name: value.GetName(),
+			CallbackID: value.GetCallbackId(), Description: value.GetDescription(), Type: value.GetType(),
+		})
+	}
+	return values, nil
+}
+
+func (r Remote) DispatchAppShortcut(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, appID domain.AppID, callbackID string, messageID domain.MessageID, responseBaseURL string) error {
+	out, err := r.interactions.DispatchAppShortcut(ctx, &chatv1.AppShortcutDispatchRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		AppId: string(appID), CallbackId: callbackID, MessageId: string(messageID), ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "application shortcut dispatch")
+}
+
+func (r Remote) HandleAppResponse(ctx context.Context, token, payload string) error {
+	out, err := r.interactions.HandleAppResponse(ctx, &chatv1.AppResponseRequest{Token: token, Payload: payload})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "application response")
+}
+
 func (r Remote) AddReaction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, name string) error {
 	in := &chatv1.ReactionRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp), Name: name}
 	out, err := r.reactions.AddReaction(ctx, in)
@@ -2166,6 +2346,85 @@ func (r Remote) AddReaction(ctx context.Context, workspaceID domain.WorkspaceID,
 	}
 	if !out.GetOk() {
 		return errors.New("typed reaction addition was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) DispatchViewBlockAction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, action domain.AppViewBlockAction, responseBaseURL string) error {
+	out, err := r.interactions.DispatchViewBlockAction(ctx, &chatv1.ViewBlockActionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID),
+		ConversationId: string(conversationID), ViewId: string(action.ViewID),
+		BlockId: action.BlockID, ActionId: action.ActionID, ActionType: action.Type,
+		Value: action.Value, StateJson: action.State, ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "view block action dispatch")
+}
+
+func (r Remote) LoadAppOptions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, query domain.AppOptionQuery, responseBaseURL string) ([]domain.AppOption, error) {
+	out, err := r.interactions.LoadAppOptions(ctx, &chatv1.AppOptionQueryRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		AppId: string(query.AppID), MessageId: string(query.MessageID), ViewId: string(query.ViewID),
+		BlockId: query.BlockID, ActionId: query.ActionID, Value: query.Value, ResponseBaseUrl: responseBaseURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+	options := make([]domain.AppOption, 0, len(out.GetOptions()))
+	for _, option := range out.GetOptions() {
+		if option == nil || option.GetText() == "" || option.GetValue() == "" {
+			return nil, errors.New("typed application option is incomplete")
+		}
+		options = append(options, domain.AppOption{
+			Text: option.GetText(), Value: option.GetValue(), Description: option.GetDescription(), Group: option.GetGroup(),
+		})
+	}
+	return options, nil
+}
+
+func (r Remote) ClaimSocketModeInteraction(ctx context.Context, appID domain.AppID, owner string, lease time.Duration) (domain.SocketModeInteraction, bool, error) {
+	out, err := r.interactions.ClaimSocketModeInteraction(ctx, &chatv1.SocketModeInteractionClaimRequest{AppId: string(appID), Owner: owner, LeaseNanos: int64(lease)})
+	if err != nil {
+		return domain.SocketModeInteraction{}, false, err
+	}
+	if !out.GetFound() {
+		return domain.SocketModeInteraction{}, false, nil
+	}
+	value, err := decodeProtoSocketModeInteraction(out)
+	return value, err == nil, err
+}
+
+func (r Remote) AckSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner string) error {
+	out, err := r.interactions.AckSocketModeInteraction(ctx, &chatv1.SocketModeInteractionAckRequest{AppId: string(appID), EnvelopeId: envelopeID, Owner: owner})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed Socket Mode interaction acknowledgement was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) ReleaseSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner, reason string, retryAt time.Time) error {
+	out, err := r.interactions.ReleaseSocketModeInteraction(ctx, &chatv1.SocketModeInteractionReleaseRequest{AppId: string(appID), EnvelopeId: envelopeID, Owner: owner, Reason: reason, RetryAt: string(domain.NewStoredTime(retryAt))})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed Socket Mode interaction release was not acknowledged")
+	}
+	return nil
+}
+
+func (r Remote) HandleSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
+	out, err := r.interactions.HandleSocketModeResponse(ctx, &chatv1.SocketModeInteractionResponseRequest{AppId: string(appID), EnvelopeId: envelopeID, Payload: append([]byte(nil), payload...)})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed Socket Mode response was not acknowledged")
 	}
 	return nil
 }
@@ -2428,6 +2687,46 @@ func (r Remote) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	return decodeProtoEvents(out)
 }
 
+func (r Remote) ListUserEventsAfter(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, after uint64, limit int) ([]events.Record, error) {
+	in := &chatv1.EventsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), After: after, Limit: int32(limit)}
+	out, err := r.events.ListEventsAfter(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	return decodeProtoEvents(out)
+}
+
+func (r Remote) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+	out, err := r.events.ClaimAppEvent(ctx, &chatv1.AppEventClaimRequest{AppId: string(appID), Surface: surface, Owner: owner, LeaseNanos: int64(lease)})
+	if err != nil {
+		return events.Record{}, 0, "", false, err
+	}
+	if !out.GetFound() {
+		return events.Record{}, int(out.GetAttempt()), out.GetRetryReason(), false, nil
+	}
+	record, err := decodeProtoEventRecord(out.GetRecord())
+	if err != nil {
+		return events.Record{}, 0, "", false, err
+	}
+	return record, int(out.GetAttempt()), out.GetRetryReason(), true, nil
+}
+
+func (r Remote) AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
+	out, err := r.events.AckAppEvent(ctx, &chatv1.AppEventAckRequest{AppId: string(appID), Surface: surface, Owner: owner, Sequence: sequence})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "app event acknowledgement")
+}
+
+func (r Remote) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
+	out, err := r.events.ReleaseAppEvent(ctx, &chatv1.AppEventReleaseRequest{AppId: string(appID), Surface: surface, Owner: owner, Sequence: sequence, RetryReason: reason, RetryAtUnixNano: retryAt.UTC().UnixNano()})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "app event release")
+}
+
 type Server struct {
 	implementation chatapi.Service
 	tokens         auth.TokenStore
@@ -2463,6 +2762,7 @@ var (
 	_ chatv1.RTMServiceServer                     = (*Server)(nil)
 	_ chatv1.CanvasesServiceServer                = (*Server)(nil)
 	_ chatv1.EntityServiceServer                  = (*Server)(nil)
+	_ chatv1.AppsServiceServer                    = (*Server)(nil)
 )
 
 func NewServer(implementation chatapi.Service, tokens auth.TokenStore, sessions auth.SessionStore, revoker auth.SessionRevoker) (*Server, error) {
@@ -2521,6 +2821,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterRTMServiceServer(registrar, server)
 	chatv1.RegisterCanvasesServiceServer(registrar, server)
 	chatv1.RegisterEntityServiceServer(registrar, server)
+	chatv1.RegisterAppsServiceServer(registrar, server)
 	return nil
 }
 
@@ -3352,11 +3653,12 @@ func (s *Server) RequestAppPermissions(ctx context.Context, input *chatv1.AppPer
 }
 
 func encodeProtoView(value domain.View) *chatv1.View {
-	return &chatv1.View{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Type: value.Type, ExternalId: value.ExternalID, Payload: value.Payload, Hash: value.Hash, RootViewId: string(value.RootViewID), PreviousViewId: string(value.PreviousViewID), CreatedAtUnixNano: value.CreatedAt.UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UnixNano()}
+	encodedErrors, _ := json.Marshal(value.Errors)
+	return &chatv1.View{Id: string(value.ID), AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Type: value.Type, ExternalId: value.ExternalID, Payload: value.Payload, StateJson: value.State, ErrorsJson: string(encodedErrors), Hash: value.Hash, RootViewId: string(value.RootViewID), PreviousViewId: string(value.PreviousViewID), CreatedAtUnixNano: value.CreatedAt.UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UnixNano()}
 }
 
 func (s *Server) OpenView(ctx context.Context, input *chatv1.OpenViewRequest) (*chatv1.View, error) {
-	value, err := s.implementation.OpenView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTriggerId(), input.GetPayload())
+	value, err := s.implementation.OpenView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -3364,15 +3666,39 @@ func (s *Server) OpenView(ctx context.Context, input *chatv1.OpenViewRequest) (*
 }
 
 func (s *Server) PublishView(ctx context.Context, input *chatv1.PublishViewRequest) (*chatv1.View, error) {
-	value, err := s.implementation.PublishView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.UserID(input.GetTargetUserId()), input.GetPayload(), input.GetHash())
+	value, err := s.implementation.PublishView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), domain.UserID(input.GetTargetUserId()), input.GetPayload(), input.GetHash())
 	if err != nil {
 		return nil, mapError(err)
 	}
 	return encodeProtoView(value), nil
 }
 
+func (s *Server) AppHome(ctx context.Context, input *chatv1.AppHomeRequest) (*chatv1.AppHomeResponse, error) {
+	app, view, err := s.implementation.AppHome(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppHome(app, view), nil
+}
+
+func (s *Server) OpenAppHome(ctx context.Context, input *chatv1.AppHomeRequest) (*chatv1.AppHomeResponse, error) {
+	app, view, err := s.implementation.OpenAppHome(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppHome(app, view), nil
+}
+
+func encodeProtoAppHome(app domain.InstalledApp, view domain.View) *chatv1.AppHomeResponse {
+	result := &chatv1.AppHomeResponse{App: encodeProtoInstalledApp(app), Published: view.ID != ""}
+	if result.Published {
+		result.View = encodeProtoView(view)
+	}
+	return result
+}
+
 func (s *Server) PushView(ctx context.Context, input *chatv1.PushViewRequest) (*chatv1.View, error) {
-	value, err := s.implementation.PushView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTriggerId(), input.GetPayload())
+	value, err := s.implementation.PushView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload())
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -3380,11 +3706,50 @@ func (s *Server) PushView(ctx context.Context, input *chatv1.PushViewRequest) (*
 }
 
 func (s *Server) UpdateView(ctx context.Context, input *chatv1.UpdateViewRequest) (*chatv1.View, error) {
-	value, err := s.implementation.UpdateView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetViewId(), input.GetExternalId(), input.GetPayload(), input.GetHash())
+	value, err := s.implementation.UpdateView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetViewId(), input.GetExternalId(), input.GetPayload(), input.GetHash())
 	if err != nil {
 		return nil, mapError(err)
 	}
 	return encodeProtoView(value), nil
+}
+
+func (s *Server) CurrentModalView(ctx context.Context, input *chatv1.CurrentModalViewRequest) (*chatv1.View, error) {
+	value, err := s.implementation.CurrentModalView(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoView(value), nil
+}
+
+func (s *Server) SubmitView(ctx context.Context, input *chatv1.ViewSubmissionRequest) (*chatv1.ViewInteractionResult, error) {
+	value, err := s.implementation.SubmitView(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.ViewID(input.GetViewId()),
+		input.GetStateJson(), input.GetResponseBaseUrl(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	encodedErrors := ""
+	if len(value.Errors) != 0 {
+		encoded, err := json.Marshal(value.Errors)
+		if err != nil {
+			return nil, mapError(err)
+		}
+		encodedErrors = string(encoded)
+	}
+	return &chatv1.ViewInteractionResult{ErrorsJson: encodedErrors, Pending: value.Pending}, nil
+}
+
+func (s *Server) CloseView(ctx context.Context, input *chatv1.CloseViewRequest) (*chatv1.ViewMutationResponse, error) {
+	if err := s.implementation.CloseView(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.ViewID(input.GetViewId()),
+		input.GetClear(), input.GetResponseBaseUrl(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ViewMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) StepCompleted(ctx context.Context, input *chatv1.WorkflowStepRequest) (*chatv1.WorkflowStepMutationResponse, error) {
@@ -3409,7 +3774,7 @@ func (s *Server) UpdateStep(ctx context.Context, input *chatv1.WorkflowStepUpdat
 }
 
 func (s *Server) OpenDialog(ctx context.Context, input *chatv1.OpenDialogRequest) (*chatv1.DialogMutationResponse, error) {
-	if err := s.implementation.OpenDialog(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetTriggerId(), input.GetPayload()); err != nil {
+	if err := s.implementation.OpenDialog(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetTriggerId(), input.GetPayload()); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.DialogMutationResponse{Ok: true}, nil
@@ -3506,18 +3871,45 @@ func (s *Server) ExchangeOAuthV2(ctx context.Context, input *chatv1.OAuthExchang
 	return encodeOAuthToken(value), nil
 }
 
-func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
-	return &chatv1.OAuthToken{
-		AccessToken: value.AccessToken,
-		ClientId:    value.ClientID,
-		AppId:       string(value.AppID),
-		WorkspaceId: string(value.WorkspaceID),
-		UserId:      string(value.UserID),
-		InstallerId: string(value.InstallerID),
-		BotId:       string(value.BotID),
-		Scopes:      value.Scopes,
-		TokenType:   value.TokenType,
+func (s *Server) RefreshOAuthV2(ctx context.Context, input *chatv1.OAuthExchangeRequest) (*chatv1.OAuthToken, error) {
+	value, err := s.implementation.OAuthV2Refresh(ctx, input.GetClientId(), input.GetClientSecret(), input.GetRefreshToken())
+	if err != nil {
+		return nil, mapError(err)
 	}
+	return encodeOAuthToken(value), nil
+}
+
+func (s *Server) ExchangeOAuthV2Token(ctx context.Context, input *chatv1.OAuthExchangeRequest) (*chatv1.OAuthToken, error) {
+	value, err := s.implementation.OAuthV2ExchangeToken(ctx, input.GetClientId(), input.GetClientSecret(), input.GetToken())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeOAuthToken(value), nil
+}
+
+func encodeOAuthToken(value domain.OAuthToken) *chatv1.OAuthToken {
+	token := &chatv1.OAuthToken{
+		AccessToken:            value.AccessToken,
+		ClientId:               value.ClientID,
+		AppId:                  string(value.AppID),
+		WorkspaceId:            string(value.WorkspaceID),
+		UserId:                 string(value.UserID),
+		InstallerId:            string(value.InstallerID),
+		BotId:                  string(value.BotID),
+		Scopes:                 value.Scopes,
+		TokenType:              value.TokenType,
+		AuthedUserAccessToken:  value.AuthedUserAccessToken,
+		AuthedUserScopes:       value.AuthedUserScopes,
+		RefreshToken:           value.RefreshToken,
+		AuthedUserRefreshToken: value.AuthedUserRefreshToken,
+	}
+	if !value.ExpiresAt.IsZero() {
+		token.ExpiresAtUnixNano = value.ExpiresAt.UTC().UnixNano()
+	}
+	if !value.AuthedUserExpiresAt.IsZero() {
+		token.AuthedUserExpiresAtUnixNano = value.AuthedUserExpiresAt.UTC().UnixNano()
+	}
+	return token
 }
 
 func (s *Server) TeamBillableInfo(ctx context.Context, input *chatv1.BillableInfoRequest) (*chatv1.BillableInfo, error) {
@@ -3536,6 +3928,14 @@ func (s *Server) Post(ctx context.Context, input *chatv1.PostRequest) (*chatv1.M
 	return s.postProto(ctx, input)
 }
 
+func (s *Server) ShareFile(ctx context.Context, input *chatv1.ShareFileRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.ShareFile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileID(input.GetFileId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTimestamp()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
 func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chatv1.Message, error) {
 	value, err := s.implementation.Unfurl(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()), input.GetUnfurls())
 	if err != nil {
@@ -3545,11 +3945,23 @@ func (s *Server) Unfurl(ctx context.Context, input *chatv1.UnfurlRequest) (*chat
 }
 
 func (s *Server) PostEphemeral(ctx context.Context, input *chatv1.PostEphemeralRequest) (*chatv1.EphemeralMessage, error) {
-	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments())
+	value, err := s.implementation.PostEphemeralWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.UserID(input.GetRecipientId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.AppID(input.GetAppId()))
 	if err != nil {
 		return nil, mapError(err)
 	}
 	return encodeProtoEphemeralMessage(value), nil
+}
+
+func (s *Server) ListEphemeral(ctx context.Context, input *chatv1.EphemeralMessagesRequest) (*chatv1.EphemeralMessagesResponse, error) {
+	values, err := s.implementation.ListEphemeralMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), seamPage(int(input.GetLimit())))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.EphemeralMessage, 0, len(values))
+	for _, value := range values {
+		result = append(result, encodeProtoEphemeralMessage(value))
+	}
+	return &chatv1.EphemeralMessagesResponse{Messages: result}, nil
 }
 
 func (s *Server) RecordAccess(ctx context.Context, input *chatv1.RecordAccessRequest) (*chatv1.AccessMutationResponse, error) {
@@ -3950,6 +4362,182 @@ func (s *Server) MarkRead(ctx context.Context, input *chatv1.MarkReadRequest) (*
 	return s.markReadProto(ctx, input)
 }
 
+func (s *Server) DispatchSlashCommand(ctx context.Context, input *chatv1.SlashCommandRequest) (*chatv1.InteractionMutationResponse, error) {
+	if err := s.implementation.DispatchSlashCommand(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetCommand(), input.GetText(), input.GetResponseBaseUrl()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) DispatchBlockAction(ctx context.Context, input *chatv1.BlockActionRequest) (*chatv1.InteractionMutationResponse, error) {
+	action := domain.AppBlockAction{
+		MessageID: domain.MessageID(input.GetMessageId()), BlockID: input.GetBlockId(),
+		ActionID: input.GetActionId(), Type: input.GetActionType(), Value: input.GetValue(),
+	}
+	if err := s.implementation.DispatchBlockAction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), action, input.GetResponseBaseUrl()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) DispatchViewBlockAction(ctx context.Context, input *chatv1.ViewBlockActionRequest) (*chatv1.InteractionMutationResponse, error) {
+	action := domain.AppViewBlockAction{
+		ViewID: domain.ViewID(input.GetViewId()), BlockID: input.GetBlockId(),
+		ActionID: input.GetActionId(), Type: input.GetActionType(),
+		Value: input.GetValue(), State: input.GetStateJson(),
+	}
+	if err := s.implementation.DispatchViewBlockAction(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), action, input.GetResponseBaseUrl()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) LoadAppOptions(ctx context.Context, input *chatv1.AppOptionQueryRequest) (*chatv1.AppOptionListResponse, error) {
+	options, err := s.implementation.LoadAppOptions(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()),
+		domain.AppOptionQuery{
+			AppID: domain.AppID(input.GetAppId()), MessageID: domain.MessageID(input.GetMessageId()), ViewID: domain.ViewID(input.GetViewId()),
+			BlockID: input.GetBlockId(), ActionID: input.GetActionId(), Value: input.GetValue(),
+		},
+		input.GetResponseBaseUrl(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.AppOptionListResponse{Options: make([]*chatv1.AppOption, 0, len(options))}
+	for _, option := range options {
+		out.Options = append(out.Options, &chatv1.AppOption{
+			Text: option.Text, Value: option.Value, Description: option.Description, Group: option.Group,
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) ListAppShortcuts(ctx context.Context, input *chatv1.AppShortcutListRequest) (*chatv1.AppShortcutListResponse, error) {
+	values, err := s.implementation.ListAppShortcuts(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetType())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.AppShortcutListResponse{Shortcuts: make([]*chatv1.AppShortcut, 0, len(values))}
+	for _, value := range values {
+		out.Shortcuts = append(out.Shortcuts, &chatv1.AppShortcut{
+			AppId: string(value.AppID), AppName: value.AppName, Name: value.Name,
+			CallbackId: value.CallbackID, Description: value.Description, Type: value.Type,
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) DispatchAppShortcut(ctx context.Context, input *chatv1.AppShortcutDispatchRequest) (*chatv1.InteractionMutationResponse, error) {
+	if err := s.implementation.DispatchAppShortcut(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()),
+		domain.AppID(input.GetAppId()), input.GetCallbackId(), domain.MessageID(input.GetMessageId()), input.GetResponseBaseUrl(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) HandleAppResponse(ctx context.Context, input *chatv1.AppResponseRequest) (*chatv1.InteractionMutationResponse, error) {
+	if err := s.implementation.HandleAppResponse(ctx, input.GetToken(), input.GetPayload()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ClaimSocketModeInteraction(ctx context.Context, input *chatv1.SocketModeInteractionClaimRequest) (*chatv1.SocketModeInteraction, error) {
+	value, found, err := s.implementation.ClaimSocketModeInteraction(ctx, domain.AppID(input.GetAppId()), input.GetOwner(), time.Duration(input.GetLeaseNanos()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	if !found {
+		return &chatv1.SocketModeInteraction{Found: false}, nil
+	}
+	return encodeProtoSocketModeInteraction(value, true), nil
+}
+
+func (s *Server) AckSocketModeInteraction(ctx context.Context, input *chatv1.SocketModeInteractionAckRequest) (*chatv1.InteractionMutationResponse, error) {
+	if err := s.implementation.AckSocketModeInteraction(ctx, domain.AppID(input.GetAppId()), input.GetEnvelopeId(), input.GetOwner()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ReleaseSocketModeInteraction(ctx context.Context, input *chatv1.SocketModeInteractionReleaseRequest) (*chatv1.InteractionMutationResponse, error) {
+	retryAt, err := domain.ParseStoredTime(input.GetRetryAt())
+	if err != nil {
+		return nil, mapError(storepkg.InvalidArgument("invalid Socket Mode interaction retry instant"))
+	}
+	if err := s.implementation.ReleaseSocketModeInteraction(ctx, domain.AppID(input.GetAppId()), input.GetEnvelopeId(), input.GetOwner(), input.GetReason(), retryAt); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) HandleSocketModeResponse(ctx context.Context, input *chatv1.SocketModeInteractionResponseRequest) (*chatv1.InteractionMutationResponse, error) {
+	if err := s.implementation.HandleSocketModeResponse(ctx, domain.AppID(input.GetAppId()), input.GetEnvelopeId(), input.GetPayload()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.InteractionMutationResponse{Ok: true}, nil
+}
+
+func encodeProtoSocketModeInteraction(value domain.SocketModeInteraction, found bool) *chatv1.SocketModeInteraction {
+	return &chatv1.SocketModeInteraction{
+		EnvelopeId: value.EnvelopeID, AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		Type: value.Type, Payload: value.Payload, ResponseTokenHash: value.Response.TokenHash,
+		ResponseConversationId: string(value.Response.ConversationID), ResponseOriginalMessageId: string(value.Response.OriginalMessageID),
+		ResponseThreadTimestamp: string(value.Response.ThreadTimestamp), ResponseCreatedAt: string(domain.NewStoredTime(value.Response.CreatedAt)),
+		ResponseExpiresAt: string(domain.NewStoredTime(value.Response.ExpiresAt)), ResponseUsesRemaining: int32(value.Response.UsesRemaining),
+		ResponseAppId: string(value.Response.AppID), ResponseWorkspaceId: string(value.Response.WorkspaceID), ResponseUserId: string(value.Response.UserID),
+		CreatedAt: string(domain.NewStoredTime(value.CreatedAt)), RetryCount: int32(value.RetryCount), RetryReason: value.RetryReason, Found: found,
+		LeaseOwner: value.LeaseOwner, LeaseExpiresAt: string(domain.NewStoredTime(value.LeaseExpiresAt)),
+		RetryAt: string(domain.NewStoredTime(value.RetryAt)), AcknowledgedAt: string(domain.NewStoredTime(value.AcknowledgedAt)),
+	}
+}
+
+func decodeProtoSocketModeInteraction(value *chatv1.SocketModeInteraction) (domain.SocketModeInteraction, error) {
+	if value == nil || value.GetEnvelopeId() == "" || value.GetAppId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" ||
+		value.GetPayload() == "" || value.GetResponseTokenHash() == "" || value.GetResponseConversationId() == "" {
+		return domain.SocketModeInteraction{}, errors.New("typed Socket Mode interaction is incomplete")
+	}
+	createdAt, err := domain.ParseStoredTime(value.GetCreatedAt())
+	if err != nil {
+		return domain.SocketModeInteraction{}, err
+	}
+	responseCreatedAt, err := domain.ParseStoredTime(value.GetResponseCreatedAt())
+	if err != nil {
+		return domain.SocketModeInteraction{}, err
+	}
+	responseExpiresAt, err := domain.ParseStoredTime(value.GetResponseExpiresAt())
+	if err != nil {
+		return domain.SocketModeInteraction{}, err
+	}
+	leaseExpiresAt, err := domain.ParseStoredTime(value.GetLeaseExpiresAt())
+	if err != nil {
+		return domain.SocketModeInteraction{}, err
+	}
+	retryAt, err := domain.ParseStoredTime(value.GetRetryAt())
+	if err != nil {
+		return domain.SocketModeInteraction{}, err
+	}
+	acknowledgedAt, err := domain.ParseStoredTime(value.GetAcknowledgedAt())
+	if err != nil {
+		return domain.SocketModeInteraction{}, err
+	}
+	return domain.SocketModeInteraction{
+		EnvelopeID: value.GetEnvelopeId(), AppID: domain.AppID(value.GetAppId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID: domain.UserID(value.GetUserId()), Type: value.GetType(), Payload: value.GetPayload(), CreatedAt: createdAt,
+		LeaseOwner: value.GetLeaseOwner(), LeaseExpiresAt: leaseExpiresAt, RetryAt: retryAt,
+		RetryCount: int(value.GetRetryCount()), RetryReason: value.GetRetryReason(), AcknowledgedAt: acknowledgedAt,
+		Response: domain.AppResponseURL{
+			TokenHash: value.GetResponseTokenHash(), AppID: domain.AppID(value.GetResponseAppId()), WorkspaceID: domain.WorkspaceID(value.GetResponseWorkspaceId()),
+			UserID: domain.UserID(value.GetResponseUserId()), ConversationID: domain.ConversationID(value.GetResponseConversationId()),
+			OriginalMessageID: domain.MessageID(value.GetResponseOriginalMessageId()), ThreadTimestamp: domain.MessageTimestamp(value.GetResponseThreadTimestamp()),
+			CreatedAt: responseCreatedAt, ExpiresAt: responseExpiresAt, UsesRemaining: int(value.GetResponseUsesRemaining()),
+		},
+	}, nil
+}
+
 func (s *Server) AddReaction(ctx context.Context, input *chatv1.ReactionRequest) (*chatv1.MutationResponse, error) {
 	return s.addReactionProto(ctx, input)
 }
@@ -4040,6 +4628,32 @@ func (s *Server) DeleteScheduledMessage(ctx context.Context, input *chatv1.Delet
 
 func (s *Server) ListEventsAfter(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
 	return s.listEventsAfterProto(ctx, input)
+}
+
+func (s *Server) ClaimAppEvent(ctx context.Context, input *chatv1.AppEventClaimRequest) (*chatv1.AppEventLease, error) {
+	record, attempt, reason, found, err := s.implementation.ClaimAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), time.Duration(input.GetLeaseNanos()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.AppEventLease{Attempt: int32(attempt), RetryReason: reason, Found: found}
+	if found {
+		result.Record = encodeProtoEventRecord(record)
+	}
+	return result, nil
+}
+
+func (s *Server) AckAppEvent(ctx context.Context, input *chatv1.AppEventAckRequest) (*chatv1.AppEventMutationResponse, error) {
+	if err := s.implementation.AckAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), input.GetSequence()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppEventMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ReleaseAppEvent(ctx context.Context, input *chatv1.AppEventReleaseRequest) (*chatv1.AppEventMutationResponse, error) {
+	if err := s.implementation.ReleaseAppEvent(ctx, domain.AppID(input.GetAppId()), input.GetSurface(), input.GetOwner(), input.GetSequence(), input.GetRetryReason(), time.Unix(0, input.GetRetryAtUnixNano()).UTC()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppEventMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) UserByEmail(ctx context.Context, input *chatv1.UserByEmailRequest) (*chatv1.User, error) {
@@ -4855,7 +5469,9 @@ func (s *Server) deleteScheduledMessageProto(ctx context.Context, input *chatv1.
 func (s *Server) listEventsAfterProto(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
 	var records []events.Record
 	var err error
-	if input.GetAppId() != "" {
+	if input.GetUserId() != "" {
+		records, err = s.implementation.ListUserEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetAfter(), seamPage(int(input.GetLimit())))
+	} else if input.GetAppId() != "" {
 		records, err = s.implementation.ListAppEventsAfter(ctx, domain.AppID(input.GetAppId()), input.GetAfter(), seamPage(int(input.GetLimit())))
 	} else {
 		records, err = s.implementation.ListEventsAfter(ctx, domain.WorkspaceID(input.GetWorkspaceId()), input.GetAfter(), seamPage(int(input.GetLimit())))
@@ -5264,10 +5880,16 @@ func decodeProtoConversationPage(value *chatv1.ConversationPage) (domain.Convers
 }
 
 func encodeProtoMessage(value domain.Message) *chatv1.Message {
+	files := make([]*chatv1.File, 0, len(value.Files))
+	for _, file := range value.Files {
+		files = append(files, encodeProtoFile(file))
+	}
 	return &chatv1.Message{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation),
 		AuthorId: string(value.AuthorID), Text: value.Text, ThreadTimestamp: string(value.ThreadTimestamp),
-		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls, Blocks: value.Blocks, Attachments: value.Attachments,
+		CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted, Unfurls: value.Unfurls,
+		Blocks: value.Blocks, Attachments: value.Attachments, AppId: string(value.AppID),
+		Metadata: value.Metadata, StreamState: value.StreamState, Files: files,
 	}
 }
 
@@ -5279,10 +5901,20 @@ func decodeProtoMessage(value *chatv1.Message) (domain.Message, error) {
 	if err != nil {
 		return domain.Message{}, errors.New("typed message created_at is invalid")
 	}
+	files := make([]domain.File, 0, len(value.GetFiles()))
+	for _, encoded := range value.GetFiles() {
+		file, err := decodeProtoFile(encoded)
+		if err != nil {
+			return domain.Message{}, err
+		}
+		files = append(files, file)
+	}
 	return domain.Message{
 		ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()),
-		Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(),
+		AppID: domain.AppID(value.GetAppId()), Text: value.GetText(), Blocks: value.GetBlocks(),
+		Attachments: value.GetAttachments(), Metadata: value.GetMetadata(), StreamState: value.GetStreamState(),
+		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTimestamp()), CreatedAt: created.UTC(), Deleted: value.GetDeleted(), Unfurls: value.GetUnfurls(), Files: files,
 	}, nil
 }
 
@@ -5295,16 +5927,20 @@ func decodeProtoRTMConnection(value *chatv1.RTMConnection) domain.RTMConnection 
 }
 
 func encodeProtoEphemeralMessage(value domain.EphemeralMessage) *chatv1.EphemeralMessage {
-	return &chatv1.EphemeralMessage{WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp)}
+	return &chatv1.EphemeralMessage{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), AuthorId: string(value.AuthorID), AppId: string(value.AppID), RecipientId: string(value.RecipientID), Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments, Timestamp: string(value.Timestamp), CreatedAt: string(domain.NewStoredTime(value.CreatedAt))}
 }
 func decodeProtoEphemeralMessage(value *chatv1.EphemeralMessage) (domain.EphemeralMessage, error) {
-	if value == nil || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || (value.GetText() == "" && value.GetBlocks() == "") || value.GetTimestamp() == "" {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetConversationId() == "" || value.GetAuthorId() == "" || value.GetRecipientId() == "" || (value.GetText() == "" && value.GetBlocks() == "" && value.GetAttachments() == "") || value.GetTimestamp() == "" || value.GetCreatedAt() == "" {
 		return domain.EphemeralMessage{}, errors.New("typed ephemeral message is incomplete")
+	}
+	createdAt, err := domain.ParseStoredTime(value.GetCreatedAt())
+	if err != nil {
+		return domain.EphemeralMessage{}, err
 	}
 	if _, err := domain.ParseMessageTimestamp(domain.MessageTimestamp(value.GetTimestamp())); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	return domain.EphemeralMessage{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp())}, nil
+	return domain.EphemeralMessage{ID: domain.MessageID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), Conversation: domain.ConversationID(value.GetConversationId()), AuthorID: domain.UserID(value.GetAuthorId()), AppID: domain.AppID(value.GetAppId()), RecipientID: domain.UserID(value.GetRecipientId()), Text: value.GetText(), Blocks: value.GetBlocks(), Attachments: value.GetAttachments(), Timestamp: domain.MessageTimestamp(value.GetTimestamp()), CreatedAt: createdAt}, nil
 }
 
 func encodeProtoAccessLog(value domain.AccessLog) *chatv1.AccessLog {
@@ -5496,9 +6132,13 @@ func decodeProtoSession(value *chatv1.SessionRecord) (domain.SessionRecord, erro
 func encodeProtoEvents(records []events.Record) *chatv1.EventsResponse {
 	result := make([]*chatv1.EventRecord, 0, len(records))
 	for _, record := range records {
-		result = append(result, &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano()})
+		result = append(result, encodeProtoEventRecord(record))
 	}
 	return &chatv1.EventsResponse{Records: result}
+}
+
+func encodeProtoEventRecord(record events.Record) *chatv1.EventRecord {
+	return &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano()}
 }
 
 func decodeProtoEvents(value *chatv1.EventsResponse) ([]events.Record, error) {
@@ -5507,12 +6147,20 @@ func decodeProtoEvents(value *chatv1.EventsResponse) ([]events.Record, error) {
 	}
 	result := make([]events.Record, 0, len(value.GetRecords()))
 	for _, item := range value.GetRecords() {
-		if item == nil || item.GetSequence() == 0 || item.GetId() == "" || item.GetWorkspaceId() == "" || item.GetTopic() == "" || item.GetCreatedAtUnixNano() == 0 {
-			return nil, errors.New("typed event record is incomplete")
+		record, err := decodeProtoEventRecord(item)
+		if err != nil {
+			return nil, err
 		}
-		result = append(result, events.Record{Sequence: item.GetSequence(), Event: events.Event{ID: domain.EventID(item.GetId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), ActorID: domain.UserID(item.GetActorId()), Topic: item.GetTopic(), Payload: item.GetPayload(), CreatedAt: time.Unix(0, item.GetCreatedAtUnixNano()).UTC()}})
+		result = append(result, record)
 	}
 	return result, nil
+}
+
+func decodeProtoEventRecord(item *chatv1.EventRecord) (events.Record, error) {
+	if item == nil || item.GetSequence() == 0 || item.GetId() == "" || item.GetWorkspaceId() == "" || item.GetTopic() == "" || item.GetCreatedAtUnixNano() == 0 {
+		return events.Record{}, errors.New("typed event record is incomplete")
+	}
+	return events.Record{Sequence: item.GetSequence(), Event: events.Event{ID: domain.EventID(item.GetId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), ActorID: domain.UserID(item.GetActorId()), Topic: item.GetTopic(), Payload: item.GetPayload(), CreatedAt: time.Unix(0, item.GetCreatedAtUnixNano()).UTC()}}, nil
 }
 
 func encodeProtoReaction(value domain.Reaction) *chatv1.Reaction {
@@ -6037,7 +6685,7 @@ func decodeProtoIncomingWebhook(value *chatv1.IncomingWebhook) (domain.IncomingW
 }
 
 func (r Remote) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return r.PostWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, text, blocks, "", threadTimestamp, idempotencyKey)
+	return r.PostWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, text, blocks, "", threadTimestamp, idempotencyKey, "")
 }
 
 func (r Remote) UpdateWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
@@ -6045,7 +6693,7 @@ func (r Remote) UpdateWithBlocks(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (s *Server) PostWithBlocks(ctx context.Context, input *chatv1.PostWithBlocksRequest) (*chatv1.Message, error) {
-	value, err := s.implementation.PostWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey())
+	value, err := s.implementation.PostWithBlocksAndAttachments(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetText(), input.GetBlocks(), input.GetAttachments(), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetIdempotencyKey(), domain.AppID(input.GetAppId()))
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -6069,20 +6717,97 @@ func (s *Server) UpdateMessage(ctx context.Context, input *chatv1.UpdateMessageR
 	return encodeProtoMessage(value), nil
 }
 
+func (s *Server) StartMessageStream(ctx context.Context, input *chatv1.StartMessageStreamRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.StartMessageStream(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.MessageStreamStart{
+		Conversation: domain.ConversationID(input.GetConversationId()), ThreadTimestamp: domain.MessageTimestamp(input.GetThreadTimestamp()),
+		AppID: domain.AppID(input.GetAppId()), BotID: domain.BotID(input.GetBotId()), RecipientTeamID: domain.WorkspaceID(input.GetRecipientTeamId()),
+		RecipientUserID: domain.UserID(input.GetRecipientUserId()), MarkdownText: input.GetMarkdownText(), Chunks: input.GetChunks(),
+		TaskDisplayMode: input.GetTaskDisplayMode(), Username: input.GetUsername(),
+		IconEmoji: input.GetIconEmoji(), IconURL: input.GetIconUrl(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
+func (s *Server) AppendMessageStream(ctx context.Context, input *chatv1.MutateMessageStreamRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.AppendMessageStream(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeStreamMutation(input))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
+func (s *Server) StopMessageStream(ctx context.Context, input *chatv1.MutateMessageStreamRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.StopMessageStream(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), decodeStreamMutation(input))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
+func decodeStreamMutation(input *chatv1.MutateMessageStreamRequest) domain.MessageStreamMutation {
+	return domain.MessageStreamMutation{
+		Conversation: domain.ConversationID(input.GetConversationId()), Timestamp: domain.MessageTimestamp(input.GetTimestamp()),
+		AppID: domain.AppID(input.GetAppId()), MarkdownText: input.GetMarkdownText(), Chunks: input.GetChunks(),
+		Blocks: input.GetBlocks(), Metadata: input.GetMetadata(),
+	}
+}
+
 func (r Remote) ScheduleMessageWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks string, postAt time.Time) (domain.ScheduledMessage, error) {
 	return r.ScheduleMessageWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", postAt)
 }
 
 func (r Remote) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "")
+	return r.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, userID, conversationID, recipientID, text, blocks, "", "")
 }
 
-func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	out, err := r.messages.PostWithBlocks(ctx, &chatv1.PostWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey})
+func (r Remote) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
+	out, err := r.messages.PostWithBlocks(ctx, &chatv1.PostWithBlocksRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Text: text, Blocks: blocks, Attachments: attachments, ThreadTimestamp: string(threadTimestamp), IdempotencyKey: idempotencyKey, AppId: string(appID)})
 	if err != nil {
 		return domain.Message{}, err
 	}
 	return decodeProtoMessage(out)
+}
+
+func (r Remote) StartMessageStream(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageStreamStart) (domain.Message, error) {
+	out, err := r.messages.StartMessageStream(ctx, &chatv1.StartMessageStreamRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(request.Conversation),
+		ThreadTimestamp: string(request.ThreadTimestamp), AppId: string(request.AppID),
+		BotId: string(request.BotID), TaskDisplayMode: request.TaskDisplayMode,
+		Username: request.Username, IconEmoji: request.IconEmoji, IconUrl: request.IconURL,
+		RecipientTeamId: string(request.RecipientTeamID), RecipientUserId: string(request.RecipientUserID),
+		MarkdownText: request.MarkdownText, Chunks: request.Chunks,
+	})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) AppendMessageStream(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageStreamMutation) (domain.Message, error) {
+	out, err := r.messages.AppendMessageStream(ctx, encodeStreamMutation(workspaceID, userID, request))
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func (r Remote) StopMessageStream(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageStreamMutation) (domain.Message, error) {
+	out, err := r.messages.StopMessageStream(ctx, encodeStreamMutation(workspaceID, userID, request))
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
+func encodeStreamMutation(workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageStreamMutation) *chatv1.MutateMessageStreamRequest {
+	return &chatv1.MutateMessageStreamRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(request.Conversation),
+		Timestamp: string(request.Timestamp), AppId: string(request.AppID), MarkdownText: request.MarkdownText,
+		Chunks: request.Chunks, Blocks: request.Blocks, Metadata: request.Metadata,
+	}
 }
 
 func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, secret, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
@@ -6093,12 +6818,28 @@ func (r Remote) PostIncomingWebhookWithAttachments(ctx context.Context, workspac
 	return decodeProtoMessage(out)
 }
 
-func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string) (domain.EphemeralMessage, error) {
-	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments})
+func (r Remote) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID) (domain.EphemeralMessage, error) {
+	out, err := r.messages.PostEphemeral(ctx, &chatv1.PostEphemeralRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), RecipientId: string(recipientID), Text: text, Blocks: blocks, Attachments: attachments, AppId: string(appID)})
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
 	return decodeProtoEphemeralMessage(out)
+}
+
+func (r Remote) ListEphemeralMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, limit int) ([]domain.EphemeralMessage, error) {
+	out, err := r.messages.ListEphemeral(ctx, &chatv1.EphemeralMessagesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Limit: int32(limit)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.EphemeralMessage, 0, len(out.GetMessages()))
+	for _, item := range out.GetMessages() {
+		value, err := decodeProtoEphemeralMessage(item)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, nil
 }
 
 func (r Remote) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
@@ -6322,4 +7063,427 @@ func (s *Server) CompleteExternalUploads(ctx context.Context, input *chatv1.Comp
 		return nil, mapError(err)
 	}
 	return encodeProtoFilePage(domain.FilePage{Files: files}), nil
+}
+
+func (r Remote) IssueAppConfigurationToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.AppConfigurationCredentials, error) {
+	out, err := r.apps.IssueAppConfigurationToken(ctx, &chatv1.AppConfigurationTokenRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.AppConfigurationCredentials{}, err
+	}
+	return decodeProtoAppConfigurationCredentials(out)
+}
+
+func (r Remote) RotateAppConfigurationToken(ctx context.Context, refreshToken string) (domain.AppConfigurationCredentials, error) {
+	out, err := r.apps.RotateAppConfigurationToken(ctx, &chatv1.AppConfigurationTokenRotateRequest{RefreshToken: refreshToken})
+	if err != nil {
+		return domain.AppConfigurationCredentials{}, err
+	}
+	return decodeProtoAppConfigurationCredentials(out)
+}
+
+func (r Remote) ValidateAppManifest(ctx context.Context, token, appID, manifest string) ([]appmanifest.Error, error) {
+	out, err := r.apps.ValidateAppManifest(ctx, &chatv1.AppManifestRequest{Token: token, AppId: appID, Manifest: manifest})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]appmanifest.Error, 0, len(out.GetErrors()))
+	for _, problem := range out.GetErrors() {
+		if problem == nil {
+			return nil, errors.New("typed app manifest validation contains an empty error")
+		}
+		result = append(result, appmanifest.Error{Message: problem.GetMessage(), Pointer: problem.GetPointer()})
+	}
+	return result, nil
+}
+
+func (r Remote) CreateAppFromManifest(ctx context.Context, token, manifest string, teamID domain.WorkspaceID) (domain.App, domain.AppCredentials, error) {
+	out, err := r.apps.CreateAppFromManifest(ctx, &chatv1.AppManifestRequest{Token: token, Manifest: manifest, TeamId: string(teamID)})
+	if err != nil {
+		return domain.App{}, domain.AppCredentials{}, err
+	}
+	app, err := decodeProtoDeveloperApp(out.GetApp())
+	if err != nil {
+		return domain.App{}, domain.AppCredentials{}, err
+	}
+	credentials := out.GetCredentials()
+	if credentials == nil || credentials.GetClientId() == "" || credentials.GetClientSecret() == "" || credentials.GetSigningSecret() == "" || credentials.GetVerificationToken() == "" {
+		return domain.App{}, domain.AppCredentials{}, errors.New("typed app credentials are incomplete")
+	}
+	return app, domain.AppCredentials{ClientID: credentials.GetClientId(), ClientSecret: credentials.GetClientSecret(), SigningSecret: credentials.GetSigningSecret(), VerificationToken: credentials.GetVerificationToken()}, nil
+}
+
+func (r Remote) ExportAppManifest(ctx context.Context, token string, appID domain.AppID) (domain.App, string, error) {
+	out, err := r.apps.ExportAppManifest(ctx, &chatv1.AppManifestRequest{Token: token, AppId: string(appID)})
+	if err != nil {
+		return domain.App{}, "", err
+	}
+	app, err := decodeProtoDeveloperApp(out.GetApp())
+	if err != nil {
+		return domain.App{}, "", err
+	}
+	return app, out.GetManifest(), nil
+}
+
+func (r Remote) UpdateAppFromManifest(ctx context.Context, token string, appID domain.AppID, manifest string) (domain.App, error) {
+	out, err := r.apps.UpdateAppFromManifest(ctx, &chatv1.AppManifestRequest{Token: token, AppId: string(appID), Manifest: manifest})
+	if err != nil {
+		return domain.App{}, err
+	}
+	return decodeProtoDeveloperApp(out.GetApp())
+}
+
+func (r Remote) DeleteDeveloperApp(ctx context.Context, token string, appID domain.AppID) error {
+	out, err := r.apps.DeleteDeveloperApp(ctx, &chatv1.AppManifestRequest{Token: token, AppId: string(appID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "developer app deletion")
+}
+
+func (r Remote) ListDeveloperApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.App, error) {
+	out, err := r.apps.ListDeveloperApps(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.App, 0, len(out.GetApps()))
+	for _, encoded := range out.GetApps() {
+		app, err := decodeProtoDeveloperApp(encoded)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, app)
+	}
+	return result, nil
+}
+
+func (r Remote) ListWorkspaceApps(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.InstalledApp, error) {
+	out, err := r.apps.ListWorkspaceApps(ctx, &chatv1.AppListRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	result := make([]domain.InstalledApp, 0, len(out.GetApps()))
+	for _, encoded := range out.GetApps() {
+		app, err := decodeProtoInstalledApp(encoded)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, app)
+	}
+	return result, nil
+}
+
+func (r Remote) PutAppDatastoreItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, datastore string, items []string, merge bool) ([]string, error) {
+	out, err := r.apps.PutAppDatastoreItems(ctx, &chatv1.AppDatastoreRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		Datastore: datastore, Items: append([]string(nil), items...), Merge: merge,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), out.GetItems()...), nil
+}
+
+func (r Remote) GetAppDatastoreItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, datastore string, ids []string) ([]string, error) {
+	out, err := r.apps.GetAppDatastoreItems(ctx, &chatv1.AppDatastoreRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		Datastore: datastore, Ids: append([]string(nil), ids...),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return append([]string(nil), out.GetItems()...), nil
+}
+
+func (r Remote) DeleteAppDatastoreItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, datastore string, ids []string) error {
+	out, err := r.apps.DeleteAppDatastoreItems(ctx, &chatv1.AppDatastoreRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		Datastore: datastore, Ids: append([]string(nil), ids...),
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "app datastore deletion")
+}
+
+func (r Remote) GetDeveloperApp(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.App, string, error) {
+	out, err := r.apps.GetDeveloperApp(ctx, &chatv1.AppGetRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.App{}, "", err
+	}
+	app, err := decodeProtoDeveloperApp(out.GetApp())
+	if err != nil {
+		return domain.App{}, "", err
+	}
+	return app, out.GetManifest(), nil
+}
+
+func (r Remote) IssueDeveloperAppToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, scopes []string) (domain.AppTokenCredentials, error) {
+	out, err := r.apps.IssueDeveloperAppToken(ctx, &chatv1.AppTokenIssueRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), Scopes: append([]string(nil), scopes...)})
+	if err != nil {
+		return domain.AppTokenCredentials{}, err
+	}
+	if out.GetToken() == "" || out.GetAppId() == "" || len(out.GetScopes()) == 0 {
+		return domain.AppTokenCredentials{}, errors.New("typed app token credentials are incomplete")
+	}
+	return domain.AppTokenCredentials{Token: out.GetToken(), AppID: domain.AppID(out.GetAppId()), Scopes: append([]string(nil), out.GetScopes()...)}, nil
+}
+
+func (r Remote) InspectOAuthAuthorization(ctx context.Context, request domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error) {
+	out, err := r.apps.InspectOAuthAuthorization(ctx, encodeProtoOAuthAuthorizationRequest(request))
+	if err != nil {
+		return domain.OAuthAuthorization{}, err
+	}
+	return decodeProtoOAuthAuthorization(out)
+}
+
+func (r Remote) AuthorizeOAuth(ctx context.Context, request domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error) {
+	out, err := r.apps.AuthorizeOAuth(ctx, encodeProtoOAuthAuthorizationRequest(request))
+	if err != nil {
+		return domain.OAuthAuthorization{}, err
+	}
+	return decodeProtoOAuthAuthorization(out)
+}
+
+func (s *Server) IssueAppConfigurationToken(ctx context.Context, input *chatv1.AppConfigurationTokenRequest) (*chatv1.AppConfigurationCredentials, error) {
+	value, err := s.implementation.IssueAppConfigurationToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppConfigurationCredentials(value), nil
+}
+
+func (s *Server) RotateAppConfigurationToken(ctx context.Context, input *chatv1.AppConfigurationTokenRotateRequest) (*chatv1.AppConfigurationCredentials, error) {
+	value, err := s.implementation.RotateAppConfigurationToken(ctx, input.GetRefreshToken())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppConfigurationCredentials(value), nil
+}
+
+func (s *Server) ValidateAppManifest(ctx context.Context, input *chatv1.AppManifestRequest) (*chatv1.AppManifestValidation, error) {
+	problems, err := s.implementation.ValidateAppManifest(ctx, input.GetToken(), input.GetAppId(), input.GetManifest())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.AppManifestValidation{Errors: make([]*chatv1.AppManifestError, 0, len(problems))}
+	for _, problem := range problems {
+		result.Errors = append(result.Errors, &chatv1.AppManifestError{Message: problem.Message, Pointer: problem.Pointer})
+	}
+	return result, nil
+}
+
+func (s *Server) CreateAppFromManifest(ctx context.Context, input *chatv1.AppManifestRequest) (*chatv1.AppCreateResponse, error) {
+	app, credentials, err := s.implementation.CreateAppFromManifest(ctx, input.GetToken(), input.GetManifest(), domain.WorkspaceID(input.GetTeamId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppCreateResponse{App: encodeProtoDeveloperApp(app), Credentials: &chatv1.AppCredentials{ClientId: credentials.ClientID, ClientSecret: credentials.ClientSecret, SigningSecret: credentials.SigningSecret, VerificationToken: credentials.VerificationToken}}, nil
+}
+
+func (s *Server) ExportAppManifest(ctx context.Context, input *chatv1.AppManifestRequest) (*chatv1.AppExportResponse, error) {
+	app, manifest, err := s.implementation.ExportAppManifest(ctx, input.GetToken(), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppExportResponse{App: encodeProtoDeveloperApp(app), Manifest: manifest}, nil
+}
+
+func (s *Server) UpdateAppFromManifest(ctx context.Context, input *chatv1.AppManifestRequest) (*chatv1.AppMutationResponse, error) {
+	app, err := s.implementation.UpdateAppFromManifest(ctx, input.GetToken(), domain.AppID(input.GetAppId()), input.GetManifest())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true, App: encodeProtoDeveloperApp(app)}, nil
+}
+
+func (s *Server) DeleteDeveloperApp(ctx context.Context, input *chatv1.AppManifestRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.DeleteDeveloperApp(ctx, input.GetToken(), domain.AppID(input.GetAppId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) ListDeveloperApps(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.AppListResponse, error) {
+	apps, err := s.implementation.ListDeveloperApps(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.AppListResponse{Apps: make([]*chatv1.DeveloperApp, 0, len(apps))}
+	for _, app := range apps {
+		result.Apps = append(result.Apps, encodeProtoDeveloperApp(app))
+	}
+	return result, nil
+}
+
+func (s *Server) ListWorkspaceApps(ctx context.Context, input *chatv1.AppListRequest) (*chatv1.InstalledAppListResponse, error) {
+	apps, err := s.implementation.ListWorkspaceApps(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.InstalledAppListResponse{Apps: make([]*chatv1.InstalledApp, 0, len(apps))}
+	for _, app := range apps {
+		result.Apps = append(result.Apps, encodeProtoInstalledApp(app))
+	}
+	return result, nil
+}
+
+func (s *Server) PutAppDatastoreItems(ctx context.Context, input *chatv1.AppDatastoreRequest) (*chatv1.AppDatastoreResponse, error) {
+	items, err := s.implementation.PutAppDatastoreItems(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetDatastore(), input.GetItems(), input.GetMerge(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppDatastoreResponse{Items: items}, nil
+}
+
+func (s *Server) GetAppDatastoreItems(ctx context.Context, input *chatv1.AppDatastoreRequest) (*chatv1.AppDatastoreResponse, error) {
+	items, err := s.implementation.GetAppDatastoreItems(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetDatastore(), input.GetIds(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppDatastoreResponse{Items: items}, nil
+}
+
+func (s *Server) DeleteAppDatastoreItems(ctx context.Context, input *chatv1.AppDatastoreRequest) (*chatv1.AppMutationResponse, error) {
+	if err := s.implementation.DeleteAppDatastoreItems(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.AppID(input.GetAppId()), input.GetDatastore(), input.GetIds(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) GetDeveloperApp(ctx context.Context, input *chatv1.AppGetRequest) (*chatv1.AppExportResponse, error) {
+	app, manifest, err := s.implementation.GetDeveloperApp(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppExportResponse{App: encodeProtoDeveloperApp(app), Manifest: manifest}, nil
+}
+
+func (s *Server) IssueDeveloperAppToken(ctx context.Context, input *chatv1.AppTokenIssueRequest) (*chatv1.AppTokenCredentials, error) {
+	value, err := s.implementation.IssueDeveloperAppToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetScopes())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.AppTokenCredentials{Token: value.Token, AppId: string(value.AppID), Scopes: value.Scopes}, nil
+}
+
+func (s *Server) InspectOAuthAuthorization(ctx context.Context, input *chatv1.OAuthAuthorizationRequest) (*chatv1.OAuthAuthorization, error) {
+	request, err := decodeProtoOAuthAuthorizationRequest(input)
+	if err != nil {
+		return nil, mapError(storepkg.InvalidArgument(err.Error()))
+	}
+	value, err := s.implementation.InspectOAuthAuthorization(ctx, request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoOAuthAuthorization(value), nil
+}
+
+func (s *Server) AuthorizeOAuth(ctx context.Context, input *chatv1.OAuthAuthorizationRequest) (*chatv1.OAuthAuthorization, error) {
+	request, err := decodeProtoOAuthAuthorizationRequest(input)
+	if err != nil {
+		return nil, mapError(storepkg.InvalidArgument(err.Error()))
+	}
+	value, err := s.implementation.AuthorizeOAuth(ctx, request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoOAuthAuthorization(value), nil
+}
+
+func encodeProtoAppConfigurationCredentials(value domain.AppConfigurationCredentials) *chatv1.AppConfigurationCredentials {
+	return &chatv1.AppConfigurationCredentials{Token: value.Token, RefreshToken: value.RefreshToken, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), IssuedAt: value.IssuedAt.UTC().Format(time.RFC3339Nano), ExpiresAt: value.ExpiresAt.UTC().Format(time.RFC3339Nano)}
+}
+
+func decodeProtoAppConfigurationCredentials(value *chatv1.AppConfigurationCredentials) (domain.AppConfigurationCredentials, error) {
+	if value == nil || value.GetToken() == "" || value.GetRefreshToken() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" {
+		return domain.AppConfigurationCredentials{}, errors.New("typed app configuration credentials are incomplete")
+	}
+	issuedAt, err := time.Parse(time.RFC3339Nano, value.GetIssuedAt())
+	if err != nil {
+		return domain.AppConfigurationCredentials{}, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, value.GetExpiresAt())
+	if err != nil {
+		return domain.AppConfigurationCredentials{}, err
+	}
+	return domain.AppConfigurationCredentials{Token: value.GetToken(), RefreshToken: value.GetRefreshToken(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), IssuedAt: issuedAt.UTC(), ExpiresAt: expiresAt.UTC()}, nil
+}
+
+func encodeProtoDeveloperApp(value domain.App) *chatv1.DeveloperApp {
+	return &chatv1.DeveloperApp{Id: string(value.ID), DevelopmentWorkspaceId: string(value.DevelopmentWorkspaceID), OwnerId: string(value.OwnerID), Name: value.Name, Description: value.Description, ClientId: value.ClientID, ManifestVersion: value.ManifestVersion, Distribution: value.Distribution, SocketModeEnabled: value.SocketModeEnabled, TokenRotationEnabled: value.TokenRotationEnabled, CreatedAt: value.CreatedAt.UTC().Format(time.RFC3339Nano), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), Deleted: value.Deleted}
+}
+
+func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
+	if value == nil || value.GetId() == "" || value.GetDevelopmentWorkspaceId() == "" || value.GetOwnerId() == "" || value.GetName() == "" || value.GetClientId() == "" || value.GetManifestVersion() < 1 || value.GetDistribution() == "" {
+		return domain.App{}, errors.New("typed developer app is incomplete")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, value.GetCreatedAt())
+	if err != nil {
+		return domain.App{}, err
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, value.GetUpdatedAt())
+	if err != nil {
+		return domain.App{}, err
+	}
+	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
+}
+
+func encodeProtoInstalledApp(value domain.InstalledApp) *chatv1.InstalledApp {
+	return &chatv1.InstalledApp{
+		Id:                  string(value.ID),
+		Name:                value.Name,
+		Description:         value.Description,
+		HomeTabEnabled:      value.HomeTabEnabled,
+		MessagesTabEnabled:  value.MessagesTabEnabled,
+		MessagesTabReadOnly: value.MessagesTabReadOnly,
+		BotDisplayName:      value.BotDisplayName,
+		BotUserId:           string(value.BotUserID),
+	}
+}
+
+func decodeProtoInstalledApp(value *chatv1.InstalledApp) (domain.InstalledApp, error) {
+	if value == nil || value.GetId() == "" || value.GetName() == "" {
+		return domain.InstalledApp{}, errors.New("typed installed app is incomplete")
+	}
+	return domain.InstalledApp{
+		ID:                  domain.AppID(value.GetId()),
+		Name:                value.GetName(),
+		Description:         value.GetDescription(),
+		HomeTabEnabled:      value.GetHomeTabEnabled(),
+		MessagesTabEnabled:  value.GetMessagesTabEnabled(),
+		MessagesTabReadOnly: value.GetMessagesTabReadOnly(),
+		BotDisplayName:      value.GetBotDisplayName(),
+		BotUserID:           domain.UserID(value.GetBotUserId()),
+	}, nil
+}
+
+func encodeProtoOAuthAuthorizationRequest(value domain.OAuthAuthorizationRequest) *chatv1.OAuthAuthorizationRequest {
+	return &chatv1.OAuthAuthorizationRequest{ClientId: value.ClientID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), RedirectUri: value.RedirectURI, BotScopes: value.BotScopes, UserScopes: value.UserScopes, State: value.State, CodeChallenge: value.CodeChallenge, CodeChallengeMethod: value.CodeChallengeMethod}
+}
+
+func decodeProtoOAuthAuthorizationRequest(value *chatv1.OAuthAuthorizationRequest) (domain.OAuthAuthorizationRequest, error) {
+	if value == nil || value.GetClientId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" {
+		return domain.OAuthAuthorizationRequest{}, errors.New("typed oauth authorization request is incomplete")
+	}
+	return domain.OAuthAuthorizationRequest{ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
+}
+
+func encodeProtoOAuthAuthorization(value domain.OAuthAuthorization) *chatv1.OAuthAuthorization {
+	return &chatv1.OAuthAuthorization{AppId: string(value.AppID), AppName: value.AppName, ClientId: value.ClientID, WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), RedirectUri: value.RedirectURI, BotScopes: value.BotScopes, UserScopes: value.UserScopes, State: value.State, Code: value.Code, BotId: string(value.BotID), BotUserId: string(value.BotUserID), CodeChallenge: value.CodeChallenge, CodeChallengeMethod: value.CodeChallengeMethod}
+}
+
+func decodeProtoOAuthAuthorization(value *chatv1.OAuthAuthorization) (domain.OAuthAuthorization, error) {
+	if value == nil || value.GetAppId() == "" || value.GetAppName() == "" || value.GetClientId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetRedirectUri() == "" {
+		return domain.OAuthAuthorization{}, errors.New("typed oauth authorization is incomplete")
+	}
+	return domain.OAuthAuthorization{AppID: domain.AppID(value.GetAppId()), AppName: value.GetAppName(), ClientID: value.GetClientId(), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), RedirectURI: value.GetRedirectUri(), BotScopes: append([]string(nil), value.GetBotScopes()...), UserScopes: append([]string(nil), value.GetUserScopes()...), State: value.GetState(), Code: value.GetCode(), BotID: domain.BotID(value.GetBotId()), BotUserID: domain.UserID(value.GetBotUserId()), CodeChallenge: value.GetCodeChallenge(), CodeChallengeMethod: value.GetCodeChallengeMethod()}, nil
 }

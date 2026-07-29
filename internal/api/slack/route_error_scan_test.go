@@ -164,12 +164,13 @@ type functionFacts struct {
 // a code carries it *to* one of these, and is derived rather than listed: see
 // codeArguments.
 var codeWriters = map[string][]int{
-	"writeError":            {1},
-	"decodeFailure":         {0},
-	"mapServiceError":       {1},
-	"mapAdminError":         {1},
-	"mapServiceErrorExists": {1, 2},
-	"mapServiceErrorNamed":  {1, 2, 3},
+	"writeError":                {1},
+	"decodeFailure":             {0},
+	"mapServiceError":           {1},
+	"mapAdminError":             {1},
+	"mapServiceErrorExists":     {1, 2},
+	"mapServiceErrorNamed":      {1, 2, 3},
+	"writeIncomingWebhookError": {2},
 }
 
 // codeArguments names, for each code-carrying call, which of its arguments carry
@@ -534,6 +535,7 @@ func sentinelDrivenCodes() map[string]string {
 		"invalid_json":              "decodeErrorCode's fallback for a malformed JSON document",
 		"request_timeout":           "decodeErrorCode's name for a request body past the size ceiling",
 		"channel_not_found":         "postMessageError's name for store.ErrNotFound on a message write",
+		"is_archived":               "postMessageError's name for service.ErrConversationAlreadyArchived on a message write",
 		"no_text":                   "postMessageError's name for service.ErrInvalidMessage",
 	}
 }
@@ -616,9 +618,7 @@ func (h Handler) mentionsWithoutEnforcing(w http.ResponseWriter, r *http.Request
 // literal is instead, so the exemption cannot become a place to hide a code the
 // scan cannot see.
 func nonCodePinnedLiterals() map[string]string {
-	return map[string]string{
-		"is_archived": "a member name in the conversations.* JSON response objects, not an error code",
-	}
+	return map[string]string{}
 }
 
 // The gates can only judge what the fact collection sees, and what it sees is a

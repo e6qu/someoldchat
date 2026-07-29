@@ -19,7 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	InteractionsService_MarkRead_FullMethodName = "/sameoldchat.chat.v1.InteractionsService/MarkRead"
+	InteractionsService_MarkRead_FullMethodName                     = "/sameoldchat.chat.v1.InteractionsService/MarkRead"
+	InteractionsService_DispatchSlashCommand_FullMethodName         = "/sameoldchat.chat.v1.InteractionsService/DispatchSlashCommand"
+	InteractionsService_DispatchBlockAction_FullMethodName          = "/sameoldchat.chat.v1.InteractionsService/DispatchBlockAction"
+	InteractionsService_DispatchViewBlockAction_FullMethodName      = "/sameoldchat.chat.v1.InteractionsService/DispatchViewBlockAction"
+	InteractionsService_LoadAppOptions_FullMethodName               = "/sameoldchat.chat.v1.InteractionsService/LoadAppOptions"
+	InteractionsService_ListAppShortcuts_FullMethodName             = "/sameoldchat.chat.v1.InteractionsService/ListAppShortcuts"
+	InteractionsService_DispatchAppShortcut_FullMethodName          = "/sameoldchat.chat.v1.InteractionsService/DispatchAppShortcut"
+	InteractionsService_HandleAppResponse_FullMethodName            = "/sameoldchat.chat.v1.InteractionsService/HandleAppResponse"
+	InteractionsService_ClaimSocketModeInteraction_FullMethodName   = "/sameoldchat.chat.v1.InteractionsService/ClaimSocketModeInteraction"
+	InteractionsService_AckSocketModeInteraction_FullMethodName     = "/sameoldchat.chat.v1.InteractionsService/AckSocketModeInteraction"
+	InteractionsService_ReleaseSocketModeInteraction_FullMethodName = "/sameoldchat.chat.v1.InteractionsService/ReleaseSocketModeInteraction"
+	InteractionsService_HandleSocketModeResponse_FullMethodName     = "/sameoldchat.chat.v1.InteractionsService/HandleSocketModeResponse"
 )
 
 // InteractionsServiceClient is the client API for InteractionsService service.
@@ -27,6 +38,17 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type InteractionsServiceClient interface {
 	MarkRead(ctx context.Context, in *MarkReadRequest, opts ...grpc.CallOption) (*ReadCursor, error)
+	DispatchSlashCommand(ctx context.Context, in *SlashCommandRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	DispatchBlockAction(ctx context.Context, in *BlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	DispatchViewBlockAction(ctx context.Context, in *ViewBlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	LoadAppOptions(ctx context.Context, in *AppOptionQueryRequest, opts ...grpc.CallOption) (*AppOptionListResponse, error)
+	ListAppShortcuts(ctx context.Context, in *AppShortcutListRequest, opts ...grpc.CallOption) (*AppShortcutListResponse, error)
+	DispatchAppShortcut(ctx context.Context, in *AppShortcutDispatchRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	HandleAppResponse(ctx context.Context, in *AppResponseRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	ClaimSocketModeInteraction(ctx context.Context, in *SocketModeInteractionClaimRequest, opts ...grpc.CallOption) (*SocketModeInteraction, error)
+	AckSocketModeInteraction(ctx context.Context, in *SocketModeInteractionAckRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	ReleaseSocketModeInteraction(ctx context.Context, in *SocketModeInteractionReleaseRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
+	HandleSocketModeResponse(ctx context.Context, in *SocketModeInteractionResponseRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error)
 }
 
 type interactionsServiceClient struct {
@@ -47,11 +69,132 @@ func (c *interactionsServiceClient) MarkRead(ctx context.Context, in *MarkReadRe
 	return out, nil
 }
 
+func (c *interactionsServiceClient) DispatchSlashCommand(ctx context.Context, in *SlashCommandRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_DispatchSlashCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) DispatchBlockAction(ctx context.Context, in *BlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_DispatchBlockAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) DispatchViewBlockAction(ctx context.Context, in *ViewBlockActionRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_DispatchViewBlockAction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) LoadAppOptions(ctx context.Context, in *AppOptionQueryRequest, opts ...grpc.CallOption) (*AppOptionListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppOptionListResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_LoadAppOptions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) ListAppShortcuts(ctx context.Context, in *AppShortcutListRequest, opts ...grpc.CallOption) (*AppShortcutListResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppShortcutListResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_ListAppShortcuts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) DispatchAppShortcut(ctx context.Context, in *AppShortcutDispatchRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_DispatchAppShortcut_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) HandleAppResponse(ctx context.Context, in *AppResponseRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_HandleAppResponse_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) ClaimSocketModeInteraction(ctx context.Context, in *SocketModeInteractionClaimRequest, opts ...grpc.CallOption) (*SocketModeInteraction, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SocketModeInteraction)
+	err := c.cc.Invoke(ctx, InteractionsService_ClaimSocketModeInteraction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) AckSocketModeInteraction(ctx context.Context, in *SocketModeInteractionAckRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_AckSocketModeInteraction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) ReleaseSocketModeInteraction(ctx context.Context, in *SocketModeInteractionReleaseRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_ReleaseSocketModeInteraction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *interactionsServiceClient) HandleSocketModeResponse(ctx context.Context, in *SocketModeInteractionResponseRequest, opts ...grpc.CallOption) (*InteractionMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InteractionMutationResponse)
+	err := c.cc.Invoke(ctx, InteractionsService_HandleSocketModeResponse_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InteractionsServiceServer is the server API for InteractionsService service.
 // All implementations should embed UnimplementedInteractionsServiceServer
 // for forward compatibility.
 type InteractionsServiceServer interface {
 	MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error)
+	DispatchSlashCommand(context.Context, *SlashCommandRequest) (*InteractionMutationResponse, error)
+	DispatchBlockAction(context.Context, *BlockActionRequest) (*InteractionMutationResponse, error)
+	DispatchViewBlockAction(context.Context, *ViewBlockActionRequest) (*InteractionMutationResponse, error)
+	LoadAppOptions(context.Context, *AppOptionQueryRequest) (*AppOptionListResponse, error)
+	ListAppShortcuts(context.Context, *AppShortcutListRequest) (*AppShortcutListResponse, error)
+	DispatchAppShortcut(context.Context, *AppShortcutDispatchRequest) (*InteractionMutationResponse, error)
+	HandleAppResponse(context.Context, *AppResponseRequest) (*InteractionMutationResponse, error)
+	ClaimSocketModeInteraction(context.Context, *SocketModeInteractionClaimRequest) (*SocketModeInteraction, error)
+	AckSocketModeInteraction(context.Context, *SocketModeInteractionAckRequest) (*InteractionMutationResponse, error)
+	ReleaseSocketModeInteraction(context.Context, *SocketModeInteractionReleaseRequest) (*InteractionMutationResponse, error)
+	HandleSocketModeResponse(context.Context, *SocketModeInteractionResponseRequest) (*InteractionMutationResponse, error)
 }
 
 // UnimplementedInteractionsServiceServer should be embedded to have
@@ -63,6 +206,39 @@ type UnimplementedInteractionsServiceServer struct{}
 
 func (UnimplementedInteractionsServiceServer) MarkRead(context.Context, *MarkReadRequest) (*ReadCursor, error) {
 	return nil, status.Error(codes.Unimplemented, "method MarkRead not implemented")
+}
+func (UnimplementedInteractionsServiceServer) DispatchSlashCommand(context.Context, *SlashCommandRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DispatchSlashCommand not implemented")
+}
+func (UnimplementedInteractionsServiceServer) DispatchBlockAction(context.Context, *BlockActionRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DispatchBlockAction not implemented")
+}
+func (UnimplementedInteractionsServiceServer) DispatchViewBlockAction(context.Context, *ViewBlockActionRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DispatchViewBlockAction not implemented")
+}
+func (UnimplementedInteractionsServiceServer) LoadAppOptions(context.Context, *AppOptionQueryRequest) (*AppOptionListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method LoadAppOptions not implemented")
+}
+func (UnimplementedInteractionsServiceServer) ListAppShortcuts(context.Context, *AppShortcutListRequest) (*AppShortcutListResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAppShortcuts not implemented")
+}
+func (UnimplementedInteractionsServiceServer) DispatchAppShortcut(context.Context, *AppShortcutDispatchRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DispatchAppShortcut not implemented")
+}
+func (UnimplementedInteractionsServiceServer) HandleAppResponse(context.Context, *AppResponseRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HandleAppResponse not implemented")
+}
+func (UnimplementedInteractionsServiceServer) ClaimSocketModeInteraction(context.Context, *SocketModeInteractionClaimRequest) (*SocketModeInteraction, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClaimSocketModeInteraction not implemented")
+}
+func (UnimplementedInteractionsServiceServer) AckSocketModeInteraction(context.Context, *SocketModeInteractionAckRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AckSocketModeInteraction not implemented")
+}
+func (UnimplementedInteractionsServiceServer) ReleaseSocketModeInteraction(context.Context, *SocketModeInteractionReleaseRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseSocketModeInteraction not implemented")
+}
+func (UnimplementedInteractionsServiceServer) HandleSocketModeResponse(context.Context, *SocketModeInteractionResponseRequest) (*InteractionMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HandleSocketModeResponse not implemented")
 }
 func (UnimplementedInteractionsServiceServer) testEmbeddedByValue() {}
 
@@ -102,6 +278,204 @@ func _InteractionsService_MarkRead_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _InteractionsService_DispatchSlashCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SlashCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).DispatchSlashCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_DispatchSlashCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).DispatchSlashCommand(ctx, req.(*SlashCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_DispatchBlockAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BlockActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).DispatchBlockAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_DispatchBlockAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).DispatchBlockAction(ctx, req.(*BlockActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_DispatchViewBlockAction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ViewBlockActionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).DispatchViewBlockAction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_DispatchViewBlockAction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).DispatchViewBlockAction(ctx, req.(*ViewBlockActionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_LoadAppOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppOptionQueryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).LoadAppOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_LoadAppOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).LoadAppOptions(ctx, req.(*AppOptionQueryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_ListAppShortcuts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppShortcutListRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).ListAppShortcuts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_ListAppShortcuts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).ListAppShortcuts(ctx, req.(*AppShortcutListRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_DispatchAppShortcut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppShortcutDispatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).DispatchAppShortcut(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_DispatchAppShortcut_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).DispatchAppShortcut(ctx, req.(*AppShortcutDispatchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_HandleAppResponse_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppResponseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).HandleAppResponse(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_HandleAppResponse_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).HandleAppResponse(ctx, req.(*AppResponseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_ClaimSocketModeInteraction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeInteractionClaimRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).ClaimSocketModeInteraction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_ClaimSocketModeInteraction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).ClaimSocketModeInteraction(ctx, req.(*SocketModeInteractionClaimRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_AckSocketModeInteraction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeInteractionAckRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).AckSocketModeInteraction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_AckSocketModeInteraction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).AckSocketModeInteraction(ctx, req.(*SocketModeInteractionAckRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_ReleaseSocketModeInteraction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeInteractionReleaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).ReleaseSocketModeInteraction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_ReleaseSocketModeInteraction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).ReleaseSocketModeInteraction(ctx, req.(*SocketModeInteractionReleaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _InteractionsService_HandleSocketModeResponse_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SocketModeInteractionResponseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(InteractionsServiceServer).HandleSocketModeResponse(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: InteractionsService_HandleSocketModeResponse_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(InteractionsServiceServer).HandleSocketModeResponse(ctx, req.(*SocketModeInteractionResponseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // InteractionsService_ServiceDesc is the grpc.ServiceDesc for InteractionsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -112,6 +486,50 @@ var InteractionsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "MarkRead",
 			Handler:    _InteractionsService_MarkRead_Handler,
+		},
+		{
+			MethodName: "DispatchSlashCommand",
+			Handler:    _InteractionsService_DispatchSlashCommand_Handler,
+		},
+		{
+			MethodName: "DispatchBlockAction",
+			Handler:    _InteractionsService_DispatchBlockAction_Handler,
+		},
+		{
+			MethodName: "DispatchViewBlockAction",
+			Handler:    _InteractionsService_DispatchViewBlockAction_Handler,
+		},
+		{
+			MethodName: "LoadAppOptions",
+			Handler:    _InteractionsService_LoadAppOptions_Handler,
+		},
+		{
+			MethodName: "ListAppShortcuts",
+			Handler:    _InteractionsService_ListAppShortcuts_Handler,
+		},
+		{
+			MethodName: "DispatchAppShortcut",
+			Handler:    _InteractionsService_DispatchAppShortcut_Handler,
+		},
+		{
+			MethodName: "HandleAppResponse",
+			Handler:    _InteractionsService_HandleAppResponse_Handler,
+		},
+		{
+			MethodName: "ClaimSocketModeInteraction",
+			Handler:    _InteractionsService_ClaimSocketModeInteraction_Handler,
+		},
+		{
+			MethodName: "AckSocketModeInteraction",
+			Handler:    _InteractionsService_AckSocketModeInteraction_Handler,
+		},
+		{
+			MethodName: "ReleaseSocketModeInteraction",
+			Handler:    _InteractionsService_ReleaseSocketModeInteraction_Handler,
+		},
+		{
+			MethodName: "HandleSocketModeResponse",
+			Handler:    _InteractionsService_HandleSocketModeResponse_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

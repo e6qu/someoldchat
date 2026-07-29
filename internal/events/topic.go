@@ -117,15 +117,12 @@ var topicRules = []topicRule{
 
 	// ---- messages ----------------------------------------------------------
 	//
-	// Every message topic is withheld. The inner Slack message event requires
-	// text, and messagePayload deliberately omits it because neither event
-	// listing filters by conversation membership: ListEventsAfter filters on
-	// workspace and ListAppEventsAfter on installed workspace, so inlining text
-	// would publish private-channel content to every workspace member's stream
-	// and to every installed app. Translation is where content starts flowing,
-	// so it cannot land before that filter exists.
+	// Identifier-only message records are withheld here. App delivery projects a
+	// complete Slack message only after proving the installed bot is a member of
+	// the conversation (service.PrepareAppEvent); workspace event streams retain
+	// the content-free record and cannot leak private text.
 	{topic: "message.created", slack: mapped("message", everySurface),
-		note: "pinned topic and pinned example; withheld until a conversation-visibility filter exists, because the inner event requires text"},
+		note: "pinned topic and example; app delivery hydrates it only after conversation visibility is proved"},
 	{topic: "message.changed", slack: mapped("message", everySurface),
 		note: "pinned topic; the message_changed subtype value is not pinned, and the event needs both bodies"},
 	{topic: "message.deleted", slack: mapped("message", everySurface),
@@ -152,10 +149,10 @@ var topicRules = []topicRule{
 		note: "pinned topic; inner shape NOT settled by the pinned material — the field names are carried over from the pinned reaction_added example, which is the only inner event the snapshot works out"},
 	{topic: "pin.removed", slack: translated("pin_removed", everySurface, itemEvent("pin_removed", false)),
 		note: "pinned topic; inner shape NOT settled, as pin.added"},
-	{topic: "star.added", slack: translated("star_added", everySurface, itemEvent("star_added", false)),
-		note: "pinned topic; inner shape NOT settled, as pin.added. Slack scopes a star to the starring user; this journal broadcasts it, which is a visibility question the streams do not answer yet and translation does not worsen — the identifiers were already broadcast"},
-	{topic: "star.removed", slack: translated("star_removed", everySurface, itemEvent("star_removed", false)),
-		note: "pinned topic; inner shape NOT settled, as pin.added"},
+	{topic: "star.added", recipient: true, slack: translated("star_added", SurfaceRTM, itemEvent("star_added", false)),
+		note: "current Slack reference authorizes a non-bot user and sends RTM only for the authenticated user; Events API delivery remains withheld until user-token subscriptions are modelled"},
+	{topic: "star.removed", recipient: true, slack: translated("star_removed", SurfaceRTM, itemEvent("star_removed", false)),
+		note: "current Slack reference authorizes a non-bot user and sends RTM only for the authenticated user; Events API delivery remains withheld until user-token subscriptions are modelled"},
 
 	// ---- conversation membership -------------------------------------------
 	{topic: "conversation.member_added", slack: translated("member_joined_channel", everySurface, memberJoinedChannel),
@@ -259,7 +256,7 @@ var topicRules = []topicRule{
 	{topic: "workspace.role_changed",
 		note: "not pinned: role administration has no Slack event"},
 	{topic: "file.created", slack: mapped("file_created", everySurface),
-		note: "pinned topic; needs the file object"},
+		note: "pinned topic; app delivery hydrates the file object only when the installed bot can access it"},
 	{topic: "file.public_shared", slack: mapped("file_public", everySurface),
 		note: "pinned topic; needs the file object"},
 	{topic: "file.public_revoked",
@@ -302,6 +299,8 @@ var topicRules = []topicRule{
 	{topic: "list.access.deleted", note: "not pinned: lists postdate the snapshot"},
 	{topic: "list.download.started", note: "not pinned: lists postdate the snapshot"},
 	{topic: "dialog.opened", note: "an interaction payload, not an event; a different transport contract"},
+	{topic: "app.home_opened", slack: translated("app_home_opened", appSurfaces, appHomeOpened),
+		note: "current first-party app_home_opened reference and @slack/types AppHomeOpenedEvent; app-targeted because opening one app must never fan out to another installed app"},
 	{topic: "view.opened", note: "an interaction payload, not an event; app_home_opened is a different fact"},
 	{topic: "view.published", note: "an interaction payload, not an event"},
 	{topic: "view.pushed", note: "an interaction payload, not an event"},

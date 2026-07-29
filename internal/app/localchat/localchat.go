@@ -2,6 +2,7 @@ package localchat
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -58,6 +59,7 @@ type Config struct {
 	BlobS3Prefix        string
 	BlobMaxBytes        int64
 	BootstrapAdminEmail string
+	AppCredentialKey    []byte
 }
 
 func ParseCluster(value string) ([]string, error) {
@@ -109,6 +111,15 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 	}
 	if config.Backend == BackendDqlite && (config.DSN != "" || config.DqliteDirectory == "" || config.DqliteAddress == "" || config.DqliteDatabase == "") {
 		return Runtime{}, errors.New("dqlite storage requires directory, address, and database; cluster seeds are optional for the bootstrap node")
+	}
+	if len(config.AppCredentialKey) != 0 && len(config.AppCredentialKey) != 32 {
+		return Runtime{}, errors.New("application credential key must be 32 bytes")
+	}
+	if config.Backend == BackendMemory && len(config.AppCredentialKey) == 0 {
+		config.AppCredentialKey = make([]byte, 32)
+		if _, err := rand.Read(config.AppCredentialKey); err != nil {
+			return Runtime{}, fmt.Errorf("generate ephemeral application credential key: %w", err)
+		}
 	}
 	var chatStore store.Store
 	var closer io.Closer
@@ -193,7 +204,7 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 		_ = closer.Close()
 		return Runtime{}, errors.New("selected store does not support scheduled message execution")
 	}
-	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore), Store: chatStore, Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, BlobStore: blobStore}, nil
+	return Runtime{Service: generated.ProvideChatServiceLocal(chatStore, blobStore, config.AppCredentialKey), Store: chatStore, Closer: closer, TokenStore: tokenStore, TokenSeeder: tokenSeeder, SessionStore: sessionStore, SessionRevoker: sessionRevoker, SessionSeeder: sessionSeeder, OutboxSource: outboxSource, CleanupSource: cleanupSource, ScheduledSource: scheduledSource, BlobStore: blobStore}, nil
 }
 
 func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {

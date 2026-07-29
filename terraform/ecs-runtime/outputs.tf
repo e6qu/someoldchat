@@ -33,9 +33,10 @@ output "environment" {
 output "secrets" {
   description = "SameOldChat secret environment variables mapped to AWS Secrets Manager ARNs."
   value = {
-    SAMEOLDCHAT_API_TOKEN          = aws_secretsmanager_secret.api_token.arn
-    SAMEOLDCHAT_AUTH_STATE_KEY_HEX = aws_secretsmanager_secret.auth_state_key.arn
-    SAMEOLDCHAT_OIDC_CLIENT_SECRET = var.oidc_client_secret_arn
+    SAMEOLDCHAT_API_TOKEN              = aws_secretsmanager_secret.api_token.arn
+    SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX = aws_secretsmanager_secret.app_credential_key.arn
+    SAMEOLDCHAT_AUTH_STATE_KEY_HEX     = aws_secretsmanager_secret.auth_state_key.arn
+    SAMEOLDCHAT_OIDC_CLIENT_SECRET     = var.oidc_client_secret_arn
   }
 }
 

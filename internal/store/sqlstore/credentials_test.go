@@ -149,6 +149,10 @@ func TestSQLiteOAuthCodeIsHashedAndExpires(t *testing.T) {
 	if record, err := s.LookupToken(ctx, "access-live"); err != nil || record.UserID != "U1" {
 		t.Fatalf("minted access token record=%+v err=%v", record, err)
 	}
+	installations, err := s.ListAppInstallations(ctx, "A1")
+	if err != nil || len(installations) != 1 || installations[0].WorkspaceID != "T1" {
+		t.Fatalf("atomic OAuth installation=%+v err=%v", installations, err)
+	}
 	if _, err := s.ExchangeOAuthCode(ctx, "client", "client-secret", fresh.Code, fresh.RedirectURI, "access-replay", domain.OAuthToken{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("replayed code error=%v, want %v", err, store.ErrNotFound)
 	}

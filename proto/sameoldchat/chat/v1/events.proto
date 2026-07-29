@@ -22,12 +22,50 @@ message EventsRequest {
   uint64 after = 2;
   int32 limit = 3;
   string app_id = 4;
+  string user_id = 5;
 }
 
 message EventsResponse {
   repeated EventRecord records = 1;
 }
 
+message AppEventClaimRequest {
+  string app_id = 1;
+  string surface = 2;
+  string owner = 3;
+  int64 lease_nanos = 4;
+}
+
+message AppEventLease {
+  EventRecord record = 1;
+  int32 attempt = 2;
+  string retry_reason = 3;
+  bool found = 4;
+}
+
+message AppEventAckRequest {
+  string app_id = 1;
+  string surface = 2;
+  string owner = 3;
+  uint64 sequence = 4;
+}
+
+message AppEventReleaseRequest {
+  string app_id = 1;
+  string surface = 2;
+  string owner = 3;
+  uint64 sequence = 4;
+  string retry_reason = 5;
+  int64 retry_at_unix_nano = 6;
+}
+
+message AppEventMutationResponse {
+  bool ok = 1;
+}
+
 service EventsService {
   rpc ListEventsAfter(EventsRequest) returns (EventsResponse);
+  rpc ClaimAppEvent(AppEventClaimRequest) returns (AppEventLease);
+  rpc AckAppEvent(AppEventAckRequest) returns (AppEventMutationResponse);
+  rpc ReleaseAppEvent(AppEventReleaseRequest) returns (AppEventMutationResponse);
 }

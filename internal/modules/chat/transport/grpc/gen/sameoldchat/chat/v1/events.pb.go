@@ -122,6 +122,7 @@ type EventsRequest struct {
 	After         uint64                 `protobuf:"varint,2,opt,name=after,proto3" json:"after,omitempty"`
 	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
 	AppId         string                 `protobuf:"bytes,4,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,5,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -184,6 +185,13 @@ func (x *EventsRequest) GetAppId() string {
 	return ""
 }
 
+func (x *EventsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 type EventsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*EventRecord         `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
@@ -228,6 +236,338 @@ func (x *EventsResponse) GetRecords() []*EventRecord {
 	return nil
 }
 
+type AppEventClaimRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Surface       string                 `protobuf:"bytes,2,opt,name=surface,proto3" json:"surface,omitempty"`
+	Owner         string                 `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	LeaseNanos    int64                  `protobuf:"varint,4,opt,name=lease_nanos,json=leaseNanos,proto3" json:"lease_nanos,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppEventClaimRequest) Reset() {
+	*x = AppEventClaimRequest{}
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppEventClaimRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppEventClaimRequest) ProtoMessage() {}
+
+func (x *AppEventClaimRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppEventClaimRequest.ProtoReflect.Descriptor instead.
+func (*AppEventClaimRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *AppEventClaimRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *AppEventClaimRequest) GetSurface() string {
+	if x != nil {
+		return x.Surface
+	}
+	return ""
+}
+
+func (x *AppEventClaimRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *AppEventClaimRequest) GetLeaseNanos() int64 {
+	if x != nil {
+		return x.LeaseNanos
+	}
+	return 0
+}
+
+type AppEventLease struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Record        *EventRecord           `protobuf:"bytes,1,opt,name=record,proto3" json:"record,omitempty"`
+	Attempt       int32                  `protobuf:"varint,2,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	RetryReason   string                 `protobuf:"bytes,3,opt,name=retry_reason,json=retryReason,proto3" json:"retry_reason,omitempty"`
+	Found         bool                   `protobuf:"varint,4,opt,name=found,proto3" json:"found,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppEventLease) Reset() {
+	*x = AppEventLease{}
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppEventLease) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppEventLease) ProtoMessage() {}
+
+func (x *AppEventLease) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppEventLease.ProtoReflect.Descriptor instead.
+func (*AppEventLease) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AppEventLease) GetRecord() *EventRecord {
+	if x != nil {
+		return x.Record
+	}
+	return nil
+}
+
+func (x *AppEventLease) GetAttempt() int32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *AppEventLease) GetRetryReason() string {
+	if x != nil {
+		return x.RetryReason
+	}
+	return ""
+}
+
+func (x *AppEventLease) GetFound() bool {
+	if x != nil {
+		return x.Found
+	}
+	return false
+}
+
+type AppEventAckRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AppId         string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Surface       string                 `protobuf:"bytes,2,opt,name=surface,proto3" json:"surface,omitempty"`
+	Owner         string                 `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	Sequence      uint64                 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppEventAckRequest) Reset() {
+	*x = AppEventAckRequest{}
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppEventAckRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppEventAckRequest) ProtoMessage() {}
+
+func (x *AppEventAckRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppEventAckRequest.ProtoReflect.Descriptor instead.
+func (*AppEventAckRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *AppEventAckRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *AppEventAckRequest) GetSurface() string {
+	if x != nil {
+		return x.Surface
+	}
+	return ""
+}
+
+func (x *AppEventAckRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *AppEventAckRequest) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+type AppEventReleaseRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	AppId           string                 `protobuf:"bytes,1,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Surface         string                 `protobuf:"bytes,2,opt,name=surface,proto3" json:"surface,omitempty"`
+	Owner           string                 `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	Sequence        uint64                 `protobuf:"varint,4,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	RetryReason     string                 `protobuf:"bytes,5,opt,name=retry_reason,json=retryReason,proto3" json:"retry_reason,omitempty"`
+	RetryAtUnixNano int64                  `protobuf:"varint,6,opt,name=retry_at_unix_nano,json=retryAtUnixNano,proto3" json:"retry_at_unix_nano,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AppEventReleaseRequest) Reset() {
+	*x = AppEventReleaseRequest{}
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppEventReleaseRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppEventReleaseRequest) ProtoMessage() {}
+
+func (x *AppEventReleaseRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppEventReleaseRequest.ProtoReflect.Descriptor instead.
+func (*AppEventReleaseRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *AppEventReleaseRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *AppEventReleaseRequest) GetSurface() string {
+	if x != nil {
+		return x.Surface
+	}
+	return ""
+}
+
+func (x *AppEventReleaseRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *AppEventReleaseRequest) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *AppEventReleaseRequest) GetRetryReason() string {
+	if x != nil {
+		return x.RetryReason
+	}
+	return ""
+}
+
+func (x *AppEventReleaseRequest) GetRetryAtUnixNano() int64 {
+	if x != nil {
+		return x.RetryAtUnixNano
+	}
+	return 0
+}
+
+type AppEventMutationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AppEventMutationResponse) Reset() {
+	*x = AppEventMutationResponse{}
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AppEventMutationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AppEventMutationResponse) ProtoMessage() {}
+
+func (x *AppEventMutationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AppEventMutationResponse.ProtoReflect.Descriptor instead.
+func (*AppEventMutationResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *AppEventMutationResponse) GetOk() bool {
+	if x != nil {
+		return x.Ok
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_events_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
@@ -240,16 +580,45 @@ const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\x05topic\x18\x04 \x01(\tR\x05topic\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\tR\apayload\x12/\n" +
 	"\x14created_at_unix_nano\x18\x06 \x01(\x03R\x11createdAtUnixNano\x12\x19\n" +
-	"\bactor_id\x18\a \x01(\tR\aactorId\"u\n" +
+	"\bactor_id\x18\a \x01(\tR\aactorId\"\x8e\x01\n" +
 	"\rEventsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05after\x18\x02 \x01(\x04R\x05after\x12\x14\n" +
 	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x15\n" +
-	"\x06app_id\x18\x04 \x01(\tR\x05appId\"L\n" +
+	"\x06app_id\x18\x04 \x01(\tR\x05appId\x12\x17\n" +
+	"\auser_id\x18\x05 \x01(\tR\x06userId\"L\n" +
 	"\x0eEventsResponse\x12:\n" +
-	"\arecords\x18\x01 \x03(\v2 .sameoldchat.chat.v1.EventRecordR\arecords2k\n" +
+	"\arecords\x18\x01 \x03(\v2 .sameoldchat.chat.v1.EventRecordR\arecords\"~\n" +
+	"\x14AppEventClaimRequest\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
+	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +
+	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1f\n" +
+	"\vlease_nanos\x18\x04 \x01(\x03R\n" +
+	"leaseNanos\"\x9c\x01\n" +
+	"\rAppEventLease\x128\n" +
+	"\x06record\x18\x01 \x01(\v2 .sameoldchat.chat.v1.EventRecordR\x06record\x12\x18\n" +
+	"\aattempt\x18\x02 \x01(\x05R\aattempt\x12!\n" +
+	"\fretry_reason\x18\x03 \x01(\tR\vretryReason\x12\x14\n" +
+	"\x05found\x18\x04 \x01(\bR\x05found\"w\n" +
+	"\x12AppEventAckRequest\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
+	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +
+	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x04R\bsequence\"\xcb\x01\n" +
+	"\x16AppEventReleaseRequest\x12\x15\n" +
+	"\x06app_id\x18\x01 \x01(\tR\x05appId\x12\x18\n" +
+	"\asurface\x18\x02 \x01(\tR\asurface\x12\x14\n" +
+	"\x05owner\x18\x03 \x01(\tR\x05owner\x12\x1a\n" +
+	"\bsequence\x18\x04 \x01(\x04R\bsequence\x12!\n" +
+	"\fretry_reason\x18\x05 \x01(\tR\vretryReason\x12+\n" +
+	"\x12retry_at_unix_nano\x18\x06 \x01(\x03R\x0fretryAtUnixNano\"*\n" +
+	"\x18AppEventMutationResponse\x12\x0e\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok2\xa1\x03\n" +
 	"\rEventsService\x12Z\n" +
-	"\x0fListEventsAfter\x12\".sameoldchat.chat.v1.EventsRequest\x1a#.sameoldchat.chat.v1.EventsResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x0fListEventsAfter\x12\".sameoldchat.chat.v1.EventsRequest\x1a#.sameoldchat.chat.v1.EventsResponse\x12^\n" +
+	"\rClaimAppEvent\x12).sameoldchat.chat.v1.AppEventClaimRequest\x1a\".sameoldchat.chat.v1.AppEventLease\x12e\n" +
+	"\vAckAppEvent\x12'.sameoldchat.chat.v1.AppEventAckRequest\x1a-.sameoldchat.chat.v1.AppEventMutationResponse\x12m\n" +
+	"\x0fReleaseAppEvent\x12+.sameoldchat.chat.v1.AppEventReleaseRequest\x1a-.sameoldchat.chat.v1.AppEventMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_events_proto_rawDescOnce sync.Once
@@ -263,21 +632,33 @@ func file_sameoldchat_chat_v1_events_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_events_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_sameoldchat_chat_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_sameoldchat_chat_v1_events_proto_goTypes = []any{
-	(*EventRecord)(nil),    // 0: sameoldchat.chat.v1.EventRecord
-	(*EventsRequest)(nil),  // 1: sameoldchat.chat.v1.EventsRequest
-	(*EventsResponse)(nil), // 2: sameoldchat.chat.v1.EventsResponse
+	(*EventRecord)(nil),              // 0: sameoldchat.chat.v1.EventRecord
+	(*EventsRequest)(nil),            // 1: sameoldchat.chat.v1.EventsRequest
+	(*EventsResponse)(nil),           // 2: sameoldchat.chat.v1.EventsResponse
+	(*AppEventClaimRequest)(nil),     // 3: sameoldchat.chat.v1.AppEventClaimRequest
+	(*AppEventLease)(nil),            // 4: sameoldchat.chat.v1.AppEventLease
+	(*AppEventAckRequest)(nil),       // 5: sameoldchat.chat.v1.AppEventAckRequest
+	(*AppEventReleaseRequest)(nil),   // 6: sameoldchat.chat.v1.AppEventReleaseRequest
+	(*AppEventMutationResponse)(nil), // 7: sameoldchat.chat.v1.AppEventMutationResponse
 }
 var file_sameoldchat_chat_v1_events_proto_depIdxs = []int32{
 	0, // 0: sameoldchat.chat.v1.EventsResponse.records:type_name -> sameoldchat.chat.v1.EventRecord
-	1, // 1: sameoldchat.chat.v1.EventsService.ListEventsAfter:input_type -> sameoldchat.chat.v1.EventsRequest
-	2, // 2: sameoldchat.chat.v1.EventsService.ListEventsAfter:output_type -> sameoldchat.chat.v1.EventsResponse
-	2, // [2:3] is the sub-list for method output_type
-	1, // [1:2] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0, // 1: sameoldchat.chat.v1.AppEventLease.record:type_name -> sameoldchat.chat.v1.EventRecord
+	1, // 2: sameoldchat.chat.v1.EventsService.ListEventsAfter:input_type -> sameoldchat.chat.v1.EventsRequest
+	3, // 3: sameoldchat.chat.v1.EventsService.ClaimAppEvent:input_type -> sameoldchat.chat.v1.AppEventClaimRequest
+	5, // 4: sameoldchat.chat.v1.EventsService.AckAppEvent:input_type -> sameoldchat.chat.v1.AppEventAckRequest
+	6, // 5: sameoldchat.chat.v1.EventsService.ReleaseAppEvent:input_type -> sameoldchat.chat.v1.AppEventReleaseRequest
+	2, // 6: sameoldchat.chat.v1.EventsService.ListEventsAfter:output_type -> sameoldchat.chat.v1.EventsResponse
+	4, // 7: sameoldchat.chat.v1.EventsService.ClaimAppEvent:output_type -> sameoldchat.chat.v1.AppEventLease
+	7, // 8: sameoldchat.chat.v1.EventsService.AckAppEvent:output_type -> sameoldchat.chat.v1.AppEventMutationResponse
+	7, // 9: sameoldchat.chat.v1.EventsService.ReleaseAppEvent:output_type -> sameoldchat.chat.v1.AppEventMutationResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_events_proto_init() }
@@ -291,7 +672,7 @@ func file_sameoldchat_chat_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_events_proto_rawDesc), len(file_sameoldchat_chat_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

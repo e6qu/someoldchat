@@ -28,6 +28,19 @@ func TestCumulativeEvidenceCountsTreatHigherEvidenceAsLowerEvidence(t *testing.T
 	}
 }
 
+func TestUnimplementedNamespacesMakesTheRemainingProductSurfaceVisible(t *testing.T) {
+	got := unimplementedNamespaces([]operation{
+		{Method: "admin.apps.uninstall", Status: "unimplemented"},
+		{Method: "apps.icon.set", Status: "unimplemented"},
+		{Method: "admin.roles.listAssignments", Status: "unimplemented"},
+		{Method: "chat.postMessage", Status: "behavior-compatible"},
+	})
+	if len(got) != 2 || got[0] != (namespaceCount{Name: "admin", Count: 2}) ||
+		got[1] != (namespaceCount{Name: "apps", Count: 1}) {
+		t.Fatalf("namespaces=%+v", got)
+	}
+}
+
 // The registration gate is the only thing tying a live Slack route to the
 // compatibility ledger. It used to read one named file and match one method
 // name, so three ways of registering a route were invisible to it: a route

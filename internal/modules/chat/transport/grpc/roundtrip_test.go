@@ -14,6 +14,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	chatv1 "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -59,6 +60,11 @@ type conversionCase struct {
 	// one field from another, so the expectation describes the contract rather
 	// than the filler.
 	prepare func(filled any)
+}
+
+type appHomeRoundTrip struct {
+	App  domain.InstalledApp
+	View domain.View
 }
 
 // omittedMarker is the value an omitted field is filled with before the wire
@@ -192,8 +198,8 @@ func conversionCases() map[string]conversionCase {
 				}
 			},
 		},
-		"Message":          {sample: &domain.Message{}, through: through(encodeProtoMessage, decodeProtoMessage)},
-		"MessagePage":      {sample: &domain.MessagePage{}, through: through(encodeProtoMessagePage, decodeProtoMessagePage)},
+		"Message":          {sample: &domain.Message{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoMessage, decodeProtoMessage)},
+		"MessagePage":      {sample: &domain.MessagePage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoMessagePage, decodeProtoMessagePage)},
 		"EphemeralMessage": {sample: &domain.EphemeralMessage{}, through: through(encodeProtoEphemeralMessage, decodeProtoEphemeralMessage)},
 		"File": {
 			sample: &domain.File{},
@@ -211,32 +217,64 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoExternalUpload, decodeProtoExternalUpload),
 		},
-		"RemoteFile":       {sample: &domain.RemoteFile{}, through: through(encodeProtoRemoteFile, decodeProtoRemoteFile)},
-		"RemoteFilePage":   {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
-		"ReadCursor":       {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
-		"TokenRecord":      {sample: &domain.TokenRecord{}, through: through(encodeProtoToken, decodeProtoToken)},
-		"SessionRecord":    {sample: &domain.SessionRecord{}, through: through(encodeProtoSession, decodeProtoSession)},
-		"Reaction":         {sample: &domain.Reaction{}, through: through(encodeProtoReaction, decodeProtoReaction)},
-		"UserReactionPage": {sample: &domain.UserReactionPage{}, through: through(encodeProtoUserReactionPage, decodeProtoUserReactionPage)},
-		"Pin":              {sample: &domain.Pin{}, through: through(encodeProtoPin, decodeProtoPin)},
-		"Star":             {sample: &domain.Star{}, through: through(encodeProtoStar, decodeProtoStar)},
-		"Bookmark":         {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
-		"Reminder":         {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
-		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
-		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
-		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
-		"Call":             {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
-		"Canvas":           {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
-		"List":             {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
-		"ListItem":         {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
-		"ListItemPage":     {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
-		"ListDownload":     {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
-		"AccessLog":        {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
-		"View":             {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
-		"Bot":              {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
-		"InviteRequest":    {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
-		"AppApproval":      {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
-		"RTMConnection":    {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
+		"RemoteFile":     {sample: &domain.RemoteFile{}, through: through(encodeProtoRemoteFile, decodeProtoRemoteFile)},
+		"RemoteFilePage": {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
+		"ReadCursor":     {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
+		"TokenRecord":    {sample: &domain.TokenRecord{}, through: through(encodeProtoToken, decodeProtoToken)},
+		"SessionRecord":  {sample: &domain.SessionRecord{}, through: through(encodeProtoSession, decodeProtoSession)},
+		"AppConfigurationCredentials": {
+			sample:  &domain.AppConfigurationCredentials{},
+			through: through(encodeProtoAppConfigurationCredentials, decodeProtoAppConfigurationCredentials),
+		},
+		"DeveloperApp": {
+			sample: &domain.App{},
+			omitted: map[string]string{
+				"SigningSecretHash":           "credential digest is storage-internal and must not cross the module boundary",
+				"SigningSecretCiphertext":     "encrypted credential is storage-internal and must not cross the module boundary",
+				"VerificationTokenCiphertext": "encrypted legacy credential is storage-internal and must not cross the module boundary",
+				"VerificationTokenHash":       "credential digest is storage-internal and must not cross the module boundary",
+			},
+			through: through(encodeProtoDeveloperApp, decodeProtoDeveloperApp),
+		},
+		"InstalledApp":              {sample: &domain.InstalledApp{}, through: through(encodeProtoInstalledApp, decodeProtoInstalledApp)},
+		"OAuthAuthorizationRequest": {sample: &domain.OAuthAuthorizationRequest{}, through: through(encodeProtoOAuthAuthorizationRequest, decodeProtoOAuthAuthorizationRequest)},
+		"OAuthAuthorization":        {sample: &domain.OAuthAuthorization{}, through: through(encodeProtoOAuthAuthorization, decodeProtoOAuthAuthorization)},
+		"Reaction":                  {sample: &domain.Reaction{}, through: through(encodeProtoReaction, decodeProtoReaction)},
+		"UserReactionPage":          {sample: &domain.UserReactionPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoUserReactionPage, decodeProtoUserReactionPage)},
+		"Pin":                       {sample: &domain.Pin{}, through: through(encodeProtoPin, decodeProtoPin)},
+		"Star":                      {sample: &domain.Star{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoStar, decodeProtoStar)},
+		"Bookmark":                  {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
+		"Reminder":                  {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
+		"ScheduledMessage":          {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
+		"DoNotDisturb":              {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
+		"UserGroup":                 {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
+		"Call":                      {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
+		"Canvas":                    {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
+		"List":                      {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
+		"ListItem":                  {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
+		"ListItemPage":              {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
+		"ListDownload":              {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
+		"AccessLog":                 {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
+		"View":                      {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
+		"AppHome": {
+			sample: &appHomeRoundTrip{},
+			through: through(
+				func(value appHomeRoundTrip) *chatv1.AppHomeResponse {
+					return encodeProtoAppHome(value.App, value.View)
+				},
+				func(value *chatv1.AppHomeResponse) (appHomeRoundTrip, error) {
+					app, view, err := decodeProtoAppHome(value)
+					return appHomeRoundTrip{App: app, View: view}, err
+				},
+			),
+		},
+		"SocketModeInteraction": {sample: &domain.SocketModeInteraction{}, through: through(func(value domain.SocketModeInteraction) *chatv1.SocketModeInteraction {
+			return encodeProtoSocketModeInteraction(value, true)
+		}, decodeProtoSocketModeInteraction)},
+		"Bot":           {sample: &domain.Bot{}, through: through(encodeProtoBot, decodeProtoBot)},
+		"InviteRequest": {sample: &domain.InviteRequest{}, through: throughInfallible(encodeProtoInviteRequest, decodeProtoInviteRequest)},
+		"AppApproval":   {sample: &domain.AppApproval{}, through: throughInfallible(encodeProtoAppApproval, decodeProtoAppApproval)},
+		"RTMConnection": {sample: &domain.RTMConnection{}, through: throughInfallible(encodeProtoRTMConnection, decodeProtoRTMConnection)},
 		"IncomingWebhook": {
 			sample: &domain.IncomingWebhook{},
 			omitted: map[string]string{
@@ -271,7 +309,7 @@ func conversionCases() map[string]conversionCase {
 			}
 			return &pinPage{Pins: decoded.Pins, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
 		}},
-		"StarPage": {sample: &starPage{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+		"StarPage": {sample: &starPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: func(t *testing.T, filled any) (any, proto.Message) {
 			value := filled.(*starPage)
 			wire := encodeProtoStarPage(value.Stars, value.NextCursor, value.HasMore)
 			decoded, err := decodeProtoStarPage(wire)
@@ -290,6 +328,14 @@ func conversionCases() map[string]conversionCase {
 			return &reactionPage{Reactions: decoded.Reactions, NextCursor: decoded.NextCursor, HasMore: decoded.HasMore}, wire
 		}},
 		"events.Record": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message) {
+			wire := encodeProtoEventRecord(*filled.(*events.Record))
+			record, err := decodeProtoEventRecord(wire)
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			return &record, wire
+		}},
+		"events.Record page": {sample: &events.Record{}, through: func(t *testing.T, filled any) (any, proto.Message) {
 			wire := encodeProtoEvents([]events.Record{*filled.(*events.Record)})
 			records, err := decodeProtoEvents(wire)
 			if err != nil {

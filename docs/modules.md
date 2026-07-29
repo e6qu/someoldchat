@@ -43,11 +43,13 @@ three-voter quorum.
 The runtime shapes are explicit:
 
 ```sh
-sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db'
+sameoldchat -chat-mode local -store sqlite -db 'file:sameoldchat.db' \
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"
 
 sameoldchat-chatd -listen :9443 -store sqlite -db 'file:chat.db' \
   -tls-cert chat.crt -tls-key chat.key \
   -tls-client-ca client-ca.crt \
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
   -api-token "$SAMEOLDCHAT_API_TOKEN" -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 sameoldchat -chat-mode grpc -chat-address chatd:9443 \
   -chat-ca server-ca.crt -chat-server-name chatd.internal \

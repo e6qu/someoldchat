@@ -21,6 +21,8 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	OAuthService_ExchangeOAuth_FullMethodName         = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuth"
 	OAuthService_ExchangeOAuthV2_FullMethodName       = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuthV2"
+	OAuthService_RefreshOAuthV2_FullMethodName        = "/sameoldchat.chat.v1.OAuthService/RefreshOAuthV2"
+	OAuthService_ExchangeOAuthV2Token_FullMethodName  = "/sameoldchat.chat.v1.OAuthService/ExchangeOAuthV2Token"
 	OAuthService_OpenIDConnectToken_FullMethodName    = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectToken"
 	OAuthService_OpenIDConnectUserInfo_FullMethodName = "/sameoldchat.chat.v1.OAuthService/OpenIDConnectUserInfo"
 )
@@ -31,6 +33,8 @@ const (
 type OAuthServiceClient interface {
 	ExchangeOAuth(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
 	ExchangeOAuthV2(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
+	RefreshOAuthV2(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
+	ExchangeOAuthV2Token(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error)
 	OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error)
 	OpenIDConnectUserInfo(ctx context.Context, in *OpenIDConnectUserInfoRequest, opts ...grpc.CallOption) (*OpenIDConnectUserInfoResponse, error)
 }
@@ -63,6 +67,26 @@ func (c *oAuthServiceClient) ExchangeOAuthV2(ctx context.Context, in *OAuthExcha
 	return out, nil
 }
 
+func (c *oAuthServiceClient) RefreshOAuthV2(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OAuthToken)
+	err := c.cc.Invoke(ctx, OAuthService_RefreshOAuthV2_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *oAuthServiceClient) ExchangeOAuthV2Token(ctx context.Context, in *OAuthExchangeRequest, opts ...grpc.CallOption) (*OAuthToken, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(OAuthToken)
+	err := c.cc.Invoke(ctx, OAuthService_ExchangeOAuthV2Token_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *oAuthServiceClient) OpenIDConnectToken(ctx context.Context, in *OpenIDConnectTokenRequest, opts ...grpc.CallOption) (*OpenIDConnectTokenResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(OpenIDConnectTokenResponse)
@@ -89,6 +113,8 @@ func (c *oAuthServiceClient) OpenIDConnectUserInfo(ctx context.Context, in *Open
 type OAuthServiceServer interface {
 	ExchangeOAuth(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
 	ExchangeOAuthV2(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
+	RefreshOAuthV2(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
+	ExchangeOAuthV2Token(context.Context, *OAuthExchangeRequest) (*OAuthToken, error)
 	OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error)
 	OpenIDConnectUserInfo(context.Context, *OpenIDConnectUserInfoRequest) (*OpenIDConnectUserInfoResponse, error)
 }
@@ -105,6 +131,12 @@ func (UnimplementedOAuthServiceServer) ExchangeOAuth(context.Context, *OAuthExch
 }
 func (UnimplementedOAuthServiceServer) ExchangeOAuthV2(context.Context, *OAuthExchangeRequest) (*OAuthToken, error) {
 	return nil, status.Error(codes.Unimplemented, "method ExchangeOAuthV2 not implemented")
+}
+func (UnimplementedOAuthServiceServer) RefreshOAuthV2(context.Context, *OAuthExchangeRequest) (*OAuthToken, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshOAuthV2 not implemented")
+}
+func (UnimplementedOAuthServiceServer) ExchangeOAuthV2Token(context.Context, *OAuthExchangeRequest) (*OAuthToken, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExchangeOAuthV2Token not implemented")
 }
 func (UnimplementedOAuthServiceServer) OpenIDConnectToken(context.Context, *OpenIDConnectTokenRequest) (*OpenIDConnectTokenResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenIDConnectToken not implemented")
@@ -168,6 +200,42 @@ func _OAuthService_ExchangeOAuthV2_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OAuthService_RefreshOAuthV2_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OAuthExchangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).RefreshOAuthV2(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_RefreshOAuthV2_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).RefreshOAuthV2(ctx, req.(*OAuthExchangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OAuthService_ExchangeOAuthV2Token_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(OAuthExchangeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OAuthServiceServer).ExchangeOAuthV2Token(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OAuthService_ExchangeOAuthV2Token_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OAuthServiceServer).ExchangeOAuthV2Token(ctx, req.(*OAuthExchangeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _OAuthService_OpenIDConnectToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(OpenIDConnectTokenRequest)
 	if err := dec(in); err != nil {
@@ -218,6 +286,14 @@ var OAuthService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ExchangeOAuthV2",
 			Handler:    _OAuthService_ExchangeOAuthV2_Handler,
+		},
+		{
+			MethodName: "RefreshOAuthV2",
+			Handler:    _OAuthService_RefreshOAuthV2_Handler,
+		},
+		{
+			MethodName: "ExchangeOAuthV2Token",
+			Handler:    _OAuthService_ExchangeOAuthV2Token_Handler,
 		},
 		{
 			MethodName: "OpenIDConnectToken",

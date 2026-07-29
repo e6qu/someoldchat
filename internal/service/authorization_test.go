@@ -186,24 +186,21 @@ func TestUserGroupMutationsRequireWorkspaceAdmin(t *testing.T) {
 	}
 }
 
-// views.publish required workspace membership and named its target by user id,
-// so any member could replace any other member's App Home with attacker-authored
-// Block Kit, for every user in the directory.
-//
-// Before the fix the first call returned nil and the victim's surface was
-// replaced.
-func TestPublishViewRefusesAnotherMembersAppHome(t *testing.T) {
+// views.publish is authorized by app ownership, not workspace administration:
+// Slack apps publish their own Home surface for each target member.
+func TestPublishViewAllowsAnAppsPerUserHome(t *testing.T) {
 	ctx := context.Background()
-	_, messages := twoMemberWorkspace(t)
+	repository, messages := twoMemberWorkspace(t)
+	seedHomeApp(t, repository, "A1")
 	payload := `{"type":"home","blocks":[]}`
 
-	if _, err := messages.PublishView(ctx, "T1", "U2", "U3", payload, ""); !errors.Is(err, ErrNotWorkspaceAdmin) {
-		t.Fatalf("a member published into another member's App Home: err=%v", err)
+	if _, err := messages.PublishView(ctx, "T1", "U2", "A1", "U3", payload, ""); err != nil {
+		t.Fatalf("the app could not publish a target member's App Home: %v", err)
 	}
-	if _, err := messages.PublishView(ctx, "T1", "U2", "U2", payload, ""); err != nil {
+	if _, err := messages.PublishView(ctx, "T1", "U2", "A1", "U2", payload, ""); err != nil {
 		t.Fatalf("a member could not publish their own App Home: %v", err)
 	}
-	if _, err := messages.PublishView(ctx, "T1", "U1", "U3", payload, ""); err != nil {
+	if _, err := messages.PublishView(ctx, "T1", "U1", "A1", "U3", payload, ""); err != nil {
 		t.Fatalf("the administrator was refused: %v", err)
 	}
 }
@@ -681,7 +678,7 @@ func TestCreatingAConversationMakesTheCreatorAMemberOfIt(t *testing.T) {
 			if _, err := messages.RenameConversation(ctx, "T1", "U1", conversation.ID, "qualification-renamed-"+name); err != nil {
 				t.Fatalf("the creator could not rename the channel they created: %v", err)
 			}
-			if _, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", conversation.ID, "hello", "", "", "", ""); err != nil {
+			if _, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", conversation.ID, "hello", "", "", "", "", ""); err != nil {
 				t.Fatalf("the creator could not post into the channel they created: %v", err)
 			}
 		})

@@ -4,6 +4,8 @@ package sameoldchat.chat.v1;
 
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
+import "sameoldchat/chat/v1/files.proto";
+
 message Message {
   string id = 1;
   string workspace_id = 2;
@@ -16,6 +18,10 @@ message Message {
   map<string, string> unfurls = 9;
   string blocks = 10;
   string attachments = 11;
+  string app_id = 12;
+  string metadata = 13;
+  string stream_state = 14;
+  repeated File files = 15;
 }
 
 message PostRequest {
@@ -36,6 +42,15 @@ message PostWithBlocksRequest {
   string attachments = 8;
   string thread_timestamp = 6;
   string idempotency_key = 7;
+  string app_id = 9;
+}
+
+message ShareFileRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string file_id = 3;
+  string conversation_id = 4;
+  string thread_timestamp = 5;
 }
 
 message EphemeralMessage {
@@ -47,6 +62,9 @@ message EphemeralMessage {
   string timestamp = 6;
   string blocks = 7;
   string attachments = 8;
+  string id = 9;
+  string app_id = 10;
+  string created_at = 11;
 }
 
 message PostEphemeralRequest {
@@ -57,6 +75,18 @@ message PostEphemeralRequest {
   string text = 5;
   string blocks = 6;
   string attachments = 7;
+  string app_id = 8;
+}
+
+message EphemeralMessagesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  int32 limit = 4;
+}
+
+message EphemeralMessagesResponse {
+  repeated EphemeralMessage messages = 1;
 }
 
 message UpdateRequest {
@@ -85,6 +115,35 @@ message UpdateMessageRequest {
   optional string text = 5;
   optional string blocks = 6;
   optional string attachments = 7;
+}
+
+message StartMessageStreamRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string thread_timestamp = 4;
+  string app_id = 5;
+  string recipient_team_id = 6;
+  string recipient_user_id = 7;
+  string markdown_text = 8;
+  string chunks = 9;
+  string bot_id = 10;
+  string task_display_mode = 11;
+  string username = 12;
+  string icon_emoji = 13;
+  string icon_url = 14;
+}
+
+message MutateMessageStreamRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+  string app_id = 5;
+  string markdown_text = 6;
+  string chunks = 7;
+  string blocks = 8;
+  string metadata = 9;
 }
 
 message UnfurlRequest {
@@ -194,10 +253,15 @@ message IncomingWebhookMutationResponse {
 service MessagesService {
   rpc Post(PostRequest) returns (Message);
   rpc PostWithBlocks(PostWithBlocksRequest) returns (Message);
+  rpc ShareFile(ShareFileRequest) returns (Message);
   rpc PostEphemeral(PostEphemeralRequest) returns (EphemeralMessage);
+  rpc ListEphemeral(EphemeralMessagesRequest) returns (EphemeralMessagesResponse);
   rpc Update(UpdateRequest) returns (Message);
   rpc UpdateWithBlocks(UpdateWithBlocksRequest) returns (Message);
   rpc UpdateMessage(UpdateMessageRequest) returns (Message);
+  rpc StartMessageStream(StartMessageStreamRequest) returns (Message);
+  rpc AppendMessageStream(MutateMessageStreamRequest) returns (Message);
+  rpc StopMessageStream(MutateMessageStreamRequest) returns (Message);
   rpc Unfurl(UnfurlRequest) returns (Message);
   rpc Delete(DeleteRequest) returns (Message);
   rpc Permalink(PermalinkRequest) returns (PermalinkResponse);

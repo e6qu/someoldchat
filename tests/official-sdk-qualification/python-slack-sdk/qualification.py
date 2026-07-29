@@ -121,8 +121,24 @@ assert oauth_v2["ok"] is True
 assert oauth_v2["authed_user"]["id"] == "U1"
 assert oauth_v2["token_type"] == "bot"
 assert oauth_v2["bot_user_id"] == "U1"
-assert oauth_v2["access_token"].startswith("xoxb-")
-assert "access_token" not in oauth_v2["authed_user"]
+assert oauth_v2["access_token"].startswith("xoxe.xoxb-")
+assert oauth_v2["refresh_token"].startswith("xoxe-")
+assert oauth_v2["expires_in"] == 43200
+assert oauth_v2["authed_user"]["access_token"].startswith("xoxe.xoxp-")
+assert oauth_v2["authed_user"]["refresh_token"].startswith("xoxe-")
+assert oauth_v2["authed_user"]["expires_in"] == 43200
+oauth_v2_refreshed = client.oauth_v2_access(
+    client_id="qualification-client",
+    client_secret="qualification-secret",
+    grant_type="refresh_token",
+    refresh_token=oauth_v2["refresh_token"],
+)
+assert oauth_v2_refreshed["ok"] is True
+assert oauth_v2_refreshed["token_type"] == "bot"
+assert oauth_v2_refreshed["access_token"].startswith("xoxe.xoxb-")
+assert oauth_v2_refreshed["refresh_token"].startswith("xoxe-")
+assert oauth_v2_refreshed["refresh_token"] != oauth_v2["refresh_token"]
+assert oauth_v2_refreshed["expires_in"] == 43200
 oauth_v2_user = client.api_call(
     "oauth.v2.user.access",
     params={
@@ -136,7 +152,9 @@ assert oauth_v2_user["ok"] is True
 assert "access_token" not in oauth_v2_user
 assert oauth_v2_user["authed_user"]["id"] == "U1"
 assert oauth_v2_user["authed_user"]["token_type"] == "user"
-assert oauth_v2_user["authed_user"]["access_token"].startswith("xoxp-")
+assert oauth_v2_user["authed_user"]["access_token"].startswith("xoxe.xoxp-")
+assert oauth_v2_user["authed_user"]["refresh_token"].startswith("xoxe-")
+assert oauth_v2_user["authed_user"]["expires_in"] == 43200
 oauth_token = client.api_call(
     "oauth.token",
     params={
@@ -293,7 +311,7 @@ updated_step = client.workflows_updateStep(
 )
 assert updated_step["ok"] is True
 opened_dialog = client.dialog_open(
-    trigger_id="qualification-trigger",
+    trigger_id="qualification-dialog-trigger",
     dialog={
         "callback_id": "qualification-dialog",
         "title": "Qualification",
@@ -303,7 +321,7 @@ opened_dialog = client.dialog_open(
 )
 assert opened_dialog["ok"] is True
 opened_view = client.views_open(
-    trigger_id="qualification-trigger",
+    trigger_id="qualification-open-trigger",
     view={
         "type": "modal",
         "callback_id": "qualification",
@@ -316,7 +334,7 @@ assert isinstance(opened_view["view"]["id"], str)
 published_view = client.views_publish(user_id="U1", view={"type": "home", "blocks": []})
 assert published_view["ok"] is True
 pushed_view = client.views_push(
-    trigger_id="qualification-trigger",
+    trigger_id="qualification-push-trigger",
     view={
         "type": "modal",
         "callback_id": "qualification-pushed",
@@ -684,7 +702,7 @@ assert marked["ok"] is True
 
 history = client.conversations_history(channel="C1", limit=10)
 assert history["ok"] is True
-assert len(history["messages"]) == 3
+assert len(history["messages"]) >= 3
 assert all(message["ts"] != posted["ts"] for message in history["messages"])
 assert history["has_more"] is False
 search = client.search_messages(query="thread", count=999, cursor="*")

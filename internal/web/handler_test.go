@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -19,9 +20,11 @@ import (
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
@@ -61,7 +64,11 @@ func browserWorkspace(t *testing.T, scopes []string) (*memory.Store, *http.Serve
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler(service.Messages{Store: s}, authenticator, s, "Cdev", "")
+	objects, err := blob.NewFilesystem(t.TempDir(), 100<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: s, Blob: objects, AppCredentialKey: []byte(strings.Repeat("k", 32))}, authenticator, s, "Cdev", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,6 +160,61 @@ func TestThreadViewRendersTheThreadAndItsComposer(t *testing.T) {
 	}
 }
 
+func TestWorkspaceUploadsSharesRendersAndDownloadsAFile(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	page := get(t, mux, "/app?channel=Cdev")
+	if page.Code != http.StatusOK {
+		t.Fatalf("workspace status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "workspace file control", page.Body.String(), "Attach a file", `action="/app/file?channel=Cdev"`, `enctype="multipart/form-data"`)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	if err := writer.WriteField("_csrf", auth.CSRFToken("session")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("title", "Quarterly report"); err != nil {
+		t.Fatal(err)
+	}
+	part, err := writer.CreateFormFile("file", "report.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("real file contents")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/app/file?channel=Cdev", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("upload status=%d body=%s", response.Code, response.Body)
+	}
+
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || len(history.Messages[0].Files) != 1 {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	file := history.Messages[0].Files[0]
+	rendered := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "shared file message", rendered.Body.String(), "Quarterly report", "report.txt", `/app/files/`+string(file.ID), "Download")
+
+	download := get(t, mux, "/app/files/"+string(file.ID))
+	if download.Code != http.StatusOK || download.Body.String() != "real file contents" {
+		t.Fatalf("download status=%d body=%q", download.Code, download.Body.String())
+	}
+	if disposition := download.Header().Get("Content-Disposition"); !strings.Contains(disposition, "attachment") || !strings.Contains(disposition, "report.txt") {
+		t.Fatalf("content disposition=%q", disposition)
+	}
+	if download.Header().Get("X-Content-Type-Options") != "nosniff" || download.Header().Get("Cache-Control") != "private, no-store" {
+		t.Fatalf("unsafe download headers=%v", download.Header())
+	}
+}
+
 // TestThreadRepliesRenderThroughTheSameTypeAsTheTimeline pins the invariant
 // behind the fix: one type feeds every message region, so no region can be
 // rendered with a value that is missing a field the partial needs.
@@ -231,6 +293,10 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`<h1 class="channel-title"># general</h1>`,
 		"<title>#general · SameOldChat</title>",
 		`placeholder="Message #general"`,
+		`role="toolbar" aria-label="Message formatting and insertions"`,
+		`aria-label="Mention a person"`,
+		`data-mention-user="U1"`,
+		`id="upload-preview" role="status">No file selected.`,
 		`<span class="author">Ada Developer</span>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
 		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,
@@ -238,6 +304,44 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 	requireMissing(t, "workspace shell", body, "# Cdev", "Message #Cdev", ">U1<")
 	// The machine timestamp stays in datetime= while the reader sees a short time.
 	requireContains(t, "message time", body, `datetime="2023-11-14T22:13:20Z">Nov 14, 22:13 UTC<`)
+}
+
+func TestWorkspaceRendersEphemeralAppResponsesOnlyToTheirRecipient(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "helper-bot", RealName: "Helper Bot"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "UOTHER", WorkspaceID: "T1", Name: "other", RealName: "Other Reader"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "UBOT"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "UOTHER"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (service.Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(
+		context.Background(), "T1", "UBOT", "Cdev", "U1", "Private result",
+		`[{"type":"section","text":{"type":"plain_text","text":"Build is ready"}},{"type":"actions","block_id":"private-result","elements":[{"type":"button","action_id":"acknowledge","text":{"type":"plain_text","text":"Acknowledge"},"value":"yes"}]}]`, "", "A1",
+	); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "recipient workspace", body, "Build is ready", "Only visible to you", "Private message only visible to you", "Acknowledge", `action="/app/interaction"`)
+	requireMissing(t, "ephemeral controls", body, "Reply in thread")
+
+	if err := s.SeedSession(context.Background(), "other-session", domain.SessionRecord{WorkspaceID: "T1", UserID: "UOTHER", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/app?channel=Cdev", nil)
+	request.AddCookie(&http.Cookie{Name: auth.SessionCookieName, Value: "other-session"})
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("other reader status=%d body=%s", response.Code, response.Body)
+	}
+	requireMissing(t, "non-recipient workspace", response.Body.String(), "Build is ready", "Only visible to you")
 }
 
 // A public channel may be read before it is joined, but every conversational
@@ -307,6 +411,43 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 		`aria-label="release, 1 unread messages"`,
 	)
 	requireMissing(t, "sidebar", body, `>direct<`, `aria-label="general, `)
+}
+
+func TestActivityAggregatesJoinedUnreadConversationsAndMentions(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1700000200, 0).UTC()
+	message := domain.Message{ID: "Mmention", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U2", Text: "Please review this, <@U1>", CreatedAt: created}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Emention", WorkspaceID: "T1", Topic: "message.created", Payload: "Mmention", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	workspace := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "activity navigation", workspace,
+		`id="activity-link"`,
+		`href="/app/activity?channel=Cdev"`,
+		`aria-keyshortcuts="Control+Shift+M Meta+Shift+M"`,
+	)
+	activity := get(t, mux, "/app/activity?channel=Cdev")
+	if activity.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", activity.Code, activity.Body)
+	}
+	requireContains(t, "activity page", activity.Body.String(),
+		"<title>Activity · SameOldChat</title>",
+		"Unread conversations",
+		"#general",
+		`aria-label="1 unread messages"`,
+		"Mentions",
+		"Bob Builder",
+		"Please review this",
+		`class="slack-mention">@Ada Developer</span>`,
+	)
+	requireContains(t, "activity shortcut", progressiveEnhancementScript, "event.shiftKey", "activityLink", "window.location.assign(activityHref)")
 }
 
 // TestNarrowNavigationKeepsConversationNamesReachable covers the responsive
@@ -411,7 +552,7 @@ func TestOwnMessageCanBeEditedAndDeleted(t *testing.T) {
 		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body)
 	}
 	after := get(t, mux, "/app?channel=Cdev").Body.String()
-	requireMissing(t, "deleted message", after, "after", `data-message-id="M1"`)
+	requireMissing(t, "deleted message", after, `data-message-id="M1"`)
 }
 
 func TestAnotherMembersMessageCannotBeChanged(t *testing.T) {
@@ -469,6 +610,77 @@ func TestWorkspaceCanCreateAChannel(t *testing.T) {
 	}
 	if target := enhanced.Header().Get("HX-Redirect"); !strings.Contains(target, "channel=") {
 		t.Fatalf("enhanced create did not name its destination: %q", target)
+	}
+}
+
+func TestConversationDetailsManageTheWholeChannelJourney(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "builder", RealName: "Bob Builder"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "reviewer", RealName: "Rae Reviewer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "U2"); err != nil {
+		t.Fatal(err)
+	}
+
+	body := get(t, mux, "/app?channel=Cdev&details=1").Body.String()
+	requireContains(t, "conversation details", body,
+		`role="dialog" aria-modal="true" aria-labelledby="conversation-details-title"`,
+		"Everything else",
+		"Bob Builder",
+		"Rae Reviewer",
+		`action="/app/conversation/invite?channel=Cdev"`,
+		`action="/app/conversation/rename?channel=Cdev"`,
+		`action="/app/conversation/topic?channel=Cdev"`,
+		`action="/app/conversation/purpose?channel=Cdev"`,
+		`action="/app/conversation/archive?channel=Cdev"`,
+		`action="/app/conversation/leave?channel=Cdev"`,
+	)
+
+	for _, mutation := range []struct {
+		target string
+		body   string
+	}{
+		{target: "/app/conversation/rename?channel=Cdev", body: "name=Product+Launch"},
+		{target: "/app/conversation/topic?channel=Cdev", body: "topic=Shipping+this+week"},
+		{target: "/app/conversation/purpose?channel=Cdev", body: "purpose=Coordinate+the+release"},
+		{target: "/app/conversation/invite?channel=Cdev", body: "user=U3"},
+	} {
+		result := postForm(t, mux, mutation.target, mutation.body, false)
+		if result.Code != http.StatusSeeOther || !strings.Contains(result.Header().Get("Location"), "details=1") {
+			t.Fatalf("%s status=%d location=%q body=%s", mutation.target, result.Code, result.Header().Get("Location"), result.Body)
+		}
+	}
+	conversation, err := s.GetConversation(context.Background(), "Cdev")
+	if err != nil || conversation.Name != "product-launch" || conversation.Topic != "Shipping this week" || conversation.Purpose != "Coordinate the release" {
+		t.Fatalf("conversation=%+v err=%v", conversation, err)
+	}
+	member, err := s.IsConversationMember(context.Background(), "Cdev", "U3")
+	if err != nil || !member {
+		t.Fatalf("invited member=%t err=%v", member, err)
+	}
+
+	archived := postForm(t, mux, "/app/conversation/archive?channel=Cdev", "archived=true", false)
+	if archived.Code != http.StatusSeeOther {
+		t.Fatalf("archive status=%d body=%s", archived.Code, archived.Body)
+	}
+	body = get(t, mux, "/app?channel=Cdev&details=1").Body.String()
+	requireContains(t, "archived conversation", body, "Archived", "Unarchive channel")
+	requireMissing(t, "archived conversation", body, `form class="composer`, `action="/app/conversation/invite?channel=Cdev"`)
+
+	unarchived := postForm(t, mux, "/app/conversation/archive?channel=Cdev", "archived=false", false)
+	if unarchived.Code != http.StatusSeeOther {
+		t.Fatalf("unarchive status=%d body=%s", unarchived.Code, unarchived.Body)
+	}
+	left := postForm(t, mux, "/app/conversation/leave?channel=Cdev", "", false)
+	if left.Code != http.StatusSeeOther {
+		t.Fatalf("leave status=%d body=%s", left.Code, left.Body)
+	}
+	member, err = s.IsConversationMember(context.Background(), "Cdev", "U1")
+	if err != nil || member {
+		t.Fatalf("membership after leave=%t err=%v", member, err)
 	}
 }
 
@@ -560,6 +772,42 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	if _, err := chat.Delete(ctx, "T1", "U1", "Cdev", timestamp); err != nil {
 		t.Fatal(err)
 	}
+	now := time.Now().UTC()
+	viewEvent := func(id, topic string, at time.Time) events.Event {
+		event, err := events.New(domain.EventID(id), "T1", "U1", events.NewPayload(topic, events.String("view_id", id)), at)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return event
+	}
+	firstView := domain.View{
+		ID: "V-live-1", AppID: "A-live", WorkspaceID: "T1", UserID: "U1", Type: "modal",
+		Payload: `{"type":"modal","title":{"type":"plain_text","text":"Live"},"blocks":[]}`,
+		Hash:    "hash-1", RootViewID: "V-live-1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateView(ctx, firstView, viewEvent("event-view-opened", "view.opened", now)); err != nil {
+		t.Fatal(err)
+	}
+	firstView.Hash = "hash-2"
+	firstView.UpdatedAt = now.Add(time.Second)
+	if _, err := s.UpdateView(ctx, firstView, "hash-1", viewEvent("event-view-updated", "view.updated", firstView.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	secondView := domain.View{
+		ID: "V-live-2", AppID: "A-live", WorkspaceID: "T1", UserID: "U1", Type: "modal",
+		Payload: `{"type":"modal","title":{"type":"plain_text","text":"Pushed"},"blocks":[]}`,
+		Hash:    "hash-3", RootViewID: firstView.ID, PreviousViewID: firstView.ID,
+		CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second),
+	}
+	if err := s.CreateView(ctx, secondView, viewEvent("event-view-pushed", "view.pushed", secondView.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteView(ctx, "T1", "U1", secondView.ID, false, viewEvent("event-view-submitted", "view.submitted", now.Add(3*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteView(ctx, "T1", "U1", firstView.ID, false, viewEvent("event-view-closed", "view.closed", now.Add(4*time.Second))); err != nil {
+		t.Fatal(err)
+	}
 	records, err := s.ListEventsAfter(ctx, "T1", 0, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -567,7 +815,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "pin.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "view.") {
 			emitted[topic] = true
 		}
 	}
@@ -919,7 +1167,7 @@ func TestThreadViewCarriesNoDuplicateIdentifiers(t *testing.T) {
 	}
 	body := get(t, mux, "/app?channel=Cdev&thread="+timestamp).Body.String()
 	seen := map[string]int{}
-	for _, match := range regexp.MustCompile(`id="([^"]+)"`).FindAllStringSubmatch(body, -1) {
+	for _, match := range regexp.MustCompile(`(?:^|\s)id="([^"]+)"`).FindAllStringSubmatch(body, -1) {
 		seen[match[1]]++
 		if seen[match[1]] > 1 {
 			t.Fatalf("the document carries id=%q %d times", match[1], seen[match[1]])
@@ -1567,8 +1815,9 @@ func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T
 		WorkspaceID:  "T1",
 		Conversation: "Cdev",
 		AuthorID:     "U1",
+		AppID:        "A1",
 		Text:         "notification fallback must not be repeated",
-		Blocks:       `[{"type":"header","text":{"type":"plain_text","text":"Deployment complete"}},{"type":"section","text":{"type":"mrkdwn","text":"*Production* is healthy"},"fields":[{"type":"plain_text","text":"Region: eu-west"}]},{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"View build"}}]}]`,
+		Blocks:       `[{"type":"header","text":{"type":"plain_text","text":"Deployment complete"}},{"type":"section","text":{"type":"mrkdwn","text":"*Production* is healthy"},"fields":[{"type":"plain_text","text":"Region: eu-west"}]},{"type":"actions","block_id":"deployment","elements":[{"type":"button","action_id":"view_build","text":{"type":"plain_text","text":"View build"},"value":"842"}]}]`,
 		Attachments:  `[{"author_name":"CI","title":"Build 842","title_link":"https://example.com/build/842","text":"All checks passed","fields":[{"title":"Duration","value":"3m 12s"}],"footer":"Continuous delivery"}]`,
 		Unfurls:      map[string]string{"https://example.com/runbook": `{"title":"Production runbook","text":"Recovery steps"}`},
 		CreatedAt:    created,
@@ -1580,7 +1829,7 @@ func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "rich message", body,
 		"Deployment complete",
-		"*Production* is healthy",
+		"<strong>Production</strong> is healthy",
 		"Region: eu-west",
 		"View build",
 		"Build 842",
@@ -1595,6 +1844,187 @@ func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T
 	)
 	requireMissing(t, "rich message", body, "notification fallback must not be repeated", `action="/app/message/update?channel=Cdev`)
 	requireContains(t, "rich message deletion", body, `action="/app/message/delete?channel=Cdev`)
+}
+
+func TestWorkspaceDiscoversAndDispatchesInstalledAppShortcuts(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	now := time.Now().UTC()
+	key := []byte(strings.Repeat("k", 32))
+	verification, err := secretbox.Seal(key, "app:A1:verification-token", "verification-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"display_information":{"name":"Tickets"},"features":{"shortcuts":[{"name":"Create ticket","callback_id":"create_ticket","description":"Create a ticket","type":"global"},{"name":"Attach ticket","callback_id":"attach_ticket","description":"Attach this message","type":"message"}]},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
+	if err := s.CreateApp(context.Background(), domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Tickets", ClientID: "shortcut-client",
+		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: domain.HashToken("verification-token"), VerificationTokenCiphertext: verification,
+		ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "shortcut-client", SecretHash: "client-hash", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	message := domain.Message{ID: "Mshortcut", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", AppID: "A1", Text: "Attach me", CreatedAt: now}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Eshortcut", WorkspaceID: "T1", Topic: "message.created", Payload: "Mshortcut", CreatedAt: now}, ""); err != nil {
+		t.Fatal(err)
+	}
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "app shortcuts", body,
+		"Shortcuts", "Create ticket", "Create a ticket", "More actions", "Attach ticket", "Attach this message",
+		`action="/app/shortcut"`, `name="app_id" value="A1"`, `name="callback_id" value="create_ticket"`,
+	)
+
+	response := postForm(t, mux, "/app/shortcut", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "channel": {"Cdev"}, "app_id": {"A1"}, "callback_id": {"create_ticket"},
+	}.Encode(), true)
+	if response.Code >= 400 {
+		t.Fatalf("shortcut status=%d body=%s", response.Code, response.Body)
+	}
+	interaction, found, err := s.ClaimSocketModeInteraction(context.Background(), "A1", "socket", time.Minute)
+	if err != nil || !found || !strings.Contains(interaction.Payload, `"type":"shortcut"`) || !strings.Contains(interaction.Payload, `"callback_id":"create_ticket"`) {
+		t.Fatalf("interaction=%+v found=%v err=%v", interaction, found, err)
+	}
+}
+
+func TestWorkspaceRendersAndSubmitsSocketModeModals(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	key := []byte(strings.Repeat("k", 32))
+	signing, err := secretbox.Seal(key, "app:A1:signing-secret", "signing-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verification, err := secretbox.Seal(key, "app:A1:verification-token", "verification-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"display_information":{"name":"Modal app"},"oauth_config":{"scopes":{"bot":["commands"]}},"settings":{"socket_mode_enabled":true,"interactivity":{"is_enabled":true}}}`
+	if err := s.CreateApp(ctx, domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Modal app", ClientID: "modal-client",
+		SigningSecretHash: domain.HashToken("signing-secret"), SigningSecretCiphertext: signing,
+		VerificationTokenHash: domain.HashToken("verification-token"), VerificationTokenCiphertext: verification,
+		ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "modal-client", SecretHash: "client-hash", AppID: "A1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	view := domain.View{
+		ID: "Vmodal", AppID: "A1", WorkspaceID: "T1", UserID: "U1", Type: "modal",
+		Payload: `{"type":"modal","title":{"type":"plain_text","text":"Create release"},"close":{"type":"plain_text","text":"Cancel"},"submit":{"type":"plain_text","text":"Create"},"notify_on_close":true,"blocks":[{"type":"input","block_id":"release_name","label":{"type":"plain_text","text":"Release name"},"hint":{"type":"plain_text","text":"Use a descriptive name"},"element":{"type":"plain_text_input","action_id":"name","placeholder":{"type":"plain_text","text":"July release"}}},{"type":"input","block_id":"environment","label":{"type":"plain_text","text":"Environment"},"element":{"type":"static_select","action_id":"environment_select","placeholder":{"type":"plain_text","text":"Choose an environment"},"options":[{"text":{"type":"plain_text","text":"Production"},"value":"production"},{"text":{"type":"plain_text","text":"Staging"},"value":"staging"}]}},{"type":"actions","block_id":"preview","elements":[{"type":"button","action_id":"preview_release","text":{"type":"plain_text","text":"Preview release"},"value":"preview"}]}]}`,
+		Hash:    "hash-modal", RootViewID: "Vmodal", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.CreateView(ctx, view, events.Event{ID: "E-modal", WorkspaceID: "T1", Topic: "view.opened", Payload: "Vmodal", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "app modal", body,
+		`role="dialog"`, `aria-modal="true"`, "Create release", "Release name", "Use a descriptive name",
+		`name="input_0"`, `name="input_1"`, "Production", "Staging",
+		"Preview release", `formaction="/app/view/action?channel=Cdev"`, `name="modal_action" value="0"`,
+		`action="/app/view/submit?channel=Cdev"`, `action="/app/view/close?channel=Cdev"`,
+	)
+	response := postForm(t, mux, "/app/view/action?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vmodal"}, "modal_action": {"0"},
+		"input_0": {"July launch"}, "input_1": {"production"},
+	}.Encode(), false)
+	if response.Code != http.StatusOK {
+		t.Fatalf("modal action status=%d body=%s", response.Code, response.Body)
+	}
+	requireContains(t, "modal action result", response.Body.String(), "The app action ran", `value="July launch"`, `value="production" selected`)
+	interaction, found, err := s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
+	if err != nil || !found || !strings.Contains(interaction.Payload, `"type":"block_actions"`) ||
+		!strings.Contains(interaction.Payload, `"action_id":"preview_release"`) ||
+		!strings.Contains(interaction.Payload, `"value":"July launch"`) {
+		t.Fatalf("modal action interaction=%+v found=%v err=%v", interaction, found, err)
+	}
+	messages := service.Messages{Store: s, AppCredentialKey: key}
+	if err := messages.HandleSocketModeResponse(ctx, "A1", interaction.EnvelopeID, []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AckSocketModeInteraction(ctx, "A1", interaction.EnvelopeID, "modal-client"); err != nil {
+		t.Fatal(err)
+	}
+	response = postForm(t, mux, "/app/view/submit?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vmodal"},
+		"input_0": {"July launch"}, "input_1": {"production"},
+	}.Encode(), false)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("modal submission status=%d body=%s", response.Code, response.Body)
+	}
+	requireContains(t, "pending modal", response.Body.String(), "The app is checking that modal", `value="July launch"`, `value="production" selected`)
+	interaction, found, err = s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
+	if err != nil || !found {
+		t.Fatalf("modal interaction=%+v found=%v err=%v", interaction, found, err)
+	}
+	var payload struct {
+		Type string `json:"type"`
+		View struct {
+			State struct {
+				Values map[string]map[string]map[string]any `json:"values"`
+			} `json:"state"`
+		} `json:"view"`
+	}
+	if err := json.Unmarshal([]byte(interaction.Payload), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Type != "view_submission" ||
+		payload.View.State.Values["release_name"]["name"]["value"] != "July launch" {
+		t.Fatalf("modal payload=%s", interaction.Payload)
+	}
+	if err := messages.HandleSocketModeResponse(ctx, "A1", interaction.EnvelopeID, []byte(`{"response_action":"errors","errors":{"release_name":"Use the full release name"}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AckSocketModeInteraction(ctx, "A1", interaction.EnvelopeID, "modal-client"); err != nil {
+		t.Fatal(err)
+	}
+	body = get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "modal validation", body, "Use the full release name", `value="July launch"`, `aria-invalid="true"`)
+
+	response = postForm(t, mux, "/app/view/submit?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vmodal"},
+		"input_0": {"July 2026 launch"}, "input_1": {"production"},
+	}.Encode(), false)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("second modal submission status=%d body=%s", response.Code, response.Body)
+	}
+	interaction, found, err = s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
+	if err != nil || !found {
+		t.Fatalf("second modal interaction=%+v found=%v err=%v", interaction, found, err)
+	}
+	if err := messages.HandleSocketModeResponse(ctx, "A1", interaction.EnvelopeID, []byte(`{}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AckSocketModeInteraction(ctx, "A1", interaction.EnvelopeID, "modal-client"); err != nil {
+		t.Fatal(err)
+	}
+	requireMissing(t, "closed modal", get(t, mux, "/app?channel=Cdev").Body.String(), `role="dialog"`, "Create release")
+
+	view.ID, view.RootViewID = "Vclose", "Vclose"
+	view.Hash = "hash-close"
+	view.CreatedAt, view.UpdatedAt = now.Add(time.Minute), now.Add(time.Minute)
+	if err := s.CreateView(ctx, view, events.Event{ID: "E-close", WorkspaceID: "T1", Topic: "view.opened", Payload: "Vclose", CreatedAt: view.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	response = postForm(t, mux, "/app/view/close?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "view_id": {"Vclose"}, "clear": {"false"},
+	}.Encode(), false)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("modal close status=%d body=%s", response.Code, response.Body)
+	}
+	interaction, found, err = s.ClaimSocketModeInteraction(ctx, "A1", "modal-client", time.Minute)
+	if err != nil || !found || !strings.Contains(interaction.Payload, `"type":"view_closed"`) {
+		t.Fatalf("view_closed interaction=%+v found=%v err=%v", interaction, found, err)
+	}
 }
 
 func TestMemberDirectoryDoesNotOfferProfileWritesWithoutScope(t *testing.T) {

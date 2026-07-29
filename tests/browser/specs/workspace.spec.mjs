@@ -97,6 +97,92 @@ test('workspace supports the core browser journey', async ({ page, context }) =>
   await expect(page.locator('.channel-title')).toHaveText('# general');
 });
 
+test('a file upload becomes a real message and an authenticated download', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  await page.getByText('Attach a file', { exact: true }).click();
+  const title = `Browser file ${Date.now()}`;
+  await page.getByLabel('Title (optional)').fill(title);
+  await page.locator('#upload-file').setInputFiles({
+    name: 'browser-report.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('browser file contents'),
+  });
+  await page.getByRole('button', { name: 'Upload and send' }).click();
+
+  await expect(page).toHaveURL(/\/app\?channel=Cdev/);
+  const card = page.locator('.message-file', { hasText: title }).last();
+  await expect(card).toContainText('browser-report.txt');
+  await expect(card).toContainText('text/plain');
+
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    card.getByRole('link', { name: 'Download' }).click(),
+  ]);
+  expect(download.suggestedFilename()).toBe('browser-report.txt');
+  const stream = await download.createReadStream();
+  const chunks = [];
+  for await (const chunk of stream) chunks.push(chunk);
+  expect(Buffer.concat(chunks).toString()).toBe('browser file contents');
+});
+
+test('developer app console creates, validates, edits, and deletes a real app', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Developer apps', exact: true }).click();
+  await expect(page).toHaveURL(/\/app\/developer\/apps$/);
+  await expect(page.getByRole('heading', { name: 'Developer apps' }).last()).toBeVisible();
+
+  const manifest = page.getByRole('textbox', { name: 'App manifest (JSON)' });
+  await manifest.fill('{"display_information":{}}');
+  await page.getByRole('button', { name: 'Create app' }).click();
+  await expect(page.getByRole('alert')).toContainText('Fix the manifest errors');
+  await expect(page.getByLabel('Manifest errors')).toContainText('/display_information/name');
+
+  const name = `Browser app ${Date.now()}`;
+  const validManifest = JSON.stringify({
+    display_information: { name, description: 'Created through the browser console' },
+    oauth_config: {
+      redirect_urls: ['https://client.example/oauth'],
+      scopes: { bot: ['chat:write'], user: ['users:read'] },
+    },
+    settings: {
+      token_rotation_enabled: true,
+      socket_mode_enabled: true,
+      event_subscriptions: { bot_events: ['message.channels'] },
+    },
+  }, null, 2);
+  await manifest.fill(validManifest);
+  await page.getByRole('button', { name: 'Create app' }).click();
+  await expect(page.getByRole('heading', { name: 'Save these app credentials now' })).toBeVisible();
+  await expect(page.locator('.secret code')).toHaveCount(4);
+  await expect(page.getByRole('link', { name: 'Open install flow' })).toHaveAttribute('href', /scope=chat%3Awrite/);
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Save these app credentials now' })).toHaveCount(0);
+  await expect(page.getByText(name, { exact: true }).first()).toBeVisible();
+  await manifest.fill(validManifest.replace(name, `${name} edited`));
+  await page.getByRole('button', { name: 'Save manifest' }).click();
+  await expect(page.getByRole('status')).toContainText('Manifest saved');
+  await expect(page.getByText('Manifest v2', { exact: true })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Generate app-level token' }).click();
+  await expect(page.getByRole('heading', { name: 'Save this app-level token now' })).toBeVisible();
+  await expect(page.locator('.secret code').first()).toContainText('xapp-');
+  await expect(page.locator('.secret')).toContainText('connections:write');
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Save this app-level token now' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Issue configuration token' }).click();
+  await expect(page.getByRole('heading', { name: 'Save this configuration token now' })).toBeVisible();
+  await expect(page.locator('.secret code').first()).toContainText('xoxe.xoxp-');
+
+  await page.getByRole('button', { name: 'Delete app' }).click();
+  await expect(page).toHaveURL(/\/app\/developer\/apps$/);
+  await expect(page.getByText('You have not created an app yet.')).toBeVisible();
+});
+
 test('JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {
   const stamp = Date.now();
   const blockHeader = `Deployment complete ${stamp}`;
@@ -110,9 +196,82 @@ test('JSON-authored blocks, attachments, and unfurls render as usable messages',
         text: { type: 'mrkdwn', text: '*Production* is healthy' },
         fields: [{ type: 'plain_text', text: 'Region: eu-west' }],
       },
+      { type: 'markdown', text: `## Release ${stamp}\nStreaming-ready output` },
+      {
+        type: 'table',
+        rows: [
+          [{ type: 'raw_text', text: 'Service' }, { type: 'raw_text', text: 'Latency' }],
+          [{ type: 'raw_text', text: 'API' }, { type: 'raw_number', value: 42 }],
+        ],
+      },
       {
         type: 'actions',
-        elements: [{ type: 'button', text: { type: 'plain_text', text: 'View build' } }],
+        elements: [{ type: 'button', action_id: 'view_build', text: { type: 'plain_text', text: 'View build' } }],
+      },
+    ],
+  });
+  const currentBlockTitle = `Current Block Kit ${stamp}`;
+  await postPayloadThroughTheAPI(request, {
+    channel: CHANNEL,
+    blocks: [
+      { type: 'alert', level: 'success', text: { type: 'mrkdwn', text: '*Validated* against the current catalog' } },
+      {
+        type: 'card',
+        title: { type: 'plain_text', text: currentBlockTitle },
+        subtitle: { type: 'plain_text', text: 'Production' },
+        body: { type: 'mrkdwn', text: '*Healthy* and serving traffic' },
+      },
+      {
+        type: 'carousel',
+        elements: [
+          { type: 'card', title: { type: 'plain_text', text: `Region EU ${stamp}` } },
+          { type: 'card', title: { type: 'plain_text', text: `Region US ${stamp}` } },
+        ],
+      },
+      {
+        type: 'task_card',
+        task_id: 'browser-task',
+        title: `Qualify task ${stamp}`,
+        status: 'complete',
+        output: {
+          type: 'rich_text',
+          elements: [{ type: 'rich_text_section', elements: [{ type: 'text', text: 'Browser verified', style: { bold: true } }] }],
+        },
+      },
+      {
+        type: 'plan',
+        title: `Qualification plan ${stamp}`,
+        tasks: [{ task_id: 'browser-plan-task', title: 'Render current blocks', status: 'complete' }],
+      },
+      {
+        type: 'data_table',
+        caption: `Health data ${stamp}`,
+        rows: [
+          [{ type: 'raw_text', text: 'Service' }, { type: 'raw_text', text: 'Latency' }],
+          [{ type: 'raw_text', text: 'API' }, { type: 'raw_number', value: 42 }],
+        ],
+      },
+      {
+        type: 'container',
+        width: 'wide',
+        title: { type: 'plain_text', text: `Bulk update ${stamp}` },
+        subtitle: { type: 'mrkdwn', text: 'Review *two* records' },
+        is_collapsible: true,
+        default_collapsed: true,
+        child_blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: '*DCW-1024* → Closed' } },
+          { type: 'divider' },
+          { type: 'context', elements: [{ type: 'plain_text', text: 'Ready to apply' }] },
+        ],
+      },
+      {
+        type: 'data_visualization',
+        title: `Weekly health ${stamp}`,
+        chart: {
+          type: 'line',
+          series: [{ name: 'Availability', data: [{ label: 'Week 1', value: 99.9 }, { label: 'Week 2', value: 99.99 }] }],
+          axis_config: { categories: ['Week 1', 'Week 2'], x_label: 'Week', y_label: 'Percent' },
+        },
       },
     ],
   });
@@ -152,13 +311,42 @@ test('JSON-authored blocks, attachments, and unfurls render as usable messages',
   await page.goto('/app');
 
   const blockMessage = page.locator('.message', { hasText: blockHeader });
-  await expect(blockMessage.getByText('*Production* is healthy', { exact: true })).toBeVisible();
+  await expect(blockMessage.locator('strong', { hasText: 'Production' })).toBeVisible();
+  await expect(blockMessage.getByText('Production is healthy', { exact: true })).toBeVisible();
   await expect(blockMessage.getByText('Region: eu-west', { exact: true })).toBeVisible();
-  await expect(blockMessage.getByText('View build', { exact: true })).toBeVisible();
+  await expect(blockMessage.getByRole('heading', { level: 2, name: `Release ${stamp}` })).toBeVisible();
+  await expect(blockMessage.getByText('Streaming-ready output', { exact: true })).toBeVisible();
+  await expect(blockMessage.locator('.block-table')).toContainText('Service');
+  await expect(blockMessage.locator('.block-table')).toContainText('42');
+  // A user-authored message has no owning app endpoint. Rendering its button
+  // as an inert label would claim an action exists when no Slack app can
+  // receive it, so the first-party client withholds that control.
+  await expect(blockMessage.getByText('View build', { exact: true })).toHaveCount(0);
   await expect(blockMessage.locator('.message-text')).toHaveCount(0);
   await expect(blockMessage.getByText(`notification fallback ${stamp}`, { exact: true })).toHaveCount(0);
   await expect(blockMessage.getByText('Edit', { exact: true })).toHaveCount(0);
   await expect(blockMessage.getByText('Delete', { exact: true })).toBeVisible();
+
+  const currentBlockMessage = page.locator('.message', { hasText: currentBlockTitle });
+  await expect(currentBlockMessage.locator('.message-block.alert.success')).toContainText('Validated against the current catalog');
+  await expect(currentBlockMessage.locator('.message-block.card')).toContainText(currentBlockTitle);
+  await expect(currentBlockMessage.locator('.block-card-body strong')).toHaveText('Healthy');
+  await expect(currentBlockMessage.locator('.block-carousel-card')).toHaveCount(2);
+  await expect(currentBlockMessage.locator('.block-carousel-card').first()).toContainText(`Region EU ${stamp}`);
+  await expect(currentBlockMessage.locator('.message-block.task-card')).toContainText(`Qualify task ${stamp}`);
+  await expect(currentBlockMessage.getByText('Browser verified', { exact: true })).toBeVisible();
+  await expect(currentBlockMessage.locator('.message-block.plan')).toContainText(`Qualification plan ${stamp}`);
+  await expect(currentBlockMessage.locator('.message-block.data-table caption')).toHaveText(`Health data ${stamp}`);
+  await expect(currentBlockMessage.locator('.message-block.data-table th').first()).toHaveAttribute('scope', 'col');
+  const container = currentBlockMessage.locator('.message-block.container details');
+  await expect(container.locator('summary')).toContainText(`Bulk update ${stamp}`);
+  await expect(container).not.toHaveAttribute('open', '');
+  await container.locator('summary').click();
+  await expect(container).toHaveAttribute('open', '');
+  await expect(container).toContainText('DCW-1024');
+  await expect(currentBlockMessage.locator('.message-block.data-visualization figcaption')).toHaveText(`Weekly health ${stamp}`);
+  await expect(currentBlockMessage.locator('.message-block.data-visualization polyline')).toHaveCount(1);
+  await expect(currentBlockMessage.locator('.block-chart-data th', { hasText: 'Availability' })).toHaveAttribute('scope', 'col');
 
   const attachmentMessage = page.locator('.message', { hasText: attachmentTitle });
   await expect(attachmentMessage.getByText('All checks passed', { exact: true })).toBeVisible();
@@ -235,6 +423,59 @@ test('the composer honours the keyboard contract it advertises', async ({ page, 
   await page.locator('.channel-title').click();
   await page.keyboard.press('/');
   await expect(search).toBeFocused();
+
+  await page.keyboard.press('Control+Shift+m');
+  await expect(page).toHaveURL(/\/app\/activity/);
+  await expect(page.getByRole('heading', { name: 'Unread conversations' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Mentions' })).toBeVisible();
+});
+
+test('composer formatting, mentions, emoji, drafts, and file preview are functional', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const composer = page.locator('form.composer textarea[name="text"]');
+  await composer.fill('format me');
+  await composer.evaluate((field) => field.setSelectionRange(0, field.value.length));
+  await page.getByRole('button', { name: 'Bold' }).click();
+  await expect(composer).toHaveValue('*format me*');
+
+  await composer.evaluate((field) => field.setSelectionRange(field.value.length, field.value.length));
+  await page.getByRole('button', { name: 'Choose an emoji' }).click();
+  await page.getByRole('menuitem', { name: 'Party popper' }).click();
+  await expect(composer).toHaveValue('*format me*:tada:');
+  await composer.press('Enter');
+  const formatted = page.locator('.message').last();
+  await expect(formatted.locator('strong')).toHaveText('format me');
+  await expect(formatted.locator('.message-text')).toContainText(':tada:');
+
+  await composer.fill('@');
+  const suggestions = page.getByRole('listbox', { name: 'Mention suggestions' });
+  await expect(suggestions).toBeVisible();
+  await composer.press('Enter');
+  await expect(composer).toHaveValue(/^<@U[^>]+> $/);
+
+  const draft = `durable draft ${Date.now()}`;
+  await composer.fill(draft);
+  await page.reload();
+  await expect(composer).toHaveValue(draft);
+
+  await page.getByText('Attach a file', { exact: true }).click();
+  await page.locator('#upload-file').setInputFiles({
+    name: 'preview.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('preview body'),
+  });
+  await expect(page.locator('#upload-preview')).toContainText('preview.txt');
+  await expect(page.locator('#upload-preview')).toContainText('12 B');
+
+  const sent = `draft cleared ${Date.now()}`;
+  await composer.fill(sent);
+  await composer.press('Enter');
+  await expect(page.locator('.message-text').last()).toHaveText(sent);
+  await expect(composer).toHaveValue('');
+  await page.reload();
+  await expect(composer).toHaveValue('');
 });
 
 test('message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
@@ -324,6 +565,46 @@ test('a public-channel preview can be joined and posted to', async ({ page, cont
   await composer.fill(sent);
   await composer.press('Enter');
   await expect(page.locator('.message-text').last()).toHaveText(sent);
+});
+
+test('conversation details manage a channel without falling back to the API', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const stamp = Date.now();
+  const originalName = `journey-${stamp}`;
+  await page.getByText('Add channel', { exact: false }).click();
+  await page.getByLabel('Channel name').fill(originalName);
+  await page.getByRole('button', { name: 'Create', exact: true }).click();
+  await expect(page.locator('.channel-title')).toHaveText(`# ${originalName}`);
+
+  await page.getByRole('link', { name: 'Open conversation details' }).click();
+  const details = page.getByRole('dialog', { name: `# ${originalName}` });
+  await expect(details).toBeVisible();
+  await expect(details).toContainText('Every available workspace member is already in this channel.');
+
+  const renamed = `release-${stamp}`;
+  await details.getByLabel('Channel name').fill(renamed);
+  await details.getByRole('button', { name: 'Rename' }).click();
+  await expect(page.getByRole('dialog', { name: `# ${renamed}` })).toBeVisible();
+
+  await page.getByLabel('Topic').fill('Shipping this week');
+  await page.getByRole('button', { name: 'Save topic' }).click();
+  await expect(page.getByText('Shipping this week', { exact: true }).first()).toBeVisible();
+
+  await page.getByLabel('Purpose').fill('Coordinate the release');
+  await page.getByRole('button', { name: 'Save purpose' }).click();
+  await expect(page.getByText('Coordinate the release', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Archive channel' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Archived');
+  await expect(page.locator('form.composer')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Unarchive channel' }).click();
+  await expect(page.locator('form.composer')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Leave channel' }).click();
+  await expect(page.getByText('Not joined', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Join channel' })).toBeVisible();
 });
 
 // The page closed its EventSource on the first submit and never reopened it, and

@@ -58,6 +58,7 @@ representative_value() {
 	SAMEOLDCHAT_AUTH_PUBLIC_URL) echo "https://chat.example.com" ;;
 	SAMEOLDCHAT_AUTH_COOKIE_DOMAIN) echo "example.com" ;;
 	SAMEOLDCHAT_AUTH_STATE_KEY_HEX) echo "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ;;
+	SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX) echo "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" ;;
 	SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL) echo "admin@example.com" ;;
 	SAMEOLDCHAT_BLOB_S3_BUCKET) echo "sameoldchat-blobs-representative" ;;
 	SAMEOLDCHAT_BLOB_S3_PREFIX) echo "blobs/" ;;

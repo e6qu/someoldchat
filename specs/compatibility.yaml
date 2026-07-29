@@ -29,6 +29,22 @@ sources:
     sha256: f6d1704676f4866fc62704086a916dd4c3d9f53a570b9e2976a80450e641d05a
     license: MIT
     retrieved_at: 2026-07-12T19:00:00Z
+  - id: slack-current-method-reference
+    kind: markdown-index
+    upstream: https://docs.slack.dev/llms-sitemap.md
+    revision: sha256:843a0a6667c9336deb541d437d8916de7087bc8f2305576b4371ff47caf61f4d
+    path: specs/upstream/slack-reference/current-methods.txt
+    sha256: 0c591b74d588fa66ecf442fd672243582ecb2ddbf6de03a5652277bdb0b0d996
+    license: Slack API Terms of Service
+    retrieved_at: 2026-07-28T00:00:00Z
+  - id: slack-current-event-reference
+    kind: markdown-index
+    upstream: https://docs.slack.dev/llms-sitemap.md
+    revision: sha256:843a0a6667c9336deb541d437d8916de7087bc8f2305576b4371ff47caf61f4d
+    path: specs/upstream/slack-reference/current-events.txt
+    sha256: fcf14b31acd19e3666002f99af845cef1d4f5b1c56ad1984df83ac1c6880596b
+    license: Slack API Terms of Service
+    retrieved_at: 2026-07-28T00:00:00Z
 
 operations:
   - method: api.test
@@ -54,23 +70,23 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.connections.open/
   - method: apps.manifest.create
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.create/
   - method: apps.manifest.delete
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.delete/
   - method: apps.manifest.export
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.export/
   - method: apps.manifest.update
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.update/
   - method: apps.manifest.validate
-    status: unimplemented
+    status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/apps.manifest.validate/
   - method: auth.revoke
@@ -550,7 +566,7 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: oauth.v2.exchange
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.exchange/
   - method: oauth.v2.user.access
@@ -709,6 +725,434 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/openid.connect.userInfo/
+  - method: admin.analytics.getFile
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.analytics.getFile/
+  - method: admin.analytics.messages.activity
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.activity/
+  - method: admin.analytics.messages.metadata
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.analytics.messages.metadata/
+  - method: admin.apps.activities.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.activities.list/
+  - method: admin.apps.clearResolution
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.clearResolution/
+  - method: admin.apps.config.lookup
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.config.lookup/
+  - method: admin.apps.config.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.config.set/
+  - method: admin.apps.requests.cancel
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.requests.cancel/
+  - method: admin.apps.uninstall
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.apps.uninstall/
+  - method: admin.audit.anomaly.allow.getItem
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.audit.anomaly.allow.getItem/
+  - method: admin.audit.anomaly.allow.updateItem
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.audit.anomaly.allow.updateItem/
+  - method: admin.auth.policy.assignEntities
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.auth.policy.assignEntities/
+  - method: admin.auth.policy.getEntities
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.auth.policy.getEntities/
+  - method: admin.auth.policy.removeEntities
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.auth.policy.removeEntities/
+  - method: admin.barriers.create
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.barriers.create/
+  - method: admin.barriers.delete
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.barriers.delete/
+  - method: admin.barriers.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.barriers.list/
+  - method: admin.barriers.update
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.barriers.update/
+  - method: admin.conversations.bulkArchive
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkArchive/
+  - method: admin.conversations.bulkDelete
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkDelete/
+  - method: admin.conversations.bulkMove
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkMove/
+  - method: admin.conversations.bulkSetExcludeFromSlackAi
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.bulkSetExcludeFromSlackAi/
+  - method: admin.conversations.convertToPublic
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.convertToPublic/
+  - method: admin.conversations.createForObjects
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.createForObjects/
+  - method: admin.conversations.getCustomRetention
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.getCustomRetention/
+  - method: admin.conversations.linkObjects
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.linkObjects/
+  - method: admin.conversations.lookup
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.lookup/
+  - method: admin.conversations.removeCustomRetention
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.removeCustomRetention/
+  - method: admin.conversations.setCustomRetention
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.setCustomRetention/
+  - method: admin.conversations.unlinkObjects
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.conversations.unlinkObjects/
+  - method: admin.functions.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.functions.list/
+  - method: admin.functions.permissions.lookup
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.lookup/
+  - method: admin.functions.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.functions.permissions.set/
+  - method: admin.roles.addAssignments
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.roles.addAssignments/
+  - method: admin.roles.listAssignments
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.roles.listAssignments/
+  - method: admin.roles.removeAssignments
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.roles.removeAssignments/
+  - method: admin.users.getExpiration
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.getExpiration/
+  - method: admin.users.session.clearSettings
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.session.clearSettings/
+  - method: admin.users.session.getSettings
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.session.getSettings/
+  - method: admin.users.session.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.session.list/
+  - method: admin.users.session.resetBulk
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.session.resetBulk/
+  - method: admin.users.session.setSettings
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.session.setSettings/
+  - method: admin.users.unsupportedVersions.export
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.users.unsupportedVersions.export/
+  - method: admin.workflows.collaborators.add
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.add/
+  - method: admin.workflows.collaborators.remove
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.collaborators.remove/
+  - method: admin.workflows.permissions.lookup
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.permissions.lookup/
+  - method: admin.workflows.search
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.search/
+  - method: admin.workflows.triggers.types.permissions.lookup
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.lookup/
+  - method: admin.workflows.triggers.types.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.triggers.types.permissions.set/
+  - method: admin.workflows.unpublish
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/admin.workflows.unpublish/
+  - method: apps.activities.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.activities.list/
+  - method: apps.auth.external.delete
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.auth.external.delete/
+  - method: apps.auth.external.get
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.auth.external.get/
+  - method: apps.datastore.bulkDelete
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkDelete/
+  - method: apps.datastore.bulkGet
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkGet/
+  - method: apps.datastore.bulkPut
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.bulkPut/
+  - method: apps.datastore.count
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.count/
+  - method: apps.datastore.delete
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.delete/
+  - method: apps.datastore.get
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.get/
+  - method: apps.datastore.put
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.put/
+  - method: apps.datastore.query
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.query/
+  - method: apps.datastore.update
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.datastore.update/
+  - method: apps.icon.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.icon.set/
+  - method: apps.user.connection.update
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/apps.user.connection.update/
+  - method: assistant.search.context
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/assistant.search.context/
+  - method: assistant.search.info
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/assistant.search.info/
+  - method: assistant.threads.setStatus
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/assistant.threads.setStatus/
+  - method: assistant.threads.setSuggestedPrompts
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/assistant.threads.setSuggestedPrompts/
+  - method: assistant.threads.setTitle
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/assistant.threads.setTitle/
+  - method: auth.teams.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/auth.teams.list/
+  - method: blocks.validate
+    status: sdk-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/blocks.validate/
+  - method: chat.appendStream
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/chat.appendStream/
+  - method: chat.startStream
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/chat.startStream/
+  - method: chat.stopStream
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/chat.stopStream/
+  - method: conversations.acceptSharedInvite
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.acceptSharedInvite/
+  - method: conversations.approveSharedInvite
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.approveSharedInvite/
+  - method: conversations.canvases.create
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.canvases.create/
+  - method: conversations.declineSharedInvite
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.declineSharedInvite/
+  - method: conversations.externalInvitePermissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.externalInvitePermissions.set/
+  - method: conversations.inviteShared
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.inviteShared/
+  - method: conversations.listConnectInvites
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.listConnectInvites/
+  - method: conversations.requestSharedInvite.approve
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.approve/
+  - method: conversations.requestSharedInvite.deny
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.deny/
+  - method: conversations.requestSharedInvite.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.list/
+  - method: functions.distributions.permissions.add
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.add/
+  - method: functions.distributions.permissions.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.list/
+  - method: functions.distributions.permissions.remove
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.remove/
+  - method: functions.distributions.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.set/
+  - method: functions.workflows.steps.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.list/
+  - method: functions.workflows.steps.responses.export
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.responses.export/
+  - method: rtm.start
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/rtm.start/
+  - method: search.all
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/search.all/
+  - method: search.files
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/search.files/
+  - method: team.billing.info
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/team.billing.info/
+  - method: team.externalTeams.disconnect
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/team.externalTeams.disconnect/
+  - method: team.externalTeams.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/team.externalTeams.list/
+  - method: team.preferences.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/team.preferences.list/
+  - method: tooling.tokens.rotate
+    status: behavior-compatible
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/tooling.tokens.rotate/
+  - method: users.discoverableContacts.lookup
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/users.discoverableContacts.lookup/
+  - method: workflows.featured.add
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.featured.add/
+  - method: workflows.featured.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.featured.list/
+  - method: workflows.featured.remove
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.featured.remove/
+  - method: workflows.featured.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.featured.set/
+  - method: workflows.triggers.permissions.add
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.add/
+  - method: workflows.triggers.permissions.list
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.list/
+  - method: workflows.triggers.permissions.remove
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.remove/
+  - method: workflows.triggers.permissions.set
+    status: unimplemented
+    provenance: slack-reference
+    reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.set/
 
 decisions:
   # The two Events-API sources above are pinned and hashed, and until this entry

@@ -20,6 +20,8 @@ import (
 // stop the outbox draining.
 var ErrSlackEventIncomplete = errors.New("durable payload lacks a field the Slack event requires")
 
+const targetAppIDField = "target_app_id"
+
 // Inner is one Slack inner event — the object an Events API envelope carries as
 // "event", and the object an RTM socket carries on its own.
 //
@@ -136,6 +138,54 @@ func itemEvent(eventType string, withReaction bool) builder {
 		}
 		return []Inner{inner}, nil
 	}
+}
+
+func appHomeOpened(delivered Delivered) ([]Inner, error) {
+	values, err := stringFields(delivered, "user_id", "channel_id", "tab")
+	if err != nil {
+		return nil, err
+	}
+	fields := []Field{
+		String("user", values["user_id"]),
+		String("channel", values["channel_id"]),
+		String("tab", values["tab"]),
+	}
+	if view, exists := delivered.Object["view"]; exists {
+		var object map[string]any
+		if json.Unmarshal(view, &object) != nil || object == nil {
+			return nil, fmt.Errorf("%w: app_home_opened payload has an invalid view", ErrSlackEventIncomplete)
+		}
+		fields = append(fields, Field{name: "view", value: append(json.RawMessage(nil), view...)})
+	}
+	inner, err := newInner("app_home_opened", delivered, fields...)
+	if err != nil {
+		return nil, err
+	}
+	return []Inner{inner}, nil
+}
+
+func broadcastableToApp(event Event, appID string) (Delivered, bool, error) {
+	delivered, err := Broadcastable(event)
+	if err != nil {
+		return Delivered{}, false, err
+	}
+	target, targeted := delivered.Field(targetAppIDField)
+	if targeted && target != strings.TrimSpace(appID) {
+		return Delivered{}, false, nil
+	}
+	if targeted {
+		// Targeting is routing metadata, not part of the Slack event. Copy the
+		// object before removing it so callers that reuse Delivered cannot
+		// observe a mutation.
+		object := make(map[string]json.RawMessage, len(delivered.Object)-1)
+		for name, value := range delivered.Object {
+			if name != targetAppIDField {
+				object[name] = value
+			}
+		}
+		delivered.Object = object
+	}
+	return delivered, true, nil
 }
 
 // memberLeftChannel renders conversation.member_left and
@@ -365,8 +415,8 @@ func SlackEventBodies(record Record, appID string) ([][]byte, error) {
 	if err := checkRecord(record, appID); err != nil {
 		return nil, err
 	}
-	delivered, err := Broadcastable(record.Event)
-	if err != nil {
+	delivered, belongs, err := broadcastableToApp(record.Event, appID)
+	if err != nil || !belongs {
 		return nil, err
 	}
 	inners, err := SlackInner(record.Event.Topic, delivered, SurfaceEventsAPI)
@@ -415,8 +465,8 @@ func SocketModeEnvelopes(record Record, appID string) ([]SocketModeEnvelope, err
 	if err := checkRecord(record, appID); err != nil {
 		return nil, err
 	}
-	delivered, err := Broadcastable(record.Event)
-	if err != nil {
+	delivered, belongs, err := broadcastableToApp(record.Event, appID)
+	if err != nil || !belongs {
 		return nil, err
 	}
 	inners, err := SlackInner(record.Event.Topic, delivered, SurfaceSocketMode)

@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
+	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
@@ -38,6 +40,8 @@ type Handler struct {
 
 var errAccessLogging = errors.New("access logging failed")
 
+const oauthTokenLifetime = 12 * time.Hour
+
 func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Handler, error) {
 	if messages == nil {
 		return Handler{}, errors.New("Slack API requires a chat service")
@@ -51,6 +55,7 @@ func NewHandler(messages chatapi.Service, authenticator auth.Authenticator) (Han
 func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/api.test", h.apiTest)
 	mux.HandleFunc("POST /api/api.test", h.apiTest)
+	mux.HandleFunc("POST /api/blocks.validate", h.blocksValidate)
 	mux.HandleFunc("POST /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/auth.test", h.authTest)
 	mux.HandleFunc("GET /api/oauth.access", h.oauthAccess)
@@ -59,6 +64,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/oauth.token", h.oauthAccess)
 	mux.HandleFunc("GET /api/oauth.v2.access", h.oauthV2Access)
 	mux.HandleFunc("POST /api/oauth.v2.access", h.oauthV2Access)
+	mux.HandleFunc("GET /api/oauth.v2.exchange", h.oauthV2ExchangeToken)
+	mux.HandleFunc("POST /api/oauth.v2.exchange", h.oauthV2ExchangeToken)
 	mux.HandleFunc("GET /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("POST /api/oauth.v2.user.access", h.oauthV2UserAccess)
 	mux.HandleFunc("GET /api/auth.revoke", h.authRevoke)
@@ -95,14 +102,27 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/dialog.open", h.dialogOpen)
 	mux.HandleFunc("GET /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
 	mux.HandleFunc("POST /api/apps.event.authorizations.list", h.appsEventAuthorizationsList)
+	mux.HandleFunc("POST /api/apps.manifest.create", h.appsManifestCreate)
+	mux.HandleFunc("POST /api/apps.manifest.delete", h.appsManifestDelete)
+	mux.HandleFunc("POST /api/apps.manifest.export", h.appsManifestExport)
+	mux.HandleFunc("POST /api/apps.manifest.update", h.appsManifestUpdate)
+	mux.HandleFunc("POST /api/apps.manifest.validate", h.appsManifestValidate)
 	mux.HandleFunc("POST /api/apps.uninstall", h.appsUninstall)
 	mux.HandleFunc("GET /api/apps.uninstall", h.appsUninstall)
+	mux.HandleFunc("POST /api/tooling.tokens.rotate", h.toolingTokensRotate)
 	mux.HandleFunc("GET /api/team.info", h.teamInfo)
 	mux.HandleFunc("POST /api/team.info", h.teamInfo)
 	mux.HandleFunc("GET /api/rtm.connect", h.rtmConnect)
 	mux.HandleFunc("POST /api/rtm.connect", h.rtmConnect)
 	mux.HandleFunc("POST /api/apps.connections.open", h.appsConnectionsOpen)
 	mux.HandleFunc("GET /api/apps.connections.open", h.appsConnectionsOpen)
+	mux.HandleFunc("POST /api/apps.datastore.put", h.appsDatastorePut)
+	mux.HandleFunc("POST /api/apps.datastore.update", h.appsDatastoreUpdate)
+	mux.HandleFunc("POST /api/apps.datastore.get", h.appsDatastoreGet)
+	mux.HandleFunc("POST /api/apps.datastore.delete", h.appsDatastoreDelete)
+	mux.HandleFunc("POST /api/apps.datastore.bulkPut", h.appsDatastoreBulkPut)
+	mux.HandleFunc("POST /api/apps.datastore.bulkGet", h.appsDatastoreBulkGet)
+	mux.HandleFunc("POST /api/apps.datastore.bulkDelete", h.appsDatastoreBulkDelete)
 	mux.HandleFunc("GET /api/bots.info", h.botsInfo)
 	mux.HandleFunc("POST /api/bots.info", h.botsInfo)
 	mux.HandleFunc("GET /api/migration.exchange", h.migrationExchange)
@@ -177,6 +197,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/emoji.list", h.emojiList)
 	mux.HandleFunc("POST /api/emoji.list", h.emojiList)
 	mux.HandleFunc("POST /api/chat.postMessage", h.postMessage)
+	mux.HandleFunc("POST /api/chat.startStream", h.startMessageStream)
+	mux.HandleFunc("POST /api/chat.appendStream", h.appendMessageStream)
+	mux.HandleFunc("POST /api/chat.stopStream", h.stopMessageStream)
 	mux.HandleFunc("POST /api/chat.unfurl", h.chatUnfurl)
 	mux.HandleFunc("POST /api/chat.postEphemeral", h.postEphemeral)
 	mux.HandleFunc("POST /api/chat.meMessage", h.meMessage)
@@ -363,6 +386,62 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("/api/", h.unknownMethod)
 }
 
+func (h Handler) blocksValidate(w http.ResponseWriter, r *http.Request) {
+	if _, err := h.authenticate(r, ""); err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	names := []string{"blocks", "message", "view"}
+	selected := ""
+	for _, name := range names {
+		if strings.TrimSpace(fields[name]) == "" {
+			continue
+		}
+		if selected != "" {
+			writeJSON(w, http.StatusOK, map[string]any{
+				"ok": false, "error": "invalid_arguments",
+				"response_metadata": map[string]any{"messages": []string{"must provide exactly one of `blocks`, `view`, or `message`"}},
+			})
+			return
+		}
+		selected = name
+	}
+	if selected == "" {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": false, "error": "invalid_arguments",
+			"response_metadata": map[string]any{"messages": []string{"must provide exactly one of `blocks`, `view`, or `message`"}},
+		})
+		return
+	}
+	raw := json.RawMessage(fields[selected])
+	var problems []blockkit.Error
+	switch selected {
+	case "blocks":
+		problems, err = blockkit.ValidateBlocks(raw, "", 100)
+	case "message":
+		problems, err = blockkit.ValidateMessage(raw)
+	case "view":
+		problems, err = blockkit.ValidateView(raw)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": false, "error": "invalid_arguments",
+			"response_metadata": map[string]any{"messages": []string{err.Error()}},
+		})
+		return
+	}
+	if len(problems) != 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "invalid_" + selected, "errors": problems})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
 // unknownMethod answers anything under /api/ that no registered route claims.
 //
 // net/http.ServeMux answered a typo with a text/plain "404 page not found" and a
@@ -416,6 +495,207 @@ func (h Handler) appsConnectionsOpen(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "url": result.URL})
+}
+
+func (h Handler) appsDatastorePut(w http.ResponseWriter, r *http.Request) {
+	h.appsDatastoreWrite(w, r, false, false)
+}
+
+func (h Handler) appsDatastoreUpdate(w http.ResponseWriter, r *http.Request) {
+	h.appsDatastoreWrite(w, r, true, false)
+}
+
+func (h Handler) appsDatastoreBulkPut(w http.ResponseWriter, r *http.Request) {
+	h.appsDatastoreWrite(w, r, false, true)
+}
+
+func (h Handler) appsDatastoreWrite(w http.ResponseWriter, r *http.Request, merge, bulk bool) {
+	principal, fields, ok := h.appDatastoreWriteRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore := strings.TrimSpace(fields["datastore"])
+	if datastore == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	var items []string
+	if bulk {
+		var rawItems []json.RawMessage
+		if json.Unmarshal([]byte(fields["items"]), &rawItems) != nil || len(rawItems) == 0 || len(rawItems) > 25 {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		items = make([]string, len(rawItems))
+		for index, item := range rawItems {
+			if !jsonIsObject(item) {
+				writeError(w, "invalid_arguments")
+				return
+			}
+			items[index] = string(item)
+		}
+	} else {
+		if !jsonIsObject(json.RawMessage(fields["item"])) {
+			writeError(w, "invalid_arguments")
+			return
+		}
+		items = []string{fields["item"]}
+	}
+	stored, err := h.Messages.PutAppDatastoreItems(
+		r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore, items, merge,
+	)
+	if err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	if bulk {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "failed_items": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "item": json.RawMessage(stored[0])})
+}
+
+func (h Handler) appsDatastoreGet(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.appDatastoreReadRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore, id := strings.TrimSpace(fields["datastore"]), strings.TrimSpace(fields["id"])
+	if datastore == "" || id == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	items, err := h.Messages.GetAppDatastoreItems(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore, []string{id})
+	if err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	item := any(map[string]any{})
+	if len(items) != 0 {
+		item = json.RawMessage(items[0])
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "item": item})
+}
+
+func (h Handler) appsDatastoreBulkGet(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.appDatastoreReadRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore, ids := strings.TrimSpace(fields["datastore"]), datastoreIDs(fields["ids"])
+	if datastore == "" || len(ids) == 0 || len(ids) > 25 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	items, err := h.Messages.GetAppDatastoreItems(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore, ids)
+	if err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	encoded := make([]json.RawMessage, len(items))
+	for index, item := range items {
+		encoded[index] = json.RawMessage(item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "items": encoded})
+}
+
+func (h Handler) appsDatastoreDelete(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.appDatastoreWriteRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore, id := strings.TrimSpace(fields["datastore"]), strings.TrimSpace(fields["id"])
+	if datastore == "" || id == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.DeleteAppDatastoreItems(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore, []string{id}); err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) appsDatastoreBulkDelete(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.appDatastoreWriteRequest(w, r)
+	if !ok {
+		return
+	}
+	datastore, ids := strings.TrimSpace(fields["datastore"]), datastoreIDs(fields["ids"])
+	if datastore == "" || len(ids) == 0 || len(ids) > 25 {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	if err := h.Messages.DeleteAppDatastoreItems(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, datastore, ids); err != nil {
+		writeAppDatastoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "datastore": datastore, "failed_items": []any{}})
+}
+
+func (h Handler) appDatastoreReadRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeDatastoreRead)
+	return h.decodeAppDatastoreRequest(w, r, principal, err)
+}
+
+func (h Handler) appDatastoreWriteRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeDatastoreWrite)
+	return h.decodeAppDatastoreRequest(w, r, principal, err)
+}
+
+func (h Handler) decodeAppDatastoreRequest(w http.ResponseWriter, r *http.Request, principal auth.Principal, err error) (auth.Principal, map[string]string, bool) {
+	if err != nil {
+		writeAuthError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	if principal.TokenType != "bot" || principal.AppID == "" {
+		writeError(w, "not_allowed_token_type")
+		return auth.Principal{}, nil, false
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	if requested := domain.AppID(strings.TrimSpace(fields["app_id"])); requested != "" && requested != principal.AppID {
+		writeError(w, "invalid_app_id")
+		return auth.Principal{}, nil, false
+	}
+	return principal, fields, true
+}
+
+func datastoreIDs(raw string) []string {
+	values := strings.Split(raw, ",")
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+func writeAppDatastoreError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrAppDatastoreNotFound):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": false, "error": "datastore_error",
+			"errors": []map[string]string{{
+				"code": "datastore_config_not_found", "message": "The datastore configuration could not be found", "pointer": "/datastores",
+			}},
+		})
+	case errors.Is(err, service.ErrInvalidDatastoreItem):
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": false, "error": "datastore_error",
+			"errors": []map[string]string{{"code": "invalid_item", "message": err.Error(), "pointer": "/item"}},
+		})
+	case errors.Is(err, service.ErrAppNotHosted):
+		writeError(w, "app_not_hosted")
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, "invalid_app_id")
+	default:
+		writeError(w, mapServiceError(err, "invalid_app_id"))
+	}
 }
 
 func (h Handler) apiTest(w http.ResponseWriter, r *http.Request) {
@@ -793,9 +1073,13 @@ func (h Handler) viewsOpen(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	value, err := h.Messages.OpenView(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
+	value, err := h.Messages.OpenView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "invalid_arguments"))
+		reason := mapServiceError(err, "invalid_arguments")
+		if errors.Is(err, service.ErrInvalidTrigger) {
+			reason = "invalid_trigger"
+		}
+		writeError(w, reason)
 		return
 	}
 	writeViewResponse(w, value)
@@ -817,8 +1101,12 @@ func (h Handler) viewsPublish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	value, err := h.Messages.PublishView(r.Context(), principal.WorkspaceID, principal.UserID, target, fields["view"], strings.TrimSpace(fields["hash"]))
+	value, err := h.Messages.PublishView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, target, fields["view"], strings.TrimSpace(fields["hash"]))
 	if err != nil {
+		if errors.Is(err, service.ErrAppHomeNotEnabled) {
+			writeError(w, "not_enabled")
+			return
+		}
 		writeError(w, mapServiceError(err, "view_not_found"))
 		return
 	}
@@ -836,9 +1124,13 @@ func (h Handler) viewsPush(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	value, err := h.Messages.PushView(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
+	value, err := h.Messages.PushView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["view"])
 	if err != nil {
-		writeError(w, mapServiceError(err, "invalid_arguments"))
+		reason := mapServiceError(err, "invalid_arguments")
+		if errors.Is(err, service.ErrInvalidTrigger) {
+			reason = "invalid_trigger"
+		}
+		writeError(w, reason)
 		return
 	}
 	writeViewResponse(w, value)
@@ -855,7 +1147,7 @@ func (h Handler) viewsUpdate(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
-	value, err := h.Messages.UpdateView(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["view_id"]), strings.TrimSpace(fields["external_id"]), fields["view"], strings.TrimSpace(fields["hash"]))
+	value, err := h.Messages.UpdateView(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["view_id"]), strings.TrimSpace(fields["external_id"]), fields["view"], strings.TrimSpace(fields["hash"]))
 	if err != nil {
 		writeError(w, mapServiceError(err, "view_not_found"))
 		return
@@ -873,11 +1165,19 @@ func viewResponse(value domain.View) (map[string]any, error) {
 		return nil, decodeFailure("invalid_view", "stored view payload is not a JSON object")
 	}
 	result["id"] = value.ID
+	result["app_id"] = value.AppID
 	result["team_id"] = value.WorkspaceID
 	result["hash"] = value.Hash
 	result["root_view_id"] = value.RootViewID
 	result["previous_view_id"] = value.PreviousViewID
 	result["external_id"] = value.ExternalID
+	state := any(map[string]any{"values": map[string]any{}})
+	if strings.TrimSpace(value.State) != "" {
+		if err := json.Unmarshal([]byte(value.State), &state); err != nil {
+			return nil, decodeFailure("invalid_view", "stored view state is not valid JSON")
+		}
+	}
+	result["state"] = state
 	return result, nil
 }
 
@@ -1004,8 +1304,12 @@ func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "missing_dialog")
 		return
 	}
-	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
-		writeError(w, mapServiceError(err, "validation_errors"))
+	if err := h.Messages.OpenDialog(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, strings.TrimSpace(fields["trigger_id"]), fields["dialog"]); err != nil {
+		reason := mapServiceError(err, "validation_errors")
+		if errors.Is(err, service.ErrInvalidTrigger) {
+			reason = "invalid_trigger"
+		}
+		writeError(w, reason)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -1103,6 +1407,290 @@ func (h Handler) oauthV2UserAccess(w http.ResponseWriter, r *http.Request) {
 	h.oauthExchange(w, r, true, true)
 }
 
+func (h Handler) oauthV2ExchangeToken(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	clientID, clientSecret := strings.TrimSpace(fields["client_id"]), strings.TrimSpace(fields["client_secret"])
+	if basicID, basicSecret, ok := r.BasicAuth(); ok {
+		if clientID != "" && clientID != basicID || clientSecret != "" && clientSecret != basicSecret {
+			writeError(w, "invalid_client_id")
+			return
+		}
+		if clientID == "" {
+			clientID = basicID
+		}
+		if clientSecret == "" {
+			clientSecret = basicSecret
+		}
+	}
+	token, err := h.Messages.OAuthV2ExchangeToken(r.Context(), clientID, clientSecret, fields["token"])
+	if err != nil {
+		reason := "invalid_auth"
+		if errors.Is(err, service.ErrInvalidOAuthClient) {
+			reason = "invalid_client_id"
+		}
+		writeError(w, reason)
+		return
+	}
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, false))
+}
+
+func (h Handler) appsManifestValidate(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	token, reason := appConfigurationToken(r, fields)
+	if reason != "" {
+		writeError(w, reason)
+		return
+	}
+	problems, err := h.Messages.ValidateAppManifest(r.Context(), token, fields["app_id"], fields["manifest"])
+	if err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	writeAppManifestValidation(w, problems)
+}
+
+func (h Handler) appsManifestCreate(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	token, reason := appConfigurationToken(r, fields)
+	if reason != "" {
+		writeError(w, reason)
+		return
+	}
+	problems, err := h.Messages.ValidateAppManifest(r.Context(), token, "", fields["manifest"])
+	if err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	if len(problems) != 0 {
+		writeAppManifestValidation(w, problems)
+		return
+	}
+	app, credentials, err := h.Messages.CreateAppFromManifest(r.Context(), token, fields["manifest"], domain.WorkspaceID(strings.TrimSpace(fields["team_id"])))
+	if err != nil {
+		reason := appManifestServiceError(err)
+		if errors.Is(err, store.ErrNotFound) && strings.TrimSpace(fields["team_id"]) != "" {
+			reason = "invalid_team_id"
+		}
+		writeError(w, reason)
+		return
+	}
+	parsed, _ := appmanifest.Parse(fields["manifest"])
+	query := url.Values{"client_id": []string{credentials.ClientID}}
+	if len(parsed.BotScopes) != 0 {
+		query.Set("scope", strings.Join(parsed.BotScopes, ","))
+	}
+	if len(parsed.UserScopes) != 0 {
+		query.Set("user_scope", strings.Join(parsed.UserScopes, ","))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":     true,
+		"app_id": app.ID,
+		"credentials": map[string]string{
+			"client_id":          credentials.ClientID,
+			"client_secret":      credentials.ClientSecret,
+			"verification_token": credentials.VerificationToken,
+			"signing_secret":     credentials.SigningSecret,
+		},
+		"oauth_authorize_url": requestOrigin(r) + "/oauth/v2/authorize?" + query.Encode(),
+	})
+}
+
+func (h Handler) appsManifestExport(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	token, reason := appConfigurationToken(r, fields)
+	if reason != "" {
+		writeError(w, reason)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if appID == "" {
+		writeError(w, "invalid_app_id")
+		return
+	}
+	_, manifest, err := h.Messages.ExportAppManifest(r.Context(), token, appID)
+	if err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "manifest": json.RawMessage(manifest)})
+}
+
+func (h Handler) appsManifestUpdate(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	token, reason := appConfigurationToken(r, fields)
+	if reason != "" {
+		writeError(w, reason)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if appID == "" {
+		writeError(w, "invalid_app_id")
+		return
+	}
+	problems, err := h.Messages.ValidateAppManifest(r.Context(), token, string(appID), fields["manifest"])
+	if err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	if len(problems) != 0 {
+		writeAppManifestValidation(w, problems)
+		return
+	}
+	_, previous, err := h.Messages.ExportAppManifest(r.Context(), token, appID)
+	if err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	before, _ := appmanifest.Parse(previous)
+	after, _ := appmanifest.Parse(fields["manifest"])
+	app, err := h.Messages.UpdateAppFromManifest(r.Context(), token, appID, fields["manifest"])
+	if err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	permissionsUpdated := !sameStringSet(before.BotScopes, after.BotScopes) || !sameStringSet(before.UserScopes, after.UserScopes)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "app_id": app.ID, "permissions_updated": permissionsUpdated})
+}
+
+func (h Handler) appsManifestDelete(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	token, reason := appConfigurationToken(r, fields)
+	if reason != "" {
+		writeError(w, reason)
+		return
+	}
+	appID := domain.AppID(strings.TrimSpace(fields["app_id"]))
+	if appID == "" {
+		writeError(w, "invalid_app_id")
+		return
+	}
+	if err := h.Messages.DeleteDeveloperApp(r.Context(), token, appID); err != nil {
+		writeError(w, appManifestServiceError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) toolingTokensRotate(w http.ResponseWriter, r *http.Request) {
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	refreshToken := strings.TrimSpace(fields["refresh_token"])
+	if refreshToken == "" {
+		writeError(w, "invalid_refresh_token")
+		return
+	}
+	value, err := h.Messages.RotateAppConfigurationToken(r.Context(), refreshToken)
+	if err != nil {
+		reason := "fatal_error"
+		if errors.Is(err, service.ErrAppConfigurationAuthentication) {
+			reason = "invalid_refresh_token"
+		}
+		writeError(w, reason)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"token":         value.Token,
+		"refresh_token": value.RefreshToken,
+		"team_id":       value.WorkspaceID,
+		"user_id":       value.UserID,
+		"iat":           value.IssuedAt.Unix(),
+		"exp":           value.ExpiresAt.Unix(),
+	})
+}
+
+func appConfigurationToken(r *http.Request, fields map[string]string) (string, string) {
+	headerToken := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
+	bodyToken := strings.TrimSpace(fields["token"])
+	if headerToken != "" && bodyToken != "" && headerToken != bodyToken {
+		return "", "invalid_auth"
+	}
+	if headerToken != "" {
+		return headerToken, ""
+	}
+	if bodyToken != "" {
+		return bodyToken, ""
+	}
+	return "", "not_authed"
+}
+
+func appManifestServiceError(err error) string {
+	switch {
+	case errors.Is(err, service.ErrAppConfigurationAuthentication):
+		return "invalid_auth"
+	case errors.Is(err, service.ErrInvalidAppManifest):
+		return "invalid_manifest"
+	case errors.Is(err, store.ErrNotFound):
+		return "invalid_app_id"
+	case errors.Is(err, store.ErrConflict):
+		return "app_manifest_update_failed"
+	default:
+		return "fatal_error"
+	}
+}
+
+func writeAppManifestValidation(w http.ResponseWriter, problems []appmanifest.Error) {
+	if len(problems) == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "errors": []appmanifest.Error{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "invalid_manifest", "errors": problems})
+}
+
+func requestOrigin(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.ToLower(strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0])); forwarded == "http" || forwarded == "https" {
+		scheme = forwarded
+	}
+	return scheme + "://" + r.Host
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	values := make(map[string]struct{}, len(left))
+	for _, value := range left {
+		values[value] = struct{}{}
+	}
+	for _, value := range right {
+		if _, exists := values[value]; !exists {
+			return false
+		}
+	}
+	return true
+}
+
 func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userOnly bool) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
@@ -1125,51 +1713,82 @@ func (h Handler) oauthExchange(w http.ResponseWriter, r *http.Request, v2, userO
 	if v2 {
 		grantType := strings.TrimSpace(fields["grant_type"])
 		if grantType != "" && grantType != "authorization_code" {
-			reason := "invalid_grant_type"
-			if grantType == "refresh_token" {
-				reason = "invalid_refresh_token"
+			if grantType != "refresh_token" {
+				writeError(w, "invalid_grant_type")
+				return
 			}
-			writeError(w, reason)
-			return
 		}
 	}
-	if v2 && strings.TrimSpace(fields["code"]) == "" {
+	refreshing := v2 && strings.TrimSpace(fields["grant_type"]) == "refresh_token"
+	if v2 && !refreshing && strings.TrimSpace(fields["code"]) == "" {
 		writeError(w, "invalid_code")
 		return
 	}
 	var token domain.OAuthToken
-	if v2 {
+	if refreshing {
+		token, err = h.Messages.OAuthV2Refresh(r.Context(), clientID, clientSecret, fields["refresh_token"])
+	} else if v2 {
 		token, err = h.Messages.OAuthV2Exchange(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"], userOnly)
 	} else {
 		token, err = h.Messages.OAuthExchange(r.Context(), clientID, clientSecret, fields["code"], fields["redirect_uri"])
 	}
 	if err != nil {
 		reason := "invalid_code"
+		if refreshing {
+			reason = "invalid_refresh_token"
+		}
 		if errors.Is(err, service.ErrInvalidOAuthClient) {
 			reason = "invalid_client_id"
 		}
 		writeError(w, reason)
 		return
 	}
-	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType}
 	if !v2 {
+		response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "team_id": token.WorkspaceID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType}
 		response["team_name"] = ""
-	} else {
-		delete(response, "team_id")
-		response["team"] = map[string]any{"id": token.WorkspaceID}
-		response["enterprise"] = nil
-		response["is_enterprise_install"] = false
-		if userOnly {
-			delete(response, "access_token")
-			delete(response, "scope")
-			delete(response, "token_type")
-			response["authed_user"] = map[string]any{"id": token.InstallerID, "access_token": token.AccessToken, "scope": strings.Join(token.Scopes, ","), "token_type": "user"}
-		} else {
-			response["bot_user_id"] = token.UserID
-			response["authed_user"] = map[string]any{"id": token.InstallerID}
-		}
+		writeJSON(w, http.StatusOK, response)
+		return
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeJSON(w, http.StatusOK, oauthV2TokenResponse(token, userOnly))
+}
+
+func oauthV2TokenResponse(token domain.OAuthToken, userOnly bool) map[string]any {
+	response := map[string]any{"ok": true, "access_token": token.AccessToken, "app_id": token.AppID, "scope": strings.Join(token.Scopes, ","), "token_type": token.TokenType, "team": map[string]any{"id": token.WorkspaceID}, "enterprise": nil, "is_enterprise_install": false}
+	if token.RefreshToken != "" {
+		response["refresh_token"] = token.RefreshToken
+		response["expires_in"] = int64(oauthTokenLifetime / time.Second)
+	}
+	if userOnly {
+		delete(response, "access_token")
+		delete(response, "scope")
+		delete(response, "token_type")
+		delete(response, "refresh_token")
+		delete(response, "expires_in")
+		authedUser := map[string]any{"id": token.InstallerID, "access_token": token.AccessToken, "scope": strings.Join(token.Scopes, ","), "token_type": "user"}
+		if token.RefreshToken != "" {
+			authedUser["refresh_token"] = token.RefreshToken
+			authedUser["expires_in"] = int64(oauthTokenLifetime / time.Second)
+		}
+		response["authed_user"] = authedUser
+		return response
+	}
+	if token.TokenType == "bot" {
+		response["bot_user_id"] = token.UserID
+		authedUser := map[string]any{"id": token.InstallerID}
+		if token.AuthedUserAccessToken != "" {
+			authedUser["access_token"] = token.AuthedUserAccessToken
+			authedUser["scope"] = strings.Join(token.AuthedUserScopes, ",")
+			authedUser["token_type"] = "user"
+			if token.AuthedUserRefreshToken != "" {
+				authedUser["refresh_token"] = token.AuthedUserRefreshToken
+				authedUser["expires_in"] = int64(oauthTokenLifetime / time.Second)
+			}
+		}
+		response["authed_user"] = authedUser
+	} else {
+		response["authed_user"] = map[string]any{"id": token.InstallerID}
+	}
+	return response
 }
 
 func (h Handler) botsInfo(w http.ResponseWriter, r *http.Request) {
@@ -1915,11 +2534,39 @@ func (h Handler) adminConversationCreate(w http.ResponseWriter, r *http.Request)
 }
 
 func (h Handler) adminConversationArchive(w http.ResponseWriter, r *http.Request) {
-	h.adminSetConversationArchived(w, r, true)
+	ok, conversation, err := h.changeAdminConversationArchived(w, r, true)
+	if !ok {
+		return
+	}
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	case errors.Is(err, service.ErrConversationAlreadyArchived):
+		writeError(w, "already_archived")
+	case errors.Is(err, service.ErrCannotArchiveDefault):
+		writeError(w, "cant_archive_general")
+	case errors.Is(err, service.ErrInvalidConversation):
+		writeError(w, "channel_type_not_supported")
+	default:
+		writeError(w, mapServiceError(err, "channel_not_found"))
+	}
 }
 
 func (h Handler) adminConversationUnarchive(w http.ResponseWriter, r *http.Request) {
-	h.adminSetConversationArchived(w, r, false)
+	ok, conversation, err := h.changeAdminConversationArchived(w, r, false)
+	if !ok {
+		return
+	}
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	case errors.Is(err, service.ErrConversationNotArchived):
+		writeError(w, "channel_not_archived")
+	case errors.Is(err, service.ErrInvalidConversation):
+		writeError(w, "channel_type_not_supported")
+	default:
+		writeError(w, mapServiceError(err, "channel_not_found"))
+	}
 }
 
 func (h Handler) adminConversationDelete(w http.ResponseWriter, r *http.Request) {
@@ -2010,28 +2657,24 @@ func (h Handler) adminConversationAccessGroupsList(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "group_ids": values})
 }
 
-func (h Handler) adminSetConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) {
+func (h Handler) changeAdminConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) (bool, domain.Conversation, error) {
 	principal, err := h.authenticate(r, auth.ScopeAdminConversationsWrite)
 	if err != nil {
 		writeAuthError(w, err)
-		return
+		return false, domain.Conversation{}, nil
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
-		return
+		return false, domain.Conversation{}, nil
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel_id"]))
 	if channel == "" {
 		writeError(w, "invalid_arg_name")
-		return
+		return false, domain.Conversation{}, nil
 	}
 	conversation, err := h.Messages.AdminSetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+	return true, conversation, err
 }
 
 func (h Handler) adminConversationInvite(w http.ResponseWriter, r *http.Request) {
@@ -2953,10 +3596,23 @@ func (h Handler) setUserPhoto(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// slack-api-client 1.49.0 labels this multipart part imageData/*.
-	// Preserve that official client behavior while applying the image contract
-	// enforced by the message service.
+	// Web API 8.0 sends a Buffer as application/octet-stream instead. Preserve
+	// both official client behaviors while still letting the message service
+	// enforce that the detected bytes exactly match an allow-listed image type.
 	if mimeType == "imageData/*" {
 		mimeType = "image/png"
+	} else if mimeType == "application/octet-stream" {
+		head := make([]byte, 512)
+		read, readErr := io.ReadFull(temporary, head)
+		if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
+			writeError(w, "bad_image")
+			return
+		}
+		mimeType = http.DetectContentType(head[:read])
+		if _, err := temporary.Seek(0, io.SeekStart); err != nil {
+			writeError(w, "fatal_error")
+			return
+		}
 	}
 	// crop_w/crop_x/crop_y are declared but not implemented. Silently ignoring a
 	// crop would return a differently framed image than the caller asked for while
@@ -3210,6 +3866,14 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
+		if errors.Is(err, service.ErrCannotLeaveDefault) {
+			writeError(w, "cant_leave_general")
+			return
+		}
+		if errors.Is(err, service.ErrInvalidConversation) {
+			writeError(w, "is_archived")
+			return
+		}
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}
@@ -3330,11 +3994,39 @@ func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) 
 }
 
 func (h Handler) archiveConversation(w http.ResponseWriter, r *http.Request) {
-	h.setConversationArchived(w, r, true)
+	ok, err := h.changeConversationArchived(w, r, true)
+	if !ok {
+		return
+	}
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case errors.Is(err, service.ErrConversationAlreadyArchived):
+		writeError(w, "already_archived")
+	case errors.Is(err, service.ErrCannotArchiveDefault):
+		writeError(w, "cant_archive_general")
+	case errors.Is(err, service.ErrInvalidConversation):
+		writeError(w, "method_not_supported_for_channel_type")
+	default:
+		writeError(w, mapServiceError(err, "channel_not_found"))
+	}
 }
 
 func (h Handler) unarchiveConversation(w http.ResponseWriter, r *http.Request) {
-	h.setConversationArchived(w, r, false)
+	ok, err := h.changeConversationArchived(w, r, false)
+	if !ok {
+		return
+	}
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	case errors.Is(err, service.ErrConversationNotArchived):
+		writeError(w, "not_archived")
+	case errors.Is(err, service.ErrInvalidConversation):
+		writeError(w, "method_not_supported_for_channel_type")
+	default:
+		writeError(w, mapServiceError(err, "channel_not_found"))
+	}
 }
 
 func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
@@ -3369,28 +4061,24 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (h Handler) setConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) {
+func (h Handler) changeConversationArchived(w http.ResponseWriter, r *http.Request, archived bool) (bool, error) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
 		writeAuthError(w, err)
-		return
+		return false, nil
 	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
-		return
+		return false, nil
 	}
 	channel := domain.ConversationID(strings.TrimSpace(fields["channel"]))
 	if channel == "" {
 		writeError(w, "channel_not_found")
-		return
+		return false, nil
 	}
 	_, err = h.Messages.SetConversationArchived(r.Context(), principal.WorkspaceID, principal.UserID, channel, archived)
-	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	return true, err
 }
 
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
@@ -5321,10 +6009,18 @@ func copyUploadPart(destination *os.File, source io.Reader) error {
 }
 
 func fileResponse(file domain.File) map[string]any {
+	fileType := strings.TrimPrefix(strings.ToLower(filepath.Ext(file.Name)), ".")
 	result := map[string]any{
 		"id": file.ID, "name": file.Name, "title": file.Title, "mimetype": file.MIMEType,
 		"size": file.Size, "created": file.CreatedAt.Unix(), "timestamp": file.CreatedAt.Unix(),
 		"user": file.Uploader, "is_public": file.PublicToken != "", "team_id": file.WorkspaceID,
+		"filetype": fileType, "pretty_type": strings.ToUpper(fileType), "mode": "hosted",
+		"is_external": false, "external_type": "", "public_url_shared": file.PublicToken != "",
+		"editable": false, "display_as_bot": false,
+	}
+	if !file.Deleted {
+		result["url_private"] = "/api/files/" + url.PathEscape(string(file.ID))
+		result["url_private_download"] = "/api/files/" + url.PathEscape(string(file.ID))
 	}
 	if file.PublicToken != "" {
 		result["permalink_public"] = "/files/public/" + file.PublicToken
@@ -5514,7 +6210,7 @@ func (h Handler) postEphemeral(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments)
+	value, err := h.Messages.PostEphemeralWithBlocksAndAttachments(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationID(strings.TrimSpace(fields["channel"])), domain.UserID(strings.TrimSpace(fields["user"])), fields["text"], blocks, attachments, principal.AppID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
@@ -5594,14 +6290,16 @@ func (h Handler) postMessageValue(r *http.Request, principal auth.Principal, fie
 		attachments,
 		domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
 		strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		principal.AppID,
 	)
 }
 
 // postMessageError names the failure of a message mutation. `chat.postMessage`
-// and its siblings enumerate `channel_not_found`, `no_text`, `msg_too_long` and
-// `invalid_blocks`; none of them enumerate `invalid_arguments`, so a rejected
-// message body is reported as `no_text` when it carries no renderable content
-// and `invalid_blocks` when the supplied blocks or attachments are unusable.
+// and its siblings enumerate `channel_not_found`, `is_archived`, `no_text`,
+// `msg_too_long` and `invalid_blocks`; none of them enumerate
+// `invalid_arguments`, so a rejected message body is reported as `no_text` when
+// it carries no renderable content and `invalid_blocks` when the supplied
+// blocks or attachments are unusable.
 func postMessageError(err error) string {
 	// A refusal raised by the handler's own decoding already names the code its
 	// operation declares (msg_too_long, channel_not_found); renaming it here would
@@ -5612,6 +6310,9 @@ func postMessageError(err error) string {
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return "channel_not_found"
+	}
+	if errors.Is(err, service.ErrConversationAlreadyArchived) {
+		return "is_archived"
 	}
 	if errors.Is(err, service.ErrInvalidMessage) {
 		return "no_text"
@@ -5661,6 +6362,133 @@ func (h Handler) updateMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	ts := slackTimestamp(message.CreatedAt)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": message.Conversation, "ts": ts, "text": message.Text, "message": messageResponse(message)})
+}
+
+func (h Handler) startMessageStream(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.messageStreamRequest(w, r)
+	if !ok {
+		return
+	}
+	channel := strings.TrimSpace(fields["channel"])
+	threadTimestamp := strings.TrimSpace(fields["thread_ts"])
+	if channel == "" || threadTimestamp == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	message, err := h.Messages.StartMessageStream(r.Context(), principal.WorkspaceID, principal.UserID, domain.MessageStreamStart{
+		Conversation: domain.ConversationID(channel), ThreadTimestamp: domain.MessageTimestamp(threadTimestamp),
+		AppID: principal.AppID, BotID: principal.BotID, RecipientTeamID: domain.WorkspaceID(strings.TrimSpace(fields["recipient_team_id"])),
+		RecipientUserID: domain.UserID(strings.TrimSpace(fields["recipient_user_id"])),
+		MarkdownText:    fields["markdown_text"], Chunks: fields["chunks"],
+		TaskDisplayMode: fields["task_display_mode"], Username: fields["username"],
+		IconEmoji: fields["icon_emoji"], IconURL: fields["icon_url"],
+	})
+	if err != nil {
+		writeError(w, messageStreamError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, messageStreamResponse(message, false))
+}
+
+func (h Handler) appendMessageStream(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.messageStreamRequest(w, r)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["ts"]) == "" ||
+		(fields["markdown_text"] == "" && strings.TrimSpace(fields["chunks"]) == "") {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	message, err := h.Messages.AppendMessageStream(r.Context(), principal.WorkspaceID, principal.UserID, domain.MessageStreamMutation{
+		Conversation: domain.ConversationID(strings.TrimSpace(fields["channel"])),
+		Timestamp:    domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), AppID: principal.AppID,
+		MarkdownText: fields["markdown_text"], Chunks: fields["chunks"],
+	})
+	if err != nil {
+		writeError(w, messageStreamError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, messageStreamResponse(message, false))
+}
+
+func (h Handler) stopMessageStream(w http.ResponseWriter, r *http.Request) {
+	principal, fields, ok := h.messageStreamRequest(w, r)
+	if !ok {
+		return
+	}
+	if strings.TrimSpace(fields["channel"]) == "" || strings.TrimSpace(fields["ts"]) == "" {
+		writeError(w, "invalid_arguments")
+		return
+	}
+	message, err := h.Messages.StopMessageStream(r.Context(), principal.WorkspaceID, principal.UserID, domain.MessageStreamMutation{
+		Conversation: domain.ConversationID(strings.TrimSpace(fields["channel"])),
+		Timestamp:    domain.MessageTimestamp(strings.TrimSpace(fields["ts"])), AppID: principal.AppID,
+		MarkdownText: fields["markdown_text"], Chunks: fields["chunks"], Blocks: fields["blocks"], Metadata: fields["metadata"],
+	})
+	if err != nil {
+		writeError(w, messageStreamError(err))
+		return
+	}
+	writeJSON(w, http.StatusOK, messageStreamResponse(message, true))
+}
+
+func messageStreamResponse(message domain.Message, includeMessage bool) map[string]any {
+	response := map[string]any{"ok": true, "channel": message.Conversation, "ts": slackTimestamp(message.CreatedAt)}
+	var state domain.MessageStreamState
+	if json.Unmarshal([]byte(message.StreamState), &state) == nil && len(state.Warnings) != 0 {
+		response["warning"] = strings.Join(state.Warnings, ",")
+		response["response_metadata"] = map[string]any{"warnings": state.Warnings}
+	}
+	if includeMessage {
+		response["message"] = messageResponse(message)
+	}
+	return response
+}
+
+func (h Handler) messageStreamRequest(w http.ResponseWriter, r *http.Request) (auth.Principal, map[string]string, bool) {
+	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	if err != nil {
+		writeAuthError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	if principal.TokenType != "bot" || principal.AppID == "" {
+		writeError(w, "not_allowed_token_type")
+		return auth.Principal{}, nil, false
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return auth.Principal{}, nil, false
+	}
+	if utf8.RuneCountInString(fields["markdown_text"]) > service.MaxStreamMarkdownRunes {
+		writeError(w, "msg_too_long")
+		return auth.Principal{}, nil, false
+	}
+	return principal, fields, true
+}
+
+func messageStreamError(err error) string {
+	switch {
+	case errors.Is(err, service.ErrMissingStreamRecipientTeam):
+		return "missing_recipient_team_id"
+	case errors.Is(err, service.ErrMissingStreamRecipientUser):
+		return "missing_recipient_user_id"
+	case errors.Is(err, service.ErrInvalidStreamChunks):
+		return "invalid_chunks"
+	case errors.Is(err, service.ErrMessageNotStreaming):
+		return "message_not_in_streaming_state"
+	case errors.Is(err, service.ErrMessageNotOwnedByApp):
+		return "message_not_owned_by_app"
+	case errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, service.ErrInvalidMessageStream):
+		return "invalid_arguments"
+	case errors.Is(err, service.ErrNotInConversation):
+		return "not_in_channel"
+	case errors.Is(err, store.ErrNotFound):
+		return "message_not_found"
+	default:
+		return mapServiceError(err, "channel_not_found")
+	}
 }
 
 func (h Handler) deleteMessage(w http.ResponseWriter, r *http.Request) {
@@ -6499,6 +7327,32 @@ func (h Handler) getPermalink(w http.ResponseWriter, r *http.Request) {
 
 func messageResponse(message domain.Message) map[string]any {
 	result := map[string]any{"type": "message", "user": message.AuthorID, "text": message.Text, "ts": slackTimestamp(message.CreatedAt)}
+	if len(message.Files) > 0 {
+		files := make([]map[string]any, 0, len(message.Files))
+		for _, file := range message.Files {
+			files = append(files, fileResponse(file))
+		}
+		result["subtype"] = "file_share"
+		result["upload"] = true
+		result["files"] = files
+	}
+	if message.AppID != "" {
+		result["app_id"] = message.AppID
+	}
+	var stream domain.MessageStreamState
+	if json.Unmarshal([]byte(message.StreamState), &stream) == nil {
+		if stream.BotID != "" {
+			result["bot_id"] = stream.BotID
+		}
+		if stream.Username != "" {
+			result["username"] = stream.Username
+		}
+		if stream.IconEmoji != "" {
+			result["icons"] = map[string]string{"emoji": stream.IconEmoji}
+		} else if stream.IconURL != "" {
+			result["icons"] = map[string]string{"image_48": stream.IconURL}
+		}
+	}
 	// `thread_ts` used to be emitted unconditionally, so a non-threaded message
 	// serialised as `"thread_ts": ""`, which the strictly typed SDK models (Java
 	// Message.threadTs, the Deno typed responses) parse as a timestamp.
@@ -6517,6 +7371,9 @@ func messageResponse(message domain.Message) map[string]any {
 	}
 	if message.Attachments != "" && message.Attachments != "[]" {
 		result["attachments"] = json.RawMessage(message.Attachments)
+	}
+	if message.Metadata != "" {
+		result["metadata"] = json.RawMessage(message.Metadata)
 	}
 	return result
 }
@@ -6582,11 +7439,14 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 //     ErrIdempotencyConflict branch below and answered `hash_conflict` where the
 //     idempotency contract requires `rate_limited`.
 func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) {
 		return notFoundReason
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
 		return invalidReason
+	}
+	if errors.Is(err, service.ErrAppInteractionUnavailable) {
+		return "fatal_error"
 	}
 	if errors.Is(err, service.ErrEmojiAlreadyExists) {
 		return "emoji_already_exists"
@@ -6675,6 +7535,9 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	// Retry-After, and this transport answers 200.
 	if errors.Is(err, store.ErrMessageTimestampTaken) || errors.Is(err, store.ErrTransient) {
 		return "internal_error"
+	}
+	if errors.Is(err, service.ErrAppCredentialKeyUnavailable) {
+		return "fatal_error"
 	}
 	return "fatal_error"
 }
@@ -7001,7 +7864,7 @@ func normalizeJSONScalar(value json.RawMessage) (string, error) {
 // shape instead — see normalizeJSONField.
 func isStructuredField(name string) bool {
 	switch name {
-	case "blocks", "attachments", "files", "unfurls", "metadata", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment":
+	case "blocks", "attachments", "chunks", "files", "unfurls", "metadata", "message", "user_auth_blocks", "view", "outputs", "inputs", "dialog", "prefs", "document_content", "changes", "criteria", "description_blocks", "schema", "initial_fields", "cells", "comments", "comment", "item", "items":
 		return true
 	default:
 		return false
@@ -7936,17 +8799,17 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 	var payload incomingWebhookPayload
 	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	if err := decoder.Decode(&payload); err != nil || (payload.Text == "" && len(payload.Blocks) == 0 && len(payload.Attachments) == 0) || (len(payload.Blocks) > 0 && !json.Valid(payload.Blocks)) || (len(payload.Attachments) > 0 && !json.Valid(payload.Attachments)) {
-		writePlain(w, http.StatusBadRequest, "invalid_payload")
+		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
 	blocks, err := domain.NormalizeBlocks(payload.Blocks)
 	if err != nil {
-		writePlain(w, http.StatusBadRequest, "invalid_payload")
+		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
 	attachments, err := domain.NormalizeAttachments(payload.Attachments)
 	if err != nil {
-		writePlain(w, http.StatusBadRequest, "invalid_payload")
+		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
 	// Slack's incoming-webhook response body is the literal string "ok" and carries
@@ -7956,6 +8819,10 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 		// hooks.slack.com is a plain-text body with a non-200 status. An unknown
 		// workspace, app, secret, or a disabled hook is indistinguishable to the
 		// caller by design, so all of them answer 404 `no_team`.
+		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+			writeIncomingWebhookError(w, http.StatusGone, "channel_is_archived")
+			return
+		}
 		reason := mapServiceError(err, "no_team")
 		status := http.StatusBadRequest
 		if reason == "no_team" {
@@ -7963,10 +8830,18 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 		} else {
 			reason = "invalid_payload"
 		}
-		writePlain(w, status, reason)
+		writeIncomingWebhookError(w, status, reason)
 		return
 	}
 	writePlain(w, http.StatusOK, "ok")
+}
+
+// writeIncomingWebhookError is distinct from writePlain so the source-level
+// Slack error-contract gate can identify the argument that is an error code.
+// Incoming webhooks intentionally return plain text rather than a Web API JSON
+// envelope.
+func writeIncomingWebhookError(w http.ResponseWriter, status int, code string) {
+	writePlain(w, status, code)
 }
 
 func writePlain(w http.ResponseWriter, status int, value string) {
@@ -8072,7 +8947,41 @@ func (h Handler) externalFileUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	if err := h.Messages.UploadExternalFile(r.Context(), id, r.ContentLength, r.Body); err != nil {
+	source := io.Reader(r.Body)
+	size := r.ContentLength
+	if mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type")); err == nil && mediaType == "multipart/form-data" {
+		reader, err := r.MultipartReader()
+		if err != nil {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		var bodyPart *multipart.Part
+		for {
+			part, partErr := reader.NextPart()
+			if errors.Is(partErr, io.EOF) {
+				break
+			}
+			if partErr != nil {
+				writeError(w, "invalid_arg_name")
+				return
+			}
+			if part.FormName() == "body" {
+				bodyPart = part
+				break
+			}
+			_ = part.Close()
+		}
+		if bodyPart == nil {
+			writeError(w, "invalid_arg_name")
+			return
+		}
+		defer bodyPart.Close()
+		source = bodyPart
+		// multipart.Part deliberately does not expose a length. The durable
+		// upload ticket supplies it and the blob adapter enforces it exactly.
+		size = -1
+	}
+	if err := h.Messages.UploadExternalFile(r.Context(), id, size, source); err != nil {
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}
@@ -8120,6 +9029,13 @@ func (h Handler) filesCompleteUploadExternal(w http.ResponseWriter, r *http.Requ
 	}
 	files, err := h.Messages.CompleteExternalUploads(r.Context(), principal.WorkspaceID, principal.UserID, completions, channels, fields["initial_comment"], fields["blocks"], domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])))
 	if err != nil {
+		if errors.Is(err, service.ErrConversationAlreadyArchived) {
+			// The current method reference does not enumerate chat.postMessage's
+			// is_archived code. It names a channel that cannot accept the
+			// resulting file-share message as posting_to_channel_denied.
+			writeError(w, "posting_to_channel_denied")
+			return
+		}
 		writeError(w, mapServiceError(err, "file_not_found"))
 		return
 	}

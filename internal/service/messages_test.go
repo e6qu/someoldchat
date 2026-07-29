@@ -48,6 +48,25 @@ func TestPostMessageRejectsForeignUser(t *testing.T) {
 	}
 }
 
+func TestPostMessageRejectsArchivedConversation(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "archive", Archived: true})
+	s.SeedConversationMember("C1", "U1")
+
+	if _, err := (Messages{Store: s}).Post(context.Background(), "T1", "U1", "C1", "hello", "", ""); !errors.Is(err, ErrConversationAlreadyArchived) {
+		t.Fatalf("Post error = %v, want %v", err, ErrConversationAlreadyArchived)
+	}
+	messages, err := s.ListMessages(context.Background(), "C1", domain.PageRequest{Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages.Messages) != 0 {
+		t.Fatalf("archived conversation persisted %d messages", len(messages.Messages))
+	}
+}
+
 func TestOAuthExchangeConsumesAuthorizationCode(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
@@ -104,7 +123,7 @@ func TestOAuthV2ExchangeIssuesBotIdentityAndScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(token.AccessToken, "xoxb-") || token.TokenType != "bot" || token.UserID != "Ubot" || token.InstallerID != "Uinstaller" || token.BotID != "B1" || strings.Join(token.Scopes, " ") != "chat:write" {
+	if !strings.HasPrefix(token.AccessToken, "xoxb-") || !strings.HasPrefix(token.AuthedUserAccessToken, "xoxp-") || token.TokenType != "bot" || token.UserID != "Ubot" || token.InstallerID != "Uinstaller" || token.BotID != "B1" || strings.Join(token.Scopes, " ") != "chat:write" || strings.Join(token.AuthedUserScopes, " ") != "users:read" {
 		t.Fatalf("unexpected token: %+v", token)
 	}
 	issued, err := s.LookupToken(ctx, token.AccessToken)
@@ -113,6 +132,13 @@ func TestOAuthV2ExchangeIssuesBotIdentityAndScopes(t *testing.T) {
 	}
 	if issued.AppID != "A1" || issued.BotID != "B1" || issued.UserID != "Ubot" || issued.TokenType != "bot" || strings.Join(issued.Scopes, " ") != "chat:write" {
 		t.Fatalf("unexpected durable token: %+v", issued)
+	}
+	installerToken, err := s.LookupToken(ctx, token.AuthedUserAccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if installerToken.AppID != "A1" || installerToken.BotID != "" || installerToken.UserID != "Uinstaller" || installerToken.TokenType != "user" || strings.Join(installerToken.Scopes, " ") != "users:read" {
+		t.Fatalf("unexpected durable installer token: %+v", installerToken)
 	}
 }
 
@@ -437,22 +463,82 @@ func TestViewsAreTypedDurableAndHashChecked(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	seedInteractionTrigger(t, s, "trigger-1")
+	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
 	ctx := context.Background()
-	opened, err := messages.OpenView(ctx, "T1", "U1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"}}`)
+	opened, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal","title":{"type":"plain_text","text":"First"},"blocks":[]}`)
 	if err != nil || opened.RootViewID != opened.ID || opened.Hash == "" {
 		t.Fatalf("opened=%+v err=%v", opened, err)
 	}
-	pushed, err := messages.PushView(ctx, "T1", "U1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"}}`)
+	pushed, err := messages.PushView(ctx, "T1", "U1", "A1", "trigger-2", `{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`)
 	if err != nil || pushed.RootViewID != opened.RootViewID || pushed.PreviousViewID != opened.ID {
 		t.Fatalf("pushed=%+v err=%v", pushed, err)
 	}
-	updated, err := messages.UpdateView(ctx, "T1", "U1", string(opened.ID), "", `{"type":"modal","title":{"type":"plain_text","text":"Updated"}}`, opened.Hash)
+	updated, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal","title":{"type":"plain_text","text":"Updated"},"blocks":[]}`, opened.Hash)
 	if err != nil || updated.Hash == opened.Hash {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	if _, err := messages.UpdateView(ctx, "T1", "U1", string(opened.ID), "", `{"type":"modal"}`, opened.Hash); err == nil {
+	if _, err := messages.UpdateView(ctx, "T1", "U1", "A1", string(opened.ID), "", `{"type":"modal"}`, opened.Hash); err == nil {
 		t.Fatal("stale view hash unexpectedly succeeded")
+	}
+	if _, err := messages.OpenView(ctx, "T1", "U1", "A1", "trigger-1", `{"type":"modal"}`); !errors.Is(err, ErrInvalidTrigger) {
+		t.Fatalf("replayed trigger error=%v, want %v", err, ErrInvalidTrigger)
+	}
+}
+
+func TestViewsAreOwnedByTheirApp(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	seedHomeApp(t, s, "A1")
+	seedHomeApp(t, s, "A2")
+	messages := Messages{Store: s}
+	ctx := context.Background()
+
+	first, err := messages.PublishView(ctx, "T1", "U1", "A1", "U1", `{"type":"home","external_id":"home-a1","blocks":[]}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := messages.PublishView(ctx, "T1", "U1", "A2", "U1", `{"type":"home","external_id":"home-a2","blocks":[]}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AppID != "A1" || second.AppID != "A2" || first.ID == second.ID {
+		t.Fatalf("first=%+v second=%+v", first, second)
+	}
+	if _, err := messages.UpdateView(ctx, "T1", "U1", "A2", string(first.ID), "", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-app update error=%v, want not found", err)
+	}
+	if _, err := messages.UpdateView(ctx, "T1", "U1", "A2", "", "home-a1", `{"type":"home","blocks":[]}`, ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-app external-id update error=%v, want not found", err)
+	}
+	if _, err := messages.PublishView(ctx, "T1", "U1", "A2", "U1", `{"type":"home","external_id":"home-a1","blocks":[]}`, ""); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("workspace-duplicate external_id error=%v, want already exists", err)
+	}
+}
+
+func seedHomeApp(t *testing.T, s *memory.Store, appID domain.AppID) {
+	t.Helper()
+	now := time.Now().UTC()
+	clientID := "client-" + string(appID)
+	if err := s.CreateApp(context.Background(), domain.App{
+		ID: appID, DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: string(appID), ClientID: clientID,
+		SigningSecretHash: "signing-" + string(appID), SigningSecretCiphertext: "signing-cipher-" + string(appID),
+		VerificationTokenHash: "verification-" + string(appID), VerificationTokenCiphertext: "verification-cipher-" + string(appID),
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: appID, Version: 1,
+		Manifest:  `{"display_information":{"name":"` + string(appID) + `"},"features":{"app_home":{"home_tab_enabled":true}}}`,
+		CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: clientID, SecretHash: "client-secret-" + string(appID), AppID: appID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: appID, WorkspaceID: "T1", Enabled: true, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -488,12 +574,33 @@ func TestDialogOpenValidatesAndPersistsPayload(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	seedInteractionTrigger(t, s, "trigger-1")
+	seedInteractionTrigger(t, s, "trigger-2")
 	messages := Messages{Store: s}
-	if err := messages.OpenDialog(context.Background(), "T1", "U1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`); err != nil {
+	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-1", `{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`); err != nil {
 		t.Fatal(err)
 	}
-	if err := messages.OpenDialog(context.Background(), "T1", "U1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != ErrInvalidDialog {
+	if err := messages.OpenDialog(context.Background(), "T1", "U1", "A1", "trigger-2", `{"callback_id":"callback","title":"Title"}`); err != ErrInvalidDialog {
 		t.Fatalf("invalid dialog err=%v", err)
+	}
+}
+
+func seedInteractionTrigger(t *testing.T, s *memory.Store, plaintext string) {
+	t.Helper()
+	now := time.Now().UTC()
+	err := s.CreateAppInteractionCapabilities(context.Background(),
+		domain.AppTrigger{
+			TokenHash: domain.HashToken(plaintext), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			CreatedAt: now, ExpiresAt: now.Add(3 * time.Second),
+		},
+		domain.AppResponseURL{
+			TokenHash: domain.HashToken("response-" + plaintext), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			ConversationID: "C1", CreatedAt: now, ExpiresAt: now.Add(30 * time.Minute), UsesRemaining: 5,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1193,6 +1300,17 @@ func TestEphemeralMessageIsDurableAndRecipientScoped(t *testing.T) {
 	if err != nil || value.RecipientID != "U2" || value.Text != "secret" {
 		t.Fatalf("ephemeral=%+v err=%v", value, err)
 	}
+	if value.ID == "" || value.CreatedAt.IsZero() {
+		t.Fatalf("ephemeral identity=%+v", value)
+	}
+	visible, err := (Messages{Store: s}).ListEphemeralMessages(context.Background(), "T1", "U2", "C1", 10)
+	if err != nil || len(visible) != 1 || visible[0].ID != value.ID {
+		t.Fatalf("recipient ephemerals=%+v err=%v", visible, err)
+	}
+	hidden, err := (Messages{Store: s}).ListEphemeralMessages(context.Background(), "T1", "U1", "C1", 10)
+	if err != nil || len(hidden) != 0 {
+		t.Fatalf("non-recipient ephemerals=%+v err=%v", hidden, err)
+	}
 	if _, err := (Messages{Store: s}).PostEphemeral(context.Background(), "T1", "U1", "C1", "U3", "secret"); err != store.ErrNotFound {
 		t.Fatalf("foreign recipient err=%v", err)
 	}
@@ -1535,7 +1653,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	attachments := ` [{"text":"attachment"}] `
-	message, err := (Messages{Store: s}).PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", "", attachments, "", "")
+	message, err := (Messages{Store: s}).PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", "", attachments, "", "", "")
 	if err != nil || message.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("message=%+v err=%v", message, err)
 	}
@@ -1543,7 +1661,7 @@ func TestRichMessagesPersistNormalizedAttachments(t *testing.T) {
 	if err != nil || updated.Attachments != `[{"text":"updated"}]` {
 		t.Fatalf("updated=%+v err=%v", updated, err)
 	}
-	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments)
+	ephemeral, err := (Messages{Store: s}).PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", "", attachments, "")
 	if err != nil || ephemeral.Attachments != `[{"text":"attachment"}]` {
 		t.Fatalf("ephemeral=%+v err=%v", ephemeral, err)
 	}
@@ -1563,7 +1681,7 @@ func TestMessagePatchPreservesOmittedRichContentAndRemovesExplicitEmptyArrays(t 
 	value, err := messages.PostWithBlocksAndAttachments(
 		context.Background(), "T1", "U1", "C1", "fallback",
 		`[{"type":"section","text":{"type":"plain_text","text":"block"}}]`,
-		`[{"text":"attachment"}]`, "", "",
+		`[{"text":"attachment"}]`, "", "", "",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -1650,7 +1768,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	messages := Messages{Store: s}
 	oversized := `[{"type":"section","text":{"type":"plain_text","text":"` + strings.Repeat("x", MaxMessageBodyBytes) + `"}}]`
 
-	if _, err := messages.PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", "", ""); !errors.Is(err, ErrInvalidMessage) {
+	if _, err := messages.PostWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", "", "", ""); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("post oversized body err=%v", err)
 	}
 	plain, err := messages.Post(context.Background(), "T1", "U1", "C1", "before", "", "")
@@ -1663,7 +1781,7 @@ func TestEveryMessageWriteUsesOneStructuredBodyLimit(t *testing.T) {
 	if _, err := messages.ScheduleMessageWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "", oversized, "", time.Now().UTC().Add(time.Hour)); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("schedule oversized body err=%v", err)
 	}
-	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, ""); !errors.Is(err, ErrInvalidEphemeral) {
+	if _, err := messages.PostEphemeralWithBlocksAndAttachments(context.Background(), "T1", "U1", "C1", "U2", "", oversized, "", ""); !errors.Is(err, ErrInvalidEphemeral) {
 		t.Fatalf("ephemeral oversized body err=%v", err)
 	}
 	if _, err := messages.Unfurl(context.Background(), "T1", "U1", "C1", domain.NewMessageTimestamp(plain.CreatedAt), map[string]string{
@@ -1715,12 +1833,33 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 		t.Fatalf("metadata=%+v err=%v", metadata, err)
 	}
 	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" {
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Text != "Uploaded" || page.Messages[0].Blocks != "" || len(page.Messages[0].Files) != 1 || page.Messages[0].Files[0].ID != file.ID {
 		t.Fatalf("published messages=%+v err=%v", page.Messages, err)
 	}
 	stored, err := s.GetExternalUpload(ctx, upload.ID)
 	if err != nil || stored.Status != domain.ExternalUploadCompleted {
 		t.Fatalf("stored=%+v err=%v", stored, err)
+	}
+}
+
+func TestExternalUploadUsesTicketSizeForMultipartParts(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s, Blob: objects}
+	upload, err := messages.CreateExternalUpload(context.Background(), "T1", "U1", "notes.txt", "text/plain", 7, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.UploadExternalFile(context.Background(), upload.ID, -1, bytes.NewReader([]byte("content"))); err != nil {
+		t.Fatalf("multipart upload: %v", err)
+	}
+	if value, err := s.GetExternalUpload(context.Background(), upload.ID); err != nil || value.Status != domain.ExternalUploadUploaded {
+		t.Fatalf("upload=%+v err=%v", value, err)
 	}
 }
 
@@ -1755,7 +1894,7 @@ func TestExternalUploadCompletionHandlesMultipleFilesAtomically(t *testing.T) {
 		t.Fatalf("files=%+v err=%v", files, err)
 	}
 	page, err := messages.History(ctx, "T1", "U1", "C1", domain.PageRequest{Limit: 10})
-	if err != nil || len(page.Messages) != 1 || page.Messages[0].Blocks == "" {
+	if err != nil || len(page.Messages) != 1 || page.Messages[0].Blocks == "" || len(page.Messages[0].Files) != 2 || page.Messages[0].Files[0].ID != files[0].ID || page.Messages[0].Files[1].ID != files[1].ID {
 		t.Fatalf("messages=%+v err=%v", page.Messages, err)
 	}
 	retry, err := messages.CompleteExternalUploads(ctx, "T1", "U1", []domain.ExternalUploadCompletion{{ID: second.ID}, {ID: first.ID}}, []domain.ConversationID{"C1"}, "", `[ {"type":"section","text":{"type":"plain_text","text":"Uploaded"}} ]`, "")
@@ -1777,6 +1916,9 @@ func TestExternalUploadKeepsItsIdentifierThroughCompletion(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	if err := s.SeedConversationMember("C1", "U1"); err != nil {
+		t.Fatal(err)
+	}
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -1815,6 +1957,9 @@ func TestExternalUploadBatchKeepsEveryIdentifier(t *testing.T) {
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	if err := s.SeedConversationMember("C1", "U1"); err != nil {
+		t.Fatal(err)
+	}
 	objects, err := blob.NewFilesystem(filepath.Join(t.TempDir(), "objects"), 1024)
 	if err != nil {
 		t.Fatal(err)

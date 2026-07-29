@@ -1,7 +1,6 @@
 package socketmode
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -23,44 +22,62 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
-type testEventSource struct {
-	record events.Record
-}
-
 type testResponseSink struct {
+	mu         sync.Mutex
 	appID      domain.AppID
 	envelopeID string
 	payload    []byte
 }
 
 func (s *testResponseSink) HandleSocketModeResponse(_ context.Context, appID domain.AppID, envelopeID string, payload []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.appID = appID
 	s.envelopeID = envelopeID
 	s.payload = append([]byte(nil), payload...)
 	return nil
 }
 
-func (s testEventSource) ListAppEventsAfter(_ context.Context, _ domain.AppID, after uint64, _ int) ([]events.Record, error) {
-	if s.record.Sequence <= after {
-		return nil, nil
+func (s *testResponseSink) snapshot() (domain.AppID, string, []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.appID, s.envelopeID, append([]byte(nil), s.payload...)
+}
+
+type observedQueue struct {
+	*memory.Store
+	mu    sync.Mutex
+	acked []uint64
+}
+
+func (q *observedQueue) AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
+	if err := q.Store.AckAppEvent(ctx, appID, surface, owner, sequence); err != nil {
+		return err
 	}
-	return []events.Record{s.record}, nil
+	q.mu.Lock()
+	q.acked = append(q.acked, sequence)
+	q.mu.Unlock()
+	return nil
 }
 
-// journalSource answers like the durable journal: the oldest record after the
-// cursor, whatever that record is. The journal carries internal worker records
-// and records written before the typed payload contract as well as events.
-type journalSource struct {
-	records []events.Record
+func (q *observedQueue) acknowledged(sequence uint64) bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.acked) != 0 && q.acked[len(q.acked)-1] >= sequence
 }
 
-func (s journalSource) ListAppEventsAfter(_ context.Context, _ domain.AppID, after uint64, _ int) ([]events.Record, error) {
-	for _, record := range s.records {
-		if record.Sequence > after {
-			return []events.Record{record}, nil
+func installAppEvents(t *testing.T, s *memory.Store, records ...events.Record) {
+	t.Helper()
+	if err := s.CreateAppInstallation(context.Background(), domain.AppInstallation{
+		AppID: "A123", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range records {
+		if err := s.AppendEvent(context.Background(), record.Event); err != nil {
+			t.Fatal(err)
 		}
 	}
-	return nil, nil
 }
 
 func producedRecord(t *testing.T, sequence uint64, id domain.EventID, topic string, fields ...events.Field) events.Record {
@@ -279,7 +296,9 @@ func TestHandlerDeliversEventAndAdvancesOnlyAfterAcknowledgement(t *testing.T) {
 	// The record is built by the same typed constructor the service uses and is
 	// one whose complete Slack inner shape can be derived from durable fields.
 	record := translatedRecord(t, 4, "event-4")
-	server := httptest.NewServer(Handler{Store: connections, Events: testEventSource{record: record}, Cursors: connections, Responses: responses})
+	installAppEvents(t, connections, record)
+	queue := &observedQueue{Store: connections}
+	server := httptest.NewServer(Handler{Store: connections, Queue: queue, Responses: responses})
 	defer server.Close()
 	parsed.Scheme = "ws"
 	parsed.Host = strings.TrimPrefix(server.URL, "http://")
@@ -318,20 +337,83 @@ func TestHandlerDeliversEventAndAdvancesOnlyAfterAcknowledgement(t *testing.T) {
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		cursor, cursorErr := connections.GetSocketModeCursor(context.Background(), "A123")
-		if cursorErr != nil {
-			t.Fatal(cursorErr)
-		}
-		if cursor == 4 && responses.appID == "A123" {
+		appID, _, _ := responses.snapshot()
+		if queue.acknowledged(1) && appID == "A123" {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("cursor=%d, want 4", cursor)
+			t.Fatal("event lease was not acknowledged")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	if responses.envelopeID != "event-4" || string(responses.payload) != `{"ok":"true"}` {
-		t.Fatalf("response=%+v", responses)
+	appID, envelopeID, payload := responses.snapshot()
+	if appID != "A123" || envelopeID != "event-4" || string(payload) != `{"ok":"true"}` {
+		t.Fatalf("response app=%q envelope=%q payload=%s", appID, envelopeID, payload)
+	}
+}
+
+func TestHandlerDeliversAndAcknowledgesAppTargetedInteraction(t *testing.T) {
+	connections := memory.New()
+	now := time.Now().UTC()
+	response := domain.AppResponseURL{
+		TokenHash: "response-hash", AppID: "A123", WorkspaceID: "T1", UserID: "U1",
+		ConversationID: "C1", CreatedAt: now, ExpiresAt: now.Add(time.Minute), UsesRemaining: 5,
+	}
+	if err := connections.CreateAppInteractionCapabilities(context.Background(), domain.AppTrigger{
+		TokenHash: "trigger-hash", AppID: "A123", WorkspaceID: "T1", UserID: "U1",
+		CreatedAt: now, ExpiresAt: now.Add(time.Minute),
+	}, response); err != nil {
+		t.Fatal(err)
+	}
+	if err := connections.CreateSocketModeInteraction(context.Background(), domain.SocketModeInteraction{
+		EnvelopeID: "interaction-1", AppID: "A123", WorkspaceID: "T1", UserID: "U1",
+		Type: "slash_commands", Payload: `{"command":"/deploy","text":"production"}`,
+		Response: response, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	responses := new(testResponseSink)
+	client := dialHandler(t, Handler{
+		Store: connections, Interactions: connections, Responses: responses,
+	}, connections)
+	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
+	var envelope struct {
+		EnvelopeID             string `json:"envelope_id"`
+		Type                   string `json:"type"`
+		AcceptsResponsePayload bool   `json:"accepts_response_payload"`
+		Payload                struct {
+			Command string `json:"command"`
+			Text    string `json:"text"`
+		} `json:"payload"`
+	}
+	if err := client.ReadJSON(&envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.EnvelopeID != "interaction-1" || envelope.Type != "slash_commands" ||
+		!envelope.AcceptsResponsePayload || envelope.Payload.Command != "/deploy" || envelope.Payload.Text != "production" {
+		t.Fatalf("interaction envelope=%+v", envelope)
+	}
+	if err := client.WriteJSON(map[string]any{
+		"envelope_id": envelope.EnvelopeID,
+		"payload":     map[string]any{"response_type": "ephemeral", "text": "deployment queued"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		stored, err := connections.GetSocketModeInteraction(context.Background(), "A123", envelope.EnvelopeID)
+		_, responseEnvelopeID, _ := responses.snapshot()
+		if err == nil && !stored.AcknowledgedAt.IsZero() && responseEnvelopeID == envelope.EnvelopeID {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("interaction was not durably acknowledged: stored=%+v response_envelope=%q err=%v", stored, responseEnvelopeID, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	appID, responseEnvelopeID, responsePayload := responses.snapshot()
+	if appID != "A123" || responseEnvelopeID != envelope.EnvelopeID || string(responsePayload) != `{"response_type":"ephemeral","text":"deployment queued"}` {
+		t.Fatalf("response app=%q envelope=%q payload=%s", appID, responseEnvelopeID, responsePayload)
 	}
 }
 
@@ -341,7 +423,9 @@ func TestHandlerAdvancesFanOutOnlyAfterEveryAcknowledgement(t *testing.T) {
 		events.String("channel_id", "C1"),
 		events.Strings("user_ids", []string{"U2", "U3"}),
 	)
-	client := dialHandler(t, Handler{Store: connections, Events: testEventSource{record: record}, Cursors: connections, Responses: new(testResponseSink)}, connections)
+	installAppEvents(t, connections, record)
+	queue := &observedQueue{Store: connections}
+	client := dialHandler(t, Handler{Store: connections, Queue: queue, Responses: new(testResponseSink)}, connections)
 	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
 	ids := make([]string, 0, 2)
 	for range 2 {
@@ -360,27 +444,19 @@ func TestHandlerAdvancesFanOutOnlyAfterEveryAcknowledgement(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	cursor, err := connections.GetSocketModeCursor(context.Background(), "A123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cursor != 0 {
-		t.Fatalf("cursor=%d after one acknowledgement, want 0 until all fan-out envelopes are acknowledged", cursor)
+	if queue.acknowledged(1) {
+		t.Fatal("event was acknowledged after only one fan-out envelope")
 	}
 	if err := client.WriteJSON(map[string]string{"envelope_id": ids[1]}); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(time.Second)
 	for {
-		cursor, err = connections.GetSocketModeCursor(context.Background(), "A123")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cursor == 4 {
+		if queue.acknowledged(1) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("cursor=%d, want 4 after every fan-out acknowledgement", cursor)
+			t.Fatal("event was not acknowledged after every fan-out envelope")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -391,7 +467,7 @@ func TestHandlerAdvancesFanOutOnlyAfterEveryAcknowledgement(t *testing.T) {
 // close the connection again forever. Delivery has to step over it.
 func TestHandlerSkipsUndeliverableRecordsAndKeepsDelivering(t *testing.T) {
 	connections := memory.New()
-	source := journalSource{records: []events.Record{
+	records := []events.Record{
 		// An internal blob-cleanup record: its payload is an object-storage key.
 		{Sequence: 4, Event: events.Event{ID: "event-4", WorkspaceID: "T1", Topic: events.UserPhotoBlobDeleteTopic, Payload: "T1/users/U1/photo_secret", CreatedAt: time.Unix(1700000000, 0)}},
 		// A record written before the typed payload contract: a bare message ID.
@@ -405,8 +481,10 @@ func TestHandlerSkipsUndeliverableRecordsAndKeepsDelivering(t *testing.T) {
 			Payload: `{"type":"reaction_added","event_ts":"1700000000.000000"}`, CreatedAt: time.Unix(1700000000, 0),
 		}},
 		translatedRecord(t, 8, "event-8"),
-	}}
-	client := dialHandler(t, Handler{Store: connections, Events: source, Cursors: connections, Responses: new(testResponseSink)}, connections)
+	}
+	installAppEvents(t, connections, records...)
+	queue := &observedQueue{Store: connections}
+	client := dialHandler(t, Handler{Store: connections, Queue: queue, Responses: new(testResponseSink)}, connections)
 	_ = client.SetReadDeadline(time.Now().Add(5 * time.Second))
 	messageType, raw, err := client.ReadMessage()
 	if err != nil {
@@ -432,69 +510,53 @@ func TestHandlerSkipsUndeliverableRecordsAndKeepsDelivering(t *testing.T) {
 	if envelope.EnvelopeID != "event-8" || envelope.Payload["type"] != "event_callback" || payload["type"] != "reaction_added" {
 		t.Fatalf("envelope=%s", raw)
 	}
-	cursor, err := connections.GetSocketModeCursor(context.Background(), "A123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cursor != 7 {
-		t.Fatalf("cursor=%d, want the undeliverable records skipped durably", cursor)
+	if !queue.acknowledged(4) {
+		t.Fatal("undeliverable records were not skipped durably")
 	}
 }
 
-// Delivery from the shared per-app cursor gives every open connection of an
-// application its own copy of every envelope, because the position is keyed on
-// the application and every connection reads and writes the same row. Slack's
-// Socket Mode contract delivers each envelope to exactly one connection, and
-// domain.SocketModeConnectionLimit deliberately permits ten, so an app that
-// holds connections open across a redeploy runs its handler ten times per
-// event, side effects included.
-//
-// No store in this repository implements per-envelope ownership, so the defect
-// is live. What must not be true is that it is also silent: an operator has no
-// other signal that the events their app is handling are duplicates. The
-// warning is emitted exactly when duplication is happening — when a second
-// connection of the same application starts delivering.
-func TestSharedCursorDeliveryReportsThatEveryConnectionReceivesEveryEnvelope(t *testing.T) {
+func TestConcurrentConnectionsDeliverAnEnvelopeExactlyOnce(t *testing.T) {
 	connections := memory.New()
-	var lines lockedBuffer
 	record := translatedRecord(t, 4, "event-4")
-	handler := Handler{Store: connections, Events: testEventSource{record: record}, Cursors: connections,
-		Responses: new(testResponseSink), Logger: slog.New(slog.NewTextHandler(&lines, nil))}
+	installAppEvents(t, connections, record)
+	queue := &observedQueue{Store: connections}
+	handler := Handler{Store: connections, Queue: queue, Responses: new(testResponseSink), Logger: quietLogger()}
 	first := dialHandler(t, handler, connections)
 	defer first.Close()
 	second := dialHandler(t, handler, connections)
 	defer second.Close()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		logged := lines.String()
-		if strings.Contains(logged, "every open connection of this app receives every envelope") {
-			if !strings.Contains(logged, "A123") {
-				t.Fatalf("the warning does not name the application: %s", logged)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("a second connection began duplicating every envelope with no operator-visible report: %s", logged)
-		}
-		time.Sleep(10 * time.Millisecond)
+
+	type delivery struct {
+		connection *websocket.Conn
+		envelopeID string
+		err        error
 	}
-}
-
-type lockedBuffer struct {
-	mu      sync.Mutex
-	written bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(payload []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.written.Write(payload)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.written.String()
+	deliveries := make(chan delivery, 2)
+	for _, client := range []*websocket.Conn{first, second} {
+		go func(client *websocket.Conn) {
+			_ = client.SetReadDeadline(time.Now().Add(750 * time.Millisecond))
+			var envelope struct {
+				EnvelopeID string `json:"envelope_id"`
+			}
+			err := client.ReadJSON(&envelope)
+			deliveries <- delivery{connection: client, envelopeID: envelope.EnvelopeID, err: err}
+		}(client)
+	}
+	results := []delivery{<-deliveries, <-deliveries}
+	var winner delivery
+	delivered := 0
+	for _, result := range results {
+		if result.err == nil {
+			delivered++
+			winner = result
+		}
+	}
+	if delivered != 1 || winner.envelopeID != "event-4" {
+		t.Fatalf("successful deliveries=%d results=%+v, want one event-4 envelope", delivered, results)
+	}
+	if err := winner.connection.WriteJSON(map[string]string{"envelope_id": winner.envelopeID}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Losing a race for an envelope is not a server fault. Closing with an internal
@@ -546,8 +608,9 @@ func TestHandlerDoesNotLeakTheReaderOnPipelinedFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := translatedRecord(t, 4, "event-4")
+	installAppEvents(t, connections, record)
 	baseline := runtime.NumGoroutine()
-	server := httptest.NewServer(Handler{Store: connections, Events: testEventSource{record: record}, Cursors: connections, Responses: new(testResponseSink)})
+	server := httptest.NewServer(Handler{Store: connections, Queue: connections, Responses: new(testResponseSink)})
 	parsed.Scheme = "ws"
 	parsed.Host = strings.TrimPrefix(server.URL, "http://")
 	client, _, err := websocket.DefaultDialer.Dial(parsed.String(), nil)

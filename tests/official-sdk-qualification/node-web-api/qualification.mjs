@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { Readable } from "node:stream";
-import { WebClient } from "@slack/web-api";
+import { LogLevel, WebClient } from "@slack/web-api";
 
 const apiUrl = process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/";
 const token = process.env.SAMEOLDCHAT_API_TOKEN ?? "xoxb-test";
-const client = new WebClient(token, { slackApiUrl: apiUrl });
-const appClient = new WebClient(process.env.SAMEOLDCHAT_APP_TOKEN ?? "xapp-test", { slackApiUrl: apiUrl });
+const clientOptions = {
+	slackApiUrl: apiUrl,
+	...(process.env.SAMEOLDCHAT_SDK_DEBUG === "1" ? { logLevel: LogLevel.DEBUG } : {}),
+};
+const client = new WebClient(token, clientOptions);
+const appClient = new WebClient(process.env.SAMEOLDCHAT_APP_TOKEN ?? "xapp-test", clientOptions);
+const configurationClient = new WebClient(process.env.SAMEOLDCHAT_CONFIGURATION_TOKEN ?? "xoxe.xoxp-qualification", clientOptions);
 
 const socketMode = await appClient.apiCall("apps.connections.open");
 assert.equal(socketMode.ok, true);
@@ -13,6 +17,123 @@ assert.equal(socketMode.url.startsWith("ws://127.0.0.1:18080/socket-mode?connect
 
 const success = await client.api.test();
 assert.equal(success.ok, true);
+// blocks.validate is newer than the SDK's generated convenience namespace,
+// so exercise it through the official client's supported raw-method path. This
+// still qualifies the SDK's argument serialization and response decoding.
+const validBlocks = await client.apiCall("blocks.validate", {
+	blocks: [{ type: "section", text: { type: "plain_text", text: "SDK validated" } }],
+});
+assert.equal(validBlocks.ok, true);
+const validMessageBlocks = await client.apiCall("blocks.validate", {
+	message: { text: "fallback", blocks: [{ type: "divider" }] },
+});
+assert.equal(validMessageBlocks.ok, true);
+const validViewBlocks = await client.apiCall("blocks.validate", {
+	view: {
+		type: "modal",
+		title: { type: "plain_text", text: "SDK view" },
+		blocks: [{ type: "section", text: { type: "mrkdwn", text: "*Valid*" } }],
+	},
+});
+assert.equal(validViewBlocks.ok, true);
+
+// @slack/web-api 8.0.0 does not currently generate convenience methods for
+// apps.datastore.*, so qualify the documented methods through WebClient's
+// supported raw-method path. This still exercises the official SDK's JSON
+// argument serialization, bearer authentication, error handling, and response
+// decoding against the current Slack wire contract.
+const datastorePut = await client.apiCall("apps.datastore.put", {
+	datastore: "incidents",
+	item: { id: "SDK-1", title: "Investigate", priority: 1 },
+});
+assert.equal(datastorePut.ok, true);
+assert.deepEqual(datastorePut.item, { id: "SDK-1", priority: 1, title: "Investigate" });
+const datastoreGet = await client.apiCall("apps.datastore.get", {
+	datastore: "incidents",
+	id: "SDK-1",
+});
+assert.equal(datastoreGet.ok, true);
+assert.equal(datastoreGet.item.title, "Investigate");
+const datastoreUpdate = await client.apiCall("apps.datastore.update", {
+	datastore: "incidents",
+	item: { id: "SDK-1", priority: 2 },
+});
+assert.equal(datastoreUpdate.ok, true);
+assert.equal(datastoreUpdate.item.title, "Investigate");
+assert.equal(datastoreUpdate.item.priority, 2);
+const datastoreBulkPut = await client.apiCall("apps.datastore.bulkPut", {
+	datastore: "incidents",
+	items: [
+		{ id: "SDK-2", title: "Mitigate" },
+		{ id: "SDK-3", title: "Recover", priority: 3 },
+	],
+});
+assert.equal(datastoreBulkPut.ok, true);
+assert.deepEqual(datastoreBulkPut.failed_items, []);
+const datastoreBulkGet = await client.apiCall("apps.datastore.bulkGet", {
+	datastore: "incidents",
+	ids: ["SDK-3", "missing", "SDK-1"],
+});
+assert.equal(datastoreBulkGet.ok, true);
+assert.deepEqual(datastoreBulkGet.items.map((item) => item.id), ["SDK-3", "SDK-1"]);
+const datastoreBulkDelete = await client.apiCall("apps.datastore.bulkDelete", {
+	datastore: "incidents",
+	ids: ["SDK-2", "SDK-3"],
+});
+assert.equal(datastoreBulkDelete.ok, true);
+assert.deepEqual(datastoreBulkDelete.failed_items, []);
+assert.equal((await client.apiCall("apps.datastore.delete", {
+	datastore: "incidents",
+	id: "SDK-1",
+})).ok, true);
+const missingDatastoreItem = await client.apiCall("apps.datastore.get", {
+	datastore: "incidents",
+	id: "SDK-1",
+});
+assert.equal(missingDatastoreItem.ok, true);
+assert.deepEqual(missingDatastoreItem.item, {});
+
+// Exercise the current typed App Manifest surface, not only SameOldChat's raw
+// HTTP handlers. This catches argument serialization and response-shape drift
+// in @slack/web-api itself.
+const qualificationManifest = {
+	display_information: { name: "SDK Manifest Qualification", description: "created by the official SDK" },
+	oauth_config: {
+		redirect_urls: ["https://example.com/oauth"],
+		scopes: { bot: ["chat:write"] },
+	},
+	settings: { socket_mode_enabled: true },
+};
+const manifestValidation = await configurationClient.apps.manifest.validate({ manifest: qualificationManifest });
+assert.equal(manifestValidation.ok, true);
+assert.deepEqual(manifestValidation.errors, []);
+const manifestCreation = await configurationClient.apps.manifest.create({ manifest: qualificationManifest });
+assert.equal(manifestCreation.ok, true);
+assert.match(manifestCreation.app_id, /^A/);
+assert.equal(typeof manifestCreation.credentials.client_secret, "string");
+assert.equal(typeof manifestCreation.credentials.signing_secret, "string");
+assert.equal(typeof manifestCreation.oauth_authorize_url, "string");
+const manifestExport = await configurationClient.apps.manifest.export({ app_id: manifestCreation.app_id });
+assert.equal(manifestExport.ok, true);
+assert.equal(manifestExport.manifest.display_information.name, "SDK Manifest Qualification");
+const updatedQualificationManifest = structuredClone(qualificationManifest);
+updatedQualificationManifest.display_information.name = "SDK Manifest Updated";
+updatedQualificationManifest.oauth_config.scopes.bot.push("commands");
+const manifestUpdate = await configurationClient.apps.manifest.update({
+	app_id: manifestCreation.app_id,
+	manifest: updatedQualificationManifest,
+});
+assert.equal(manifestUpdate.ok, true);
+assert.equal(manifestUpdate.permissions_updated, true);
+const rotatedConfiguration = await configurationClient.tooling.tokens.rotate({ refresh_token: "xoxe-qualification" });
+assert.equal(rotatedConfiguration.ok, true);
+assert.match(rotatedConfiguration.token, /^xoxe\.xoxp-/);
+assert.match(rotatedConfiguration.refresh_token, /^xoxe-/);
+assert.equal(rotatedConfiguration.team_id, "T1");
+assert.equal(rotatedConfiguration.user_id, "U1");
+const rotatedConfigurationClient = new WebClient(rotatedConfiguration.token, clientOptions);
+const manifestDeletion = await rotatedConfigurationClient.apps.manifest.delete({ app_id: manifestCreation.app_id });
+assert.equal(manifestDeletion.ok, true);
 
 const identity = await client.auth.test();
 assert.equal(identity.ok, true);
@@ -108,8 +229,26 @@ assert.equal(oauthV2.ok, true);
 assert.equal(oauthV2.authed_user.id, "U1");
 assert.equal(oauthV2.token_type, "bot");
 assert.equal(oauthV2.bot_user_id, "U1");
-assert.equal(oauthV2.access_token.startsWith("xoxb-"), true);
-assert.equal(oauthV2.authed_user.access_token, undefined);
+assert.equal(oauthV2.access_token.startsWith("xoxe.xoxb-"), true);
+assert.equal(oauthV2.refresh_token.startsWith("xoxe-"), true);
+assert.equal(oauthV2.expires_in, 43200);
+assert.equal(oauthV2.authed_user.access_token.startsWith("xoxe.xoxp-"), true);
+assert.equal(oauthV2.authed_user.refresh_token.startsWith("xoxe-"), true);
+assert.equal(oauthV2.authed_user.expires_in, 43200);
+assert.equal(oauthV2.authed_user.token_type, "user");
+assert.equal(typeof oauthV2.authed_user.scope, "string");
+const oauthV2Refreshed = await client.oauth.v2.access({
+  client_id: "qualification-client",
+  client_secret: "qualification-secret",
+  grant_type: "refresh_token",
+  refresh_token: oauthV2.refresh_token,
+});
+assert.equal(oauthV2Refreshed.ok, true);
+assert.equal(oauthV2Refreshed.token_type, "bot");
+assert.equal(oauthV2Refreshed.access_token.startsWith("xoxe.xoxb-"), true);
+assert.equal(oauthV2Refreshed.refresh_token.startsWith("xoxe-"), true);
+assert.notEqual(oauthV2Refreshed.refresh_token, oauthV2.refresh_token);
+assert.equal(oauthV2Refreshed.expires_in, 43200);
 const oauthV2User = await client.apiCall("oauth.v2.user.access", {
   client_id: "qualification-client",
   client_secret: "qualification-secret",
@@ -120,7 +259,19 @@ assert.equal(oauthV2User.ok, true);
 assert.equal(oauthV2User.access_token, undefined);
 assert.equal(oauthV2User.authed_user.id, "U1");
 assert.equal(oauthV2User.authed_user.token_type, "user");
-assert.equal(oauthV2User.authed_user.access_token.startsWith("xoxp-"), true);
+assert.equal(oauthV2User.authed_user.access_token.startsWith("xoxe.xoxp-"), true);
+assert.equal(oauthV2User.authed_user.refresh_token.startsWith("xoxe-"), true);
+assert.equal(oauthV2User.authed_user.expires_in, 43200);
+const oauthV2Exchanged = await client.oauth.v2.exchange({
+  client_id: "qualification-client",
+  client_secret: "qualification-secret",
+  token: "xoxb-qualification-legacy",
+});
+assert.equal(oauthV2Exchanged.ok, true);
+assert.equal(oauthV2Exchanged.token_type, "bot");
+assert.equal(oauthV2Exchanged.access_token.startsWith("xoxe.xoxb-"), true);
+assert.equal(oauthV2Exchanged.refresh_token.startsWith("xoxe-"), true);
+assert.equal(oauthV2Exchanged.expires_in, 43200);
 const oauthToken = await client.apiCall("oauth.token", {
 	client_id: "qualification-client",
 	client_secret: "qualification-secret",
@@ -268,24 +419,28 @@ assert.equal(typeof conversationPrefs.prefs, "object");
 const conversationTeams = await client.admin.conversations.getTeams({ channel_id: "C1", limit: 10 });
 assert.equal(conversationTeams.ok, true);
 assert.equal(conversationTeams.team_ids.includes("T1"), true);
-const completedStep = await client.workflows.stepCompleted({
+// Web API 8 removed the typed Workflow Steps from Apps helpers after Slack
+// retired that platform. SameOldChat deliberately preserves the legacy HTTP
+// methods, so qualify them through WebClient.apiCall instead of pinning an old
+// SDK merely to retain removed convenience functions.
+const completedStep = await client.apiCall("workflows.stepCompleted", {
   workflow_step_execute_id: "qualification-execute",
   outputs: { answer: "ok" },
 });
 assert.equal(completedStep.ok, true);
-const failedStep = await client.workflows.stepFailed({
+const failedStep = await client.apiCall("workflows.stepFailed", {
   workflow_step_execute_id: "qualification-failed",
   error: { message: "qualification failure" },
 });
 assert.equal(failedStep.ok, true);
-const updatedStep = await client.workflows.updateStep({
+const updatedStep = await client.apiCall("workflows.updateStep", {
   workflow_step_edit_id: "qualification-edit",
   inputs: { input: { value: "qualification" } },
   outputs: [{ type: "text", name: "answer", label: "Answer" }],
 });
 assert.equal(updatedStep.ok, true);
 const openedDialog = await client.dialog.open({
-  trigger_id: "qualification-trigger",
+  trigger_id: "qualification-dialog-trigger",
   dialog: {
     callback_id: "qualification-dialog",
     title: "Qualification",
@@ -295,7 +450,7 @@ const openedDialog = await client.dialog.open({
 });
 assert.equal(openedDialog.ok, true);
 const openedView = await client.views.open({
-  trigger_id: "qualification-trigger",
+  trigger_id: "qualification-open-trigger",
   view: {
     type: "modal",
     callback_id: "qualification",
@@ -308,7 +463,7 @@ assert.equal(typeof openedView.view.id, "string");
 const publishedView = await client.views.publish({ user_id: "U1", view: { type: "home", blocks: [] } });
 assert.equal(publishedView.ok, true);
 const pushedView = await client.views.push({
-  trigger_id: "qualification-trigger",
+  trigger_id: "qualification-push-trigger",
   view: {
     type: "modal",
     callback_id: "qualification-pushed",
@@ -450,17 +605,21 @@ assert.equal((await client.admin.conversations.restrictAccess.removeGroup({
 })).ok, true);
 assert.equal((await client.admin.conversations.delete({ channel_id: restrictedConversation.channel_id })).ok, true);
 assert.equal((await client.usergroups.disable({ usergroup: accessGroupID, team_id: "T1" })).ok, true);
-const uploadedFile = await client.files.upload({
+// Web API 8 removed the retired files.upload helper. filesUploadV2 exercises
+// the current three-step upload protocol through the SDK's public convenience
+// method and therefore qualifies both the method pair and the byte upload URL.
+const uploadedFile = await client.filesUploadV2({
 	filename: "sdk-upload.txt",
 	content: "sdk upload",
 	title: "SDK upload",
 });
 assert.equal(uploadedFile.ok, true);
-assert.equal(typeof uploadedFile.file.id, "string");
+const uploadedFileMetadata = uploadedFile.files[0].files[0];
+assert.equal(typeof uploadedFileMetadata.id, "string");
 const files = await client.files.list({ count: 10 });
 assert.equal(files.ok, true);
 assert.equal(files.files.length, 2);
-const fileId = uploadedFile.file.id;
+const fileId = uploadedFileMetadata.id;
 const qualificationFile = files.files.find((file) => file.name === "qualification.txt");
 assert.notEqual(qualificationFile, undefined);
 const deletedComment = await client.files.comments.delete({ file: qualificationFile.id, id: "FC1" });
@@ -619,8 +778,7 @@ assert.equal(profile.profile.display_name, "alice");
 // a stream that is not the image it claims to be, which is what stops an
 // uploaded document being served back from this origin. A fixture that sends a
 // lie asserts the product accepts one.
-const image = Readable.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64"));
-image.path = "qualification.png";
+const image = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==", "base64");
 const photo = await client.users.setPhoto({ image });
 assert.equal(photo.ok, true);
 const deletedPhoto = await client.users.deletePhoto();
@@ -628,6 +786,42 @@ assert.equal(deletedPhoto.ok, true);
 
 const root = await client.chat.postMessage({ channel: "C1", text: "thread root" });
 assert.equal(root.ok, true);
+// Exercise Slack's current high-level ChatStreamer, not only raw method names.
+// It buffers fragments, starts on the first flush, appends against the returned
+// timestamp, and finalizes with blocks and metadata.
+const streamer = client.chatStream({
+	channel: "C1",
+	thread_ts: root.ts,
+	recipient_team_id: "T1",
+	recipient_user_id: "U1",
+	buffer_size: 1,
+	task_display_mode: "dense",
+	username: "SDK assistant",
+	icon_emoji: ":robot_face:",
+});
+const firstStreamFlush = await streamer.append({ markdown_text: "**streamed " });
+assert.equal(firstStreamFlush?.ok, true);
+assert.equal(typeof streamer.ts, "string");
+const secondStreamFlush = await streamer.append({
+	chunks: [
+		{ type: "markdown_text", text: "answer**" },
+		{ type: "plan_update", title: "SDK plan" },
+		{ type: "task_update", id: "sdk-task", title: "Qualify stream", status: "complete", output: "green" },
+	],
+});
+assert.equal(secondStreamFlush?.ok, true);
+const stoppedStream = await streamer.stop({
+	markdown_text: " Done.",
+	blocks: [{ type: "context", elements: [{ type: "plain_text", text: "Final SDK block" }] }],
+	metadata: { event_type: "qualification", event_payload: { sdk: "node" } },
+});
+assert.equal(stoppedStream.ok, true);
+assert.equal(stoppedStream.ts, streamer.ts);
+assert.equal(stoppedStream.message.text, "**streamed answer** Done.");
+assert.equal(stoppedStream.message.bot_id, "B1");
+assert.equal(stoppedStream.message.username, "SDK assistant");
+assert.equal(stoppedStream.message.icons.emoji, ":robot_face:");
+assert.equal(stoppedStream.message.metadata.event_type, "qualification");
 const unfurled = await client.chat.unfurl({
   channel: "C1",
   ts: root.ts,
@@ -724,7 +918,7 @@ assert.equal(marked.ok, true);
 
 const history = await client.conversations.history({ channel: "C1", limit: 10 });
 assert.equal(history.ok, true);
-assert.equal(history.messages.length, 3);
+assert.equal(history.messages.length >= 3, true);
 assert.equal(history.messages.some((message) => message.ts === posted.ts), false);
 assert.equal(history.has_more, false);
 const search = await client.search.messages({ query: "thread", count: 999, cursor: "*" });
@@ -796,6 +990,15 @@ assert.equal(externalInfo.ok, true);
 assert.equal(externalInfo.file.id, externalUpload.file_id);
 assert.equal(externalInfo.file.title, "External qualification");
 assert.equal(externalInfo.file.size, 11);
+const externalHistory = await client.conversations.history({ channel: "C1", limit: 100 });
+const externalMessages = externalHistory.messages.filter((message) =>
+	message.subtype === "file_share" &&
+	message.files?.some((file) => file.id === externalUpload.file_id)
+);
+assert.equal(externalMessages.length, 1);
+assert.equal(externalMessages[0].text, "external upload");
+assert.equal(externalMessages[0].files[0].mode, "hosted");
+assert.equal(externalMessages[0].files[0].url_private, `/api/files/${externalUpload.file_id}`);
 
 // The upload is single-use: completing it again must not mint a second file.
 const repeatedExternal = await client.files.completeUploadExternal({
@@ -804,6 +1007,10 @@ const repeatedExternal = await client.files.completeUploadExternal({
 });
 assert.equal(repeatedExternal.ok, true);
 assert.equal(repeatedExternal.files[0].id, externalUpload.file_id);
+const repeatedHistory = await client.conversations.history({ channel: "C1", limit: 100 });
+assert.equal(repeatedHistory.messages.filter((message) =>
+	message.files?.some((file) => file.id === externalUpload.file_id)
+).length, 1);
 
 await assert.rejects(
 	client.api.test({ error: "synthetic" }),

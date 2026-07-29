@@ -1,0 +1,182 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+message AppConfigurationTokenRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message AppConfigurationTokenRotateRequest {
+  string refresh_token = 1;
+}
+
+message AppConfigurationCredentials {
+  string token = 1;
+  string refresh_token = 2;
+  string workspace_id = 3;
+  string user_id = 4;
+  string issued_at = 5;
+  string expires_at = 6;
+}
+
+message AppManifestRequest {
+  string token = 1;
+  string app_id = 2;
+  string manifest = 3;
+  string team_id = 4;
+}
+
+message AppManifestError {
+  string message = 1;
+  string pointer = 2;
+}
+
+message AppManifestValidation {
+  repeated AppManifestError errors = 1;
+}
+
+message DeveloperApp {
+  string id = 1;
+  string development_workspace_id = 2;
+  string owner_id = 3;
+  string name = 4;
+  string description = 5;
+  string client_id = 6;
+  int64 manifest_version = 7;
+  string distribution = 8;
+  bool socket_mode_enabled = 9;
+  bool token_rotation_enabled = 10;
+  string created_at = 11;
+  string updated_at = 12;
+  bool deleted = 13;
+}
+
+message AppCredentials {
+  string client_id = 1;
+  string client_secret = 2;
+  string signing_secret = 3;
+  string verification_token = 4;
+}
+
+message AppCreateResponse {
+  DeveloperApp app = 1;
+  AppCredentials credentials = 2;
+}
+
+message AppExportResponse {
+  DeveloperApp app = 1;
+  string manifest = 2;
+}
+
+message AppListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message AppGetRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+}
+
+message AppTokenIssueRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  repeated string scopes = 4;
+}
+
+message AppTokenCredentials {
+  string token = 1;
+  string app_id = 2;
+  repeated string scopes = 3;
+}
+
+message AppListResponse {
+  repeated DeveloperApp apps = 1;
+}
+
+message InstalledApp {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  bool home_tab_enabled = 4;
+  bool messages_tab_enabled = 5;
+  bool messages_tab_read_only = 6;
+  string bot_display_name = 7;
+  string bot_user_id = 8;
+}
+
+message InstalledAppListResponse {
+  repeated InstalledApp apps = 1;
+}
+
+message AppDatastoreRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string datastore = 4;
+  repeated string items = 5;
+  repeated string ids = 6;
+  bool merge = 7;
+}
+
+message AppDatastoreResponse {
+  repeated string items = 1;
+}
+
+message AppMutationResponse {
+  bool ok = 1;
+  DeveloperApp app = 2;
+}
+
+message OAuthAuthorizationRequest {
+  string client_id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string redirect_uri = 4;
+  repeated string bot_scopes = 5;
+  repeated string user_scopes = 6;
+  string state = 7;
+  string code_challenge = 8;
+  string code_challenge_method = 9;
+}
+
+message OAuthAuthorization {
+  string app_id = 1;
+  string app_name = 2;
+  string client_id = 3;
+  string workspace_id = 4;
+  string user_id = 5;
+  string redirect_uri = 6;
+  repeated string bot_scopes = 7;
+  repeated string user_scopes = 8;
+  string state = 9;
+  string code = 10;
+  string bot_id = 11;
+  string bot_user_id = 12;
+  string code_challenge = 13;
+  string code_challenge_method = 14;
+}
+
+service AppsService {
+  rpc IssueAppConfigurationToken(AppConfigurationTokenRequest) returns (AppConfigurationCredentials);
+  rpc RotateAppConfigurationToken(AppConfigurationTokenRotateRequest) returns (AppConfigurationCredentials);
+  rpc ValidateAppManifest(AppManifestRequest) returns (AppManifestValidation);
+  rpc CreateAppFromManifest(AppManifestRequest) returns (AppCreateResponse);
+  rpc ExportAppManifest(AppManifestRequest) returns (AppExportResponse);
+  rpc UpdateAppFromManifest(AppManifestRequest) returns (AppMutationResponse);
+  rpc DeleteDeveloperApp(AppManifestRequest) returns (AppMutationResponse);
+  rpc ListDeveloperApps(AppListRequest) returns (AppListResponse);
+  rpc ListWorkspaceApps(AppListRequest) returns (InstalledAppListResponse);
+  rpc PutAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
+  rpc GetAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
+  rpc DeleteAppDatastoreItems(AppDatastoreRequest) returns (AppMutationResponse);
+  rpc GetDeveloperApp(AppGetRequest) returns (AppExportResponse);
+  rpc IssueDeveloperAppToken(AppTokenIssueRequest) returns (AppTokenCredentials);
+  rpc InspectOAuthAuthorization(OAuthAuthorizationRequest) returns (OAuthAuthorization);
+  rpc AuthorizeOAuth(OAuthAuthorizationRequest) returns (OAuthAuthorization);
+}
