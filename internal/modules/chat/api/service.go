@@ -233,6 +233,12 @@ type Service interface {
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) error
 	ReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID) (domain.Reminder, error)
 	Reminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
+	CreateLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderRequest) (domain.LaterReminder, error)
+	LaterReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
+	LaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
+	UpdateLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, domain.LaterReminderRequest) (domain.LaterReminder, error)
+	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) error
+	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) error
 	ScheduleMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, time.Time) (domain.ScheduledMessage, error)
 	ScheduleMessageWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, time.Time) (domain.ScheduledMessage, error)

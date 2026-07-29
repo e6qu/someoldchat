@@ -1029,6 +1029,48 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "first-party Later reminder lifecycle",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "water the plants",
+					DueAt: time.Now().UTC().Add(time.Hour), TimeZone: "Europe/Bucharest",
+				})
+				if err != nil {
+					return nil, err
+				}
+				info, err := chat.LaterReminderInfo(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.LaterReminders(ctx, "T1", "U1", domain.LaterReminderPersonal, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.UpdateLaterReminder(ctx, "T1", "U1", created.ID, domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "water every plant",
+					DueAt: time.Now().UTC().Add(2 * time.Hour), TimeZone: "Europe/Bucharest",
+					Recurrence: domain.ReminderWeekly,
+				})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CompleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				completed, err := chat.LaterReminderInfo(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				return []any{
+					info.Text, info.Target, info.TimeZone, len(page.Items), page.HasMore,
+					updated.Text, updated.Recurrence, !completed.CompletedAt.IsZero(),
+				}, nil
+			},
+		},
+		{
 			name: "lists",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				list, err := chat.CreateList(ctx, "T1", "U1", "Groceries", "", "[]", "", false, false)

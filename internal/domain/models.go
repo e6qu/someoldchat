@@ -772,6 +772,82 @@ type ReminderPage struct {
 	HasMore    bool
 }
 
+type LaterReminderTarget string
+
+const (
+	LaterReminderPersonal LaterReminderTarget = "personal"
+	LaterReminderChannel  LaterReminderTarget = "channel"
+)
+
+func (target LaterReminderTarget) Valid() bool {
+	return target == LaterReminderPersonal || target == LaterReminderChannel
+}
+
+type ReminderRecurrence string
+
+const (
+	ReminderOnce    ReminderRecurrence = ""
+	ReminderDaily   ReminderRecurrence = "daily"
+	ReminderWeekly  ReminderRecurrence = "weekly"
+	ReminderMonthly ReminderRecurrence = "monthly"
+	ReminderYearly  ReminderRecurrence = "yearly"
+)
+
+func (recurrence ReminderRecurrence) Valid() bool {
+	switch recurrence {
+	case ReminderOnce, ReminderDaily, ReminderWeekly, ReminderMonthly, ReminderYearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// LaterReminder is SameOldChat's private first-party reminder state. It is
+// deliberately separate from Reminder, which preserves Slack's deprecated
+// reminders.* app contract. Slack exposes no app API for current Later.
+//
+// Personal reminders are visible only to UserID. Channel reminders have a
+// Channel and no UserID, and are listed by Creator. SourceMessageID is optional
+// and retains the message selected by "Remind me about this".
+type LaterReminder struct {
+	ID                 LaterReminderID
+	WorkspaceID        WorkspaceID
+	Creator            UserID
+	UserID             UserID
+	Channel            ConversationID
+	SourceMessageID    MessageID
+	SourceConversation ConversationID
+	SourceTimestamp    MessageTimestamp
+	Target             LaterReminderTarget
+	Text               string
+	DueAt              time.Time
+	TimeZone           string
+	Recurrence         ReminderRecurrence
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	CompletedAt        time.Time
+	LastDeliveredAt    time.Time
+	FailedAt           time.Time
+	FailureCode        string
+}
+
+type LaterReminderPage struct {
+	Items      []LaterReminder
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type LaterReminderRequest struct {
+	Target          LaterReminderTarget
+	Channel         ConversationID
+	SourceChannel   ConversationID
+	SourceTimestamp MessageTimestamp
+	Text            string
+	DueAt           time.Time
+	TimeZone        string
+	Recurrence      ReminderRecurrence
+}
+
 type ScheduledMessage struct {
 	WorkspaceID     WorkspaceID
 	ID              ScheduledMessageID

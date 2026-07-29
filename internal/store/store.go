@@ -493,6 +493,18 @@ type Store interface {
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
+	CreateLaterReminder(context.Context, domain.LaterReminder, events.Event) error
+	GetLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
+	ListLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
+	UpdateLaterReminder(context.Context, domain.LaterReminder, events.Event) (domain.LaterReminder, error)
+	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, time.Time, events.Event) error
+	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, events.Event) error
+	EarliestLaterReminder(context.Context, domain.WorkspaceID) (time.Time, error)
+	ClaimDueLaterReminders(context.Context, domain.WorkspaceID, string, int, time.Duration, time.Time) ([]domain.LaterReminder, error)
+	RenewLaterReminder(context.Context, string, domain.LaterReminderID, time.Duration, time.Time) error
+	MarkLaterReminderDelivered(context.Context, string, domain.LaterReminderID, time.Time, time.Time, events.Event) error
+	MarkLaterReminderFailed(context.Context, string, domain.LaterReminderID, string, time.Time, events.Event) error
+	ReleaseLaterReminder(context.Context, string, domain.LaterReminderID, time.Time, time.Time) error
 	CreateScheduledMessage(context.Context, domain.ScheduledMessage, events.Event) error
 	CreateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessage, time.Duration, int, events.Event) error
 	ListScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)

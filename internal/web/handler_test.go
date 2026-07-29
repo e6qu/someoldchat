@@ -808,6 +808,139 @@ func TestLaterJourneySavesOrganizesAndRemovesAMessage(t *testing.T) {
 	requireMissing(t, "removed Later item", empty.Body.String(), `review the release`)
 }
 
+func TestReminderJourneysCreateFromMessageAndManageInLater(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	message := seedMessage(t, s, "M-reminder", "review the launch", created)
+	timestamp := domain.NewMessageTimestamp(created)
+
+	workspace := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "REMIND-01 message action", workspace.Body.String(),
+		"Remind me about this", `data-reminder-menu`, ` M`, `name="preset" value="20m"`,
+		`name="preset" value="tomorrow"`, `data-browser-timezone`,
+	)
+	createdResponse := postForm(t, mux, "/app/reminders/create?channel=Cdev&ts="+url.QueryEscape(string(timestamp)), url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"preset":                {"20m"},
+		"timezone":              {"Europe/Bucharest"},
+	}.Encode(), false)
+	if createdResponse.Code != http.StatusSeeOther {
+		t.Fatalf("create reminder status=%d body=%s", createdResponse.Code, createdResponse.Body)
+	}
+	chat := service.Messages{Store: s}
+	page, err := chat.LaterReminders(context.Background(), "T1", "U1", domain.LaterReminderPersonal, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("reminders=%+v err=%v", page, err)
+	}
+	reminder := page.Items[0]
+	if reminder.SourceMessageID != message.ID || reminder.SourceConversation != "Cdev" || reminder.SourceTimestamp != timestamp || reminder.TimeZone != "Europe/Bucharest" {
+		t.Fatalf("message reminder lost source/time zone: %+v", reminder)
+	}
+	later := get(t, mux, createdResponse.Header().Get("Location"))
+	requireContains(t, "REMIND-02 Later", later.Body.String(),
+		"Reminder saved.", "Message reminder", "View source message", "Mark complete",
+		"Edit", "Delete reminder", "Upcoming reminders", "Add a reminder",
+	)
+
+	tomorrow := time.Now().UTC().AddDate(0, 0, 1)
+	update := postForm(t, mux, "/app/reminders/update?channel=Cdev&id="+url.QueryEscape(string(reminder.ID))+"&return_state=in_progress", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"review every launch"},
+		"date":                  {tomorrow.Format("2006-01-02")},
+		"time":                  {"12:30"},
+		"timezone":              {"UTC"},
+		"recurrence":            {"weekly"},
+	}.Encode(), false)
+	if update.Code != http.StatusSeeOther {
+		t.Fatalf("update reminder status=%d body=%s", update.Code, update.Body)
+	}
+	updated, err := chat.LaterReminderInfo(context.Background(), "T1", "U1", reminder.ID)
+	if err != nil || updated.Text != "review every launch" || updated.Recurrence != domain.ReminderWeekly || updated.TimeZone != "UTC" {
+		t.Fatalf("updated reminder=%+v err=%v", updated, err)
+	}
+	complete := postForm(t, mux, "/app/reminders/complete?channel=Cdev&id="+url.QueryEscape(string(reminder.ID))+"&return_state=in_progress", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+	}.Encode(), false)
+	if complete.Code != http.StatusSeeOther {
+		t.Fatalf("complete reminder status=%d body=%s", complete.Code, complete.Body)
+	}
+	completed := get(t, mux, "/app/later?channel=Cdev&state=completed")
+	requireContains(t, "completed reminder", completed.Body.String(), "review every launch", "Completed", "Delete reminder")
+	requireMissing(t, "completed reminder", completed.Body.String(), `action="/app/reminders/update?`)
+
+	deleted := postForm(t, mux, "/app/reminders/delete?channel=Cdev&id="+url.QueryEscape(string(reminder.ID))+"&return_state=completed", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+	}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete reminder status=%d body=%s", deleted.Code, deleted.Body)
+	}
+	if _, err := chat.LaterReminderInfo(context.Background(), "T1", "U1", reminder.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted reminder lookup=%v", err)
+	}
+}
+
+func TestRemindSlashCommandCreatesPrivateChannelReminderListWithoutPosting(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	response := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"/remind #general deploy tomorrow at 9am"},
+		"timezone":              {"Europe/Bucharest"},
+	}.Encode(), false)
+	if response.Code != http.StatusSeeOther || !strings.Contains(response.Header().Get("Location"), "filter=channel-reminders") {
+		t.Fatalf("/remind status=%d location=%q body=%s", response.Code, response.Header().Get("Location"), response.Body)
+	}
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 0 {
+		t.Fatalf("/remind was posted as chat: messages=%+v err=%v", history.Messages, err)
+	}
+	page, err := (service.Messages{Store: s}).LaterReminders(context.Background(), "T1", "U1", domain.LaterReminderChannel, domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Channel != "Cdev" || page.Items[0].Text != "deploy" || page.Items[0].TimeZone != "Europe/Bucharest" {
+		t.Fatalf("channel reminders=%+v err=%v", page, err)
+	}
+	list := get(t, mux, response.Header().Get("Location"))
+	requireContains(t, "REMIND-03 private channel list", list.Body.String(),
+		"Channel reminders you created", "deploy", "#general", "Delete reminder",
+	)
+	requireMissing(t, "channel reminder editability", list.Body.String(), "Mark complete", ">Edit<")
+
+	listCommand := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "text": {"/remind list"}, "timezone": {"UTC"},
+	}.Encode(), false)
+	if listCommand.Code != http.StatusSeeOther || !strings.Contains(listCommand.Header().Get("Location"), "filter=channel-reminders") {
+		t.Fatalf("/remind list status=%d location=%q", listCommand.Code, listCommand.Header().Get("Location"))
+	}
+}
+
+func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *testing.T) {
+	now := time.Date(2026, time.July, 29, 8, 0, 0, 0, time.UTC)
+	for _, testCase := range []struct {
+		expression string
+		text       string
+		recurrence domain.ReminderRecurrence
+		hour       int
+		wantError  error
+	}{
+		{expression: "stand-up tomorrow at 9am", text: "stand-up", hour: 9},
+		{expression: "stand-up in 20 minutes", text: "stand-up", hour: 8},
+		{expression: "stand-up every week at 10:30", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 10},
+		{expression: "stand-up sometime soon", wantError: service.ErrInvalidLaterReminder},
+		{expression: "stand-up at 7am", wantError: service.ErrReminderTimeInPast},
+	} {
+		t.Run(testCase.expression, func(t *testing.T) {
+			text, due, recurrence, err := parseChannelReminderExpression(testCase.expression, now, time.UTC)
+			if testCase.wantError != nil {
+				if !errors.Is(err, testCase.wantError) {
+					t.Fatalf("error=%v want=%v", err, testCase.wantError)
+				}
+				return
+			}
+			if err != nil || text != testCase.text || recurrence != testCase.recurrence || due.Hour() != testCase.hour || !due.After(now) {
+				t.Fatalf("text=%q due=%s recurrence=%q err=%v", text, due, recurrence, err)
+			}
+		})
+	}
+}
+
 // TestLiveUpdatesSubscribeToExactlyTheEmittedTopics covers the defect where the
 // page listened for "message.updated", which nothing publishes, and therefore
 // never saw an edit.

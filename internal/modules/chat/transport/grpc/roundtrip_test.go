@@ -265,8 +265,18 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoSavedItemPage, decodeProtoSavedItemPage),
 		},
-		"Bookmark":         {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
-		"Reminder":         {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
+		"Bookmark": {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
+		"Reminder": {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
+		"LaterReminder": {
+			sample: &domain.LaterReminder{},
+			prepare: func(filled any) {
+				reminder := filled.(*domain.LaterReminder)
+				reminder.Target = domain.LaterReminderPersonal
+				reminder.Channel = ""
+				reminder.Recurrence = domain.ReminderMonthly
+			},
+			through: through(encodeProtoLaterReminder, decodeProtoLaterReminder),
+		},
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
 		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},

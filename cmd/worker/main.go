@@ -129,6 +129,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	}()
 	var worker outbox.Worker
 	var scheduledWorker scheduler.Worker
+	var reminderWorker scheduler.ReminderWorker
 	var appEventProcessor slackapp.EventProcessor
 	if *deliveryFormat == "record" {
 		worker, err = outbox.NewWorker(runtime.OutboxSource, *owner, *limit, *lease, delivery)
@@ -147,6 +148,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure scheduled worker", "error", err)
 		return exitConfiguration
 	}
+	reminderWorker, err = scheduler.NewReminderWorker(runtime.ReminderSource, runtime.Service, *owner, *limit, *lease, nil)
+	if err != nil {
+		logger.Error("configure reminder worker", "error", err)
+		return exitConfiguration
+	}
 	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	cycle := func(cycleContext context.Context) (bool, error) {
@@ -159,7 +165,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if scheduledErr != nil {
 				logger.Error("scheduled message execution failed", "count", scheduledCount, "error", scheduledErr)
 			}
-			return eventCount > 0 || scheduledCount > 0, errors.Join(eventErr, scheduledErr)
+			reminderCount, reminderErr := reminderWorker.RunOnce(cycleContext, "")
+			if reminderErr != nil {
+				logger.Error("reminder execution failed", "count", reminderCount, "error", reminderErr)
+			}
+			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0, errors.Join(eventErr, scheduledErr, reminderErr)
 		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
@@ -172,7 +182,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, scheduledErr)
 			logger.Error("scheduled message execution failed", "count", scheduledCount, "error", scheduledErr)
 		}
-		return count > 0 || scheduledCount > 0, failures
+		reminderCount, reminderErr := reminderWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if reminderErr != nil {
+			failures = errors.Join(failures, reminderErr)
+			logger.Error("reminder execution failed", "count", reminderCount, "error", reminderErr)
+		}
+		return count > 0 || scheduledCount > 0 || reminderCount > 0, failures
 	}
 	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
 }

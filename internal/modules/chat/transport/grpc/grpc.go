@@ -2701,6 +2701,74 @@ func (r Remote) Reminders(ctx context.Context, workspaceID domain.WorkspaceID, u
 	return domain.ReminderPage{Reminders: result, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
 }
 
+func (r Remote) CreateLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.LaterReminderRequest) (domain.LaterReminder, error) {
+	out, err := r.reminders.CreateLaterReminder(ctx, &chatv1.CreateLaterReminderRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Target: string(request.Target),
+		ChannelId: string(request.Channel), SourceChannelId: string(request.SourceChannel),
+		SourceTimestamp: string(request.SourceTimestamp), Text: request.Text, DueAt: request.DueAt.Unix(),
+		Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+	})
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return decodeProtoLaterReminder(out)
+}
+
+func (r Remote) LaterReminderInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) (domain.LaterReminder, error) {
+	out, err := r.reminders.LaterReminderInfo(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return decodeProtoLaterReminder(out)
+}
+
+func (r Remote) LaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.LaterReminderTarget, request domain.PageRequest) (domain.LaterReminderPage, error) {
+	out, err := r.reminders.LaterReminders(ctx, &chatv1.LaterRemindersRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Target: string(target),
+		Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending,
+	})
+	if err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	items := make([]domain.LaterReminder, 0, len(out.GetReminders()))
+	for _, value := range out.GetReminders() {
+		reminder, decodeErr := decodeProtoLaterReminder(value)
+		if decodeErr != nil {
+			return domain.LaterReminderPage{}, decodeErr
+		}
+		items = append(items, reminder)
+	}
+	return domain.LaterReminderPage{Items: items, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) UpdateLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID, request domain.LaterReminderRequest) (domain.LaterReminder, error) {
+	out, err := r.reminders.UpdateLaterReminder(ctx, &chatv1.UpdateLaterReminderRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID),
+		Target: string(request.Target), ChannelId: string(request.Channel), Text: request.Text,
+		DueAt: request.DueAt.Unix(), Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+	})
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return decodeProtoLaterReminder(out)
+}
+
+func (r Remote) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
+	out, err := r.reminders.CompleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "Later reminder completion")
+}
+
+func (r Remote) DeleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
+	out, err := r.reminders.DeleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "Later reminder deletion")
+}
+
 func (r Remote) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
 	return r.ScheduleMessageWithBlocks(ctx, workspaceID, userID, channel, text, "", postAt)
 }
@@ -4751,6 +4819,30 @@ func (s *Server) DeleteReminder(ctx context.Context, input *chatv1.ReminderReque
 	return s.deleteReminderProto(ctx, input)
 }
 
+func (s *Server) CreateLaterReminder(ctx context.Context, input *chatv1.CreateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	return s.createLaterReminderProto(ctx, input)
+}
+
+func (s *Server) LaterReminderInfo(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.LaterReminder, error) {
+	return s.laterReminderInfoProto(ctx, input)
+}
+
+func (s *Server) LaterReminders(ctx context.Context, input *chatv1.LaterRemindersRequest) (*chatv1.LaterReminderPage, error) {
+	return s.laterRemindersProto(ctx, input)
+}
+
+func (s *Server) UpdateLaterReminder(ctx context.Context, input *chatv1.UpdateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	return s.updateLaterReminderProto(ctx, input)
+}
+
+func (s *Server) CompleteLaterReminder(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	return s.completeLaterReminderProto(ctx, input)
+}
+
+func (s *Server) DeleteLaterReminder(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	return s.deleteLaterReminderProto(ctx, input)
+}
+
 func (s *Server) ScheduleMessage(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
 	return s.scheduleMessageProto(ctx, input)
 }
@@ -5570,6 +5662,65 @@ func (s *Server) completeReminderProto(ctx context.Context, input *chatv1.Remind
 
 func (s *Server) deleteReminderProto(ctx context.Context, input *chatv1.ReminderRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.DeleteReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ReminderID(input.GetReminderId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) createLaterReminderProto(ctx context.Context, input *chatv1.CreateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	reminder, err := s.implementation.CreateLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderRequest{
+		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
+		SourceChannel: domain.ConversationID(input.GetSourceChannelId()), SourceTimestamp: domain.MessageTimestamp(input.GetSourceTimestamp()),
+		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoLaterReminder(reminder), nil
+}
+
+func (s *Server) laterReminderInfoProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.LaterReminder, error) {
+	reminder, err := s.implementation.LaterReminderInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoLaterReminder(reminder), nil
+}
+
+func (s *Server) laterRemindersProto(ctx context.Context, input *chatv1.LaterRemindersRequest) (*chatv1.LaterReminderPage, error) {
+	page, err := s.implementation.LaterReminders(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderTarget(input.GetTarget()), protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	items := make([]*chatv1.LaterReminder, 0, len(page.Items))
+	for _, reminder := range page.Items {
+		items = append(items, encodeProtoLaterReminder(reminder))
+	}
+	return &chatv1.LaterReminderPage{Reminders: items, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) updateLaterReminderProto(ctx context.Context, input *chatv1.UpdateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	reminder, err := s.implementation.UpdateLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId()), domain.LaterReminderRequest{
+		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
+		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoLaterReminder(reminder), nil
+}
+
+func (s *Server) completeLaterReminderProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.CompleteLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) deleteLaterReminderProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId())); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.MutationResponse{Ok: true}, nil
@@ -6611,6 +6762,47 @@ func decodeProtoReminder(value *chatv1.Reminder) (domain.Reminder, error) {
 		result.CompleteAt = time.Unix(value.GetCompleteTs(), 0).UTC()
 	}
 	return result, nil
+}
+
+func encodeProtoLaterReminder(value domain.LaterReminder) *chatv1.LaterReminder {
+	return &chatv1.LaterReminder{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), CreatorId: string(value.Creator),
+		UserId: string(value.UserID), ChannelId: string(value.Channel), SourceMessageId: string(value.SourceMessageID),
+		SourceConversationId: string(value.SourceConversation), SourceTimestamp: string(value.SourceTimestamp),
+		Target: string(value.Target), Text: value.Text,
+		DueAt: unixOrZero(value.DueAt), Timezone: value.TimeZone, Recurrence: string(value.Recurrence),
+		CreatedAt: unixOrZero(value.CreatedAt), UpdatedAt: unixOrZero(value.UpdatedAt),
+		CompletedAt: unixOrZero(value.CompletedAt), LastDeliveredAt: unixOrZero(value.LastDeliveredAt),
+		FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
+	}
+}
+
+func decodeProtoLaterReminder(value *chatv1.LaterReminder) (domain.LaterReminder, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetCreatorId() == "" ||
+		value.GetText() == "" || value.GetDueAt() <= 0 || value.GetCreatedAt() <= 0 || value.GetUpdatedAt() <= 0 ||
+		value.GetTimezone() == "" {
+		return domain.LaterReminder{}, errors.New("typed Later reminder is incomplete")
+	}
+	target := domain.LaterReminderTarget(value.GetTarget())
+	recurrence := domain.ReminderRecurrence(value.GetRecurrence())
+	if !target.Valid() || !recurrence.Valid() ||
+		(target == domain.LaterReminderPersonal && (value.GetUserId() == "" || value.GetChannelId() != "")) ||
+		(target == domain.LaterReminderChannel && (value.GetChannelId() == "" || value.GetUserId() != "")) ||
+		((value.GetSourceMessageId() == "") != (value.GetSourceConversationId() == "")) ||
+		((value.GetSourceMessageId() == "") != (value.GetSourceTimestamp() == "")) {
+		return domain.LaterReminder{}, errors.New("typed Later reminder has invalid targeting")
+	}
+	return domain.LaterReminder{
+		ID: domain.LaterReminderID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		Creator: domain.UserID(value.GetCreatorId()), UserID: domain.UserID(value.GetUserId()),
+		Channel: domain.ConversationID(value.GetChannelId()), SourceMessageID: domain.MessageID(value.GetSourceMessageId()),
+		SourceConversation: domain.ConversationID(value.GetSourceConversationId()), SourceTimestamp: domain.MessageTimestamp(value.GetSourceTimestamp()),
+		Target: target, Text: value.GetText(),
+		DueAt: timeFromUnix(value.GetDueAt()), TimeZone: value.GetTimezone(), Recurrence: recurrence,
+		CreatedAt: timeFromUnix(value.GetCreatedAt()), UpdatedAt: timeFromUnix(value.GetUpdatedAt()),
+		CompletedAt: timeFromUnix(value.GetCompletedAt()), LastDeliveredAt: timeFromUnix(value.GetLastDeliveredAt()),
+		FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+	}, nil
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {
