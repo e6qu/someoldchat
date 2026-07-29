@@ -73,6 +73,8 @@ primary_client_secret=$(openssl rand -hex 32)
 witness_client_secret=$(openssl rand -hex 32)
 primary_api_token=$(openssl rand -hex 32)
 witness_api_token=$(openssl rand -hex 32)
+primary_app_credential_key=$(openssl rand -hex 32)
+witness_app_credential_key=$(openssl rand -hex 32)
 # No -session-token here. This suite exercises real single sign-on, and a static
 # browser session shared by every holder cannot coexist with a configured
 # identity provider: possession of the value yields an authenticated session and
@@ -204,6 +206,7 @@ provider_compose exec -T postgres createdb -U shauth sameoldchat_witness
 	-addr ":${primary_port}" -chat-mode local -store postgresql \
 	-db "postgres://shauth:${postgres_password}@127.0.0.1:${postgres_port}/sameoldchat_primary?sslmode=disable" \
 	-api-token "$primary_api_token" \
+	-app-credential-key-hex "$primary_app_credential_key" \
 	-bootstrap-admin-email primary-bootstrap@localhost.test \
 	-auth-workspace Tdev -auth-lookup-user Udev -auth-public-url "$primary_origin" -auth-state-key-hex "$primary_state_key" \
 	-oidc-issuer "$provider_origin" -oidc-client-id someoldchat-primary -oidc-client-secret "$primary_client_secret" \
@@ -214,6 +217,7 @@ primary_pid=$!
 	-addr ":${witness_port}" -chat-mode local -store postgresql \
 	-db "postgres://shauth:${postgres_password}@127.0.0.1:${postgres_port}/sameoldchat_witness?sslmode=disable" \
 	-api-token "$witness_api_token" \
+	-app-credential-key-hex "$witness_app_credential_key" \
 	-bootstrap-admin-email witness-bootstrap@localhost.test \
 	-auth-workspace Tdev -auth-lookup-user Udev -auth-public-url "$witness_origin" -auth-state-key-hex "$witness_state_key" \
 	-oidc-issuer "$provider_origin" -oidc-client-id someoldchat-witness -oidc-client-secret "$witness_client_secret" \
