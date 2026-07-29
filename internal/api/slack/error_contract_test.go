@@ -689,6 +689,54 @@ func TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse(t *testing.
 	}
 }
 
+func TestReminderUserTokenRejectsObsoleteOtherUserAndReturnsCompleteTimestamp(t *testing.T) {
+	_, repository := testHandlerWithStore()
+	granted := make(map[auth.Scope]struct{})
+	for _, scope := range defaultTestScopes() {
+		granted[scope] = struct{}{}
+	}
+	authenticator, err := auth.NewStatic("user-token", auth.Principal{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: granted,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: repository}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	call := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/reminders.add", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer user-token")
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
+	if envelope := decodeEnvelope(t, call("text=private&time=300&user=U2")); envelope.OK || envelope.Error != "cannot_add_others" {
+		t.Fatalf("other-user reminder body=%+v, want cannot_add_others", envelope)
+	}
+	response := call("text=private&time=300")
+	var created struct {
+		OK       bool `json:"ok"`
+		Reminder struct {
+			Creator    string `json:"creator"`
+			User       string `json:"user"`
+			CompleteTS *int64 `json:"complete_ts"`
+		} `json:"reminder"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode response %q: %v", response.Body, err)
+	}
+	if !created.OK || created.Reminder.Creator != "U1" || created.Reminder.User != "U1" ||
+		created.Reminder.CompleteTS == nil || *created.Reminder.CompleteTS != 0 {
+		t.Fatalf("reminder shape=%+v, want self-owned active non-recurring reminder", created)
+	}
+}
+
 // usergroups.users.update read an absent `users` as the empty list, so a request
 // that omitted the required argument emptied the group and reported success.
 func TestUserGroupUsersUpdateRequiresItsMandatoryArguments(t *testing.T) {

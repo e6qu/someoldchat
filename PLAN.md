@@ -282,6 +282,16 @@ Later evidence. Drafts/Sent aggregation, scheduled edit, reschedule/send-now
 and failure history, reminder dates/delivery, and Later reminder filtering
 remain the next stateful client slice.
 
+The reminder contract audit also corrected a false evidence claim. Current
+Slack Help puts personal reminder creation and management in Later and message
+actions; current `/remind` documentation covers channel reminders and a private
+channel-reminder list, with channel edits performed by delete-and-recreate.
+Slack's five deprecated `reminders.*` app methods remain a separate legacy
+surface. They are now recorded as `sdk-compatible`, not
+`behavior-compatible`, until natural-language parsing, recurrence, targeting,
+delivery, retirement behavior, and controlled live outcomes have their own
+evidence.
+
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for

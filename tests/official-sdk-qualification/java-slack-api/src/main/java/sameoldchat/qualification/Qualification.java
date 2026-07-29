@@ -54,6 +54,7 @@ public final class Qualification {
         config.setTokenExistenceVerificationEnabled(false);
         try (Slack slack = Slack.getInstance(config)) {
             MethodsClient methods = slack.methods(token);
+            MethodsClient reminderMethods = slack.methods("xoxp-reminder-qualification");
 
             ApiTestResponse api = methods.apiTest(com.slack.api.methods.request.api.ApiTestRequest.builder().build());
             require(api.isOk(), "api.test failed: " + api.getError());
@@ -675,27 +676,42 @@ public final class Qualification {
             require(rtm.isOk() && rtm.getUrl() != null && rtm.getTeam() != null && "T1".equals(rtm.getTeam().getId())
                             && rtm.getSelf() != null && "U1".equals(rtm.getSelf().getId()),
                     "rtm.connect failed: " + rtm.getError());
-            com.slack.api.methods.response.reminders.RemindersAddResponse reminder = methods.remindersAdd(
+            com.slack.api.methods.response.reminders.RemindersAddResponse reminder = reminderMethods.remindersAdd(
                     com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
                             .text("reminder qualification")
                             .time(Long.toString(System.currentTimeMillis() / 1000L + 3600L))
                             .build());
             require(reminder.isOk() && reminder.getReminder() != null && reminder.getReminder().getId() != null,
                     "reminders.add failed: " + reminder.getError());
+            require("U1".equals(reminder.getReminder().getCreator())
+                            && "U1".equals(reminder.getReminder().getUser())
+                            && !reminder.getReminder().isRecurring()
+                            && reminder.getReminder().getCompleteTs() == 0L,
+                    "reminders.add returned a non-Slack reminder shape");
             String reminderId = reminder.getReminder().getId();
-            com.slack.api.methods.response.reminders.RemindersListResponse reminders = methods.remindersList(
+            com.slack.api.methods.response.reminders.RemindersAddResponse otherUserReminder = reminderMethods.remindersAdd(
+                    com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
+                            .text("not another user's reminder").time("300").user("U2").build());
+            require(!otherUserReminder.isOk() && "cannot_add_others".equals(otherUserReminder.getError()),
+                    "reminders.add accepted another user for a user token");
+            com.slack.api.methods.response.reminders.RemindersAddResponse naturalLanguageReminder = reminderMethods.remindersAdd(
+                    com.slack.api.methods.request.reminders.RemindersAddRequest.builder()
+                            .text("documented natural language").time("in 15 minutes").build());
+            require(!naturalLanguageReminder.isOk() && "cannot_parse".equals(naturalLanguageReminder.getError()),
+                    "known reminders.add natural-language gap was not reported");
+            com.slack.api.methods.response.reminders.RemindersListResponse reminders = reminderMethods.remindersList(
                     com.slack.api.methods.request.reminders.RemindersListRequest.builder().build());
             require(reminders.isOk() && reminders.getReminders() != null && reminders.getReminders().size() == 1,
                     "reminders.list failed: " + reminders.getError());
-            com.slack.api.methods.response.reminders.RemindersInfoResponse reminderInfo = methods.remindersInfo(
+            com.slack.api.methods.response.reminders.RemindersInfoResponse reminderInfo = reminderMethods.remindersInfo(
                     com.slack.api.methods.request.reminders.RemindersInfoRequest.builder().reminder(reminderId).build());
             require(reminderInfo.isOk() && reminderInfo.getReminder() != null
                             && reminderId.equals(reminderInfo.getReminder().getId()),
                     "reminders.info failed: " + reminderInfo.getError());
-            com.slack.api.methods.response.reminders.RemindersCompleteResponse completedReminder = methods.remindersComplete(
+            com.slack.api.methods.response.reminders.RemindersCompleteResponse completedReminder = reminderMethods.remindersComplete(
                     com.slack.api.methods.request.reminders.RemindersCompleteRequest.builder().reminder(reminderId).build());
             require(completedReminder.isOk(), "reminders.complete failed: " + completedReminder.getError());
-            com.slack.api.methods.response.reminders.RemindersDeleteResponse deletedReminder = methods.remindersDelete(
+            com.slack.api.methods.response.reminders.RemindersDeleteResponse deletedReminder = reminderMethods.remindersDelete(
                     com.slack.api.methods.request.reminders.RemindersDeleteRequest.builder().reminder(reminderId).build());
             require(deletedReminder.isOk(), "reminders.delete failed: " + deletedReminder.getError());
             com.slack.api.methods.response.usergroups.UsergroupsCreateResponse createdUsergroup = methods.usergroupsCreate(

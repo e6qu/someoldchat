@@ -9,7 +9,7 @@ Measured on 2026-07-29:
 
 - 215 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
-- 210 current methods are recorded as behavior-compatible, three as
+- 205 current methods are recorded as behavior-compatible, eight as
   SDK-compatible, two as schema-compatible, and none as live-differential
   `verified-against-slack`;
 - the current official Node Web API SDK exercises the product end to end,
@@ -63,7 +63,7 @@ implementation MUST NOT narrow the target.
 | --- | --- | --- |
 | P0 | Activity depth | Activity now covers joined unread conversations and explicit mentions, but it does not yet aggregate thread replies, reminders, notification-policy events, clear state, bulk read, layouts, filters, or custom tabs from Slack's current Activity model. |
 | P0 | Composer depth | Formatting, standard emoji, member mention autocomplete, file preview, draft recovery, and browser-time-zone scheduled send work. Custom-emoji browsing, channel autocomplete, pasted-file staging, voice/video clips, and Slack's full shortcuts browser remain. |
-| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, reminder dates/upcoming filters, and reminder delivery/UI remain. |
+| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, reminder dates/upcoming filters, channel `/remind`, and reminder delivery/UI remain. The five deprecated `reminders.*` methods are only SDK-compatible: natural-language parsing, recurrence, current targeting rules, delivery, and live outcomes are not falsely counted as behavior evidence. |
 | P1 | Direct-message lifecycle | DMs can be opened from People, but there is no dedicated DM/group-DM section, participant management, or recent-DM navigation matching Slack. |
 | P1 | Notifications and presence | Basic presence/status APIs exist, but the client has no per-conversation notification preferences, status expiry, snooze/DND controls, typing indicators, or presence-aware member affordances. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |

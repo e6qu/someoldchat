@@ -120,6 +120,11 @@ func main() {
 		}
 	}
 	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: auth.AllScopes()})
+	// Reminder methods are documented as a user-token surface. Keeping a real
+	// user credential beside the broad bot fixture prevents the SDK suites from
+	// "qualifying" reminders with an identity Slack does not advertise for the
+	// method.
+	store.SeedToken(context.Background(), "xoxp-reminder-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
 	store.SeedToken(context.Background(), "xoxb-qualification-legacy", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"chat:write"}})
 	if err := store.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-qualification", "xoxe-qualification", domain.AppConfigurationToken{WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().UTC().Add(12 * time.Hour)}); err != nil {
 		panic(err)

@@ -648,20 +648,88 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/oauth.v2.user.access/
   - method: reminders.add
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/reminders.add/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - Natural-language time descriptions and the recurrence object are not implemented.
+      - Reminder delivery is not implemented, so creating a durable row does not yet produce Slack's notification.
+      - The current token-type-dependent rules for setting another user's reminder have not been differentially qualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The prior level inferred Slack behavior from local CRUD tests even though current documented parsing, recurrence, targeting, retirement, and delivery contracts were not implemented or observed.
+      evidence:
+        - specs/journeys/06-later-and-reminders.md
+        - internal/api/slack/error_contract_test.go
+        - tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: reminders.complete
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/reminders.complete/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - The cannot_complete_recurring and cannot_complete_others behavioral paths are not implemented.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: Official SDK CRUD qualification does not exercise the method's current recurring and ownership error contract.
+      evidence:
+        - specs/journeys/06-later-and-reminders.md
+        - internal/service/messages.go
   - method: reminders.delete
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/reminders.delete/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - Retirement behavior and deletion racing reminder delivery have not been differentially qualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The local CRUD path has no delivery worker, so it cannot establish Slack's deletion outcome at the delivery boundary.
+      evidence:
+        - specs/journeys/06-later-and-reminders.md
+        - internal/service/messages.go
   - method: reminders.info
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/reminders.info/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - Recurring reminders and current retirement behavior are not represented.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The response is SDK-decodable but the only locally creatable reminder shape is non-recurring and has not been compared with Slack.
+      evidence:
+        - specs/journeys/06-later-and-reminders.md
+        - tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: reminders.list
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/reminders.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - Recurring reminder projection, retirement behavior, and live list inclusion rules have not been differentially qualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: Pagination and SDK decoding pass locally, but the returned set and recurring shape have not been established against current Slack behavior.
+      evidence:
+        - specs/journeys/06-later-and-reminders.md
+        - tests/official-sdk-qualification/node-web-api/qualification.mjs
   - method: rtm.connect
     status: behavior-compatible
     provenance: slack-api-specs-openapi

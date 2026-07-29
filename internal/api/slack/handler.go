@@ -4594,6 +4594,11 @@ func reminderResponse(reminder domain.Reminder) map[string]any {
 	response := map[string]any{"id": reminder.ID, "creator": reminder.Creator, "user": reminder.User, "text": reminder.Text, "time": reminder.Time.Unix(), "recurring": reminder.Recurring}
 	if !reminder.CompleteAt.IsZero() {
 		response["complete_ts"] = reminder.CompleteAt.Unix()
+	} else if !reminder.Recurring {
+		// Slack's current reminder object includes complete_ts=0 for an active
+		// non-recurring reminder. Omitting the field happened to decode in the
+		// SDKs, but it was not the documented wire object those SDKs model.
+		response["complete_ts"] = int64(0)
 	}
 	return response
 }
@@ -4754,7 +4759,16 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserID(strings.TrimSpace(fields["user"])), textValue, when)
+	targetID := domain.UserID(strings.TrimSpace(fields["user"]))
+	// Slack marks the user argument no longer supported for user tokens. Its
+	// current page separately notes a bot-token exception, so preserve that
+	// explicit token distinction instead of accepting the obsolete path for
+	// every credential.
+	if targetID != "" && targetID != principal.UserID && principal.TokenType != "bot" {
+		writeError(w, "cannot_add_others")
+		return
+	}
+	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, targetID, textValue, when)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
