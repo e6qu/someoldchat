@@ -115,6 +115,7 @@ const (
 	directNameWindow = 20
 	searchWindow     = 25
 	memberWindow     = 100
+	scheduledWindow  = 50
 	// reactionWindow bounds the reactions rendered for one message.
 	reactionWindow = 50
 	// pinWindow bounds the pins loaded for one conversation view.
@@ -257,6 +258,7 @@ type pageData struct {
 	ShowAdmin         bool
 	IsMember          bool
 	CanPost           bool
+	CanSchedule       bool
 	CanUpload         bool
 	CanJoin           bool
 	CanCreate         bool
@@ -275,7 +277,9 @@ type pageData struct {
 	Notice          string
 	Error           string
 	Draft           string
+	ScheduleAt      string
 	ComposeURL      string
+	ScheduleURL     string
 	UploadURL       string
 	TimelineURL     string
 	ThreadURL       string
@@ -330,6 +334,24 @@ type activityData struct {
 	Unread   []activityConversationView
 	Mentions []messageView
 	Notice   string
+}
+
+type scheduledMessageView struct {
+	Text            string
+	MachineTime     string
+	DisplayTime     string
+	ChannelName     string
+	ChannelPrefix   string
+	ConversationURL string
+	CancelURL       string
+}
+
+type scheduledMessagesData struct {
+	Channel   string
+	CSRFToken string
+	Messages  []scheduledMessageView
+	MoreURL   string
+	Notice    string
 }
 
 type identityData struct {
@@ -547,6 +569,7 @@ const pageStyle = `<style>
 .composer-footer{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .composer-tools{margin:0;color:var(--muted);font-size:13px}
 .send{border:0;border-radius:5px;background:var(--ok);color:var(--on-strong);font-weight:700;padding:7px 14px}
+.send-actions{display:flex;align-items:stretch;gap:2px}.schedule-menu{position:relative}.schedule-menu>summary{display:grid;place-items:center;height:100%;min-width:34px;border-radius:5px;background:var(--ok);color:var(--on-strong);cursor:pointer;list-style:none;font-weight:800}.schedule-menu>summary::-webkit-details-marker{display:none}.schedule-popover{position:absolute;z-index:10;right:0;bottom:38px;display:grid;gap:8px;width:min(310px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}.schedule-popover label{display:grid;gap:5px;font-size:12px;font-weight:800}.schedule-popover input{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.schedule-popover p{margin:0;color:var(--muted);font-size:12px}.schedule-popover button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);padding:8px 11px;font-weight:800}.schedule-popover a{color:var(--action);font-size:12px;font-weight:700}
 .thread{grid-area:thread;min-height:0;border-left:1px solid var(--line);background:var(--panel);padding:16px 18px;overflow:auto}
 .thread h2{margin:0 0 12px;font-size:16px}
 @media(max-width:800px){
@@ -876,6 +899,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
         <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity" aria-keyshortcuts="Control+3 Control+Shift+3"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span></a>
+        {{if .CanSchedule}}<a class="side-link" href="/app/scheduled?channel={{.Channel}}" aria-label="Scheduled messages"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Scheduled</span></a>{{end}}
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
         <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
@@ -1012,7 +1036,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           {{if .ThreadTimestamp}}<input type="hidden" name="thread_ts" value="{{.ThreadTimestamp}}">{{end}}
           <div class="composer-footer">
             <span class="composer-tools" id="composer-hint"><kbd>Enter</kbd> sends · <kbd>Shift</kbd> + <kbd>Enter</kbd> adds a line</span>
-            <button class="send" type="submit">Send</button>
+            <div class="send-actions"><button class="send" type="submit">Send</button><details class="schedule-menu"><summary role="button" aria-label="Schedule message">⌄</summary><div class="schedule-popover"><label for="schedule-at">Send date and time<input id="schedule-at" type="datetime-local" name="schedule_at" value="{{.ScheduleAt}}" data-schedule-at aria-describedby="schedule-time-help"></label><input type="hidden" name="post_at"><p id="schedule-time-help">The time uses your current browser time zone and must be within 120 days.</p><button type="submit" formaction="{{.ScheduleURL}}">Schedule message</button><a href="/app/scheduled?channel={{.Channel}}">View scheduled messages</a></div></details></div>
           </div>
         </form>
         {{else}}
@@ -1289,6 +1313,23 @@ const activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 </main>{{end}}`
 
 var activityTemplate = mustPage(activityMarkup)
+
+const scheduledMessagesMarkup = `{{define "title"}}Scheduled messages · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(860px,calc(100% - 32px));margin:28px auto 48px}.heading{margin-bottom:18px}.heading h2{margin:0 0 5px;font-size:25px}.heading p{margin:0;color:var(--muted)}
+.scheduled-list{display:grid;gap:9px;margin:0;padding:0;list-style:none}.scheduled-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:15px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}.scheduled-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font-size:12px}.scheduled-channel{font-weight:800;color:var(--text);text-decoration:none}.scheduled-channel:hover{color:var(--action)}.scheduled-text{margin:7px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.scheduled-actions{align-self:center}.scheduled-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--danger);padding:7px 10px;font-weight:800}.scheduled-actions button:hover{background:var(--hover)}.empty{padding:28px;border:1px dashed var(--line);border-radius:9px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:18px}
+@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,860px);margin-top:18px}.scheduled-item{grid-template-columns:minmax(0,1fr)}.scheduled-actions button{width:100%}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Scheduled</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
+<div class="heading"><h2>Scheduled messages</h2><p>Messages waiting to be sent, ordered by delivery time.</p></div>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+<ul class="scheduled-list" aria-label="Scheduled messages">{{range .Messages}}<li class="scheduled-item"><div><div class="scheduled-meta">{{if .ConversationURL}}<a class="scheduled-channel" href="{{.ConversationURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="scheduled-channel">{{.ChannelName}}</span>{{end}}<span>Scheduled for <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="scheduled-text">{{.Text}}</p></div><form class="scheduled-actions" method="post" action="{{.CancelURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit" aria-label="Cancel scheduled message in {{.ChannelName}}">Cancel message</button></form></li>{{else}}<li class="empty">You have no scheduled messages.</li>{{end}}</ul>
+{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more scheduled messages</a></p>{{end}}
+</main>{{end}}`
+
+var scheduledMessagesTemplate = mustPage(scheduledMessagesMarkup)
 
 const identityMarkup = `{{define "title"}}{{.Heading}} · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -1632,7 +1673,8 @@ uploadPreview.textContent=file.name+' · '+(unit==='B'?size:String(Math.round(si
 document.addEventListener('submit',function(event){
 var form=event.target.closest('form');
 if(!form||!form.hasAttribute('hx-post'))return;
-var action=form.getAttribute('hx-post');
+var submitter=event.submitter;
+var action=submitter&&submitter.getAttribute('formaction')||form.getAttribute('hx-post');
 if(!ownPath(action))return;
 event.preventDefault();
 if(form===composer){if(sending)return;sending=true}
@@ -1640,15 +1682,17 @@ var quiet=form.getAttribute('data-quiet')==='true';
 var body=new FormData(form);
 var unixInput=form.querySelector('[data-unix-seconds="true"]');
 if(unixInput&&unixInput.value){var unixMillis=new Date(unixInput.value).getTime();if(!isNaN(unixMillis))body.set('value',String(Math.floor(unixMillis/1000)))}
+var scheduleInput=form.querySelector('[data-schedule-at]');
+if(scheduleInput&&action.indexOf('/app/message/schedule')===0&&scheduleInput.value){var scheduleMillis=new Date(scheduleInput.value).getTime();if(!isNaN(scheduleMillis))body.set('post_at',String(Math.floor(scheduleMillis/1000)))}
 var sent=text?text.value:'';
-var button=form.querySelector('button[type=submit]');
+var button=submitter||form.querySelector('button[type=submit]');
 if(button)button.disabled=true;
 var release=function(){if(button)button.disabled=false;if(form===composer)sending=false};
 clearError(form);
 fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
 var redirect=response.headers.get('HX-Redirect');
-if(redirect){if(ownPath(redirect))window.location.assign(redirect);return null}
+if(redirect){if(form===composer&&text&&text.value===sent){text.value='';persistDraft()}if(ownPath(redirect))window.location.assign(redirect);return null}
 if(response.status===204)return '';
 return response.text();
 }).then(function(html){
@@ -1860,6 +1904,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/activity", h.activity)
+	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/members", h.members)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
@@ -1874,6 +1919,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/join", h.joinConversation)
 	mux.HandleFunc("POST /app/message", h.postMessage)
+	mux.HandleFunc("POST /app/message/schedule", h.scheduleMessage)
+	mux.HandleFunc("POST /app/message/schedule/cancel", h.cancelScheduledMessage)
 	mux.HandleFunc("POST /app/file", h.uploadFile)
 	mux.HandleFunc("GET /app/files/{fileID}", h.downloadFile)
 	mux.HandleFunc("POST /app/interaction", h.appInteraction)
@@ -1948,6 +1995,7 @@ func (h Handler) writeMutationError(w http.ResponseWriter, r *http.Request, stat
 // post keeps the text the user typed and says what went wrong.
 type composerState struct {
 	Draft          string
+	ScheduleAt     string
 	Message        string
 	Notice         string
 	Status         int
@@ -2369,6 +2417,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		ShowAdmin:       h.canShowAuthorizationAdmin(r.Context(), principal),
 		IsMember:        isMember,
 		CanPost:         canPost,
+		CanSchedule:     principal.HasScope(auth.ScopeChatWrite),
 		CanUpload:       isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
 		CanJoin:         canJoin,
 		CanCreate:       principal.HasScope(auth.ScopeChannelsManage),
@@ -2378,7 +2427,9 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Notice:          strings.Join(notices, " "),
 		Error:           state.Message,
 		Draft:           state.Draft,
+		ScheduleAt:      state.ScheduleAt,
 		ComposeURL:      mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
+		ScheduleURL:     mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
 		UploadURL:       mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
 		TimelineURL:     fragmentURL(string(channel), "", string(before)),
 		ThreadURL:       fragmentURL(string(channel), threadTimestamp, ""),
@@ -3015,6 +3066,81 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 // Search
 // ---------------------------------------------------------------------------
 
+func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if !principal.HasScope(auth.ScopeChatWrite) {
+		h.writeAuthError(w, auth.ErrMissingScope)
+		return
+	}
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
+	page, err := h.Messages.ScheduledMessages(r.Context(), principal.WorkspaceID, principal.UserID, "", domain.PageRequest{Limit: scheduledWindow, Cursor: cursor})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidCursor) || errors.Is(err, store.ErrInvalidArgument) {
+			h.writePageError(w, http.StatusBadRequest, "That scheduled-message link is not valid", "Open Scheduled from the workspace and try again.")
+			return
+		}
+		h.writeStoreError(w, err, "Scheduled messages are temporarily unavailable.")
+		return
+	}
+	data := scheduledMessagesData{Channel: channel, CSRFToken: auth.CSRFToken(sessionCookie.Value)}
+	if r.URL.Query().Get("scheduled") == "1" {
+		data.Notice = "Message scheduled."
+	}
+	if r.URL.Query().Get("cancelled") == "1" {
+		data.Notice = "Scheduled message cancelled."
+	}
+	data.Messages = make([]scheduledMessageView, 0, len(page.Items))
+	for _, item := range page.Items {
+		name, prefix, conversationURL := "Conversation unavailable", "", ""
+		conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Channel)
+		if conversationErr == nil {
+			name = conversationName(conversation)
+			prefix = "#"
+			if conversation.IsDirect || conversation.IsGroupDirect {
+				prefix = ""
+				if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+					name = participants
+				}
+			}
+			conversationURL = appURL(string(item.Channel), string(item.ThreadTimestamp), "", "", "")
+		}
+		text := item.Text
+		if strings.TrimSpace(text) == "" {
+			text = "Rich message"
+		}
+		cancelQuery := url.Values{
+			"channel":        {string(item.Channel)},
+			"id":             {string(item.ID)},
+			"return_channel": {channel},
+		}
+		data.Messages = append(data.Messages, scheduledMessageView{
+			Text:        text,
+			MachineTime: item.PostAt.UTC().Format(time.RFC3339Nano),
+			DisplayTime: formatTime(item.PostAt), ChannelName: name,
+			ChannelPrefix: prefix, ConversationURL: conversationURL,
+			CancelURL: "/app/message/schedule/cancel?" + cancelQuery.Encode(),
+		})
+	}
+	if page.HasMore && page.NextCursor != "" {
+		query := url.Values{"channel": {channel}, "cursor": {string(page.NextCursor)}}
+		data.MoreURL = "/app/scheduled?" + query.Encode()
+	}
+	h.writeHTML(w, scheduledMessagesTemplate, data, http.StatusOK, "scheduled messages rendering unavailable")
+}
+
 func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
 	if err != nil {
@@ -3585,6 +3711,106 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])), http.StatusSeeOther)
+}
+
+func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Your scheduled message could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	postAtUnix, parseErr := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
+	if parseErr != nil || postAtUnix <= 0 {
+		h.writeScheduleMessageError(w, r, principal, fields["text"], fields["schedule_at"], http.StatusBadRequest, "Choose a delivery date and time in your browser before scheduling the message.")
+		return
+	}
+	channel := h.requestChannel(r)
+	_, err = h.Messages.ScheduleMessageAs(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledMessageRequest{
+		Channel:         channel,
+		Text:            fields["text"],
+		ThreadTimestamp: domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"])),
+		PostAt:          time.Unix(postAtUnix, 0).UTC(),
+		CredentialHash:  service.InternalScheduledCredential(principal.WorkspaceID, principal.UserID),
+	})
+	if err != nil {
+		status := http.StatusServiceUnavailable
+		reason := "The message could not be scheduled because the workspace store is temporarily unavailable."
+		switch {
+		case errors.Is(err, service.ErrInvalidMessage):
+			status, reason = http.StatusBadRequest, "A scheduled message needs some text before it can be saved."
+		case errors.Is(err, service.ErrInvalidTimestamp):
+			status, reason = http.StatusBadRequest, "That thread is not a message in this conversation."
+		case errors.Is(err, service.ErrScheduledTimeInPast):
+			status, reason = http.StatusBadRequest, "Choose a delivery time in the future."
+		case errors.Is(err, service.ErrScheduledTimeTooFar):
+			status, reason = http.StatusBadRequest, "Choose a delivery time within the next 120 days."
+		case errors.Is(err, service.ErrScheduledTooMany):
+			status, reason = http.StatusConflict, "This channel already has 30 messages scheduled in that five-minute window."
+		case errors.Is(err, service.ErrNotInConversation):
+			status, reason = http.StatusForbidden, "You are not a member of this conversation, so the message was not scheduled."
+		case errors.Is(err, service.ErrConversationAlreadyArchived):
+			status, reason = http.StatusConflict, "This conversation is archived, so messages cannot be scheduled in it."
+		case errors.Is(err, store.ErrNotFound):
+			status, reason = http.StatusNotFound, "That conversation or thread is no longer available."
+		}
+		h.writeScheduleMessageError(w, r, principal, fields["text"], fields["schedule_at"], status, reason)
+		return
+	}
+	query := url.Values{"channel": {string(channel)}, "scheduled": {"1"}}
+	h.redirectMutation(w, r, "/app/scheduled?"+query.Encode())
+}
+
+func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, draft, scheduleAt string, status int, reason string) {
+	w.Header().Set("Vary", "HX-Request")
+	if r.Header.Get("HX-Request") == "true" {
+		secureHeaders(w, workspaceContentSecurityPolicy)
+		http.Error(w, reason, status)
+		return
+	}
+	reader, err := requireHistoryReader(principal)
+	if err != nil {
+		h.writePageError(w, status, "That message was not scheduled", reason)
+		return
+	}
+	h.renderApp(w, r, reader, composerState{Draft: draft, ScheduleAt: scheduleAt, Message: reason, Status: status})
+}
+
+func (h Handler) cancelScheduledMessage(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChatWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The scheduled message could not be cancelled from this form. Reload Scheduled and try again."); !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	id := domain.ScheduledMessageID(strings.TrimSpace(r.URL.Query().Get("id")))
+	if channel == "" || id == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That scheduled message link is not valid", "Open Scheduled from the workspace and try again.")
+		return
+	}
+	if err := h.Messages.DeleteScheduledMessage(r.Context(), principal.WorkspaceID, principal.UserID, channel, id); err != nil {
+		status, reason := http.StatusServiceUnavailable, "The scheduled message could not be cancelled because the workspace store is temporarily unavailable."
+		if errors.Is(err, store.ErrNotFound) {
+			status, reason = http.StatusNotFound, "That scheduled message was already sent, cancelled, or is no longer available."
+		}
+		if errors.Is(err, store.ErrInvalidArgument) {
+			status, reason = http.StatusBadRequest, "That scheduled message link is not valid."
+		}
+		h.writeMutationError(w, r, status, "The scheduled message was not cancelled", reason)
+		return
+	}
+	returnChannel := strings.TrimSpace(r.URL.Query().Get("return_channel"))
+	if returnChannel == "" {
+		returnChannel = string(h.Channel)
+	}
+	query := url.Values{"channel": {returnChannel}, "cancelled": {"1"}}
+	h.redirectMutation(w, r, "/app/scheduled?"+query.Encode())
 }
 
 const (

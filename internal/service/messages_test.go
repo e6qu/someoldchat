@@ -1693,6 +1693,30 @@ func TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts(t *testin
 	}
 }
 
+func TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+	scheduled, err := messages.ScheduleMessage(ctx, "T1", "U1", "C1", "cancel me", time.Now().UTC().Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.LeaveConversation(ctx, "T1", "U1", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DeleteScheduledMessage(ctx, "T1", "U1", "C1", scheduled.ID); err != nil {
+		t.Fatalf("owner could not cancel after leaving: %v", err)
+	}
+	page, err := messages.ScheduledMessages(ctx, "T1", "U1", "", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("scheduled page=%+v err=%v", page, err)
+	}
+}
+
 func TestPostEphemeralWithBlocksPersistsNormalizedEvent(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})

@@ -114,6 +114,42 @@ test('[AUTH-01 MSG-01 COMP-01 SEARCH-01] workspace supports the core browser jou
   await expect(page.locator('.channel-title')).toHaveText('# general');
 });
 
+test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history, and can be cancelled', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  const message = `scheduled browser qualification ${Date.now()}`;
+  const composer = page.locator('form.composer textarea[name="text"]');
+  await composer.fill(message);
+  await page.getByRole('button', { name: 'Schedule message' }).click();
+  const localFuture = await page.evaluate(() => {
+    const value = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    const pad = (part) => String(part).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+  });
+  await page.getByLabel('Send date and time').fill(localFuture);
+
+  await Promise.all([
+    page.waitForURL(/\/app\/scheduled\?.*scheduled=1/),
+    page.locator('button[formaction^="/app/message/schedule"]').click(),
+  ]);
+  await expect(page.getByRole('status')).toHaveText('Message scheduled.');
+  const scheduled = page.locator('.scheduled-item', { hasText: message });
+  await expect(scheduled).toBeVisible();
+  await expect(scheduled.getByRole('link', { name: '#general' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-text', { hasText: message })).toHaveCount(0);
+  await expect(composer).toHaveValue('');
+  await page.getByRole('link', { name: 'Scheduled messages' }).click();
+  await expect(scheduled).toBeVisible();
+  await scheduled.getByRole('button', { name: /Cancel scheduled message/ }).click();
+  await expect(page.getByRole('status')).toHaveText('Scheduled message cancelled.');
+  await expect(page.locator('.scheduled-item', { hasText: message })).toHaveCount(0);
+  await expect(page.getByText('You have no scheduled messages.')).toBeVisible();
+});
+
 test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA automation', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

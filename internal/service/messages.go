@@ -3860,7 +3860,7 @@ func (m Messages) ScheduleMessage(ctx context.Context, workspaceID domain.Worksp
 
 func (m Messages) ScheduledMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	return m.ScheduledMessagesForCredential(ctx, workspaceID, userID, domain.ScheduledMessageQuery{
-		CredentialHash: internalScheduledCredential(workspaceID, userID),
+		CredentialHash: InternalScheduledCredential(workspaceID, userID),
 		Channel:        channel,
 		Page:           request,
 	})
@@ -3882,16 +3882,20 @@ func (m Messages) ScheduledMessagesForCredential(ctx context.Context, workspaceI
 }
 
 func (m Messages) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
-	return m.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, internalScheduledCredential(workspaceID, userID), channel, id)
+	return m.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, InternalScheduledCredential(workspaceID, userID), channel, id)
 }
 
 func (m Messages) DeleteScheduledMessageForCredential(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, credentialHash string, channel domain.ConversationID, id domain.ScheduledMessageID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
 	}
-	if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
-		return err
+	if credentialHash == "" || channel == "" || id == "" {
+		return store.InvalidArgument("scheduled-message credential, channel, and id are required")
 	}
+	// The exact credential coordinate stored with the item is its ownership
+	// check. Requiring current conversation visibility here stranded scheduled
+	// work after its owner left a private channel, even though the scheduler
+	// could still attempt it. The atomic delete below discloses no content.
 	event, err := newEvent(workspaceID, userID, events.NewPayload("message.schedule_deleted", events.String("scheduled_message_id", string(id)), events.String("channel_id", string(channel))), time.Now().UTC())
 	if err != nil {
 		return err
@@ -4793,11 +4797,15 @@ func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, w
 		Blocks:         blocks,
 		Attachments:    attachments,
 		PostAt:         postAt,
-		CredentialHash: internalScheduledCredential(workspaceID, userID),
+		CredentialHash: InternalScheduledCredential(workspaceID, userID),
 	})
 }
 
-func internalScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
+// InternalScheduledCredential identifies work created by SameOldChat's
+// first-party client. Keeping this coordinate in one place lets the web client
+// preserve thread context through ScheduleMessageAs without duplicating the
+// ownership contract used by list and delete.
+func InternalScheduledCredential(workspaceID domain.WorkspaceID, userID domain.UserID) string {
 	return domain.HashToken("internal-scheduled\x00" + string(workspaceID) + "\x00" + string(userID))
 }
 
