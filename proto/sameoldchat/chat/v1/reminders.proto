@@ -64,6 +64,7 @@ message LaterReminder {
   int64 failed_at = 17;
   string failure_code = 18;
   string source_timestamp = 19;
+  int64 acknowledged_at = 20;
 }
 
 message CreateLaterReminderRequest {
@@ -94,6 +95,11 @@ message LaterRemindersRequest {
   bool descending = 6;
 }
 
+message AcknowledgeLaterRemindersRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
 message UpdateLaterReminderRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -122,6 +128,7 @@ service RemindersService {
   rpc LaterReminderInfo(LaterReminderRequest) returns (LaterReminder);
   rpc LaterReminders(LaterRemindersRequest) returns (LaterReminderPage);
   rpc UpdateLaterReminder(UpdateLaterReminderRequest) returns (LaterReminder);
+  rpc AcknowledgeLaterReminders(AcknowledgeLaterRemindersRequest) returns (MutationResponse);
   rpc CompleteLaterReminder(LaterReminderRequest) returns (MutationResponse);
   rpc DeleteLaterReminder(LaterReminderRequest) returns (MutationResponse);
 }

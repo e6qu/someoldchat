@@ -835,6 +835,9 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	if membership.Role != domain.WorkspaceRoleMember && membership.Role != domain.WorkspaceRoleAdmin {
 		return store.InvalidArgument("user membership role must be member or admin")
 	}
+	if (membership.Restricted && membership.UltraRestricted) || (membership.Guest() && membership.Role != domain.WorkspaceRoleMember) {
+		return store.InvalidArgument("guest membership must have exactly one guest tier and the member role")
+	}
 	if _, exists := s.workspaces[user.WorkspaceID]; !exists {
 		return store.ErrNotFound
 	}
@@ -1014,6 +1017,9 @@ func (s *Store) SetWorkspaceRole(_ context.Context, workspaceID domain.Workspace
 	membership, ok := s.members[key]
 	if !ok {
 		return store.ErrNotFound
+	}
+	if membership.Guest() && role != domain.WorkspaceRoleMember {
+		return store.InvalidArgument("guest membership cannot be promoted")
 	}
 	membership.Role, membership.Active = role, true
 	s.members[key] = membership
@@ -3993,6 +3999,7 @@ func (s *Store) UpdateLaterReminder(_ context.Context, reminder domain.LaterRemi
 	}
 	reminder.CreatedAt = current.CreatedAt
 	reminder.LastDeliveredAt = time.Time{}
+	reminder.AcknowledgedAt = time.Time{}
 	reminder.FailedAt = time.Time{}
 	reminder.FailureCode = ""
 	s.laterReminders[reminder.ID] = reminder
@@ -4000,6 +4007,28 @@ func (s *Store) UpdateLaterReminder(_ context.Context, reminder domain.LaterRemi
 	delete(s.laterReminderNextAttempt, reminder.ID)
 	s.outbox = append(s.outbox, event)
 	return reminder, nil
+}
+
+func (s *Store) AcknowledgeLaterReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, acknowledged time.Time, event events.Event) error {
+	if workspace == "" || user == "" || acknowledged.IsZero() {
+		return store.InvalidArgument("Later reminder acknowledgement is incomplete")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := false
+	for id, reminder := range s.laterReminders {
+		if reminder.WorkspaceID != workspace || reminder.Target != domain.LaterReminderPersonal || reminder.UserID != user || reminder.LastDeliveredAt.IsZero() || !reminder.LastDeliveredAt.After(reminder.AcknowledgedAt) {
+			continue
+		}
+		reminder.AcknowledgedAt = reminder.LastDeliveredAt
+		reminder.UpdatedAt = acknowledged.UTC()
+		s.laterReminders[id] = reminder
+		found = true
+	}
+	if found {
+		s.outbox = append(s.outbox, event)
+	}
+	return nil
 }
 
 func (s *Store) CompleteLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, completed time.Time, event events.Event) error {

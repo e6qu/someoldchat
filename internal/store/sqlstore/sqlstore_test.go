@@ -178,6 +178,37 @@ func TestSQLiteCreateUserIsTransactionalAndWorkspaceScoped(t *testing.T) {
 	}
 }
 
+func TestGuestMembershipPersistsAndCannotBePromoted(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "guest-membership.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	user := domain.User{ID: "UG", WorkspaceID: "T1", Email: "guest@example.com", Name: "guest"}
+	membership := domain.WorkspaceMembership{
+		WorkspaceID: "T1", UserID: user.ID, Role: domain.WorkspaceRoleMember,
+		Active: true, Restricted: true,
+	}
+	if err := s.CreateUser(ctx, user, membership, events.Event{ID: "E-guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.GetWorkspaceMembership(ctx, "T1", user.ID)
+	if err != nil || !stored.Restricted || stored.UltraRestricted || !stored.Guest() {
+		t.Fatalf("stored membership=%+v err=%v", stored, err)
+	}
+	page, err := s.ListAdminUsers(ctx, "T1", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Users) != 1 || !page.Users[0].Membership.Restricted {
+		t.Fatalf("admin page=%+v err=%v", page, err)
+	}
+	if err := s.SetWorkspaceRole(ctx, "T1", user.ID, domain.WorkspaceRoleAdmin, events.Event{ID: "E-promote", WorkspaceID: "T1", Topic: "workspace.role_changed", CreatedAt: time.Now().UTC()}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("guest promotion error=%v, want invalid argument", err)
+	}
+}
+
 func TestSQLiteUserRemovalRevokesCredentialsAtomically(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:remove-user-credentials?mode=memory&cache=shared")

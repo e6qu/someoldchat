@@ -4090,6 +4090,21 @@ func (m Messages) UpdateLaterReminder(ctx context.Context, workspaceID domain.Wo
 	return m.Store.UpdateLaterReminder(ctx, current, event)
 }
 
+func (m Messages) AcknowledgeLaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"later_reminder.acknowledged",
+		events.String("user_id", string(userID)),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.AcknowledgeLaterReminders(ctx, workspaceID, userID, now, event)
+}
+
 func (m Messages) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
@@ -4148,6 +4163,13 @@ func (m Messages) normalizeLaterReminderRequest(ctx context.Context, workspaceID
 		}
 	case domain.LaterReminderChannel:
 		if request.Channel == "" || request.SourceChannel != "" || request.SourceTimestamp != "" {
+			return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+		}
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+		if err != nil {
+			return domain.LaterReminderRequest{}, err
+		}
+		if membership.Guest() {
 			return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
 		}
 		if err := m.requireConversationMembership(ctx, workspaceID, userID, request.Channel); err != nil {

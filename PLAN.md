@@ -293,10 +293,10 @@ delivery, retirement behavior, and controlled live outcomes have their own
 evidence.
 
 UI evidence is now measured against the normative catalog rather than counted
-from test files: 27 Playwright scenarios currently cite 48 of 101 stable
-journey IDs. `make journey-check` rejects duplicate/unknown IDs and any journey
-file that loses its observation date or official Slack source. The remaining
-53 IDs are printed as an explicit browser gap list; a citation is not promoted
+from test files: 28 Playwright scenarios cite 51 of 101 stable journey IDs.
+`make journey-check` rejects duplicate/unknown IDs and any journey file that
+loses its observation date or official Slack source. The remaining IDs are
+printed as an explicit browser gap list; a citation is not promoted
 to full compatibility without the domain, transport, accessibility, visual,
 and differential layers required by the catalog.
 
@@ -315,6 +315,26 @@ entry points, organization, privacy, local-time default, recurrence, guest,
 editability, retirement, or Later-versus-app-API separation. This detects
 documentation drift; controlled live-workspace behavior and visual comparison
 remain distinct evidence layers.
+
+The first-party reminder slice now has a durable model separate from deprecated
+`reminders.*`, message `M` presets/custom time, Later CRUD and filtering,
+reserved `/remind` parsing including named weekdays, private channel-reminder
+listing, guest enforcement, worker delivery/recurrence/retry/failure fencing,
+Activity/source projection, durable Later/Activity badge acknowledgement, and
+combined scheduled/reminder lifecycle wake publication. The real browser
+journey runs in all three engines; deterministic memory, SQL, service, web, and
+local-versus-gRPC evidence covers delivery state that cannot safely wait for a
+wall clock in CI. Live-workspace parsing/presentation comparison,
+deterministic deployed-worker browser delivery, and undocumented month-end
+recurrence remain explicit gaps.
+
+The same source refresh exposed that the 2026 Activity journey is much broader
+than the current client. SameOldChat currently projects unread conversations,
+mentions, and reminders, but does not yet implement the durable notification
+classes, layouts, filters/custom views, clear/restore, per-item actions, or
+Activity-local keyboard triage required by `ACTIVITY-01` through `ACTIVITY-03`.
+Those omissions remain named gaps rather than being hidden behind a passing
+reminder test.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison

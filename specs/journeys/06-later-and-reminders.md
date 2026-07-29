@@ -108,27 +108,32 @@ Implemented evidence:
   recurrence, editability, guest, retirement, or API-separation assertions.
 - Playwright drives focused-message `A`, save/unsave, source navigation,
   In progress, Completed, Archived, restore, removal, and automated WCAG checks
-  in Chromium, Firefox, and WebKit.
+  in Chromium, Firefox, and WebKit. It also drives focused-message `M`,
+  reminder presets and custom editing, personal completion/deletion, named
+  weekday `/remind` recurrence, private `/remind list`, and channel-reminder
+  deletion in all three engines.
 - Service, portable-store, SQL-migration, and local-versus-gRPC differential
   tests cover idempotency, exact-member isolation, pagination, state
-  transitions, and content redaction after source access is lost.
+  transitions, guest restrictions, content redaction after source access is
+  lost, worker lease races, retry idempotency, terminal failures, DST-safe
+  recurrence, Activity/source projection, durable badge acknowledgement, and
+  the minimum scheduled-message/reminder wake deadline.
 - Current official Node, Python, and Java SDK qualification continues to
   exercise deprecated `stars.*` and `reminders.*` as separate app contracts.
   No SDK suite is cited as Later evidence because Slack exposes no current
   Later Web API.
 
-Still required before the reminder journeys are complete:
+Still required before claiming live Slack equivalence:
 
-- reminder presets/custom time, Later creation/editing, `/remind` channel
-  parsing and private listing, durable delivery, Activity projection,
-  recurrence, delete-and-recreate channel rescheduling, and upcoming-reminder
-  filtering;
-- deterministic-clock persistence tests for time zones, hibernation wake
-  deadlines, worker races, recurrence, and terminal failures; and
-- controlled live-Slack differential observations for organization, source
-  loss, live reconciliation, and `/remind` parsing.
+- controlled live-Slack differential observations for Later organization,
+  source loss, live reconciliation, notification presentation, and the broader
+  natural-language `/remind` grammar;
+- browser delivery evidence driven by a deterministic deployed worker clock
+  rather than only the real UI plus deterministic service/web tests; and
+- observed decisions for undocumented recurrence edge cases such as a monthly
+  reminder anchored on the 29th–31st.
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-30:
 
 - [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later)
 - [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder)
@@ -138,4 +143,5 @@ Sources checked 2026-07-29:
 - [`reminders.info`](https://docs.slack.dev/reference/methods/reminders.info/)
 - [`reminders.list`](https://docs.slack.dev/reference/methods/reminders.list/)
 - [Slack keyboard shortcuts and commands](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands)
+- [Introducing the new Activity view](https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack/)
 - [Slack developer changelog: It’s later already for stars and reminders](https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/)

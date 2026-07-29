@@ -58,6 +58,13 @@ func TestLaterReminderLeaseRecurrenceAndCancellationAreAtomic(t *testing.T) {
 	if !stored.LastDeliveredAt.Equal(now) || !stored.DueAt.Equal(nextDue) || !stored.CompletedAt.IsZero() {
 		t.Fatalf("recurring delivery state=%+v", stored)
 	}
+	if err := s.AcknowledgeLaterReminders(ctx, "T1", "U1", now.Add(time.Second), laterStoreEvent("acknowledged", reminder.ID, now.Add(time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = s.GetLaterReminder(ctx, "T1", "U1", reminder.ID)
+	if err != nil || !stored.AcknowledgedAt.Equal(stored.LastDeliveredAt) {
+		t.Fatalf("acknowledged delivery=%+v err=%v", stored, err)
+	}
 	if due, err := s.ClaimDueLaterReminders(ctx, "T1", "worker-2", 10, time.Minute, now); err != nil || len(due) != 0 {
 		t.Fatalf("future recurrence was claimed: %+v err=%v", due, err)
 	}

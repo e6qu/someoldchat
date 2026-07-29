@@ -237,6 +237,7 @@ type Service interface {
 	LaterReminderInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
 	LaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
 	UpdateLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, domain.LaterReminderRequest) (domain.LaterReminder, error)
+	AcknowledgeLaterReminders(context.Context, domain.WorkspaceID, domain.UserID) error
 	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) error
 	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) error
 	ScheduleMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)

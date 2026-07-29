@@ -19,17 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RemindersService_AddReminder_FullMethodName           = "/sameoldchat.chat.v1.RemindersService/AddReminder"
-	RemindersService_ReminderInfo_FullMethodName          = "/sameoldchat.chat.v1.RemindersService/ReminderInfo"
-	RemindersService_Reminders_FullMethodName             = "/sameoldchat.chat.v1.RemindersService/Reminders"
-	RemindersService_CompleteReminder_FullMethodName      = "/sameoldchat.chat.v1.RemindersService/CompleteReminder"
-	RemindersService_DeleteReminder_FullMethodName        = "/sameoldchat.chat.v1.RemindersService/DeleteReminder"
-	RemindersService_CreateLaterReminder_FullMethodName   = "/sameoldchat.chat.v1.RemindersService/CreateLaterReminder"
-	RemindersService_LaterReminderInfo_FullMethodName     = "/sameoldchat.chat.v1.RemindersService/LaterReminderInfo"
-	RemindersService_LaterReminders_FullMethodName        = "/sameoldchat.chat.v1.RemindersService/LaterReminders"
-	RemindersService_UpdateLaterReminder_FullMethodName   = "/sameoldchat.chat.v1.RemindersService/UpdateLaterReminder"
-	RemindersService_CompleteLaterReminder_FullMethodName = "/sameoldchat.chat.v1.RemindersService/CompleteLaterReminder"
-	RemindersService_DeleteLaterReminder_FullMethodName   = "/sameoldchat.chat.v1.RemindersService/DeleteLaterReminder"
+	RemindersService_AddReminder_FullMethodName               = "/sameoldchat.chat.v1.RemindersService/AddReminder"
+	RemindersService_ReminderInfo_FullMethodName              = "/sameoldchat.chat.v1.RemindersService/ReminderInfo"
+	RemindersService_Reminders_FullMethodName                 = "/sameoldchat.chat.v1.RemindersService/Reminders"
+	RemindersService_CompleteReminder_FullMethodName          = "/sameoldchat.chat.v1.RemindersService/CompleteReminder"
+	RemindersService_DeleteReminder_FullMethodName            = "/sameoldchat.chat.v1.RemindersService/DeleteReminder"
+	RemindersService_CreateLaterReminder_FullMethodName       = "/sameoldchat.chat.v1.RemindersService/CreateLaterReminder"
+	RemindersService_LaterReminderInfo_FullMethodName         = "/sameoldchat.chat.v1.RemindersService/LaterReminderInfo"
+	RemindersService_LaterReminders_FullMethodName            = "/sameoldchat.chat.v1.RemindersService/LaterReminders"
+	RemindersService_UpdateLaterReminder_FullMethodName       = "/sameoldchat.chat.v1.RemindersService/UpdateLaterReminder"
+	RemindersService_AcknowledgeLaterReminders_FullMethodName = "/sameoldchat.chat.v1.RemindersService/AcknowledgeLaterReminders"
+	RemindersService_CompleteLaterReminder_FullMethodName     = "/sameoldchat.chat.v1.RemindersService/CompleteLaterReminder"
+	RemindersService_DeleteLaterReminder_FullMethodName       = "/sameoldchat.chat.v1.RemindersService/DeleteLaterReminder"
 )
 
 // RemindersServiceClient is the client API for RemindersService service.
@@ -45,6 +46,7 @@ type RemindersServiceClient interface {
 	LaterReminderInfo(ctx context.Context, in *LaterReminderRequest, opts ...grpc.CallOption) (*LaterReminder, error)
 	LaterReminders(ctx context.Context, in *LaterRemindersRequest, opts ...grpc.CallOption) (*LaterReminderPage, error)
 	UpdateLaterReminder(ctx context.Context, in *UpdateLaterReminderRequest, opts ...grpc.CallOption) (*LaterReminder, error)
+	AcknowledgeLaterReminders(ctx context.Context, in *AcknowledgeLaterRemindersRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	CompleteLaterReminder(ctx context.Context, in *LaterReminderRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	DeleteLaterReminder(ctx context.Context, in *LaterReminderRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 }
@@ -147,6 +149,16 @@ func (c *remindersServiceClient) UpdateLaterReminder(ctx context.Context, in *Up
 	return out, nil
 }
 
+func (c *remindersServiceClient) AcknowledgeLaterReminders(ctx context.Context, in *AcknowledgeLaterRemindersRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, RemindersService_AcknowledgeLaterReminders_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *remindersServiceClient) CompleteLaterReminder(ctx context.Context, in *LaterReminderRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
@@ -180,6 +192,7 @@ type RemindersServiceServer interface {
 	LaterReminderInfo(context.Context, *LaterReminderRequest) (*LaterReminder, error)
 	LaterReminders(context.Context, *LaterRemindersRequest) (*LaterReminderPage, error)
 	UpdateLaterReminder(context.Context, *UpdateLaterReminderRequest) (*LaterReminder, error)
+	AcknowledgeLaterReminders(context.Context, *AcknowledgeLaterRemindersRequest) (*MutationResponse, error)
 	CompleteLaterReminder(context.Context, *LaterReminderRequest) (*MutationResponse, error)
 	DeleteLaterReminder(context.Context, *LaterReminderRequest) (*MutationResponse, error)
 }
@@ -217,6 +230,9 @@ func (UnimplementedRemindersServiceServer) LaterReminders(context.Context, *Late
 }
 func (UnimplementedRemindersServiceServer) UpdateLaterReminder(context.Context, *UpdateLaterReminderRequest) (*LaterReminder, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateLaterReminder not implemented")
+}
+func (UnimplementedRemindersServiceServer) AcknowledgeLaterReminders(context.Context, *AcknowledgeLaterRemindersRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AcknowledgeLaterReminders not implemented")
 }
 func (UnimplementedRemindersServiceServer) CompleteLaterReminder(context.Context, *LaterReminderRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompleteLaterReminder not implemented")
@@ -406,6 +422,24 @@ func _RemindersService_UpdateLaterReminder_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RemindersService_AcknowledgeLaterReminders_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AcknowledgeLaterRemindersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RemindersServiceServer).AcknowledgeLaterReminders(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RemindersService_AcknowledgeLaterReminders_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RemindersServiceServer).AcknowledgeLaterReminders(ctx, req.(*AcknowledgeLaterRemindersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _RemindersService_CompleteLaterReminder_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(LaterReminderRequest)
 	if err := dec(in); err != nil {
@@ -484,6 +518,10 @@ var RemindersService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateLaterReminder",
 			Handler:    _RemindersService_UpdateLaterReminder_Handler,
+		},
+		{
+			MethodName: "AcknowledgeLaterReminders",
+			Handler:    _RemindersService_AcknowledgeLaterReminders_Handler,
 		},
 		{
 			MethodName: "CompleteLaterReminder",

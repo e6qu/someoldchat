@@ -1059,7 +1059,14 @@ func TestParseSlackTimestampRejectsWhatIsNotATimestamp(t *testing.T) {
 // which the pinned 200 example carries — even though the admin projection already
 // existed and was already used by the web UI.
 func TestAdminUsersListReturnsTheAdminProjection(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, repository := testHandlerWithStore()
+	guest := domain.User{ID: "UG", WorkspaceID: "T1", Email: "guest@example.com", Name: "guest"}
+	if err := repository.CreateUser(context.Background(), guest, domain.WorkspaceMembership{
+		WorkspaceID: "T1", UserID: guest.ID, Role: domain.WorkspaceRoleMember,
+		Active: true, UltraRestricted: true,
+	}, events.Event{ID: "E-admin-guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	response := callAPI(t, handler, http.MethodGet, "/api/admin.users.list?team_id=T1", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
@@ -1078,5 +1085,17 @@ func TestAdminUsersListReturnsTheAdminProjection(t *testing.T) {
 		if _, present := body.Users[0][field]; !present {
 			t.Errorf("admin.users.list omits %s", field)
 		}
+	}
+	var foundGuest bool
+	for _, user := range body.Users {
+		if user["id"] == "UG" {
+			foundGuest = true
+			if user["is_restricted"] != false || user["is_ultra_restricted"] != true {
+				t.Errorf("guest flags=%v/%v, want false/true", user["is_restricted"], user["is_ultra_restricted"])
+			}
+		}
+	}
+	if !foundGuest {
+		t.Fatal("admin.users.list omitted the guest")
 	}
 }

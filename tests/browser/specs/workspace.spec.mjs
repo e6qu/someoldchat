@@ -243,12 +243,13 @@ test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut
   await page.getByRole('link', { name: 'Back to chat' }).click();
   const channelReminder = `channel reminder ${Date.now()}`;
   const composer = page.locator('form.composer textarea[name="text"]');
-  await composer.fill(`/remind #general ${channelReminder} tomorrow at 9am`);
+  await composer.fill(`/remind #general ${channelReminder} every Thursday at 9am`);
   await page.getByRole('button', { name: 'Send' }).click();
   await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
   const channelItem = page.locator('.later-item', { hasText: channelReminder });
   await expect(channelItem.getByRole('link', { name: '#general' })).toBeVisible();
   await expect(channelItem.getByRole('button', { name: 'Delete reminder' })).toBeVisible();
+  await expect(channelItem).toContainText('Repeats weekly');
   await expect(channelItem.getByRole('button', { name: 'Mark complete' })).toHaveCount(0);
   await expect(channelItem.getByText('Edit', { exact: true })).toHaveCount(0);
 

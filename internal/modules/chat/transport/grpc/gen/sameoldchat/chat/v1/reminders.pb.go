@@ -406,6 +406,7 @@ type LaterReminder struct {
 	FailedAt             int64                  `protobuf:"varint,17,opt,name=failed_at,json=failedAt,proto3" json:"failed_at,omitempty"`
 	FailureCode          string                 `protobuf:"bytes,18,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
 	SourceTimestamp      string                 `protobuf:"bytes,19,opt,name=source_timestamp,json=sourceTimestamp,proto3" json:"source_timestamp,omitempty"`
+	AcknowledgedAt       int64                  `protobuf:"varint,20,opt,name=acknowledged_at,json=acknowledgedAt,proto3" json:"acknowledged_at,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -571,6 +572,13 @@ func (x *LaterReminder) GetSourceTimestamp() string {
 		return x.SourceTimestamp
 	}
 	return ""
+}
+
+func (x *LaterReminder) GetAcknowledgedAt() int64 {
+	if x != nil {
+		return x.AcknowledgedAt
+	}
+	return 0
 }
 
 type CreateLaterReminderRequest struct {
@@ -833,6 +841,58 @@ func (x *LaterRemindersRequest) GetDescending() bool {
 	return false
 }
 
+type AcknowledgeLaterRemindersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcknowledgeLaterRemindersRequest) Reset() {
+	*x = AcknowledgeLaterRemindersRequest{}
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcknowledgeLaterRemindersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcknowledgeLaterRemindersRequest) ProtoMessage() {}
+
+func (x *AcknowledgeLaterRemindersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcknowledgeLaterRemindersRequest.ProtoReflect.Descriptor instead.
+func (*AcknowledgeLaterRemindersRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *AcknowledgeLaterRemindersRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AcknowledgeLaterRemindersRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 type UpdateLaterReminderRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -850,7 +910,7 @@ type UpdateLaterReminderRequest struct {
 
 func (x *UpdateLaterReminderRequest) Reset() {
 	*x = UpdateLaterReminderRequest{}
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -862,7 +922,7 @@ func (x *UpdateLaterReminderRequest) String() string {
 func (*UpdateLaterReminderRequest) ProtoMessage() {}
 
 func (x *UpdateLaterReminderRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[9]
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -875,7 +935,7 @@ func (x *UpdateLaterReminderRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateLaterReminderRequest.ProtoReflect.Descriptor instead.
 func (*UpdateLaterReminderRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{9}
+	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *UpdateLaterReminderRequest) GetWorkspaceId() string {
@@ -952,7 +1012,7 @@ type LaterReminderPage struct {
 
 func (x *LaterReminderPage) Reset() {
 	*x = LaterReminderPage{}
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -964,7 +1024,7 @@ func (x *LaterReminderPage) String() string {
 func (*LaterReminderPage) ProtoMessage() {}
 
 func (x *LaterReminderPage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[10]
+	mi := &file_sameoldchat_chat_v1_reminders_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -977,7 +1037,7 @@ func (x *LaterReminderPage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LaterReminderPage.ProtoReflect.Descriptor instead.
 func (*LaterReminderPage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{10}
+	return file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *LaterReminderPage) GetReminders() []*LaterReminder {
@@ -1037,7 +1097,7 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\treminders\x18\x01 \x03(\v2\x1d.sameoldchat.chat.v1.ReminderR\treminders\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xf2\x04\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x9b\x05\n" +
 	"\rLaterReminder\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1d\n" +
@@ -1064,7 +1124,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\x11last_delivered_at\x18\x10 \x01(\x03R\x0flastDeliveredAt\x12\x1b\n" +
 	"\tfailed_at\x18\x11 \x01(\x03R\bfailedAt\x12!\n" +
 	"\ffailure_code\x18\x12 \x01(\tR\vfailureCode\x12)\n" +
-	"\x10source_timestamp\x18\x13 \x01(\tR\x0fsourceTimestamp\"\xcd\x02\n" +
+	"\x10source_timestamp\x18\x13 \x01(\tR\x0fsourceTimestamp\x12'\n" +
+	"\x0facknowledged_at\x18\x14 \x01(\x03R\x0eacknowledgedAt\"\xcd\x02\n" +
 	"\x1aCreateLaterReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x16\n" +
@@ -1093,7 +1154,10 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\x06cursor\x18\x05 \x01(\tR\x06cursor\x12\x1e\n" +
 	"\n" +
 	"descending\x18\x06 \x01(\bR\n" +
-	"descending\"\x97\x02\n" +
+	"descending\"^\n" +
+	" AcknowledgeLaterRemindersRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\"\x97\x02\n" +
 	"\x1aUpdateLaterReminderRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
@@ -1112,7 +1176,7 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\treminders\x18\x01 \x03(\v2\".sameoldchat.chat.v1.LaterReminderR\treminders\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xcb\b\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xc6\t\n" +
 	"\x10RemindersService\x12U\n" +
 	"\vAddReminder\x12'.sameoldchat.chat.v1.AddReminderRequest\x1a\x1d.sameoldchat.chat.v1.Reminder\x12S\n" +
 	"\fReminderInfo\x12$.sameoldchat.chat.v1.ReminderRequest\x1a\x1d.sameoldchat.chat.v1.Reminder\x12U\n" +
@@ -1122,7 +1186,8 @@ const file_sameoldchat_chat_v1_reminders_proto_rawDesc = "" +
 	"\x13CreateLaterReminder\x12/.sameoldchat.chat.v1.CreateLaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12b\n" +
 	"\x11LaterReminderInfo\x12).sameoldchat.chat.v1.LaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12d\n" +
 	"\x0eLaterReminders\x12*.sameoldchat.chat.v1.LaterRemindersRequest\x1a&.sameoldchat.chat.v1.LaterReminderPage\x12j\n" +
-	"\x13UpdateLaterReminder\x12/.sameoldchat.chat.v1.UpdateLaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12i\n" +
+	"\x13UpdateLaterReminder\x12/.sameoldchat.chat.v1.UpdateLaterReminderRequest\x1a\".sameoldchat.chat.v1.LaterReminder\x12y\n" +
+	"\x19AcknowledgeLaterReminders\x125.sameoldchat.chat.v1.AcknowledgeLaterRemindersRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12i\n" +
 	"\x15CompleteLaterReminder\x12).sameoldchat.chat.v1.LaterReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12g\n" +
 	"\x13DeleteLaterReminder\x12).sameoldchat.chat.v1.LaterReminderRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
@@ -1138,20 +1203,21 @@ func file_sameoldchat_chat_v1_reminders_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_reminders_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_reminders_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_sameoldchat_chat_v1_reminders_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_sameoldchat_chat_v1_reminders_proto_goTypes = []any{
-	(*Reminder)(nil),                   // 0: sameoldchat.chat.v1.Reminder
-	(*AddReminderRequest)(nil),         // 1: sameoldchat.chat.v1.AddReminderRequest
-	(*ReminderRequest)(nil),            // 2: sameoldchat.chat.v1.ReminderRequest
-	(*RemindersRequest)(nil),           // 3: sameoldchat.chat.v1.RemindersRequest
-	(*ReminderPage)(nil),               // 4: sameoldchat.chat.v1.ReminderPage
-	(*LaterReminder)(nil),              // 5: sameoldchat.chat.v1.LaterReminder
-	(*CreateLaterReminderRequest)(nil), // 6: sameoldchat.chat.v1.CreateLaterReminderRequest
-	(*LaterReminderRequest)(nil),       // 7: sameoldchat.chat.v1.LaterReminderRequest
-	(*LaterRemindersRequest)(nil),      // 8: sameoldchat.chat.v1.LaterRemindersRequest
-	(*UpdateLaterReminderRequest)(nil), // 9: sameoldchat.chat.v1.UpdateLaterReminderRequest
-	(*LaterReminderPage)(nil),          // 10: sameoldchat.chat.v1.LaterReminderPage
-	(*MutationResponse)(nil),           // 11: sameoldchat.chat.v1.MutationResponse
+	(*Reminder)(nil),                         // 0: sameoldchat.chat.v1.Reminder
+	(*AddReminderRequest)(nil),               // 1: sameoldchat.chat.v1.AddReminderRequest
+	(*ReminderRequest)(nil),                  // 2: sameoldchat.chat.v1.ReminderRequest
+	(*RemindersRequest)(nil),                 // 3: sameoldchat.chat.v1.RemindersRequest
+	(*ReminderPage)(nil),                     // 4: sameoldchat.chat.v1.ReminderPage
+	(*LaterReminder)(nil),                    // 5: sameoldchat.chat.v1.LaterReminder
+	(*CreateLaterReminderRequest)(nil),       // 6: sameoldchat.chat.v1.CreateLaterReminderRequest
+	(*LaterReminderRequest)(nil),             // 7: sameoldchat.chat.v1.LaterReminderRequest
+	(*LaterRemindersRequest)(nil),            // 8: sameoldchat.chat.v1.LaterRemindersRequest
+	(*AcknowledgeLaterRemindersRequest)(nil), // 9: sameoldchat.chat.v1.AcknowledgeLaterRemindersRequest
+	(*UpdateLaterReminderRequest)(nil),       // 10: sameoldchat.chat.v1.UpdateLaterReminderRequest
+	(*LaterReminderPage)(nil),                // 11: sameoldchat.chat.v1.LaterReminderPage
+	(*MutationResponse)(nil),                 // 12: sameoldchat.chat.v1.MutationResponse
 }
 var file_sameoldchat_chat_v1_reminders_proto_depIdxs = []int32{
 	0,  // 0: sameoldchat.chat.v1.ReminderPage.reminders:type_name -> sameoldchat.chat.v1.Reminder
@@ -1164,22 +1230,24 @@ var file_sameoldchat_chat_v1_reminders_proto_depIdxs = []int32{
 	6,  // 7: sameoldchat.chat.v1.RemindersService.CreateLaterReminder:input_type -> sameoldchat.chat.v1.CreateLaterReminderRequest
 	7,  // 8: sameoldchat.chat.v1.RemindersService.LaterReminderInfo:input_type -> sameoldchat.chat.v1.LaterReminderRequest
 	8,  // 9: sameoldchat.chat.v1.RemindersService.LaterReminders:input_type -> sameoldchat.chat.v1.LaterRemindersRequest
-	9,  // 10: sameoldchat.chat.v1.RemindersService.UpdateLaterReminder:input_type -> sameoldchat.chat.v1.UpdateLaterReminderRequest
-	7,  // 11: sameoldchat.chat.v1.RemindersService.CompleteLaterReminder:input_type -> sameoldchat.chat.v1.LaterReminderRequest
-	7,  // 12: sameoldchat.chat.v1.RemindersService.DeleteLaterReminder:input_type -> sameoldchat.chat.v1.LaterReminderRequest
-	0,  // 13: sameoldchat.chat.v1.RemindersService.AddReminder:output_type -> sameoldchat.chat.v1.Reminder
-	0,  // 14: sameoldchat.chat.v1.RemindersService.ReminderInfo:output_type -> sameoldchat.chat.v1.Reminder
-	4,  // 15: sameoldchat.chat.v1.RemindersService.Reminders:output_type -> sameoldchat.chat.v1.ReminderPage
-	11, // 16: sameoldchat.chat.v1.RemindersService.CompleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	11, // 17: sameoldchat.chat.v1.RemindersService.DeleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	5,  // 18: sameoldchat.chat.v1.RemindersService.CreateLaterReminder:output_type -> sameoldchat.chat.v1.LaterReminder
-	5,  // 19: sameoldchat.chat.v1.RemindersService.LaterReminderInfo:output_type -> sameoldchat.chat.v1.LaterReminder
-	10, // 20: sameoldchat.chat.v1.RemindersService.LaterReminders:output_type -> sameoldchat.chat.v1.LaterReminderPage
-	5,  // 21: sameoldchat.chat.v1.RemindersService.UpdateLaterReminder:output_type -> sameoldchat.chat.v1.LaterReminder
-	11, // 22: sameoldchat.chat.v1.RemindersService.CompleteLaterReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	11, // 23: sameoldchat.chat.v1.RemindersService.DeleteLaterReminder:output_type -> sameoldchat.chat.v1.MutationResponse
-	13, // [13:24] is the sub-list for method output_type
-	2,  // [2:13] is the sub-list for method input_type
+	10, // 10: sameoldchat.chat.v1.RemindersService.UpdateLaterReminder:input_type -> sameoldchat.chat.v1.UpdateLaterReminderRequest
+	9,  // 11: sameoldchat.chat.v1.RemindersService.AcknowledgeLaterReminders:input_type -> sameoldchat.chat.v1.AcknowledgeLaterRemindersRequest
+	7,  // 12: sameoldchat.chat.v1.RemindersService.CompleteLaterReminder:input_type -> sameoldchat.chat.v1.LaterReminderRequest
+	7,  // 13: sameoldchat.chat.v1.RemindersService.DeleteLaterReminder:input_type -> sameoldchat.chat.v1.LaterReminderRequest
+	0,  // 14: sameoldchat.chat.v1.RemindersService.AddReminder:output_type -> sameoldchat.chat.v1.Reminder
+	0,  // 15: sameoldchat.chat.v1.RemindersService.ReminderInfo:output_type -> sameoldchat.chat.v1.Reminder
+	4,  // 16: sameoldchat.chat.v1.RemindersService.Reminders:output_type -> sameoldchat.chat.v1.ReminderPage
+	12, // 17: sameoldchat.chat.v1.RemindersService.CompleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	12, // 18: sameoldchat.chat.v1.RemindersService.DeleteReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	5,  // 19: sameoldchat.chat.v1.RemindersService.CreateLaterReminder:output_type -> sameoldchat.chat.v1.LaterReminder
+	5,  // 20: sameoldchat.chat.v1.RemindersService.LaterReminderInfo:output_type -> sameoldchat.chat.v1.LaterReminder
+	11, // 21: sameoldchat.chat.v1.RemindersService.LaterReminders:output_type -> sameoldchat.chat.v1.LaterReminderPage
+	5,  // 22: sameoldchat.chat.v1.RemindersService.UpdateLaterReminder:output_type -> sameoldchat.chat.v1.LaterReminder
+	12, // 23: sameoldchat.chat.v1.RemindersService.AcknowledgeLaterReminders:output_type -> sameoldchat.chat.v1.MutationResponse
+	12, // 24: sameoldchat.chat.v1.RemindersService.CompleteLaterReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	12, // 25: sameoldchat.chat.v1.RemindersService.DeleteLaterReminder:output_type -> sameoldchat.chat.v1.MutationResponse
+	14, // [14:26] is the sub-list for method output_type
+	2,  // [2:14] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -1197,7 +1265,7 @@ func file_sameoldchat_chat_v1_reminders_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_reminders_proto_rawDesc), len(file_sameoldchat_chat_v1_reminders_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -2753,6 +2753,14 @@ func (r Remote) UpdateLaterReminder(ctx context.Context, workspaceID domain.Work
 	return decodeProtoLaterReminder(out)
 }
 
+func (r Remote) AcknowledgeLaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	out, err := r.reminders.AcknowledgeLaterReminders(ctx, &chatv1.AcknowledgeLaterRemindersRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "Later reminder acknowledgement")
+}
+
 func (r Remote) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
 	out, err := r.reminders.CompleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
 	if err != nil {
@@ -4835,6 +4843,10 @@ func (s *Server) UpdateLaterReminder(ctx context.Context, input *chatv1.UpdateLa
 	return s.updateLaterReminderProto(ctx, input)
 }
 
+func (s *Server) AcknowledgeLaterReminders(ctx context.Context, input *chatv1.AcknowledgeLaterRemindersRequest) (*chatv1.MutationResponse, error) {
+	return s.acknowledgeLaterRemindersProto(ctx, input)
+}
+
 func (s *Server) CompleteLaterReminder(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
 	return s.completeLaterReminderProto(ctx, input)
 }
@@ -5712,6 +5724,13 @@ func (s *Server) updateLaterReminderProto(ctx context.Context, input *chatv1.Upd
 	return encodeProtoLaterReminder(reminder), nil
 }
 
+func (s *Server) acknowledgeLaterRemindersProto(ctx context.Context, input *chatv1.AcknowledgeLaterRemindersRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AcknowledgeLaterReminders(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) completeLaterReminderProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
 	if err := s.implementation.CompleteLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId())); err != nil {
 		return nil, mapError(err)
@@ -5945,20 +5964,20 @@ func encodeProtoUserPage(page domain.UserPage) *chatv1.UserPage {
 }
 
 func encodeProtoWorkspaceMembership(value domain.WorkspaceMembership) *chatv1.WorkspaceMembership {
-	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active}
+	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active, Restricted: value.Restricted, UltraRestricted: value.UltraRestricted}
 }
 
 func decodeProtoWorkspaceMembership(value *chatv1.WorkspaceMembership) (domain.WorkspaceMembership, error) {
 	if value == nil {
 		return domain.WorkspaceMembership{}, errors.New("missing workspace membership")
 	}
-	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive()}, nil
+	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive(), Restricted: value.GetRestricted(), UltraRestricted: value.GetUltraRestricted()}, nil
 }
 
 func encodeProtoAdminUserPage(page domain.AdminUserPage) *chatv1.AdminUserPage {
 	users := make([]*chatv1.AdminUser, 0, len(page.Users))
 	for _, value := range page.Users {
-		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active})
+		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active, Restricted: value.Membership.Restricted, UltraRestricted: value.Membership.UltraRestricted})
 	}
 	return &chatv1.AdminUserPage{Users: users, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
 }
@@ -5976,7 +5995,7 @@ func decodeProtoAdminUserPage(value *chatv1.AdminUserPage) (domain.AdminUserPage
 		if err != nil {
 			return domain.AdminUserPage{}, err
 		}
-		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive()}})
+		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive(), Restricted: item.GetRestricted(), UltraRestricted: item.GetUltraRestricted()}})
 	}
 	return domain.AdminUserPage{Users: users, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
@@ -6773,7 +6792,7 @@ func encodeProtoLaterReminder(value domain.LaterReminder) *chatv1.LaterReminder 
 		DueAt: unixOrZero(value.DueAt), Timezone: value.TimeZone, Recurrence: string(value.Recurrence),
 		CreatedAt: unixOrZero(value.CreatedAt), UpdatedAt: unixOrZero(value.UpdatedAt),
 		CompletedAt: unixOrZero(value.CompletedAt), LastDeliveredAt: unixOrZero(value.LastDeliveredAt),
-		FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
+		AcknowledgedAt: unixOrZero(value.AcknowledgedAt), FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
 	}
 }
 
@@ -6801,7 +6820,7 @@ func decodeProtoLaterReminder(value *chatv1.LaterReminder) (domain.LaterReminder
 		DueAt: timeFromUnix(value.GetDueAt()), TimeZone: value.GetTimezone(), Recurrence: recurrence,
 		CreatedAt: timeFromUnix(value.GetCreatedAt()), UpdatedAt: timeFromUnix(value.GetUpdatedAt()),
 		CompletedAt: timeFromUnix(value.GetCompletedAt()), LastDeliveredAt: timeFromUnix(value.GetLastDeliveredAt()),
-		FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+		AcknowledgedAt: timeFromUnix(value.GetAcknowledgedAt()), FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
 	}, nil
 }
 

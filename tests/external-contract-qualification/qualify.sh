@@ -27,11 +27,13 @@ assert_contains() {
 
 reminder_help_url='https://slack.com/help/articles/208423427-Set-a-reminder'
 later_help_url='https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later'
+activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack'
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
 
 fetch "$reminder_help_url" "$work/reminders.html"
 fetch "$later_help_url" "$work/later.html"
+fetch "$activity_help_url" "$work/activity.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
 fetch "$later_api_url" "$work/later-api.html"
 
@@ -49,6 +51,14 @@ assert_contains "$work/reminders.html" '9 a.m. in your time zone' \
 	'date-only reminder default is local 9 AM' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'guests can only set reminders for themselves' \
 	'guest reminder boundary' "$reminder_help_url"
+assert_contains "$work/reminders.html" 'see a badge on the' \
+	'due personal reminders badge Later and Activity' "$reminder_help_url"
+assert_contains "$work/reminders.html" 'every Monday' \
+	'channel reminders accept named weekday recurrence' "$reminder_help_url"
+assert_contains "$work/activity.html" 'personal reminders in Activity' \
+	'current Activity includes personal reminders' "$activity_help_url"
+assert_contains "$work/activity.html" 'mark them all as read' \
+	'current Activity supports bulk read acknowledgement' "$activity_help_url"
 
 for section in 'In progress' 'Archived' 'Completed' 'Show upcoming reminders'; do
 	assert_contains "$work/later.html" "$section" "Later exposes $section" "$later_help_url"

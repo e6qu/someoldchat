@@ -71,16 +71,32 @@ triaged item. Reconnect/replay MUST not duplicate Activity.
 
 ## Evidence
 
-- Seed one authorized and one unauthorized object of every result/notification
-  class, then prove the authorized set through browser, Web API, events, and
-  permission changes.
-- Run search syntax/results through current official SDK response models.
-- Execute global/current search and full Activity keyboard triage in Chromium,
-  Firefox, and WebKit, including zero/error/loading/reconnect states.
-- Differential fixtures normalize rank and timestamps but compare object
-  classes, filters, actions, visibility, and navigation.
+Implemented evidence:
 
-Sources checked 2026-07-29:
+- `make external-contract-qualification` checks the current 2026 Activity
+  source for personal reminders and bulk read acknowledgement rather than
+  relying on the legacy Activity article.
+- Browser qualification covers authenticated Activity entry, unread
+  conversation navigation, mentions, reminder source navigation, and the
+  documented navigation shortcut in Chromium, Firefox, and WebKit.
+- Delivered reminders have durable unread acknowledgement state shared by the
+  Activity and Later badges; service, memory, SQL, gRPC, and web tests cover
+  delivery, badge projection, CSRF-protected bulk acknowledgement, and source
+  navigation.
+
+Known gaps, which MUST NOT be reported as full Activity compatibility:
+
+- the feed does not yet model thread replies, reactions, invitations, apps,
+  VIP activity, or all-new-post channel notifications as durable notification
+  records;
+- dense/detailed layouts, filter tabs, custom views, per-item read/unread,
+  clear/restore, reply/react actions, and Activity-local Up/Down, Enter, `C`,
+  and `R` triage are not implemented;
+- search still lacks Slack's modifier parser, result-type grouping, current
+  conversation scope, suggestions, and official-SDK/differential evidence;
+- controlled live-Slack comparison and visual baselines remain required.
+
+Sources checked 2026-07-30:
 
 - [Search in Slack](https://slack.com/help/articles/202528808-Search-in-Slack)
 - [Get your work done from Activity](https://slack.com/help/articles/19693583638803-Get-your-work-done-from-the-Activity-view)

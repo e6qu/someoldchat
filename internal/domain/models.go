@@ -84,10 +84,18 @@ func (r WorkspaceRole) Rank() int {
 func (r WorkspaceRole) Outranks(other WorkspaceRole) bool { return r.Rank() > other.Rank() }
 
 type WorkspaceMembership struct {
-	WorkspaceID WorkspaceID
-	UserID      UserID
-	Role        WorkspaceRole
-	Active      bool
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	Role            WorkspaceRole
+	Active          bool
+	Restricted      bool
+	UltraRestricted bool
+}
+
+// Guest reports Slack's two guest membership tiers. Restricted is a
+// multi-channel guest and UltraRestricted is a single-channel guest.
+func (membership WorkspaceMembership) Guest() bool {
+	return membership.Restricted || membership.UltraRestricted
 }
 
 type BillableUser struct {
@@ -827,6 +835,7 @@ type LaterReminder struct {
 	UpdatedAt          time.Time
 	CompletedAt        time.Time
 	LastDeliveredAt    time.Time
+	AcknowledgedAt     time.Time
 	FailedAt           time.Time
 	FailureCode        string
 }

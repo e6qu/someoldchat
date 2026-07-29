@@ -497,6 +497,7 @@ type Store interface {
 	GetLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
 	ListLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
 	UpdateLaterReminder(context.Context, domain.LaterReminder, events.Event) (domain.LaterReminder, error)
+	AcknowledgeLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
 	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, time.Time, events.Event) error
 	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, events.Event) error
 	EarliestLaterReminder(context.Context, domain.WorkspaceID) (time.Time, error)

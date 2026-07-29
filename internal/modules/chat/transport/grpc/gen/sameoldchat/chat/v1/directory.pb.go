@@ -82,12 +82,14 @@ func (x *UserPage) GetHasMore() bool {
 }
 
 type AdminUser struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	User          *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
-	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
-	Active        bool                   `protobuf:"varint,3,opt,name=active,proto3" json:"active,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	User            *User                  `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Role            string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	Active          bool                   `protobuf:"varint,3,opt,name=active,proto3" json:"active,omitempty"`
+	Restricted      bool                   `protobuf:"varint,4,opt,name=restricted,proto3" json:"restricted,omitempty"`
+	UltraRestricted bool                   `protobuf:"varint,5,opt,name=ultra_restricted,json=ultraRestricted,proto3" json:"ultra_restricted,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *AdminUser) Reset() {
@@ -137,6 +139,20 @@ func (x *AdminUser) GetRole() string {
 func (x *AdminUser) GetActive() bool {
 	if x != nil {
 		return x.Active
+	}
+	return false
+}
+
+func (x *AdminUser) GetRestricted() bool {
+	if x != nil {
+		return x.Restricted
+	}
+	return false
+}
+
+func (x *AdminUser) GetUltraRestricted() bool {
+	if x != nil {
+		return x.UltraRestricted
 	}
 	return false
 }
@@ -2309,13 +2325,15 @@ func (x *WorkspaceMembershipRequest) GetTargetUserId() string {
 }
 
 type WorkspaceMembership struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Role          string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
-	Active        bool                   `protobuf:"varint,4,opt,name=active,proto3" json:"active,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Role            string                 `protobuf:"bytes,3,opt,name=role,proto3" json:"role,omitempty"`
+	Active          bool                   `protobuf:"varint,4,opt,name=active,proto3" json:"active,omitempty"`
+	Restricted      bool                   `protobuf:"varint,5,opt,name=restricted,proto3" json:"restricted,omitempty"`
+	UltraRestricted bool                   `protobuf:"varint,6,opt,name=ultra_restricted,json=ultraRestricted,proto3" json:"ultra_restricted,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *WorkspaceMembership) Reset() {
@@ -2372,6 +2390,20 @@ func (x *WorkspaceMembership) GetRole() string {
 func (x *WorkspaceMembership) GetActive() bool {
 	if x != nil {
 		return x.Active
+	}
+	return false
+}
+
+func (x *WorkspaceMembership) GetRestricted() bool {
+	if x != nil {
+		return x.Restricted
+	}
+	return false
+}
+
+func (x *WorkspaceMembership) GetUltraRestricted() bool {
+	if x != nil {
+		return x.UltraRestricted
 	}
 	return false
 }
@@ -3220,11 +3252,15 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\x05users\x18\x01 \x03(\v2\x19.sameoldchat.chat.v1.UserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"f\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xb1\x01\n" +
 	"\tAdminUser\x12-\n" +
 	"\x04user\x18\x01 \x01(\v2\x19.sameoldchat.chat.v1.UserR\x04user\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\x12\x16\n" +
-	"\x06active\x18\x03 \x01(\bR\x06active\"\x81\x01\n" +
+	"\x06active\x18\x03 \x01(\bR\x06active\x12\x1e\n" +
+	"\n" +
+	"restricted\x18\x04 \x01(\bR\n" +
+	"restricted\x12)\n" +
+	"\x10ultra_restricted\x18\x05 \x01(\bR\x0fultraRestricted\"\x81\x01\n" +
 	"\rAdminUserPage\x124\n" +
 	"\x05users\x18\x01 \x03(\v2\x1e.sameoldchat.chat.v1.AdminUserR\x05users\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
@@ -3388,12 +3424,16 @@ const file_sameoldchat_chat_v1_directory_proto_rawDesc = "" +
 	"\x1aWorkspaceMembershipRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12$\n" +
-	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\"}\n" +
+	"\x0etarget_user_id\x18\x03 \x01(\tR\ftargetUserId\"\xc8\x01\n" +
 	"\x13WorkspaceMembership\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x12\n" +
 	"\x04role\x18\x03 \x01(\tR\x04role\x12\x16\n" +
-	"\x06active\x18\x04 \x01(\bR\x06active\"\x88\x01\n" +
+	"\x06active\x18\x04 \x01(\bR\x06active\x12\x1e\n" +
+	"\n" +
+	"restricted\x18\x05 \x01(\bR\n" +
+	"restricted\x12)\n" +
+	"\x10ultra_restricted\x18\x06 \x01(\bR\x0fultraRestricted\"\x88\x01\n" +
 	"\x1cProvisionExternalUserRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x1b\n" +

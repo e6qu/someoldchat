@@ -42,6 +42,7 @@ var immutableCommitRevision = regexp.MustCompile(`^[0-9a-f]{12,64}$`)
 var remindInPattern = regexp.MustCompile(`(?i)^(.*?)\s+in\s+([1-9][0-9]*)\s+(minute|minutes|hour|hours|day|days)$`)
 var remindTomorrowPattern = regexp.MustCompile(`(?i)^(.*?)\s+tomorrow(?:\s+at\s+(.+))?$`)
 var remindDatePattern = regexp.MustCompile(`(?i)^(.*?)\s+on\s+([0-9]{4}-[0-9]{2}-[0-9]{2})(?:\s+at\s+(.+))?$`)
+var remindWeekdayPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)(?:\s+at\s+(.+))?$`)
 var remindRecurringPattern = regexp.MustCompile(`(?i)^(.*?)\s+every\s+(day|week|month|year)(?:\s+at\s+(.+))?$`)
 var remindTodayPattern = regexp.MustCompile(`(?i)^(.*?)\s+at\s+(.+)$`)
 
@@ -269,6 +270,7 @@ type pageData struct {
 	CSRFToken         string
 	ShowProfile       bool
 	ShowAdmin         bool
+	ReminderUnread    bool
 	IsMember          bool
 	CanPost           bool
 	CanSchedule       bool
@@ -343,11 +345,13 @@ type activityConversationView struct {
 }
 
 type activityData struct {
-	Channel   string
-	Unread    []activityConversationView
-	Mentions  []messageView
-	Reminders []activityReminderView
-	Notice    string
+	Channel              string
+	CSRFToken            string
+	AcknowledgeReminders bool
+	Unread               []activityConversationView
+	Mentions             []messageView
+	Reminders            []activityReminderView
+	Notice               string
 }
 
 type activityReminderView struct {
@@ -990,8 +994,8 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </div>
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
-        <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity" aria-keyshortcuts="Control+3 Control+Shift+3"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span></a>
-        <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later"><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span></a>
+        <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" aria-keyshortcuts="Control+3 Control+Shift+3"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
+        <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}"><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
         {{if .CanSchedule}}<a class="side-link" href="/app/scheduled?channel={{.Channel}}" aria-label="Scheduled messages"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Scheduled</span></a>{{end}}
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
@@ -1400,6 +1404,7 @@ const activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .AcknowledgeReminders}}<form id="ack-reminders" method="post" action="/app/activity/read?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Mark all reminders read</button></form>{{end}}
 <section class="activity-section" aria-labelledby="unread-heading"><h2 id="unread-heading">Unread conversations</h2><p class="section-copy">Open a conversation to review its unread messages.</p>
 <ul class="unread-list">{{range .Unread}}<li><a class="unread-link" href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span class="unread-count" aria-label="{{.UnreadCount}} unread messages">{{.UnreadCount}}</span></a></li>{{else}}<li class="empty">You’re caught up on joined conversations.</li>{{end}}</ul></section>
 <section class="activity-section" aria-labelledby="reminders-heading"><h2 id="reminders-heading">Reminders</h2><p class="section-copy">Personal reminders that have been delivered.</p>
@@ -2059,6 +2064,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/activity", h.activity)
+	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
 	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/members", h.members)
@@ -2556,6 +2562,10 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	if state.Notice != "" {
 		notices = append(notices, state.Notice)
 	}
+	reminderUnread, reminderErr := h.hasUnacknowledgedReminder(r.Context(), principal)
+	if reminderErr != nil {
+		notices = append(notices, "Reminder notification state is temporarily unavailable.")
+	}
 	var details *conversationDetailsView
 	if strings.TrimSpace(r.URL.Query().Get("details")) == "1" {
 		details, err = h.newConversationDetails(r.Context(), principal, workspace, conversation, isMember)
@@ -2578,6 +2588,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		CSRFToken:       csrfToken,
 		ShowProfile:     h.canShowIdentity(),
 		ShowAdmin:       h.canShowAuthorizationAdmin(r.Context(), principal),
+		ReminderUnread:  reminderUnread,
 		IsMember:        isMember,
 		CanPost:         canPost,
 		CanSchedule:     principal.HasScope(auth.ScopeChatWrite),
@@ -3530,6 +3541,9 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 		channel = string(h.Channel)
 	}
 	data := activityData{Channel: channel}
+	if sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName); cookieErr == nil && strings.TrimSpace(sessionCookie.Value) != "" {
+		data.CSRFToken = auth.CSRFToken(sessionCookie.Value)
+	}
 	var cursor domain.Cursor
 	for pageIndex := 0; pageIndex < 10; pageIndex++ {
 		page, pageErr := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
@@ -3620,7 +3634,54 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 			data.Reminders = append(data.Reminders, view)
 		}
 	}
+	if data.CSRFToken != "" {
+		unreadReminder, unreadErr := h.hasUnacknowledgedReminder(r.Context(), principal)
+		if unreadErr != nil {
+			data.Notice = strings.TrimSpace(data.Notice + " Reminder read state is temporarily unavailable.")
+		} else {
+			data.AcknowledgeReminders = unreadReminder
+		}
+	}
 	h.writeHTML(w, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
+}
+
+func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The reminder read marker could not be read. Reload Activity and try again."); !ok {
+		return
+	}
+	if err := h.Messages.AcknowledgeLaterReminders(r.Context(), principal.WorkspaceID, principal.UserID); err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Reminder badges are temporarily unavailable", "The reminder read marker could not be saved. No reminder was changed.")
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	h.redirectMutation(w, r, "/app/activity?channel="+url.QueryEscape(channel))
+}
+
+func (h Handler) hasUnacknowledgedReminder(ctx context.Context, principal auth.Principal) (bool, error) {
+	var cursor domain.Cursor
+	for {
+		page, err := h.Messages.LaterReminders(ctx, principal.WorkspaceID, principal.UserID, domain.LaterReminderPersonal, domain.PageRequest{Limit: scheduledWindow, Cursor: cursor})
+		if err != nil {
+			return false, err
+		}
+		for _, reminder := range page.Items {
+			if reminder.LastDeliveredAt.After(reminder.AcknowledgedAt) {
+				return true, nil
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
+			return false, nil
+		}
+		cursor = page.NextCursor
+	}
 }
 
 func (h Handler) search(w http.ResponseWriter, r *http.Request) {
@@ -4496,6 +4557,31 @@ func parseChannelReminderExpression(expression string, now time.Time, location *
 		}
 		due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
 		return strings.TrimSpace(match[1]), due, domain.ReminderOnce, err
+	}
+	if match := remindWeekdayPattern.FindStringSubmatch(expression); match != nil {
+		hour, minute, err := parseReminderClock(match[3], 9, 0)
+		if err != nil {
+			return "", time.Time{}, "", service.ErrInvalidLaterReminder
+		}
+		weekday := map[string]time.Weekday{
+			"sunday": time.Sunday, "monday": time.Monday, "tuesday": time.Tuesday,
+			"wednesday": time.Wednesday, "thursday": time.Thursday,
+			"friday": time.Friday, "saturday": time.Saturday,
+		}[strings.ToLower(match[2])]
+		days := (int(weekday) - int(localNow.Weekday()) + 7) % 7
+		date := localNow.AddDate(0, 0, days)
+		due, err := reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
+		if err != nil {
+			return "", time.Time{}, "", err
+		}
+		if !due.After(now) {
+			date = date.AddDate(0, 0, 7)
+			due, err = reminderLocalTime(date.Year(), date.Month(), date.Day(), hour, minute, location)
+			if err != nil {
+				return "", time.Time{}, "", err
+			}
+		}
+		return strings.TrimSpace(match[1]), due, domain.ReminderWeekly, nil
 	}
 	if match := remindRecurringPattern.FindStringSubmatch(expression); match != nil {
 		hour, minute, err := parseReminderClock(match[3], 9, 0)

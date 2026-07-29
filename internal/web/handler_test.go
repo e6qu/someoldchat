@@ -941,7 +941,22 @@ func TestDeliveredPersonalReminderAppearsInActivityWithItsSource(t *testing.T) {
 	requireContains(t, "REMIND-04 Activity projection", activity.Body.String(),
 		"Personal reminders that have been delivered.", "review the source",
 		`datetime="`+now.Format(time.RFC3339)+`"`, "#message-M-activity-reminder",
+		`id="ack-reminders"`,
 	)
+	workspace := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "REMIND-04 due badges", workspace.Body.String(),
+		`aria-label="Activity, reminder due"`, `aria-label="Later, reminder due"`,
+	)
+	acknowledged := postForm(t, mux, "/app/activity/read?channel=Cdev", "", false)
+	if acknowledged.Code != http.StatusSeeOther || acknowledged.Header().Get("Location") != "/app/activity?channel=Cdev" {
+		t.Fatalf("acknowledge status=%d location=%q body=%s", acknowledged.Code, acknowledged.Header().Get("Location"), acknowledged.Body)
+	}
+	stored, err := (service.Messages{Store: s}).LaterReminderInfo(context.Background(), "T1", "U1", reminder.ID)
+	if err != nil || !stored.AcknowledgedAt.Equal(stored.LastDeliveredAt) {
+		t.Fatalf("acknowledged reminder=%+v err=%v", stored, err)
+	}
+	after := get(t, mux, "/app?channel=Cdev")
+	requireMissing(t, "acknowledged reminder badges", after.Body.String(), "reminder due")
 }
 
 func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *testing.T) {
@@ -955,6 +970,7 @@ func TestChannelReminderParserRejectsAmbiguityAndPreservesCalendarMeaning(t *tes
 	}{
 		{expression: "stand-up tomorrow at 9am", text: "stand-up", hour: 9},
 		{expression: "stand-up in 20 minutes", text: "stand-up", hour: 8},
+		{expression: "stand-up every Thursday at 9am", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 9},
 		{expression: "stand-up every week at 10:30", text: "stand-up", recurrence: domain.ReminderWeekly, hour: 10},
 		{expression: "stand-up sometime soon", wantError: service.ErrInvalidLaterReminder},
 		{expression: "stand-up at 7am", wantError: service.ErrReminderTimeInPast},

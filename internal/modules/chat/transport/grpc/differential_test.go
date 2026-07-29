@@ -1054,6 +1054,9 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				if err := chat.AcknowledgeLaterReminders(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
 				if err := chat.CompleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
 					return nil, err
 				}
