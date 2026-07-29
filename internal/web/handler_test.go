@@ -30,6 +30,31 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
+func TestValidatePublicURLAllowsHTTPSAndExplicitLoopbackOnly(t *testing.T) {
+	for _, value := range []string{
+		"https://chat.example.test",
+		"http://localhost:8080",
+		"http://someoldchat-primary.localhost:18080",
+		"http://127.0.0.1:8080",
+		"http://[::1]:8080",
+	} {
+		if err := ValidatePublicURL(value); err != nil {
+			t.Errorf("%q rejected: %v", value, err)
+		}
+	}
+	for _, value := range []string{
+		"http://chat.example.test",
+		"http://localhost.attacker.test",
+		"https://user@chat.example.test",
+		"https://chat.example.test?redirect=https://attacker.test",
+		"https://chat.example.test/#fragment",
+	} {
+		if err := ValidatePublicURL(value); err == nil {
+			t.Errorf("%q accepted", value)
+		}
+	}
+}
+
 // addBrowserCookies makes a request look like the one a current browser sends.
 //
 // Sec-Fetch-Site is part of that shape and it is set here rather than in the

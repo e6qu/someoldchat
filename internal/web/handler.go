@@ -67,8 +67,8 @@ func (h *Handler) SetReleaseRevision(revision string) error {
 
 func ValidatePublicURL(value string) error {
 	parsed, err := url.Parse(strings.TrimSpace(value))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
-		return errors.New("web public URL must be an absolute HTTPS URL")
+	if err != nil || !validAuthorizationURL(parsed) || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("web public URL must be an absolute HTTPS URL, except for an explicit loopback development coordinate")
 	}
 	return nil
 }
