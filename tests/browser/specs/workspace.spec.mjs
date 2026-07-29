@@ -737,6 +737,7 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   await threadRoot.focus();
   await page.keyboard.press('ArrowLeft');
   await expect(page).not.toHaveURL(/thread=/);
+  await page.waitForLoadState('domcontentloaded');
 
   const returned = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
   await returned.focus();

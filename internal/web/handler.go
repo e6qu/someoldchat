@@ -1831,7 +1831,7 @@ if(!ownPath(action))return;
 event.preventDefault();
 if(form===composer){if(sending)return;sending=true}
 var activeMessage=document.activeElement&&document.activeElement.closest?document.activeElement.closest('.message'):null;
-var restoreMessageID=activeMessage&&document.activeElement===activeMessage?activeMessage.getAttribute('data-message-id'):'';
+var restoreMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
 var quiet=form.getAttribute('data-quiet')==='true';
 var body=new FormData(form);
 var unixInput=form.querySelector('[data-unix-seconds="true"]');
