@@ -4,11 +4,17 @@
 
 From a message/file action or Slack's focused-message `A` shortcut, the member
 can save the item. The save control changes state once, the Later navigation
-reflects the item, and the action synchronizes with Slack's saved-item API
-contract. Removing the save reverses only the member's saved state.
+reflects the item, and removing the save reverses only the member's saved
+state.
 
 Saving does not pin the message, notify the channel, duplicate the source, or
 grant access the member does not otherwise have.
+
+Current Later is a first-party Slack client feature, not a Slack app API.
+Implementations MUST NOT write it through `stars.*`, infer it from
+`stars.list`, or expose a private Later item to an app token. Slack's developer
+changelog says legacy stars do not appear in Later and Later items are not
+returned to apps.
 
 ## LATER-02 — Review Later
 
@@ -59,18 +65,31 @@ completed, and deleted reminders do not fire.
 
 ## Evidence
 
-- Browser tests cover save/unsave, all Later states, reminder presets/custom
-  time, `/remind` parsing, delivery, complete/archive/restore, and inaccessible
-  sources.
-- Current official SDKs exercise `stars.*` or Slack's current saved-item
-  surface as applicable and `reminders.*`, with exact-member token isolation.
-- Deterministic-clock persistence tests cover recurrence, time zones,
-  hibernation wake deadlines, worker races, and terminal failures.
-- Differential tests record current Slack Later organization and `/remind`
-  parsing because these are not completely described by the archived API spec.
+Implemented evidence:
+
+- Playwright drives focused-message `A`, save/unsave, source navigation,
+  In progress, Completed, Archived, restore, removal, and automated WCAG checks
+  in Chromium, Firefox, and WebKit.
+- Service, portable-store, SQL-migration, and local-versus-gRPC differential
+  tests cover idempotency, exact-member isolation, pagination, state
+  transitions, and content redaction after source access is lost.
+- Current official Node, Python, and Java SDK qualification continues to
+  exercise deprecated `stars.*` and `reminders.*` as separate app contracts.
+  No SDK suite is cited as Later evidence because Slack exposes no current
+  Later Web API.
+
+Still required before the reminder journeys are complete:
+
+- reminder presets/custom time, `/remind` parsing, durable delivery, Activity
+  projection, recurrence, rescheduling, and upcoming-reminder filtering;
+- deterministic-clock persistence tests for time zones, hibernation wake
+  deadlines, worker races, recurrence, and terminal failures; and
+- controlled live-Slack differential observations for organization, source
+  loss, live reconciliation, and `/remind` parsing.
 
 Sources checked 2026-07-29:
 
 - [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later)
 - [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder)
 - [Slack keyboard shortcuts and commands](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands)
+- [Slack developer changelog: It’s later already for stars and reminders](https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/)

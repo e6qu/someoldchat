@@ -18,7 +18,7 @@ Measured on 2026-07-29:
   file upload that becomes one idempotent `file_share` history message. Socket
   Mode now consumes a real posted message projected after installed-bot
   visibility checks rather than a hand-authored callback fixture;
-- 25 Playwright journeys cover the first-party client in Chromium, Firefox,
+- 27 Playwright journeys cover the first-party client in Chromium, Firefox,
   and WebKit. Automated axe checks cover the desktop workspace, command
   discovery, and a 320-pixel layout; visual-regression baselines, manual
   assistive-technology qualification, and comparison against a live Slack
@@ -44,6 +44,9 @@ implementation MUST NOT narrow the target.
   topic/purpose editing, archive/unarchive, leave, and direct-conversation
   close behavior;
 - member directory and profile/status/photo-URL editing;
+- private save-for-later state, focused-message `A`, In progress, Archived,
+  Completed, restore/removal, source navigation, and inaccessible-source
+  redaction without conflating current Later with deprecated `stars.*`;
 - desktop and narrow layouts, named mobile navigation, light/dark themes,
   message/composer keyboard navigation, safe Slack-markup formatting controls,
   member mention autocomplete, an emoji picker, per-conversation/thread draft
@@ -60,7 +63,7 @@ implementation MUST NOT narrow the target.
 | --- | --- | --- |
 | P0 | Activity depth | Activity now covers joined unread conversations and explicit mentions, but it does not yet aggregate thread replies, reminders, notification-policy events, clear state, bulk read, layouts, filters, or custom tabs from Slack's current Activity model. |
 | P0 | Composer depth | Formatting, standard emoji, member mention autocomplete, file preview, draft recovery, and browser-time-zone scheduled send work. Custom-emoji browsing, channel autocomplete, pasted-file staging, voice/video clips, and Slack's full shortcuts browser remain. |
-| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, Later/saved-item organization, and reminder delivery/UI remain. |
+| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, reminder dates/upcoming filters, and reminder delivery/UI remain. |
 | P1 | Direct-message lifecycle | DMs can be opened from People, but there is no dedicated DM/group-DM section, participant management, or recent-DM navigation matching Slack. |
 | P1 | Notifications and presence | Basic presence/status APIs exist, but the client has no per-conversation notification preferences, status expiry, snooze/DND controls, typing indicators, or presence-aware member affordances. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |

@@ -3706,6 +3706,155 @@ func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, use
 	return m.Store.ListStars(ctx, workspaceID, userID, request)
 }
 
+func savedItemPayload(topic string, item domain.SavedItem) events.Payload {
+	return events.NewPayload(topic,
+		events.String("saved_item_id", string(item.ID)),
+		events.String("message_id", string(item.MessageID)),
+		events.String("channel_id", string(item.Conversation)),
+		events.String("user_id", string(item.UserID)),
+		events.String("state", string(item.State)),
+	)
+}
+
+// SaveForLater implements Slack's current private Later state. It must not call
+// AddStar: Slack retired that relationship in 2023 and current Later items are
+// neither written nor returned through the deprecated stars.* methods.
+func (m Messages) SaveForLater(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.SavedItem, error) {
+	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	id, err := domain.NewSavedItemID()
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	now := time.Now().UTC()
+	item := domain.SavedItem{
+		ID: id, WorkspaceID: workspaceID, UserID: userID, MessageID: message.ID,
+		Conversation: conversationID, State: domain.SavedItemInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	event, err := newEvent(workspaceID, userID, savedItemPayload("saved_item.created", item), now)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item, _, err = m.Store.CreateSavedItem(ctx, item, event)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item.Message = message
+	item.SourceAvailable = !message.Deleted
+	return item, nil
+}
+
+func (m Messages) SavedItemForMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageID domain.MessageID) (domain.SavedItem, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SavedItem{}, err
+	}
+	item, err := m.Store.GetSavedItemByMessage(ctx, workspaceID, userID, messageID)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return m.savedItemWithSource(ctx, item)
+}
+
+func (m Messages) SavedItemsForMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageIDs []domain.MessageID) ([]domain.SavedItem, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	if len(messageIDs) > 200 {
+		return nil, store.InvalidArgument("too many saved item message ids")
+	}
+	return m.Store.ListSavedItemsForMessages(ctx, workspaceID, userID, messageIDs)
+}
+
+func (m Messages) SavedItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItemPage{}, store.InvalidArgument("saved item state is invalid")
+	}
+	page, err := m.Store.ListSavedItems(ctx, workspaceID, userID, state, request)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	for index := range page.Items {
+		page.Items[index], err = m.savedItemWithSource(ctx, page.Items[index])
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+	}
+	return page, nil
+}
+
+func (m Messages) SetSavedItemState(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID, state domain.SavedItemState) (domain.SavedItem, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SavedItem{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItem{}, store.InvalidArgument("saved item state is invalid")
+	}
+	item, err := m.Store.GetSavedItem(ctx, workspaceID, userID, id)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	if item.State == state {
+		return m.savedItemWithSource(ctx, item)
+	}
+	item.State = state
+	item.UpdatedAt = time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, savedItemPayload("saved_item.changed", item), item.UpdatedAt)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item, err = m.Store.UpdateSavedItem(ctx, item, event)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return m.savedItemWithSource(ctx, item)
+}
+
+func (m Messages) RemoveSavedItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	item, err := m.Store.GetSavedItem(ctx, workspaceID, userID, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, savedItemPayload("saved_item.removed", item), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteSavedItem(ctx, workspaceID, userID, id, event)
+}
+
+func (m Messages) savedItemWithSource(ctx context.Context, item domain.SavedItem) (domain.SavedItem, error) {
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	if err := m.authorizeConversation(ctx, item.WorkspaceID, item.UserID, item.Conversation); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return item, nil
+		}
+		return domain.SavedItem{}, err
+	}
+	message, err := m.Store.GetMessage(ctx, item.MessageID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return item, nil
+		}
+		return domain.SavedItem{}, err
+	}
+	if message.WorkspaceID != item.WorkspaceID || message.Conversation != item.Conversation || message.Deleted {
+		return item, nil
+	}
+	item.Message = message
+	item.SourceAvailable = true
+	return item, nil
+}
+
 func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Bookmark{}, err

@@ -1117,6 +1117,43 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "private Later saved-item lifecycle",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				message, err := chat.Post(ctx, "T1", "U1", "C1", "save me for later", "", "")
+				if err != nil {
+					return nil, err
+				}
+				saved, err := chat.SaveForLater(ctx, "T1", "U1", "C1", timestampOf(message))
+				if err != nil {
+					return nil, err
+				}
+				byMessage, err := chat.SavedItemForMessage(ctx, "T1", "U1", message.ID)
+				if err != nil {
+					return nil, err
+				}
+				byMessages, err := chat.SavedItemsForMessages(ctx, "T1", "U1", []domain.MessageID{message.ID})
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.SavedItems(ctx, "T1", "U1", domain.SavedItemInProgress, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				completed, err := chat.SetSavedItemState(ctx, "T1", "U1", saved.ID, domain.SavedItemCompleted)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveSavedItem(ctx, "T1", "U1", saved.ID); err != nil {
+					return nil, err
+				}
+				return []any{
+					saved.State, saved.SourceAvailable, saved.Message.Text,
+					byMessage.ID == saved.ID, len(byMessages), len(page.Items), page.HasMore,
+					completed.State,
+				}, nil
+			},
+		},
+		{
 			name: "workspace and conversation listings",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				workspace, err := chat.WorkspaceInfo(ctx, "T1", "U1")

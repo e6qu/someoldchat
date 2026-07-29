@@ -23,6 +23,7 @@ type ListDownloadID string
 type FileCommentID string
 type ExternalUploadID string
 type ReminderID string
+type SavedItemID string
 type ScheduledMessageID string
 type UserGroupID string
 type InviteRequestID string
@@ -117,6 +118,11 @@ func NewReminderID() (ReminderID, error) {
 		return "", err
 	}
 	return ReminderID("Rm" + strings.ToUpper(value[2:])), nil
+}
+
+func NewSavedItemID() (SavedItemID, error) {
+	value, err := PublicID("saved_")
+	return SavedItemID(value), err
 }
 
 func NewConversationID() (ConversationID, error) {

@@ -250,6 +250,13 @@ CREATE TABLE IF NOT EXISTS stars (
  PRIMARY KEY (user_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS stars_user_created ON stars(user_id, created_at, message_id);
+CREATE TABLE IF NOT EXISTS saved_items (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ message_id TEXT NOT NULL REFERENCES messages(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ UNIQUE (workspace_id, user_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS saved_items_user_state_updated ON saved_items(workspace_id, user_id, state, updated_at, id);
 CREATE TABLE IF NOT EXISTS bookmarks (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  title TEXT NOT NULL, type TEXT NOT NULL, link TEXT NOT NULL DEFAULT '', emoji TEXT NOT NULL DEFAULT '', entity_id TEXT NOT NULL DEFAULT '',
@@ -321,7 +328,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 102
+const schemaVersion = 103
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2159,6 +2166,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS scheduled_messages_credential ON scheduled_messages(workspace_id, credential_hash, post_at, id)`); err != nil {
 			return fmt.Errorf("index scheduled message credentials: %w", err)
+		}
+	}
+	if version < 103 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS saved_items (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			message_id TEXT NOT NULL REFERENCES messages(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+			state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			UNIQUE (workspace_id, user_id, message_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate saved items: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS saved_items_user_state_updated ON saved_items(workspace_id, user_id, state, updated_at, id)`); err != nil {
+			return fmt.Errorf("index saved items: %w", err)
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -7036,6 +7056,216 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 		}
 	}
 	return values, next, hasMore, nil
+}
+
+const savedItemColumns = `id, workspace_id, user_id, message_id, conversation_id, state, created_at, updated_at`
+
+func scanSavedItem(row rowScanner) (domain.SavedItem, error) {
+	var item domain.SavedItem
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.MessageID, &item.Conversation, &item.State, &createdAt, &updatedAt); err != nil {
+		return domain.SavedItem{}, err
+	}
+	var err error
+	item.CreatedAt, err = domain.ParseStoredTime(createdAt)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item.UpdatedAt, err = domain.ParseStoredTime(updatedAt)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) CreateSavedItem(ctx context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, bool, error) {
+	if !item.State.Valid() {
+		return domain.SavedItem{}, false, store.InvalidArgument("saved item state is invalid")
+	}
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT INTO saved_items(id, workspace_id, user_id, message_id, conversation_id, state, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, message_id) DO NOTHING`,
+		item.ID, item.WorkspaceID, item.UserID, item.MessageID, item.Conversation, item.State,
+		domain.NewStoredTime(item.CreatedAt), domain.NewStoredTime(item.UpdatedAt))
+	if err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	if count == 0 {
+		existing, err := scanSavedItem(tx.QueryRowContext(ctx, `SELECT `+savedItemColumns+` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND message_id = ?`, item.WorkspaceID, item.UserID, item.MessageID))
+		return existing, false, err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *Store) GetSavedItem(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID) (domain.SavedItem, error) {
+	item, err := scanSavedItem(s.db.QueryRowContext(ctx, `SELECT `+savedItemColumns+` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	return item, err
+}
+
+func (s *Store) GetSavedItemByMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, message domain.MessageID) (domain.SavedItem, error) {
+	item, err := scanSavedItem(s.db.QueryRowContext(ctx, `SELECT `+savedItemColumns+` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND message_id = ?`, workspace, user, message))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	return item, err
+}
+
+func (s *Store) ListSavedItemsForMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, messages []domain.MessageID) ([]domain.SavedItem, error) {
+	if len(messages) == 0 {
+		return []domain.SavedItem{}, nil
+	}
+	query := `SELECT ` + savedItemColumns + ` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND message_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(messages)), ",") + `)`
+	args := make([]any, 0, len(messages)+2)
+	args = append(args, workspace, user)
+	for _, message := range messages {
+		args = append(args, message)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.SavedItem, 0, len(messages))
+	for rows.Next() {
+		item, err := scanSavedItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ListSavedItems(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItemPage{}, store.InvalidArgument("saved item state is invalid")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	query := `SELECT ` + savedItemColumns + ` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND state = ?`
+	args := []any{workspace, user, state}
+	if after != "" {
+		separator := strings.IndexByte(after, 0)
+		if separator < 1 || separator == len(after)-1 {
+			return domain.SavedItemPage{}, domain.ErrInvalidCursor
+		}
+		updatedAt, id := after[:separator], after[separator+1:]
+		query += ` AND (updated_at > ? OR (updated_at = ? AND id > ?))`
+		args = append(args, updatedAt, updatedAt, id)
+	}
+	query += ` ORDER BY updated_at, id LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.SavedItem, 0, request.Limit+1)
+	for rows.Next() {
+		item, err := scanSavedItem(rows)
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	more := len(items) > request.Limit
+	if more {
+		items = items[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		last := items[len(items)-1]
+		next, err = domain.NewListCursor(string(domain.NewStoredTime(last.UpdatedAt)) + "\x00" + string(last.ID))
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+	}
+	return domain.SavedItemPage{Items: items, NextCursor: next, HasMore: more}, nil
+}
+
+func (s *Store) UpdateSavedItem(ctx context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, error) {
+	if !item.State.Valid() {
+		return domain.SavedItem{}, store.InvalidArgument("saved item state is invalid")
+	}
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE saved_items SET state = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`,
+		item.State, domain.NewStoredTime(item.UpdatedAt), item.ID, item.WorkspaceID, item.UserID)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	if count != 1 {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.SavedItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SavedItem{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) DeleteSavedItem(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM saved_items WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) CreateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) error {

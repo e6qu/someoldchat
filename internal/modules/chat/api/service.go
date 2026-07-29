@@ -218,6 +218,12 @@ type Service interface {
 	AddStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	RemoveStar(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
 	Stars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	SaveForLater(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.SavedItem, error)
+	SavedItemForMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
+	SavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
+	SavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemState, domain.PageRequest) (domain.SavedItemPage, error)
+	SetSavedItemState(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, domain.SavedItemState) (domain.SavedItem, error)
+	RemoveSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) error
 	AddBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, string, string, string, string) (domain.Bookmark, error)
 	EditBookmark(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.BookmarkID, domain.BookmarkUpdate) (domain.Bookmark, error)
 	Bookmarks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) ([]domain.Bookmark, error)

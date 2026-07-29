@@ -36,6 +36,7 @@ type Remote struct {
 	mutations     chatv1.ConversationMutationsServiceClient
 	presence      chatv1.PresenceServiceClient
 	reactions     chatv1.ReactionsServiceClient
+	savedItems    chatv1.SavedItemsServiceClient
 	reminders     chatv1.RemindersServiceClient
 	scheduled     chatv1.ScheduledMessagesServiceClient
 	usergroups    chatv1.UserGroupsServiceClient
@@ -113,6 +114,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		mutations:     chatv1.NewConversationMutationsServiceClient(conn),
 		presence:      chatv1.NewPresenceServiceClient(conn),
 		reactions:     chatv1.NewReactionsServiceClient(conn),
+		savedItems:    chatv1.NewSavedItemsServiceClient(conn),
 		reminders:     chatv1.NewRemindersServiceClient(conn),
 		scheduled:     chatv1.NewScheduledMessagesServiceClient(conn),
 		usergroups:    chatv1.NewUserGroupsServiceClient(conn),
@@ -2535,6 +2537,66 @@ func (r Remote) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userI
 	return page.Stars, page.NextCursor, page.HasMore, nil
 }
 
+func (r Remote) SaveForLater(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.SavedItem, error) {
+	out, err := r.savedItems.SaveForLater(ctx, &chatv1.SaveForLaterRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp)})
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return decodeProtoSavedItem(out)
+}
+
+func (r Remote) SavedItemForMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageID domain.MessageID) (domain.SavedItem, error) {
+	out, err := r.savedItems.SavedItemForMessage(ctx, &chatv1.SavedItemForMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), MessageId: string(messageID)})
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return decodeProtoSavedItem(out)
+}
+
+func (r Remote) SavedItemsForMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageIDs []domain.MessageID) ([]domain.SavedItem, error) {
+	ids := make([]string, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.savedItems.SavedItemsForMessages(ctx, &chatv1.SavedItemsForMessagesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), MessageIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.SavedItem, 0, len(out.GetItems()))
+	for _, item := range out.GetItems() {
+		decoded, err := decodeProtoSavedItem(item)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, decoded)
+	}
+	return items, nil
+}
+
+func (r Remote) SavedItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	out, err := r.savedItems.SavedItems(ctx, &chatv1.SavedItemsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), State: string(state), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending})
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	return decodeProtoSavedItemPage(out)
+}
+
+func (r Remote) SetSavedItemState(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID, state domain.SavedItemState) (domain.SavedItem, error) {
+	out, err := r.savedItems.SetSavedItemState(ctx, &chatv1.SetSavedItemStateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SavedItemId: string(id), State: string(state)})
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return decodeProtoSavedItem(out)
+}
+
+func (r Remote) RemoveSavedItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID) error {
+	out, err := r.savedItems.RemoveSavedItem(ctx, &chatv1.RemoveSavedItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SavedItemId: string(id)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "saved item removal")
+}
+
 func (r Remote) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
 	out, err := r.bookmarks.AddBookmark(ctx, &chatv1.AddBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Title: title, Type: bookmarkType, Link: link, Emoji: emoji, EntityId: entityID, AccessLevel: accessLevel, ParentId: parentID})
 	if err != nil {
@@ -2765,6 +2827,7 @@ var (
 	_ chatv1.MessagesServiceServer                = (*Server)(nil)
 	_ chatv1.PresenceServiceServer                = (*Server)(nil)
 	_ chatv1.ReactionsServiceServer               = (*Server)(nil)
+	_ chatv1.SavedItemsServiceServer              = (*Server)(nil)
 	_ chatv1.BookmarksServiceServer               = (*Server)(nil)
 	_ chatv1.UserGroupsServiceServer              = (*Server)(nil)
 	_ chatv1.CallsServiceServer                   = (*Server)(nil)
@@ -2821,6 +2884,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterAuthServiceServer(registrar, server)
 	chatv1.RegisterEventsServiceServer(registrar, server)
 	chatv1.RegisterReactionsServiceServer(registrar, server)
+	chatv1.RegisterSavedItemsServiceServer(registrar, server)
 	chatv1.RegisterBookmarksServiceServer(registrar, server)
 	chatv1.RegisterMessagesServiceServer(registrar, server)
 	chatv1.RegisterRemindersServiceServer(registrar, server)
@@ -4596,6 +4660,61 @@ func (s *Server) Stars(ctx context.Context, input *chatv1.StarsRequest) (*chatv1
 	return s.starsProto(ctx, input)
 }
 
+func (s *Server) SaveForLater(ctx context.Context, input *chatv1.SaveForLaterRequest) (*chatv1.SavedItem, error) {
+	item, err := s.implementation.SaveForLater(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItem(item), nil
+}
+
+func (s *Server) SavedItemForMessage(ctx context.Context, input *chatv1.SavedItemForMessageRequest) (*chatv1.SavedItem, error) {
+	item, err := s.implementation.SavedItemForMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.MessageID(input.GetMessageId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItem(item), nil
+}
+
+func (s *Server) SavedItemsForMessages(ctx context.Context, input *chatv1.SavedItemsForMessagesRequest) (*chatv1.SavedItemsForMessagesResponse, error) {
+	ids := make([]domain.MessageID, 0, len(input.GetMessageIds()))
+	for _, id := range input.GetMessageIds() {
+		ids = append(ids, domain.MessageID(id))
+	}
+	items, err := s.implementation.SavedItemsForMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.SavedItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, encodeProtoSavedItem(item))
+	}
+	return &chatv1.SavedItemsForMessagesResponse{Items: result}, nil
+}
+
+func (s *Server) SavedItems(ctx context.Context, input *chatv1.SavedItemsRequest) (*chatv1.SavedItemPage, error) {
+	page, err := s.implementation.SavedItems(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SavedItemState(input.GetState()), protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItemPage(page), nil
+}
+
+func (s *Server) SetSavedItemState(ctx context.Context, input *chatv1.SetSavedItemStateRequest) (*chatv1.SavedItem, error) {
+	item, err := s.implementation.SetSavedItemState(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SavedItemID(input.GetSavedItemId()), domain.SavedItemState(input.GetState()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItem(item), nil
+}
+
+func (s *Server) RemoveSavedItem(ctx context.Context, input *chatv1.RemoveSavedItemRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.RemoveSavedItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SavedItemID(input.GetSavedItemId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) AddBookmark(ctx context.Context, input *chatv1.AddBookmarkRequest) (*chatv1.Bookmark, error) {
 	return s.addBookmarkProto(ctx, input)
 }
@@ -6355,6 +6474,67 @@ func encodeProtoStarPage(items []domain.Star, next domain.Cursor, more bool) *ch
 		result = append(result, encodeProtoStar(item))
 	}
 	return &chatv1.StarPage{Stars: result, NextCursor: string(next), HasMore: more}
+}
+
+func encodeProtoSavedItem(value domain.SavedItem) *chatv1.SavedItem {
+	item := &chatv1.SavedItem{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		MessageId: string(value.MessageID), ConversationId: string(value.Conversation), State: string(value.State),
+		CreatedAtUnixNano: value.CreatedAt.UTC().UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+		SourceAvailable: value.SourceAvailable,
+	}
+	if value.SourceAvailable {
+		item.Message = encodeProtoMessage(value.Message)
+	}
+	return item
+}
+
+func decodeProtoSavedItem(value *chatv1.SavedItem) (domain.SavedItem, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetMessageId() == "" || value.GetConversationId() == "" {
+		return domain.SavedItem{}, errors.New("typed saved item is incomplete")
+	}
+	state := domain.SavedItemState(value.GetState())
+	if !state.Valid() {
+		return domain.SavedItem{}, errors.New("typed saved item state is invalid")
+	}
+	item := domain.SavedItem{
+		ID: domain.SavedItemID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID: domain.UserID(value.GetUserId()), MessageID: domain.MessageID(value.GetMessageId()),
+		Conversation: domain.ConversationID(value.GetConversationId()), State: state,
+		CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
+		SourceAvailable: value.GetSourceAvailable(),
+	}
+	if item.SourceAvailable {
+		message, err := decodeProtoMessage(value.GetMessage())
+		if err != nil {
+			return domain.SavedItem{}, err
+		}
+		item.Message = message
+	}
+	return item, nil
+}
+
+func encodeProtoSavedItemPage(value domain.SavedItemPage) *chatv1.SavedItemPage {
+	items := make([]*chatv1.SavedItem, 0, len(value.Items))
+	for _, item := range value.Items {
+		items = append(items, encodeProtoSavedItem(item))
+	}
+	return &chatv1.SavedItemPage{Items: items, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoSavedItemPage(value *chatv1.SavedItemPage) (domain.SavedItemPage, error) {
+	if value == nil {
+		return domain.SavedItemPage{}, errors.New("typed saved item page is required")
+	}
+	items := make([]domain.SavedItem, 0, len(value.GetItems()))
+	for _, item := range value.GetItems() {
+		decoded, err := decodeProtoSavedItem(item)
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+		items = append(items, decoded)
+	}
+	return domain.SavedItemPage{Items: items, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
 
 func encodeProtoBookmark(value domain.Bookmark) *chatv1.Bookmark {

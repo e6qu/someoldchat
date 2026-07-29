@@ -243,19 +243,41 @@ func conversionCases() map[string]conversionCase {
 		"UserReactionPage":          {sample: &domain.UserReactionPage{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoUserReactionPage, decodeProtoUserReactionPage)},
 		"Pin":                       {sample: &domain.Pin{}, through: through(encodeProtoPin, decodeProtoPin)},
 		"Star":                      {sample: &domain.Star{}, omitted: map[string]string{"BlobKey": "storage-internal file location"}, through: through(encodeProtoStar, decodeProtoStar)},
-		"Bookmark":                  {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
-		"Reminder":                  {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
-		"ScheduledMessage":          {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
-		"DoNotDisturb":              {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
-		"UserGroup":                 {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
-		"Call":                      {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
-		"Canvas":                    {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
-		"List":                      {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
-		"ListItem":                  {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
-		"ListItemPage":              {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
-		"ListDownload":              {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
-		"AccessLog":                 {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
-		"View":                      {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
+		"SavedItem": {
+			sample:  &domain.SavedItem{},
+			omitted: map[string]string{"BlobKey": "storage-internal file location"},
+			prepare: func(filled any) {
+				item := filled.(*domain.SavedItem)
+				item.State = domain.SavedItemInProgress
+				item.SourceAvailable = true
+			},
+			through: through(encodeProtoSavedItem, decodeProtoSavedItem),
+		},
+		"SavedItemPage": {
+			sample:  &domain.SavedItemPage{},
+			omitted: map[string]string{"BlobKey": "storage-internal file location"},
+			prepare: func(filled any) {
+				page := filled.(*domain.SavedItemPage)
+				for index := range page.Items {
+					page.Items[index].State = domain.SavedItemInProgress
+					page.Items[index].SourceAvailable = true
+				}
+			},
+			through: through(encodeProtoSavedItemPage, decodeProtoSavedItemPage),
+		},
+		"Bookmark":         {sample: &domain.Bookmark{}, through: through(encodeProtoBookmark, decodeProtoBookmark)},
+		"Reminder":         {sample: &domain.Reminder{}, through: through(encodeProtoReminder, decodeProtoReminder)},
+		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
+		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
+		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
+		"Call":             {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
+		"Canvas":           {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
+		"List":             {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
+		"ListItem":         {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
+		"ListItemPage":     {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
+		"ListDownload":     {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
+		"AccessLog":        {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
+		"View":             {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
 		"AppHome": {
 			sample: &appHomeRoundTrip{},
 			through: through(

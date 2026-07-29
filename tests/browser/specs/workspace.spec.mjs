@@ -150,6 +150,50 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history,
   await expect(page.getByText('You have no scheduled messages.')).toBeVisible();
 });
 
+test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports every current state', async ({ page, context, request }) => {
+  await signIn(context);
+  const text = `later browser qualification ${Date.now()}`;
+  await postThroughTheAPI(request, text);
+  await page.goto('/app');
+
+  const message = page.locator('.message', { hasText: text });
+  await message.focus();
+  await page.keyboard.press('a');
+  await expect(message.getByRole('button', { name: 'Remove from Later' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(message).toBeFocused();
+
+  await page.getByRole('link', { name: 'Later' }).click();
+  await expect(page.getByRole('heading', { name: 'Later', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'In progress' })).toHaveAttribute('aria-current', 'page');
+  let item = page.locator('.later-item', { hasText: text });
+  await expect(item.getByRole('link', { name: '#general' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await item.getByRole('link', { name: '#general' }).click();
+  await expect(page.locator('.message', { hasText: text })).toBeVisible();
+  await page.getByRole('link', { name: 'Later' }).click();
+  item = page.locator('.later-item', { hasText: text });
+
+  await item.getByRole('button', { name: 'Mark complete' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved item moved.');
+  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Completed' }).click();
+  item = page.locator('.later-item', { hasText: text });
+  await expect(item).toBeVisible();
+
+  await item.getByRole('button', { name: 'Move to in progress' }).click();
+  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+  await page.getByRole('link', { name: 'In progress' }).click();
+  item = page.locator('.later-item', { hasText: text });
+  await item.getByRole('button', { name: 'Archive' }).click();
+  await page.getByRole('link', { name: 'Archived' }).click();
+  item = page.locator('.later-item', { hasText: text });
+  await expect(item).toBeVisible();
+
+  await item.getByRole('button', { name: 'Remove from Later' }).click();
+  await expect(page.getByRole('status')).toHaveText('Message removed from Later.');
+  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+});
+
 test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA automation', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
@@ -778,7 +822,7 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
   const editor = target.getByRole('textbox', { name: 'Edit your message' });
   const changed = `edited in browser ${Date.now()}`;
   await editor.fill(changed);
-  await target.getByRole('button', { name: 'Save' }).click();
+  await target.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(1);
   await expect(page.locator('.message', { hasText: original })).toHaveCount(0);
 

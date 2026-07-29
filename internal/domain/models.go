@@ -641,6 +641,44 @@ type Star struct {
 	CreatedAt    time.Time
 }
 
+type SavedItemState string
+
+const (
+	SavedItemInProgress SavedItemState = "in_progress"
+	SavedItemArchived   SavedItemState = "archived"
+	SavedItemCompleted  SavedItemState = "completed"
+)
+
+func (state SavedItemState) Valid() bool {
+	return state == SavedItemInProgress || state == SavedItemArchived || state == SavedItemCompleted
+}
+
+// SavedItem is the private first-party state behind Slack's current Later
+// surface. It is intentionally distinct from Star: Slack does not expose
+// current Later items through the deprecated stars.* API.
+//
+// Message is populated only when the requesting member can still read the
+// source. SourceAvailable is explicit so a deleted or inaccessible source is
+// distinguishable from a malformed empty message without leaking its content.
+type SavedItem struct {
+	ID              SavedItemID
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	MessageID       MessageID
+	Conversation    ConversationID
+	State           SavedItemState
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Message         Message
+	SourceAvailable bool
+}
+
+type SavedItemPage struct {
+	Items      []SavedItem
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type Bookmark struct {
 	ID           BookmarkID
 	WorkspaceID  WorkspaceID

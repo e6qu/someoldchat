@@ -476,6 +476,13 @@ type Store interface {
 	AddStar(context.Context, domain.Star, events.Event) error
 	RemoveStar(context.Context, domain.Star, events.Event) error
 	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	CreateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, bool, error)
+	GetSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.SavedItem, error)
+	GetSavedItemByMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
+	ListSavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
+	ListSavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemState, domain.PageRequest) (domain.SavedItemPage, error)
+	UpdateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, error)
+	DeleteSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, events.Event) error
 	CreateBookmark(context.Context, domain.Bookmark, events.Event) error
 	GetBookmark(context.Context, domain.WorkspaceID, domain.ConversationID, domain.BookmarkID) (domain.Bookmark, error)
 	ListBookmarks(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.Bookmark, error)

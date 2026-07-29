@@ -135,6 +135,9 @@ var liveEventTopics = []string{
 	"reaction.removed",
 	"pin.added",
 	"pin.removed",
+	"saved_item.created",
+	"saved_item.changed",
+	"saved_item.removed",
 	"view.opened",
 	"view.pushed",
 	"view.updated",
@@ -177,12 +180,16 @@ type messageView struct {
 	MachineTime   string
 	DisplayTime   string
 	Pinned        bool
+	Saved         bool
+	SavedItemID   string
 	Reactions     []reactionView
 	ReplyURL      string
 	ReactionURL   string
 	UnreactURL    string
 	PinURL        string
 	UnpinURL      string
+	SaveURL       string
+	UnsaveURL     string
 	UpdateURL     string
 	DeleteURL     string
 	CanEdit       bool
@@ -352,6 +359,35 @@ type scheduledMessagesData struct {
 	Messages  []scheduledMessageView
 	MoreURL   string
 	Notice    string
+}
+
+type laterItemView struct {
+	ID              string
+	Text            string
+	AuthorName      string
+	MachineTime     string
+	DisplayTime     string
+	ChannelName     string
+	ChannelPrefix   string
+	SourceURL       string
+	SourceAvailable bool
+	CompleteURL     string
+	ArchiveURL      string
+	RestoreURL      string
+	RemoveURL       string
+}
+
+type laterData struct {
+	Channel           string
+	CSRFToken         string
+	State             domain.SavedItemState
+	StateTitle        string
+	InProgressCurrent bool
+	ArchivedCurrent   bool
+	CompletedCurrent  bool
+	Items             []laterItemView
+	MoreURL           string
+	Notice            string
 }
 
 type identityData struct {
@@ -722,7 +758,7 @@ const attachmentPartial = `{{define "attachment"}}
 
 const messagesPartial = `{{define "messages"}}
 {{range $message := .Messages}}
-<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
+<article class="message" id="{{$message.Anchor}}" data-message-id="{{$message.ID}}" tabindex="-1" aria-label="{{if $message.Ephemeral}}Private message only visible to you{{else}}Message{{end}} from {{$message.AuthorName}} at {{$message.DisplayTime}}" aria-keyshortcuts="ArrowUp ArrowDown Home End ArrowRight T{{if not $message.Ephemeral}} A{{end}}{{if $message.CanEdit}} E{{end}}{{if $.CanPin}} P{{end}}{{if $.CanReact}} R{{end}}{{if $message.CanDelete}} Delete{{end}}">
   <div class="avatar{{if $message.AvatarEmoji}} avatar-emoji{{end}}" aria-hidden="true">{{if $message.AvatarURL}}<img src="{{$message.AvatarURL}}" alt="">{{else if $message.AvatarEmoji}}{{$message.AvatarEmoji}}{{else}}{{$message.AuthorInitial}}{{end}}</div>
   <div class="message-body">
     <div class="message-head">
@@ -813,6 +849,10 @@ const messagesPartial = `{{define "messages"}}
         </form>
       </details>
       {{end}}
+      <form method="post" action="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" hx-post="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" data-message-save>
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <button type="submit" aria-pressed="{{if $message.Saved}}true{{else}}false{{end}}">{{if $message.Saved}}Remove from Later{{else}}Save for later{{end}}</button>
+      </form>
       {{if $.CanPin}}
       <form method="post" action="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}" hx-post="{{if $message.Pinned}}{{$message.UnpinURL}}{{else}}{{$message.PinURL}}{{end}}">
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
@@ -843,7 +883,7 @@ const messagesPartial = `{{define "messages"}}
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
           <label class="visually-hidden" for="edit-{{$message.ID}}">Edit your message</label>
           <textarea id="edit-{{$message.ID}}" name="text" maxlength="40000" required>{{$message.Text}}</textarea>
-          <button type="submit">Save</button>
+          <button type="submit">Save changes</button>
         </form>
       </details>
       {{end}}
@@ -899,6 +939,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
         <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity" aria-keyshortcuts="Control+3 Control+Shift+3"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span></a>
+        <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later"><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span></a>
         {{if .CanSchedule}}<a class="side-link" href="/app/scheduled?channel={{.Channel}}" aria-label="Scheduled messages"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Scheduled</span></a>{{end}}
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
@@ -1313,6 +1354,40 @@ const activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 </main>{{end}}`
 
 var activityTemplate = mustPage(activityMarkup)
+
+const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(900px,calc(100% - 32px));margin:28px auto 48px}.heading{display:grid;gap:5px;margin-bottom:17px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted)}
+.later-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px}.later-tabs a{padding:10px 13px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.later-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.later-tabs a:hover{color:var(--text);background:var(--hover)}
+.later-list{display:grid;gap:10px;margin:0;padding:0;list-style:none}.later-item{display:grid;gap:11px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.later-source{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.later-source a{font-weight:800;color:var(--text);text-decoration:none}.later-source a:hover{color:var(--action)}.later-meta{color:var(--muted);font-size:12px}.later-text{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}.later-unavailable{margin:0;color:var(--muted);font-weight:700}.later-actions{display:flex;gap:7px;flex-wrap:wrap}.later-actions form{margin:0}.later-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.later-actions button:hover{background:var(--hover)}.later-actions .remove{color:var(--danger)}.empty{padding:30px;border:1px dashed var(--line);border-radius:10px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:18px}
+@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,900px);margin-top:18px}.later-tabs{overflow-x:auto}.later-actions{display:grid;grid-template-columns:1fr 1fr}.later-actions button{width:100%}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + laterLiveScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Later</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
+<div class="heading"><h2>Later</h2><p>Saved messages are private to you.</p></div>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+<nav class="later-tabs" aria-label="Later sections"><a href="/app/later?channel={{.Channel}}&state=in_progress"{{if .InProgressCurrent}} aria-current="page"{{end}}>In progress</a><a href="/app/later?channel={{.Channel}}&state=archived"{{if .ArchivedCurrent}} aria-current="page"{{end}}>Archived</a><a href="/app/later?channel={{.Channel}}&state=completed"{{if .CompletedCurrent}} aria-current="page"{{end}}>Completed</a></nav>
+<ul class="later-list" aria-label="{{.StateTitle}} saved items">{{range .Items}}<li class="later-item">
+{{if .SourceAvailable}}<div class="later-source"><a href="{{.SourceURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a><span class="later-meta">{{.AuthorName}} · <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="later-text">{{.Text}}</p>{{else}}<p class="later-unavailable">This message is no longer available.</p>{{end}}
+<div class="later-actions">
+{{if $.InProgressCurrent}}<form method="post" action="{{.CompleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Mark complete</button></form><form method="post" action="{{.ArchiveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Archive</button></form>{{else}}<form method="post" action="{{.RestoreURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Move to in progress</button></form>{{end}}
+<form method="post" action="{{.RemoveURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="remove" type="submit">Remove from Later</button></form>
+</div></li>{{else}}<li class="empty">No items in {{.StateTitle}}.</li>{{end}}</ul>
+{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more saved items</a></p>{{end}}
+</main>{{end}}`
+
+var laterTemplate = mustPage(laterMarkup)
+
+const laterLiveScript = `<script>(function(){
+if(!window.EventSource)return;
+var cursor='';
+try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){cursor=''}
+var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));
+['saved_item.created','saved_item.changed','saved_item.removed'].forEach(function(topic){
+stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}window.location.reload()});
+});
+})();</script>`
 
 const scheduledMessagesMarkup = `{{define "title"}}Scheduled messages · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -1815,6 +1890,10 @@ if(back&&ownPath(back.getAttribute('href'))){event.preventDefault();window.locat
 if(key==='e'&&openMessageDetails(focusedMessage,'Edit','textarea')){event.preventDefault();return}
 if(event.key==='Delete'&&openMessageDetails(focusedMessage,'Delete','button[type=submit]')){event.preventDefault();return}
 if(key==='r'&&openMessageDetails(focusedMessage,'Add reaction','input[name=name]')){event.preventDefault();return}
+if(key==='a'){
+var save=focusedMessage.querySelector('[data-message-save] button[type=submit]');
+if(save){event.preventDefault();var saveForm=save.closest('form');if(saveForm&&typeof saveForm.requestSubmit==='function')saveForm.requestSubmit(save);else if(saveForm)saveForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));return}
+}
 if(key==='p'){
 var buttons=focusedMessage.querySelectorAll('.message-actions button[type=submit]');
 var pin=Array.prototype.slice.call(buttons).find(function(button){var label=button.textContent.trim();return label==='Pin'||label==='Unpin'});
@@ -1904,6 +1983,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/activity", h.activity)
+	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/members", h.members)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
@@ -1944,6 +2024,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/reaction/remove", h.removeReaction)
 	mux.HandleFunc("POST /app/pin", h.addPin)
 	mux.HandleFunc("POST /app/pin/remove", h.removePin)
+	mux.HandleFunc("POST /app/later/save", h.saveForLater)
+	mux.HandleFunc("POST /app/later/state", h.setSavedItemState)
+	mux.HandleFunc("POST /app/later/remove", h.removeSavedItem)
 	mux.HandleFunc("POST /app/session/revoke", h.revokeSession)
 	mux.HandleFunc("POST /logout", h.revokeSession)
 }
@@ -2651,6 +2734,25 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			pinned[pin.Message] = struct{}{}
 		}
 	}
+	saved := make(map[domain.MessageID]domain.SavedItem)
+	messageIDs := make([]domain.MessageID, 0, len(messages))
+	for _, message := range messages {
+		if message.Deleted {
+			continue
+		}
+		if _, ephemeral := ephemeralIDs[message.ID]; !ephemeral {
+			messageIDs = append(messageIDs, message.ID)
+		}
+	}
+	if items, err := h.Messages.SavedItemsForMessages(ctx, principal.WorkspaceID, principal.UserID, messageIDs); err != nil {
+		if notice == "" {
+			notice = "Saved items are temporarily unavailable."
+		}
+	} else {
+		for _, item := range items {
+			saved[item.MessageID] = item
+		}
+	}
 	readReactions := principal.HasScope(auth.ScopeReactionsRead) || principal.HasScope(auth.ScopeReactionsWrite)
 	var messageShortcuts []domain.AppShortcut
 	if request.Member {
@@ -2702,6 +2804,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			UnreactURL:    mutationURL("/app/reaction/remove", channel, timestamp, threadTimestamp, before),
 			PinURL:        mutationURL("/app/pin", channel, timestamp, threadTimestamp, before),
 			UnpinURL:      mutationURL("/app/pin/remove", channel, timestamp, threadTimestamp, before),
+			SaveURL:       mutationURL("/app/later/save", channel, timestamp, threadTimestamp, before),
 			UpdateURL:     mutationURL("/app/message/update", channel, timestamp, threadTimestamp, before),
 			DeleteURL:     mutationURL("/app/message/delete", channel, timestamp, threadTimestamp, before),
 			// The first-party editor currently writes plain text. Offering it on
@@ -2714,6 +2817,11 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			CanInteract: request.Member && message.AppID != "",
 			Streaming:   messageStreamActive(message.StreamState),
 			Ephemeral:   ephemeral,
+		}
+		if item, ok := saved[message.ID]; ok {
+			view.Saved = true
+			view.SavedItemID = string(item.ID)
+			view.UnsaveURL = mutationURL("/app/later/remove", channel, timestamp, threadTimestamp, before) + "&id=" + url.QueryEscape(string(item.ID))
 		}
 		for _, file := range message.Files {
 			title := strings.TrimSpace(file.Title)
@@ -3065,6 +3173,128 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
+
+func parseLaterState(value string) (domain.SavedItemState, bool) {
+	switch domain.SavedItemState(strings.TrimSpace(value)) {
+	case "", domain.SavedItemInProgress:
+		return domain.SavedItemInProgress, true
+	case domain.SavedItemArchived:
+		return domain.SavedItemArchived, true
+	case domain.SavedItemCompleted:
+		return domain.SavedItemCompleted, true
+	default:
+		return "", false
+	}
+}
+
+func laterActionURL(path string, id domain.SavedItemID, state, returnState domain.SavedItemState, channel string) string {
+	query := url.Values{"id": {string(id)}, "channel": {channel}}
+	if state != "" {
+		query.Set("state", string(state))
+	}
+	if returnState != "" {
+		query.Set("return_state", string(returnState))
+	}
+	return path + "?" + query.Encode()
+}
+
+func (h Handler) later(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	state, ok := parseLaterState(r.URL.Query().Get("state"))
+	if !ok {
+		h.writePageError(w, http.StatusBadRequest, "That Later link is not valid", "Open Later from the workspace and choose a section.")
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
+	page, err := h.Messages.SavedItems(r.Context(), principal.WorkspaceID, principal.UserID, state, domain.PageRequest{Limit: scheduledWindow, Cursor: cursor})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidCursor) || errors.Is(err, store.ErrInvalidArgument) {
+			h.writePageError(w, http.StatusBadRequest, "That Later link is not valid", "Open Later from the workspace and try again.")
+			return
+		}
+		h.writeStoreError(w, err, "Later is temporarily unavailable.")
+		return
+	}
+	title := map[domain.SavedItemState]string{
+		domain.SavedItemInProgress: "In progress",
+		domain.SavedItemArchived:   "Archived",
+		domain.SavedItemCompleted:  "Completed",
+	}[state]
+	data := laterData{
+		Channel: channel, CSRFToken: auth.CSRFToken(sessionCookie.Value), State: state, StateTitle: title,
+		InProgressCurrent: state == domain.SavedItemInProgress,
+		ArchivedCurrent:   state == domain.SavedItemArchived,
+		CompletedCurrent:  state == domain.SavedItemCompleted,
+		Items:             make([]laterItemView, 0, len(page.Items)),
+	}
+	switch r.URL.Query().Get("changed") {
+	case "saved":
+		data.Notice = "Message saved for later."
+	case "removed":
+		data.Notice = "Message removed from Later."
+	case "state":
+		data.Notice = "Saved item moved."
+	}
+	for _, item := range page.Items {
+		view := laterItemView{
+			ID:              string(item.ID),
+			SourceAvailable: item.SourceAvailable,
+			CompleteURL:     laterActionURL("/app/later/state", item.ID, domain.SavedItemCompleted, state, channel),
+			ArchiveURL:      laterActionURL("/app/later/state", item.ID, domain.SavedItemArchived, state, channel),
+			RestoreURL:      laterActionURL("/app/later/state", item.ID, domain.SavedItemInProgress, state, channel),
+			RemoveURL:       laterActionURL("/app/later/remove", item.ID, "", state, channel),
+		}
+		if item.SourceAvailable {
+			view.Text = item.Message.Text
+			if strings.TrimSpace(view.Text) == "" {
+				view.Text = "File or rich message"
+			}
+			view.MachineTime = item.Message.CreatedAt.UTC().Format(time.RFC3339Nano)
+			view.DisplayTime = formatTime(item.Message.CreatedAt)
+			boundary := item.Message
+			boundary.CreatedAt = boundary.CreatedAt.Add(time.Nanosecond)
+			before := ""
+			if cursor, cursorErr := domain.NewMessageCursor(boundary); cursorErr == nil {
+				before = string(cursor)
+			}
+			view.SourceURL = appURL(string(item.Conversation), string(item.Message.ThreadTimestamp), before, messageAnchor(item.Message.ID), "")
+			view.AuthorName = "Unknown member"
+			if author, authorErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Message.AuthorID); authorErr == nil {
+				view.AuthorName = displayName(author)
+			}
+			view.ChannelName = "Conversation"
+			if conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation); conversationErr == nil {
+				view.ChannelName = conversationName(conversation)
+				view.ChannelPrefix = "#"
+				if conversation.IsDirect || conversation.IsGroupDirect {
+					view.ChannelPrefix = ""
+					if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
+						view.ChannelName = participants
+					}
+				}
+			}
+		}
+		data.Items = append(data.Items, view)
+	}
+	if page.HasMore && page.NextCursor != "" {
+		query := url.Values{"channel": {channel}, "state": {string(state)}, "cursor": {string(page.NextCursor)}}
+		data.MoreURL = "/app/later?" + query.Encode()
+	}
+	h.writeHTML(w, laterTemplate, data, http.StatusOK, "Later rendering unavailable")
+}
 
 func (h Handler) scheduledMessages(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
@@ -4287,6 +4517,105 @@ func (h Handler) mutatePin(w http.ResponseWriter, r *http.Request, add bool) {
 	h.completeMutation(w, r)
 }
 
+func (h Handler) saveForLater(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The save request could not be read from the form. Reload the page and try again."); !ok {
+		return
+	}
+	timestamp := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("ts")))
+	if _, err := domain.ParseMessageTimestamp(timestamp); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That message link is not valid", "The message was not saved because the link does not identify a message in this conversation.")
+		return
+	}
+	if _, err := h.Messages.SaveForLater(r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), timestamp); err != nil {
+		status, reason := http.StatusServiceUnavailable, "The message could not be saved because the workspace store is temporarily unavailable."
+		switch {
+		case errors.Is(err, service.ErrInvalidTimestamp):
+			status, reason = http.StatusBadRequest, "That message link is not valid."
+		case errors.Is(err, store.ErrNotFound):
+			status, reason = http.StatusNotFound, "That message is no longer available or you can no longer read it."
+		}
+		h.writeMutationError(w, r, status, "The message was not saved", reason)
+		return
+	}
+	h.completeMutation(w, r)
+}
+
+func (h Handler) setSavedItemState(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The Later action could not be read from the form. Reload Later and try again."); !ok {
+		return
+	}
+	id := domain.SavedItemID(strings.TrimSpace(r.URL.Query().Get("id")))
+	rawState := strings.TrimSpace(r.URL.Query().Get("state"))
+	state, ok := parseLaterState(rawState)
+	if id == "" || rawState == "" || !ok {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That Later action is not valid", "Open Later from the workspace and try again.")
+		return
+	}
+	if _, err := h.Messages.SetSavedItemState(r.Context(), principal.WorkspaceID, principal.UserID, id, state); err != nil {
+		status, reason := http.StatusServiceUnavailable, "The saved item could not be moved because the workspace store is temporarily unavailable."
+		if errors.Is(err, store.ErrNotFound) {
+			status, reason = http.StatusNotFound, "That saved item is no longer available."
+		} else if errors.Is(err, store.ErrInvalidArgument) {
+			status, reason = http.StatusBadRequest, "That Later destination is not valid."
+		}
+		h.writeMutationError(w, r, status, "The saved item was not moved", reason)
+		return
+	}
+	h.redirectLaterMutation(w, r, "state")
+}
+
+func (h Handler) removeSavedItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "The remove request could not be read from the form. Reload the page and try again."); !ok {
+		return
+	}
+	id := domain.SavedItemID(strings.TrimSpace(r.URL.Query().Get("id")))
+	if id == "" {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That saved item link is not valid", "Open Later from the workspace and try again.")
+		return
+	}
+	if err := h.Messages.RemoveSavedItem(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
+		status, reason := http.StatusServiceUnavailable, "The saved item could not be removed because the workspace store is temporarily unavailable."
+		if errors.Is(err, store.ErrNotFound) {
+			status, reason = http.StatusNotFound, "That saved item was already removed or belongs to another member."
+		}
+		h.writeMutationError(w, r, status, "The saved item was not removed", reason)
+		return
+	}
+	if strings.TrimSpace(r.URL.Query().Get("return_state")) != "" {
+		h.redirectLaterMutation(w, r, "removed")
+		return
+	}
+	h.completeMutation(w, r)
+}
+
+func (h Handler) redirectLaterMutation(w http.ResponseWriter, r *http.Request, changed string) {
+	state, ok := parseLaterState(r.URL.Query().Get("return_state"))
+	if !ok {
+		state = domain.SavedItemInProgress
+	}
+	query := url.Values{
+		"channel": {string(h.requestChannel(r))},
+		"state":   {string(state)},
+		"changed": {changed},
+	}
+	h.redirectMutation(w, r, "/app/later?"+query.Encode())
+}
+
 func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
 	if err != nil {
@@ -4580,7 +4909,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript, laterLiveScript), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

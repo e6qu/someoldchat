@@ -760,6 +760,54 @@ func TestTimelineFragmentServesTheLiveRegion(t *testing.T) {
 	}
 }
 
+func TestLaterJourneySavesOrganizesAndRemovesAMessage(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	created := time.Unix(1700000000, 123456000).UTC()
+	message := seedMessage(t, s, "M-later", "review the release", created)
+	timestamp := string(domain.NewMessageTimestamp(created))
+
+	page := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "Later message action", page.Body.String(),
+		`href="/app/later?channel=Cdev"`,
+		`data-message-save`,
+		`Save for later`,
+		` A`,
+	)
+	saved := postForm(t, mux, "/app/later/save?channel=Cdev&ts="+url.QueryEscape(timestamp), "", true)
+	if saved.Code != http.StatusNoContent {
+		t.Fatalf("save status=%d body=%s", saved.Code, saved.Body)
+	}
+	chat := service.Messages{Store: s}
+	item, err := chat.SavedItemForMessage(context.Background(), "T1", "U1", message.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshed := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "saved message action", refreshed.Body.String(), `Remove from Later`, `aria-pressed="true"`)
+
+	later := get(t, mux, "/app/later?channel=Cdev")
+	requireContains(t, "LATER-02 In progress", later.Body.String(),
+		`aria-current="page">In progress`,
+		`review the release`,
+		`#general`,
+		`Mark complete`,
+		`Archive`,
+	)
+	moved := postForm(t, mux, "/app/later/state?channel=Cdev&id="+url.QueryEscape(string(item.ID))+"&state=completed&return_state=in_progress", "", false)
+	if moved.Code != http.StatusSeeOther {
+		t.Fatalf("complete status=%d body=%s", moved.Code, moved.Body)
+	}
+	completed := get(t, mux, "/app/later?channel=Cdev&state=completed")
+	requireContains(t, "LATER-03 Completed", completed.Body.String(), `aria-current="page">Completed`, `review the release`, `Move to in progress`)
+	removed := postForm(t, mux, "/app/later/remove?channel=Cdev&id="+url.QueryEscape(string(item.ID))+"&return_state=completed", "", false)
+	if removed.Code != http.StatusSeeOther {
+		t.Fatalf("remove status=%d body=%s", removed.Code, removed.Body)
+	}
+	empty := get(t, mux, "/app/later?channel=Cdev&state=completed")
+	requireContains(t, "empty Completed", empty.Body.String(), `No items in Completed.`)
+	requireMissing(t, "removed Later item", empty.Body.String(), `review the release`)
+}
+
 // TestLiveUpdatesSubscribeToExactlyTheEmittedTopics covers the defect where the
 // page listened for "message.updated", which nothing publishes, and therefore
 // never saw an edit.
@@ -792,6 +840,16 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := chat.RemovePin(ctx, "T1", "U1", "Cdev", timestamp); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := chat.SaveForLater(ctx, "T1", "U1", "Cdev", timestamp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := chat.SetSavedItemState(ctx, "T1", "U1", saved.ID, domain.SavedItemCompleted); err != nil {
+		t.Fatal(err)
+	}
+	if err := chat.RemoveSavedItem(ctx, "T1", "U1", saved.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := chat.Delete(ctx, "T1", "U1", "Cdev", timestamp); err != nil {
@@ -840,7 +898,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "view.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") {
 			emitted[topic] = true
 		}
 	}

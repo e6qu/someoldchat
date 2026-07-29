@@ -263,7 +263,7 @@ order:
    developer workspace.
 
 Current sweep status (2026-07-29): the normative catalog and stable-ID mapping
-for all 25 first-party browser journeys are in place; Slack web keyboard and
+for all 27 first-party browser journeys are in place; Slack web keyboard and
 slash-command discovery/escaping semantics are corrected; and the journeys now
 qualify in Chromium, Firefox, and WebKit with representative automated WCAG
 checks. Visual baselines, manual assistive-technology evidence, complete
@@ -271,9 +271,16 @@ API/SDK-to-journey mapping, and live-Slack differential runs remain explicit
 work rather than inferred compatibility. Scheduled send now preserves
 channel/thread context and the browser's local time zone, stays out of history
 until delivery, and has a real pending
-list and cancellation journey. Drafts/Sent aggregation, scheduled edit,
-reschedule/send-now and failure history, Later, and reminder execution remain
-the next stateful client slice.
+list and cancellation journey. Current Later is now a private first-party
+saved-item model—not an alias over deprecated `stars.*`—with save/unsave,
+focused-message `A`, In progress, Archived, Completed, restore/removal,
+inaccessible-source redaction, live reconciliation, portable persistence, and
+local/distributed composition parity. Slack exposes no current Later Web API,
+so official SDK qualification remains evidence for the deliberately separate
+legacy `stars.*` and `reminders.*` contracts rather than being mislabeled as
+Later evidence. Drafts/Sent aggregation, scheduled edit, reschedule/send-now
+and failure history, reminder dates/delivery, and Later reminder filtering
+remain the next stateful client slice.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
