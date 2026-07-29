@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"crypto/hmac"
+	"encoding/json"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -15,74 +17,85 @@ import (
 )
 
 type Store struct {
-	mu                     sync.RWMutex
-	workspaces             map[domain.WorkspaceID]domain.Workspace
-	members                map[string]domain.WorkspaceMembership
-	users                  map[domain.UserID]domain.User
-	userExpirations        map[domain.UserID]time.Time
-	conversations          map[domain.ConversationID]domain.Conversation
-	conversationPrefs      map[domain.ConversationID]domain.ConversationPrefs
-	conversationAccess     map[domain.ConversationID][]domain.UserGroupID
-	conversationTeams      map[domain.ConversationID]map[domain.WorkspaceID]struct{}
-	conversationOrg        map[domain.ConversationID]bool
-	inviteRequests         map[domain.InviteRequestID]domain.InviteRequest
-	appApprovals           map[domain.AppID]domain.AppApproval
-	appInstallations       map[string]domain.AppInstallation
-	permissionRequests     map[domain.AppRequestID]domain.AppPermissionRequest
-	views                  map[domain.ViewID]domain.View
-	workflowSteps          map[domain.WorkflowStepID]domain.WorkflowStep
-	dialogs                map[domain.DialogID]domain.Dialog
-	bots                   map[domain.BotID]domain.Bot
-	migrations             map[string]domain.UserMigration
-	oauthClients           map[string]domain.OAuthClient
-	oauthCodes             map[string]memoryOAuthCode
-	rtmConnections         map[string]domain.RTMConnection
-	socketConnections      map[string]domain.SocketModeConnection
-	socketConnectionActive map[string]bool
-	socketResponses        map[string]domain.SocketModeResponse
-	socketCursors          map[domain.AppID]uint64
-	memberships            map[domain.ConversationID]map[domain.UserID]struct{}
-	tokens                 map[string]domain.TokenRecord
-	appTokens              map[string]domain.AppTokenRecord
-	sessions               map[string]domain.SessionRecord
-	oidcLogoutTokens       map[string]time.Time
-	authMethods            map[string]domain.AuthMethod
-	externalIdentities     map[string]domain.ExternalIdentity
-	messages               map[domain.ConversationID][]domain.Message
-	outbox                 []events.Event
-	outboxLeases           map[uint64]memoryLease
-	delivered              map[uint64]bool
-	idempotency            map[string]domain.MessageID
-	nextAttempt            map[uint64]time.Time
-	readCursors            map[string]domain.ReadCursor
-	reactions              map[domain.MessageID]map[string]domain.Reaction
-	pins                   map[domain.MessageID]map[domain.UserID]domain.Pin
-	files                  map[domain.FileID]domain.File
-	fileComments           map[domain.FileCommentID]domain.FileComment
-	remoteFiles            map[domain.FileID]domain.RemoteFile
-	remoteFileShares       map[domain.FileID][]domain.ConversationID
-	dnd                    map[domain.UserID]domain.DoNotDisturb
-	stars                  map[domain.UserID]map[domain.MessageID]domain.Star
-	bookmarks              map[domain.BookmarkID]domain.Bookmark
-	reminders              map[domain.ReminderID]domain.Reminder
-	scheduled              map[domain.ScheduledMessageID]domain.ScheduledMessage
-	scheduledLeases        map[domain.ScheduledMessageID]memoryLease
-	scheduledDelivered     map[domain.ScheduledMessageID]bool
-	scheduledNextAttempt   map[domain.ScheduledMessageID]time.Time
-	userGroups             map[domain.UserGroupID]domain.UserGroup
-	calls                  map[domain.CallID]domain.Call
-	emojis                 map[string]domain.CustomEmoji
-	canvases               map[domain.CanvasID]domain.Canvas
-	canvasAccess           map[string]domain.CanvasAccess
-	accessLogs             []domain.AccessLog
-	lists                  map[domain.ListID]domain.List
-	listItems              map[domain.ListID]map[domain.ListItemID]domain.ListItem
-	listAccess             map[string]domain.ListAccess
-	listDownloads          map[domain.ListDownloadID]domain.ListDownload
-	openidRefreshTokens    map[string]domain.OpenIDRefreshToken
-	incomingWebhooks       map[domain.IncomingWebhookID]domain.IncomingWebhook
-	externalUploads        map[domain.ExternalUploadID]domain.ExternalUpload
-	fileShares             map[domain.FileID][]domain.ConversationID
+	mu                            sync.RWMutex
+	workspaces                    map[domain.WorkspaceID]domain.Workspace
+	members                       map[string]domain.WorkspaceMembership
+	users                         map[domain.UserID]domain.User
+	userExpirations               map[domain.UserID]time.Time
+	conversations                 map[domain.ConversationID]domain.Conversation
+	conversationPrefs             map[domain.ConversationID]domain.ConversationPrefs
+	conversationAccess            map[domain.ConversationID][]domain.UserGroupID
+	conversationTeams             map[domain.ConversationID]map[domain.WorkspaceID]struct{}
+	conversationOrg               map[domain.ConversationID]bool
+	inviteRequests                map[domain.InviteRequestID]domain.InviteRequest
+	appApprovals                  map[domain.AppID]domain.AppApproval
+	appInstallations              map[string]domain.AppInstallation
+	apps                          map[domain.AppID]domain.App
+	appManifestRevisions          map[domain.AppID][]domain.AppManifestRevision
+	appTriggers                   map[string]domain.AppTrigger
+	appResponseURLs               map[string]domain.AppResponseURL
+	appConfigurationTokens        map[string]domain.AppConfigurationToken
+	appConfigurationRefreshTokens map[string]string
+	permissionRequests            map[domain.AppRequestID]domain.AppPermissionRequest
+	views                         map[domain.ViewID]domain.View
+	workflowSteps                 map[domain.WorkflowStepID]domain.WorkflowStep
+	dialogs                       map[domain.DialogID]domain.Dialog
+	bots                          map[domain.BotID]domain.Bot
+	migrations                    map[string]domain.UserMigration
+	oauthClients                  map[string]domain.OAuthClient
+	oauthCodes                    map[string]memoryOAuthCode
+	oauthRefreshGrants            map[string]domain.OAuthRefreshGrant
+	rtmConnections                map[string]domain.RTMConnection
+	socketConnections             map[string]domain.SocketModeConnection
+	socketConnectionActive        map[string]bool
+	socketResponses               map[string]domain.SocketModeResponse
+	socketInteractions            map[string]domain.SocketModeInteraction
+	socketCursors                 map[domain.AppID]uint64
+	appEventCursors               map[string]memoryAppEventCursor
+	memberships                   map[domain.ConversationID]map[domain.UserID]struct{}
+	tokens                        map[string]domain.TokenRecord
+	appTokens                     map[string]domain.AppTokenRecord
+	sessions                      map[string]domain.SessionRecord
+	oidcLogoutTokens              map[string]time.Time
+	authMethods                   map[string]domain.AuthMethod
+	externalIdentities            map[string]domain.ExternalIdentity
+	messages                      map[domain.ConversationID][]domain.Message
+	ephemeralMessages             []domain.EphemeralMessage
+	outbox                        []events.Event
+	outboxLeases                  map[uint64]memoryLease
+	delivered                     map[uint64]bool
+	idempotency                   map[string]domain.MessageID
+	nextAttempt                   map[uint64]time.Time
+	readCursors                   map[string]domain.ReadCursor
+	reactions                     map[domain.MessageID]map[string]domain.Reaction
+	pins                          map[domain.MessageID]map[domain.UserID]domain.Pin
+	files                         map[domain.FileID]domain.File
+	fileComments                  map[domain.FileCommentID]domain.FileComment
+	remoteFiles                   map[domain.FileID]domain.RemoteFile
+	remoteFileShares              map[domain.FileID][]domain.ConversationID
+	dnd                           map[domain.UserID]domain.DoNotDisturb
+	stars                         map[domain.UserID]map[domain.MessageID]domain.Star
+	bookmarks                     map[domain.BookmarkID]domain.Bookmark
+	reminders                     map[domain.ReminderID]domain.Reminder
+	scheduled                     map[domain.ScheduledMessageID]domain.ScheduledMessage
+	scheduledLeases               map[domain.ScheduledMessageID]memoryLease
+	scheduledDelivered            map[domain.ScheduledMessageID]bool
+	scheduledNextAttempt          map[domain.ScheduledMessageID]time.Time
+	userGroups                    map[domain.UserGroupID]domain.UserGroup
+	calls                         map[domain.CallID]domain.Call
+	emojis                        map[string]domain.CustomEmoji
+	canvases                      map[domain.CanvasID]domain.Canvas
+	canvasAccess                  map[string]domain.CanvasAccess
+	accessLogs                    []domain.AccessLog
+	lists                         map[domain.ListID]domain.List
+	listItems                     map[domain.ListID]map[domain.ListItemID]domain.ListItem
+	listAccess                    map[string]domain.ListAccess
+	listDownloads                 map[domain.ListDownloadID]domain.ListDownload
+	openidRefreshTokens           map[string]domain.OpenIDRefreshToken
+	incomingWebhooks              map[domain.IncomingWebhookID]domain.IncomingWebhook
+	appDatastoreItems             map[string]domain.AppDatastoreItem
+	externalUploads               map[domain.ExternalUploadID]domain.ExternalUpload
+	fileShares                    map[domain.FileID][]domain.ConversationID
 }
 
 var _ store.Store = (*Store)(nil)
@@ -139,8 +152,18 @@ type memoryLease struct {
 	Expires time.Time
 }
 
+type memoryAppEventCursor struct {
+	Sequence       uint64
+	LeasedSequence uint64
+	LeaseOwner     string
+	LeaseUntil     time.Time
+	RetryAt        time.Time
+	RetryCount     int
+	RetryReason    string
+}
+
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appInstallations: make(map[string]domain.AppInstallation), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketCursors: make(map[domain.AppID]uint64), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -431,6 +454,25 @@ func (s *Store) SeedAppToken(_ context.Context, token string, record domain.AppT
 	}
 	if record.AppID == "" {
 		return store.InvalidArgument("app token requires an app ID")
+	}
+	record.Scopes = domain.NormalizeScopes(record.Scopes)
+	s.appTokens[key] = record
+	return nil
+}
+
+func (s *Store) CreateAppToken(_ context.Context, token string, record domain.AppTokenRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if strings.TrimSpace(token) == "" || record.AppID == "" || len(domain.NormalizeScopes(record.Scopes)) == 0 || record.Revoked {
+		return store.InvalidArgument("invalid app token")
+	}
+	app, exists := s.apps[record.AppID]
+	if !exists || app.Deleted {
+		return store.ErrNotFound
+	}
+	key := domain.HashToken(token)
+	if _, exists := s.appTokens[key]; exists {
+		return store.ErrAlreadyExists
 	}
 	record.Scopes = domain.NormalizeScopes(record.Scopes)
 	s.appTokens[key] = record
@@ -1373,6 +1415,15 @@ func (s *Store) DeleteConversation(_ context.Context, workspace domain.Workspace
 			s.remoteFiles[id] = remote
 		}
 	}
+	for id, channels := range s.fileShares {
+		filtered := make([]domain.ConversationID, 0, len(channels))
+		for _, channel := range channels {
+			if channel != conversation {
+				filtered = append(filtered, channel)
+			}
+		}
+		s.fileShares[id] = filtered
+	}
 	for id, group := range s.userGroups {
 		filtered := make([]domain.ConversationID, 0, len(group.Channels))
 		for _, channel := range group.Channels {
@@ -1573,6 +1624,11 @@ func (s *Store) UninstallApp(_ context.Context, workspaceID domain.WorkspaceID, 
 			s.bots[key] = bot
 		}
 	}
+	for key, item := range s.appDatastoreItems {
+		if item.WorkspaceID == workspaceID && item.AppID == appID {
+			delete(s.appDatastoreItems, key)
+		}
+	}
 	return nil
 }
 
@@ -1644,7 +1700,7 @@ func (s *Store) CreateAppPermissionRequest(_ context.Context, value domain.AppPe
 }
 
 func (s *Store) CreateView(_ context.Context, value domain.View, event events.Event) error {
-	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
+	if value.ID == "" || value.AppID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
 		return store.InvalidArgument("invalid view")
 	}
 	s.mu.Lock()
@@ -1657,7 +1713,7 @@ func (s *Store) CreateView(_ context.Context, value domain.View, event events.Ev
 			return store.ErrAlreadyExists
 		}
 	}
-	s.views[value.ID] = value
+	s.views[value.ID] = cloneView(value)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -1669,48 +1725,71 @@ func (s *Store) GetView(_ context.Context, workspace domain.WorkspaceID, id doma
 	if !exists || value.WorkspaceID != workspace {
 		return domain.View{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneView(value), nil
 }
 
-func (s *Store) GetViewByExternalID(_ context.Context, workspace domain.WorkspaceID, externalID string) (domain.View, error) {
+func (s *Store) GetViewByExternalID(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID, externalID string) (domain.View, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, value := range s.views {
-		if value.WorkspaceID == workspace && value.ExternalID == externalID {
-			return value, nil
+		if value.WorkspaceID == workspace && value.AppID == appID && value.ExternalID == externalID {
+			return cloneView(value), nil
 		}
 	}
 	return domain.View{}, store.ErrNotFound
 }
 
-func (s *Store) GetPublishedView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.View, error) {
+func (s *Store) GetPublishedView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, appID domain.AppID) (domain.View, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var found domain.View
 	for _, value := range s.views {
-		if value.WorkspaceID == workspace && value.UserID == user && value.Type == "home" && (found.ID == "" || value.UpdatedAt.After(found.UpdatedAt)) {
+		if value.WorkspaceID == workspace && value.UserID == user && value.AppID == appID && value.Type == "home" && (found.ID == "" || value.UpdatedAt.After(found.UpdatedAt)) {
 			found = value
 		}
 	}
 	if found.ID == "" {
 		return domain.View{}, store.ErrNotFound
 	}
-	return found, nil
+	return cloneView(found), nil
 }
 
-func (s *Store) GetLatestView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, viewType string) (domain.View, error) {
+func (s *Store) GetLatestView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, appID domain.AppID, viewType string) (domain.View, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var found domain.View
 	for _, value := range s.views {
-		if value.WorkspaceID == workspace && value.UserID == user && value.Type == viewType && (found.ID == "" || value.UpdatedAt.After(found.UpdatedAt)) {
+		after := value.UpdatedAt.After(found.UpdatedAt)
+		if viewType == "modal" {
+			after = value.CreatedAt.After(found.CreatedAt)
+		}
+		if value.WorkspaceID == workspace && value.UserID == user && value.AppID == appID && value.Type == viewType && (found.ID == "" || after) {
 			found = value
 		}
 	}
 	if found.ID == "" {
 		return domain.View{}, store.ErrNotFound
 	}
-	return found, nil
+	return cloneView(found), nil
+}
+
+func (s *Store) GetCurrentView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, viewType string) (domain.View, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var found domain.View
+	for _, value := range s.views {
+		after := value.UpdatedAt.After(found.UpdatedAt)
+		if viewType == "modal" {
+			after = value.CreatedAt.After(found.CreatedAt)
+		}
+		if value.WorkspaceID == workspace && value.UserID == user && value.Type == viewType && (found.ID == "" || after) {
+			found = value
+		}
+	}
+	if found.ID == "" {
+		return domain.View{}, store.ErrNotFound
+	}
+	return cloneView(found), nil
 }
 
 func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash string, event events.Event) (domain.View, error) {
@@ -1720,11 +1799,21 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 	if !exists || current.WorkspaceID != value.WorkspaceID {
 		return domain.View{}, store.ErrNotFound
 	}
+	if current.AppID != value.AppID {
+		return domain.View{}, store.ErrNotFound
+	}
 	if expectedHash != "" && current.Hash != expectedHash {
 		return domain.View{}, store.ErrConflict
 	}
-	if value.Payload == "" || value.Hash == "" {
+	if value.AppID == "" || value.Payload == "" || value.Hash == "" {
 		return domain.View{}, store.InvalidArgument("invalid view")
+	}
+	if value.ExternalID != "" {
+		for candidateID, candidate := range s.views {
+			if candidateID != value.ID && candidate.WorkspaceID == value.WorkspaceID && candidate.ExternalID == value.ExternalID {
+				return domain.View{}, store.ErrAlreadyExists
+			}
+		}
 	}
 	value.CreatedAt = current.CreatedAt
 	value.UpdatedAt = value.UpdatedAt.UTC()
@@ -1734,9 +1823,36 @@ func (s *Store) UpdateView(_ context.Context, value domain.View, expectedHash st
 	if value.RootViewID == "" {
 		value.RootViewID = current.RootViewID
 	}
-	s.views[value.ID] = value
+	s.views[value.ID] = cloneView(value)
 	s.outbox = append(s.outbox, event)
-	return value, nil
+	return cloneView(value), nil
+}
+
+func cloneView(value domain.View) domain.View {
+	if value.Errors != nil {
+		value.Errors = maps.Clone(value.Errors)
+	}
+	return value
+}
+
+func (s *Store) DeleteView(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ViewID, clear bool, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.views[id]
+	if !exists || current.WorkspaceID != workspace || current.UserID != user {
+		return store.ErrNotFound
+	}
+	if clear {
+		for candidateID, candidate := range s.views {
+			if candidate.WorkspaceID == workspace && candidate.UserID == user && candidate.AppID == current.AppID && candidate.RootViewID == current.RootViewID {
+				delete(s.views, candidateID)
+			}
+		}
+	} else {
+		delete(s.views, id)
+	}
+	s.outbox = append(s.outbox, event)
+	return nil
 }
 
 func (s *Store) SetWorkflowStep(_ context.Context, value domain.WorkflowStep, event events.Event) error {
@@ -1814,6 +1930,17 @@ func (s *Store) GetBot(_ context.Context, workspace domain.WorkspaceID, id domai
 		return domain.Bot{}, store.ErrNotFound
 	}
 	return value, nil
+}
+
+func (s *Store) GetBotByApp(_ context.Context, workspace domain.WorkspaceID, appID domain.AppID) (domain.Bot, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, value := range s.bots {
+		if value.WorkspaceID == workspace && value.AppID == appID && !value.Deleted {
+			return value, nil
+		}
+	}
+	return domain.Bot{}, store.ErrNotFound
 }
 
 func migrationKey(workspace domain.WorkspaceID, id domain.UserID) string {
@@ -2085,8 +2212,61 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	if len(tokenScopes) == 0 {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
+	userScopes := domain.NormalizeScopes(grant.UserScopes)
+	if tokenType == "bot" && len(userScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
+		return domain.OAuthToken{}, store.InvalidArgument("missing installer user access token")
+	}
+	rotating := strings.TrimSpace(token.RefreshToken) != ""
+	if rotating && (!token.ExpiresAt.After(now) || token.TokenType == "bot" && len(userScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
+		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
+	}
+	accessHash := domain.HashToken(accessToken)
+	if _, exists := s.tokens[accessHash]; exists {
+		return domain.OAuthToken{}, store.ErrAlreadyExists
+	}
+	if rotating {
+		if _, exists := s.oauthRefreshGrants[domain.HashToken(token.RefreshToken)]; exists {
+			return domain.OAuthToken{}, store.ErrAlreadyExists
+		}
+		if tokenType == "bot" && len(userScopes) != 0 {
+			if _, exists := s.oauthRefreshGrants[domain.HashToken(token.AuthedUserRefreshToken)]; exists {
+				return domain.OAuthToken{}, store.ErrAlreadyExists
+			}
+		}
+	}
+	// Redeeming a code is the installation commit. The grant, token, and
+	// installation deliberately change under the same lock so callers can
+	// never observe a consumed code and minted token without an enabled
+	// installation.
+	installationKey := appInstallationKey(client.AppID, grant.WorkspaceID)
+	installation, installed := s.appInstallations[installationKey]
+	if !installed {
+		installation = domain.AppInstallation{
+			AppID:       client.AppID,
+			WorkspaceID: grant.WorkspaceID,
+			CreatedAt:   now,
+		}
+	}
+	installation.Enabled = true
+	s.appInstallations[installationKey] = installation
 	delete(s.oauthCodes, codeHash)
-	s.tokens[domain.HashToken(accessToken)] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: subjectID, AppID: client.AppID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType}
+	s.tokens[accessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: subjectID, AppID: client.AppID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType, ExpiresAt: token.ExpiresAt}
+	if rotating {
+		refreshHash := domain.HashToken(token.RefreshToken)
+		s.oauthRefreshGrants[refreshHash] = domain.OAuthRefreshGrant{TokenHash: refreshHash, AccessTokenHash: accessHash, ClientID: clientID, AppID: client.AppID, WorkspaceID: grant.WorkspaceID, UserID: subjectID, InstallerID: grant.UserID, BotID: tokenBotID, Scopes: append([]string(nil), tokenScopes...), TokenType: tokenType, AccessExpiresAt: token.ExpiresAt, CreatedAt: now}
+	}
+	if tokenType == "bot" && len(userScopes) != 0 {
+		userAccessHash := domain.HashToken(token.AuthedUserAccessToken)
+		s.tokens[userAccessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, AppID: client.AppID, Scopes: append([]string(nil), userScopes...), TokenType: "user", ExpiresAt: token.AuthedUserExpiresAt}
+		if rotating {
+			userRefreshHash := domain.HashToken(token.AuthedUserRefreshToken)
+			s.oauthRefreshGrants[userRefreshHash] = domain.OAuthRefreshGrant{TokenHash: userRefreshHash, AccessTokenHash: userAccessHash, ClientID: clientID, AppID: client.AppID, WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, InstallerID: grant.UserID, Scopes: append([]string(nil), userScopes...), TokenType: "user", AccessExpiresAt: token.AuthedUserExpiresAt, CreatedAt: now}
+		}
+		token.AuthedUserScopes = append([]string(nil), userScopes...)
+	} else {
+		token.AuthedUserAccessToken = ""
+		token.AuthedUserScopes = nil
+	}
 	token.AccessToken = accessToken
 	token.AppID = client.AppID
 	token.ClientID = clientID
@@ -2098,6 +2278,116 @@ func (s *Store) ExchangeOAuthCode(_ context.Context, clientID, secret, code, red
 	token.TokenType = tokenType
 	token.CodeVerifier = ""
 	return token, nil
+}
+
+func (s *Store) ExchangeOAuthRefreshToken(_ context.Context, clientID, secret, oldRefreshToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, exists := s.oauthClients[strings.TrimSpace(clientID)]
+	if !exists || !hmac.Equal([]byte(client.SecretHash), []byte(domain.HashToken(strings.TrimSpace(secret)))) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	oldHash := domain.HashToken(strings.TrimSpace(oldRefreshToken))
+	grant, exists := s.oauthRefreshGrants[oldHash]
+	if !exists || grant.Revoked || grant.ClientID != clientID || grant.AppID != client.AppID || strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	nextAccessHash := domain.HashToken(nextAccessToken)
+	nextRefreshHash := domain.HashToken(nextRefreshToken)
+	if _, exists := s.tokens[nextAccessHash]; exists {
+		return domain.OAuthToken{}, store.ErrAlreadyExists
+	}
+	if _, exists := s.oauthRefreshGrants[nextRefreshHash]; exists {
+		return domain.OAuthToken{}, store.ErrAlreadyExists
+	}
+	grant.Revoked = true
+	s.oauthRefreshGrants[oldHash] = grant
+	next := grant
+	next.TokenHash = nextRefreshHash
+	next.AccessTokenHash = nextAccessHash
+	next.AccessExpiresAt = expiresAt
+	next.CreatedAt = now
+	next.Revoked = false
+	next.Scopes = append([]string(nil), grant.Scopes...)
+	s.oauthRefreshGrants[nextRefreshHash] = next
+	s.tokens[nextAccessHash] = domain.TokenRecord{WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, AppID: grant.AppID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType, ExpiresAt: expiresAt}
+	s.enforceOAuthActiveTokenLimit(next)
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
+}
+
+func (s *Store) LookupOAuthRefreshToken(_ context.Context, clientID, refreshToken string) (domain.OAuthRefreshGrant, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	grant, exists := s.oauthRefreshGrants[domain.HashToken(strings.TrimSpace(refreshToken))]
+	if !exists || grant.Revoked || grant.ClientID != strings.TrimSpace(clientID) {
+		return domain.OAuthRefreshGrant{}, store.ErrNotFound
+	}
+	grant.Scopes = append([]string(nil), grant.Scopes...)
+	return grant, nil
+}
+
+func (s *Store) ExchangeOAuthAccessToken(_ context.Context, clientID, secret, oldAccessToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	client, exists := s.oauthClients[strings.TrimSpace(clientID)]
+	if !exists || !hmac.Equal([]byte(client.SecretHash), []byte(domain.HashToken(strings.TrimSpace(secret)))) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	oldAccessHash := domain.HashToken(strings.TrimSpace(oldAccessToken))
+	record, exists := s.tokens[oldAccessHash]
+	if !exists || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || record.TokenType != "bot" && record.TokenType != "user" || strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	for _, grant := range s.oauthRefreshGrants {
+		if grant.AccessTokenHash == oldAccessHash {
+			return domain.OAuthToken{}, store.ErrNotFound
+		}
+	}
+	nextAccessHash := domain.HashToken(nextAccessToken)
+	nextRefreshHash := domain.HashToken(nextRefreshToken)
+	if _, exists := s.tokens[nextAccessHash]; exists {
+		return domain.OAuthToken{}, store.ErrAlreadyExists
+	}
+	if _, exists := s.oauthRefreshGrants[nextRefreshHash]; exists {
+		return domain.OAuthToken{}, store.ErrAlreadyExists
+	}
+	legacyKey := "legacy:" + oldAccessHash
+	legacy := domain.OAuthRefreshGrant{TokenHash: legacyKey, AccessTokenHash: oldAccessHash, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, CreatedAt: now.Add(-time.Nanosecond), Revoked: true}
+	next := legacy
+	next.TokenHash = nextRefreshHash
+	next.AccessTokenHash = nextAccessHash
+	next.AccessExpiresAt = expiresAt
+	next.CreatedAt = now
+	next.Revoked = false
+	s.oauthRefreshGrants[legacyKey] = legacy
+	s.oauthRefreshGrants[nextRefreshHash] = next
+	s.tokens[nextAccessHash] = domain.TokenRecord{WorkspaceID: record.WorkspaceID, UserID: record.UserID, AppID: record.AppID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType, ExpiresAt: expiresAt}
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt, ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
+}
+
+func (s *Store) enforceOAuthActiveTokenLimit(current domain.OAuthRefreshGrant) {
+	grants := make([]domain.OAuthRefreshGrant, 0, 3)
+	for _, candidate := range s.oauthRefreshGrants {
+		if candidate.ClientID == current.ClientID && candidate.WorkspaceID == current.WorkspaceID && candidate.UserID == current.UserID && candidate.BotID == current.BotID && candidate.TokenType == current.TokenType {
+			grants = append(grants, candidate)
+		}
+	}
+	sort.Slice(grants, func(i, j int) bool {
+		if grants[i].CreatedAt.Equal(grants[j].CreatedAt) {
+			return grants[i].AccessTokenHash > grants[j].AccessTokenHash
+		}
+		return grants[i].CreatedAt.After(grants[j].CreatedAt)
+	})
+	for _, stale := range grants[2:] {
+		record, exists := s.tokens[stale.AccessTokenHash]
+		if !exists {
+			continue
+		}
+		record.Revoked = true
+		s.tokens[stale.AccessTokenHash] = record
+	}
 }
 
 func (s *Store) CreateRTMConnection(_ context.Context, value domain.RTMConnection) error {
@@ -2251,6 +2541,19 @@ func (s *Store) RecordSocketModeResponse(_ context.Context, value domain.SocketM
 	return nil
 }
 
+func (s *Store) GetSocketModeResponse(_ context.Context, appID domain.AppID, envelopeID string) (domain.SocketModeResponse, error) {
+	if appID == "" || strings.TrimSpace(envelopeID) == "" {
+		return domain.SocketModeResponse{}, store.InvalidArgument("Socket Mode response identity is required")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.socketResponses[socketModeResponseKey(appID, strings.TrimSpace(envelopeID))]
+	if !ok {
+		return domain.SocketModeResponse{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
 func validateSocketModeResponseLease(appID domain.AppID, owner string, limit int, lease time.Duration) error {
 	if appID == "" || strings.TrimSpace(owner) == "" || limit <= 0 || limit > 1000 || lease <= 0 {
 		return store.InvalidArgument("invalid Socket Mode response lease")
@@ -2390,6 +2693,106 @@ func (s *Store) ReleaseSocketModeResponses(_ context.Context, owner string, valu
 		stored.LeaseExpiresAt = retryAt.UTC()
 		s.socketResponses[key] = stored
 	}
+	return nil
+}
+
+func validSocketModeInteraction(value domain.SocketModeInteraction) bool {
+	if value.EnvelopeID == "" || value.AppID == "" || value.WorkspaceID == "" || value.UserID == "" ||
+		(value.Type != "slash_commands" && value.Type != "interactive") || strings.TrimSpace(value.Payload) == "" ||
+		value.Response.TokenHash == "" || value.Response.AppID != value.AppID || value.Response.WorkspaceID != value.WorkspaceID ||
+		value.Response.UserID != value.UserID || value.Response.ConversationID == "" || value.CreatedAt.IsZero() {
+		return false
+	}
+	var payload map[string]any
+	return json.Unmarshal([]byte(value.Payload), &payload) == nil && payload != nil
+}
+
+func (s *Store) CreateSocketModeInteraction(_ context.Context, value domain.SocketModeInteraction) error {
+	if !validSocketModeInteraction(value) {
+		return store.InvalidArgument("invalid Socket Mode interaction")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.socketInteractions[value.EnvelopeID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.socketInteractions[value.EnvelopeID] = value
+	return nil
+}
+
+func (s *Store) GetSocketModeInteraction(_ context.Context, appID domain.AppID, envelopeID string) (domain.SocketModeInteraction, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.socketInteractions[envelopeID]
+	if !exists || value.AppID != appID {
+		return domain.SocketModeInteraction{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ClaimSocketModeInteraction(_ context.Context, appID domain.AppID, owner string, lease time.Duration) (domain.SocketModeInteraction, bool, error) {
+	if appID == "" || strings.TrimSpace(owner) == "" || lease <= 0 {
+		return domain.SocketModeInteraction{}, false, store.InvalidArgument("invalid Socket Mode interaction lease")
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var candidates []domain.SocketModeInteraction
+	for _, value := range s.socketInteractions {
+		if value.AppID != appID || !value.AcknowledgedAt.IsZero() || value.RetryAt.After(now) ||
+			(value.LeaseOwner != "" && value.LeaseExpiresAt.After(now)) {
+			continue
+		}
+		candidates = append(candidates, value)
+	}
+	slices.SortFunc(candidates, func(left, right domain.SocketModeInteraction) int {
+		if order := left.CreatedAt.Compare(right.CreatedAt); order != 0 {
+			return order
+		}
+		return strings.Compare(left.EnvelopeID, right.EnvelopeID)
+	})
+	if len(candidates) == 0 {
+		return domain.SocketModeInteraction{}, false, nil
+	}
+	value := candidates[0]
+	value.LeaseOwner = owner
+	value.LeaseExpiresAt = now.Add(lease)
+	s.socketInteractions[value.EnvelopeID] = value
+	return value, true, nil
+}
+
+func (s *Store) AckSocketModeInteraction(_ context.Context, appID domain.AppID, envelopeID, owner string) error {
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.socketInteractions[envelopeID]
+	if !exists || value.AppID != appID || value.LeaseOwner != owner || !value.LeaseExpiresAt.After(now) || !value.AcknowledgedAt.IsZero() {
+		return store.ErrLeaseConflict
+	}
+	value.AcknowledgedAt = now
+	value.LeaseOwner = ""
+	value.LeaseExpiresAt = time.Time{}
+	s.socketInteractions[envelopeID] = value
+	return nil
+}
+
+func (s *Store) ReleaseSocketModeInteraction(_ context.Context, appID domain.AppID, envelopeID, owner, reason string, retryAt time.Time) error {
+	now := time.Now().UTC()
+	if strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+		return store.InvalidArgument("invalid Socket Mode interaction release")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.socketInteractions[envelopeID]
+	if !exists || value.AppID != appID || value.LeaseOwner != owner || !value.LeaseExpiresAt.After(now) || !value.AcknowledgedAt.IsZero() {
+		return store.ErrLeaseConflict
+	}
+	value.LeaseOwner = ""
+	value.LeaseExpiresAt = time.Time{}
+	value.RetryAt = retryAt.UTC()
+	value.RetryCount++
+	value.RetryReason = strings.TrimSpace(reason)
+	s.socketInteractions[envelopeID] = value
 	return nil
 }
 
@@ -2675,31 +3078,62 @@ func (s *Store) IsConversationMember(_ context.Context, conversation domain.Conv
 // "[]", a duplicate message identifier silently inserted a second row, and a
 // message could reference a conversation that does not exist.
 func (s *Store) CreateMessage(_ context.Context, message domain.Message, event events.Event, idempotencyKey string) error {
+	message, err := normalizeMessage(message)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createMessageLocked(message, event, idempotencyKey)
+}
+
+func normalizeMessage(message domain.Message) (domain.Message, error) {
 	// Matches the SQL backends: see the note there on why a message instant is
 	// held to the resolution of its own timestamp.
 	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
 	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
 	if err != nil {
-		return err
+		return domain.Message{}, err
 	}
 	attachments, err := domain.NormalizeAttachments([]byte(message.Attachments))
 	if err != nil {
-		return err
+		return domain.Message{}, err
 	}
 	if attachments == "" {
 		attachments = "[]"
 	}
 	unfurls, err := domain.NormalizeUnfurls(message.Unfurls)
 	if err != nil {
-		return err
+		return domain.Message{}, err
 	}
 	message.Blocks = blocks
 	message.Attachments = attachments
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	message.Unfurls = copyUnfurls(unfurls)
+	return message, nil
+}
+
+func (s *Store) createMessageLocked(message domain.Message, event events.Event, idempotencyKey string) error {
 	if _, exists := s.conversations[message.Conversation]; !exists {
 		return store.ErrNotFound
 	}
+	files := make([]domain.File, 0, len(message.Files))
+	seenFiles := make(map[domain.FileID]struct{}, len(message.Files))
+	for _, requested := range message.Files {
+		if requested.ID == "" {
+			return store.InvalidArgument("message file id is required")
+		}
+		if _, duplicate := seenFiles[requested.ID]; duplicate {
+			return store.InvalidArgument("message file ids must be unique")
+		}
+		file, exists := s.files[requested.ID]
+		if !exists || file.Deleted || file.WorkspaceID != message.WorkspaceID || !slices.Contains(s.fileShares[requested.ID], message.Conversation) {
+			return store.ErrNotFound
+		}
+		seenFiles[requested.ID] = struct{}{}
+		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[requested.ID]...)
+		files = append(files, file)
+	}
+	message.Files = files
 	if _, exists := s.messageLocked(message.ID); exists == nil {
 		return store.ErrAlreadyExists
 	}
@@ -2721,7 +3155,6 @@ func (s *Store) CreateMessage(_ context.Context, message domain.Message, event e
 			return store.ErrMessageTimestampTaken
 		}
 	}
-	message.Unfurls = copyUnfurls(unfurls)
 	values := s.messages[message.Conversation]
 	index := sort.Search(len(values), func(index int) bool {
 		current := values[index]
@@ -2736,6 +3169,136 @@ func (s *Store) CreateMessage(_ context.Context, message domain.Message, event e
 		s.idempotency[key] = message.ID
 	}
 	return nil
+}
+
+func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
+	if len(fileIDs) == 0 {
+		return store.InvalidArgument("a file share message requires a file")
+	}
+	message.Files = make([]domain.File, len(fileIDs))
+	for index, fileID := range fileIDs {
+		message.Files[index].ID = fileID
+	}
+	normalized, err := normalizeMessage(message)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	previous := make(map[domain.FileID][]domain.ConversationID, len(fileIDs))
+	for _, fileID := range fileIDs {
+		file, exists := s.files[fileID]
+		if !exists || file.Deleted || file.WorkspaceID != message.WorkspaceID {
+			return store.ErrNotFound
+		}
+		previous[fileID] = append([]domain.ConversationID(nil), s.fileShares[fileID]...)
+		if !slices.Contains(s.fileShares[fileID], message.Conversation) {
+			s.fileShares[fileID] = append(s.fileShares[fileID], message.Conversation)
+			slices.Sort(s.fileShares[fileID])
+		}
+	}
+	if err := s.createMessageLocked(normalized, event, ""); err != nil {
+		for fileID, channels := range previous {
+			s.fileShares[fileID] = channels
+		}
+		return err
+	}
+	return nil
+}
+
+func (s *Store) CreateEphemeralMessage(_ context.Context, value domain.EphemeralMessage, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.Conversation == "" || value.AuthorID == "" || value.RecipientID == "" || value.CreatedAt.IsZero() || value.Timestamp == "" {
+		return store.InvalidArgument("invalid ephemeral message")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conversation, exists := s.conversations[value.Conversation]
+	if !exists || conversation.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.users[value.AuthorID]; !exists {
+		return store.ErrNotFound
+	}
+	if _, exists := s.users[value.RecipientID]; !exists {
+		return store.ErrNotFound
+	}
+	for _, existing := range s.ephemeralMessages {
+		if existing.ID == value.ID {
+			return store.ErrAlreadyExists
+		}
+	}
+	s.ephemeralMessages = append(s.ephemeralMessages, value)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListEphemeralMessages(_ context.Context, workspaceID domain.WorkspaceID, recipientID domain.UserID, conversationID domain.ConversationID, limit int) ([]domain.EphemeralMessage, error) {
+	if workspaceID == "" || recipientID == "" || conversationID == "" || limit <= 0 || limit > 1000 {
+		return nil, store.InvalidArgument("invalid ephemeral message page")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]domain.EphemeralMessage, 0, limit)
+	for index := len(s.ephemeralMessages) - 1; index >= 0 && len(result) < limit; index-- {
+		value := s.ephemeralMessages[index]
+		if value.WorkspaceID == workspaceID && value.RecipientID == recipientID && value.Conversation == conversationID {
+			result = append(result, value)
+		}
+	}
+	slices.Reverse(result)
+	return result, nil
+}
+
+func (s *Store) GetEphemeralMessage(_ context.Context, workspaceID domain.WorkspaceID, recipientID domain.UserID, id domain.MessageID) (domain.EphemeralMessage, error) {
+	if workspaceID == "" || recipientID == "" || id == "" {
+		return domain.EphemeralMessage{}, store.InvalidArgument("invalid ephemeral message key")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, value := range s.ephemeralMessages {
+		if value.ID == id && value.WorkspaceID == workspaceID && value.RecipientID == recipientID {
+			return value, nil
+		}
+	}
+	return domain.EphemeralMessage{}, store.ErrNotFound
+}
+
+func (s *Store) UpdateEphemeralMessage(_ context.Context, value domain.EphemeralMessage, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.Conversation == "" || value.AuthorID == "" || value.RecipientID == "" || value.CreatedAt.IsZero() || value.Timestamp == "" {
+		return store.InvalidArgument("invalid ephemeral message")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, existing := range s.ephemeralMessages {
+		if existing.ID != value.ID || existing.WorkspaceID != value.WorkspaceID || existing.RecipientID != value.RecipientID {
+			continue
+		}
+		if existing.AppID != value.AppID || existing.Conversation != value.Conversation || existing.AuthorID != value.AuthorID ||
+			!existing.CreatedAt.Equal(value.CreatedAt) || existing.Timestamp != value.Timestamp {
+			return store.ErrConflict
+		}
+		s.ephemeralMessages[index] = value
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
+	return store.ErrNotFound
+}
+
+func (s *Store) DeleteEphemeralMessage(_ context.Context, workspaceID domain.WorkspaceID, recipientID domain.UserID, id domain.MessageID, event events.Event) error {
+	if workspaceID == "" || recipientID == "" || id == "" {
+		return store.InvalidArgument("invalid ephemeral message key")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index, value := range s.ephemeralMessages {
+		if value.ID != id || value.WorkspaceID != workspaceID || value.RecipientID != recipientID {
+			continue
+		}
+		s.ephemeralMessages = slices.Delete(s.ephemeralMessages, index, index+1)
+		s.outbox = append(s.outbox, event)
+		return nil
+	}
+	return store.ErrNotFound
 }
 
 func idempotencyKeyFor(workspace domain.WorkspaceID, user domain.UserID, key string) string {
@@ -2869,7 +3432,7 @@ func (s *Store) ListUserReactions(_ context.Context, workspace domain.WorkspaceI
 				if reaction.UserID != user {
 					continue
 				}
-				item := domain.UserReaction{Conversation: conversationID, Message: message, Reaction: reaction}
+				item := domain.UserReaction{Conversation: conversationID, Message: cloneMessage(message), Reaction: reaction}
 				if after == "" || userReactionKey(item) > after {
 					values = appendSorted(values, item, request.Limit+1, func(left, right domain.UserReaction) bool { return userReactionKey(left) < userReactionKey(right) })
 				}
@@ -3020,6 +3583,7 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 		if star.Message.WorkspaceID != workspace || star.Message.Deleted || (after != "" && starKey(star) <= after) {
 			continue
 		}
+		star.Message = cloneMessage(star.Message)
 		values = appendSorted(values, star, request.Limit+1, func(left, right domain.Star) bool { return starKey(left) < starKey(right) })
 	}
 	hasMore := len(values) > request.Limit
@@ -3890,6 +4454,10 @@ func cloneMessage(value domain.Message) domain.Message {
 	if value.Unfurls != nil {
 		value.Unfurls = copyUnfurls(value.Unfurls)
 	}
+	value.Files = append([]domain.File(nil), value.Files...)
+	for index := range value.Files {
+		value.Files[index].SharedChannels = append([]domain.ConversationID(nil), value.Files[index].SharedChannels...)
+	}
 	return value
 }
 
@@ -3953,6 +4521,106 @@ func (s *Store) ListAppEventsAfter(_ context.Context, appID domain.AppID, after 
 	}
 	s.mu.RUnlock()
 	return result, nil
+}
+
+func appEventCursorKey(appID domain.AppID, surface string) string {
+	return string(appID) + "\x00" + surface
+}
+
+func validAppEventSurface(surface string) bool {
+	return surface == "http" || surface == "socket"
+}
+
+func (s *Store) ClaimAppEvent(_ context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || lease <= 0 {
+		return events.Record{}, 0, "", false, store.InvalidArgument("app event claim fields are invalid")
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workspaces := make(map[domain.WorkspaceID]struct{})
+	for _, installation := range s.appInstallations {
+		if installation.AppID == appID && installation.Enabled {
+			workspaces[installation.WorkspaceID] = struct{}{}
+		}
+	}
+	if len(workspaces) == 0 {
+		return events.Record{}, 0, "", false, store.ErrNotFound
+	}
+	key := appEventCursorKey(appID, surface)
+	cursor := s.appEventCursors[key]
+	if cursor.LeasedSequence != 0 && cursor.LeaseUntil.After(now) {
+		return events.Record{}, 0, "", false, nil
+	}
+	if cursor.RetryAt.After(now) {
+		return events.Record{}, 0, "", false, nil
+	}
+	for index, event := range s.outbox {
+		sequence := uint64(index + 1)
+		if sequence <= cursor.Sequence || store.InternalTopic(event.Topic) {
+			continue
+		}
+		if _, installed := workspaces[event.WorkspaceID]; !installed {
+			continue
+		}
+		cursor.LeasedSequence = sequence
+		cursor.LeaseOwner = owner
+		cursor.LeaseUntil = now.Add(lease)
+		s.appEventCursors[key] = cursor
+		return events.Record{Sequence: sequence, Event: event}, cursor.RetryCount, cursor.RetryReason, true, nil
+	}
+	return events.Record{}, 0, "", false, nil
+}
+
+func (s *Store) AckAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 {
+		return store.InvalidArgument("app event acknowledgement fields are invalid")
+	}
+	now := time.Now().UTC()
+	key := appEventCursorKey(appID, surface)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cursor, exists := s.appEventCursors[key]
+	if !exists || cursor.LeasedSequence != sequence || cursor.LeaseOwner != owner {
+		return store.ErrLeaseConflict
+	}
+	if !cursor.LeaseUntil.After(now) {
+		return store.ErrLeaseConflict
+	}
+	cursor.Sequence = sequence
+	cursor.LeasedSequence = 0
+	cursor.LeaseOwner = ""
+	cursor.LeaseUntil = time.Time{}
+	cursor.RetryAt = time.Time{}
+	cursor.RetryCount = 0
+	cursor.RetryReason = ""
+	s.appEventCursors[key] = cursor
+	return nil
+}
+
+func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+		return store.InvalidArgument("app event release fields are invalid")
+	}
+	now := time.Now().UTC()
+	key := appEventCursorKey(appID, surface)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cursor, exists := s.appEventCursors[key]
+	if !exists || cursor.LeasedSequence != sequence || cursor.LeaseOwner != owner {
+		return store.ErrLeaseConflict
+	}
+	if !cursor.LeaseUntil.After(now) {
+		return store.ErrLeaseConflict
+	}
+	cursor.LeasedSequence = 0
+	cursor.LeaseOwner = ""
+	cursor.LeaseUntil = time.Time{}
+	cursor.RetryAt = retryAt.UTC()
+	cursor.RetryCount++
+	cursor.RetryReason = strings.TrimSpace(reason)
+	s.appEventCursors[key] = cursor
+	return nil
 }
 
 func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]events.Record, error) {
@@ -4193,7 +4861,7 @@ func (s *Store) ListThreadMessages(_ context.Context, conversation domain.Conver
 		}
 		if (message.ThreadTimestamp == "" && domain.NewMessageTimestamp(message.CreatedAt) == timestamp) || message.ThreadTimestamp == timestamp {
 			if request.Cursor == "" || !threadMessageBeforeOrEqual(message, startTime, startID, startRoot, timestamp) {
-				values = appendSorted(values, message, request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
+				values = appendSorted(values, cloneMessage(message), request.Limit+1, func(left, right domain.Message) bool { return threadMessageBefore(left, right, timestamp) })
 			}
 		}
 	}
@@ -4672,17 +5340,25 @@ func (s *Store) MarkExternalUploadUploaded(_ context.Context, id domain.External
 }
 
 func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
-	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event})
+	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event}, nil, nil)
 }
 
-func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) {
+func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
 	}
+	for index := range messages {
+		normalized, err := normalizeMessage(messages[index])
+		if err != nil {
+			return err
+		}
+		messages[index] = normalized
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(completions))
 	seenFiles := make(map[domain.FileID]struct{}, len(files))
+	previousUploads := make(map[domain.ExternalUploadID]domain.ExternalUpload, len(completions))
 	for index, completion := range completions {
 		value, exists := s.externalUploads[completion.ID]
 		if !exists {
@@ -4702,7 +5378,9 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 		}
 		seenUploads[completion.ID] = struct{}{}
 		seenFiles[files[index].ID] = struct{}{}
+		previousUploads[completion.ID] = value
 	}
+	outboxLength := len(s.outbox)
 	for index, completion := range completions {
 		value := s.externalUploads[completion.ID]
 		file := files[index]
@@ -4713,6 +5391,28 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 		s.files[file.ID] = file
 		s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
 		s.outbox = append(s.outbox, emitted[index])
+	}
+	for index, message := range messages {
+		if err := s.createMessageLocked(message, messageEvents[index], ""); err != nil {
+			for uploadID, value := range previousUploads {
+				s.externalUploads[uploadID] = value
+			}
+			for _, file := range files {
+				delete(s.files, file.ID)
+				delete(s.fileShares, file.ID)
+			}
+			for _, inserted := range messages[:index] {
+				values := s.messages[inserted.Conversation]
+				for position := range values {
+					if values[position].ID == inserted.ID {
+						s.messages[inserted.Conversation] = slices.Delete(values, position, position+1)
+						break
+					}
+				}
+			}
+			s.outbox = s.outbox[:outboxLength]
+			return err
+		}
 	}
 	return nil
 }

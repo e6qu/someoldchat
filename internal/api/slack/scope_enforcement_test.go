@@ -101,11 +101,21 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/admin.emoji.remove", auth.ScopeAdminTeamsWrite},
 		{http.MethodPost, "/api/admin.emoji.rename", auth.ScopeAdminTeamsWrite},
 		{http.MethodPost, "/api/chat.postMessage", auth.ScopeChatWrite},
+		{http.MethodPost, "/api/chat.startStream", auth.ScopeChatWrite},
+		{http.MethodPost, "/api/chat.appendStream", auth.ScopeChatWrite},
+		{http.MethodPost, "/api/chat.stopStream", auth.ScopeChatWrite},
 		// chat.unfurl requires links:write, not chat:write: the pinned token
 		// parameter says so, and attaching a preview to a message is a different
 		// grant from writing one.
 		{http.MethodPost, "/api/chat.unfurl", auth.ScopeLinksWrite},
 		{http.MethodGet, "/api/apps.event.authorizations.list", auth.ScopeAuthorizationsRead},
+		{http.MethodPost, "/api/apps.datastore.get", auth.ScopeDatastoreRead},
+		{http.MethodPost, "/api/apps.datastore.bulkGet", auth.ScopeDatastoreRead},
+		{http.MethodPost, "/api/apps.datastore.put", auth.ScopeDatastoreWrite},
+		{http.MethodPost, "/api/apps.datastore.update", auth.ScopeDatastoreWrite},
+		{http.MethodPost, "/api/apps.datastore.delete", auth.ScopeDatastoreWrite},
+		{http.MethodPost, "/api/apps.datastore.bulkPut", auth.ScopeDatastoreWrite},
+		{http.MethodPost, "/api/apps.datastore.bulkDelete", auth.ScopeDatastoreWrite},
 		{http.MethodPost, "/api/chat.postEphemeral", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/chat.meMessage", auth.ScopeChatWrite},
 		{http.MethodPost, "/api/chat.update", auth.ScopeChatWrite},

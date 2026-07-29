@@ -183,16 +183,24 @@ type Call struct {
 // schema on Block Kit, whose fields are intentionally extensible.
 type View struct {
 	ID             ViewID
+	AppID          AppID
 	WorkspaceID    WorkspaceID
 	UserID         UserID
 	Type           string
 	ExternalID     string
 	Payload        string
+	State          string
+	Errors         map[string]string
 	Hash           string
 	RootViewID     ViewID
 	PreviousViewID ViewID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+type ViewInteractionResult struct {
+	Errors  map[string]string
+	Pending bool
 }
 
 type WorkflowStepStatus string
@@ -293,16 +301,70 @@ type OAuthCode struct {
 }
 
 type OAuthToken struct {
-	AccessToken  string
-	ClientID     string
-	AppID        AppID
-	WorkspaceID  WorkspaceID
-	UserID       UserID
-	InstallerID  UserID
-	BotID        BotID
-	Scopes       []string
-	TokenType    string
-	CodeVerifier string
+	AccessToken            string
+	ClientID               string
+	AppID                  AppID
+	WorkspaceID            WorkspaceID
+	UserID                 UserID
+	InstallerID            UserID
+	BotID                  BotID
+	Scopes                 []string
+	TokenType              string
+	RefreshToken           string
+	ExpiresAt              time.Time
+	AuthedUserAccessToken  string
+	AuthedUserScopes       []string
+	AuthedUserRefreshToken string
+	AuthedUserExpiresAt    time.Time
+	CodeVerifier           string
+}
+
+// OAuthRefreshGrant is the durable, one-time capability behind a rotating
+// OAuth access token. TokenHash and AccessTokenHash are digests; repositories
+// never persist either bearer credential in plaintext.
+type OAuthRefreshGrant struct {
+	TokenHash       string
+	AccessTokenHash string
+	ClientID        string
+	AppID           AppID
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	InstallerID     UserID
+	BotID           BotID
+	Scopes          []string
+	TokenType       string
+	AccessExpiresAt time.Time
+	CreatedAt       time.Time
+	Revoked         bool
+}
+
+type OAuthAuthorizationRequest struct {
+	ClientID            string
+	WorkspaceID         WorkspaceID
+	UserID              UserID
+	RedirectURI         string
+	BotScopes           []string
+	UserScopes          []string
+	State               string
+	CodeChallenge       string
+	CodeChallengeMethod string
+}
+
+type OAuthAuthorization struct {
+	AppID               AppID
+	AppName             string
+	ClientID            string
+	WorkspaceID         WorkspaceID
+	UserID              UserID
+	RedirectURI         string
+	BotScopes           []string
+	UserScopes          []string
+	State               string
+	Code                string
+	BotID               BotID
+	BotUserID           UserID
+	CodeChallenge       string
+	CodeChallengeMethod string
 }
 
 type OpenIDToken struct {
@@ -365,6 +427,12 @@ type AppTokenRecord struct {
 	AppID   AppID
 	Scopes  []string
 	Revoked bool
+}
+
+type AppTokenCredentials struct {
+	Token  string
+	AppID  AppID
+	Scopes []string
 }
 
 type SessionRecord struct {
@@ -767,6 +835,164 @@ type AppInstallation struct {
 	CreatedAt   time.Time
 }
 
+// App is the durable developer-owned Slack application. Installation records
+// deliberately reference this aggregate rather than acting as the app model
+// themselves: an uninstalled app still has credentials, configuration,
+// collaborators, and manifest history.
+type App struct {
+	ID                     AppID
+	DevelopmentWorkspaceID WorkspaceID
+	OwnerID                UserID
+	Name                   string
+	Description            string
+	ClientID               string
+	SigningSecretHash      string
+	// SigningSecretCiphertext is storage-internal encrypted credential
+	// material. It must never cross the public service or gRPC boundary.
+	SigningSecretCiphertext     string
+	VerificationTokenHash       string
+	VerificationTokenCiphertext string
+	ManifestVersion             int64
+	Distribution                string
+	SocketModeEnabled           bool
+	TokenRotationEnabled        bool
+	Deleted                     bool
+	CreatedAt                   time.Time
+	UpdatedAt                   time.Time
+}
+
+type AppManifestRevision struct {
+	AppID     AppID
+	Version   int64
+	Manifest  string
+	CreatedBy UserID
+	CreatedAt time.Time
+}
+
+// AppManifestSnapshot is the current durable configuration for an installed
+// application. It is an internal storage result used by delivery workers; the
+// manifest remains versioned independently of the app aggregate.
+type AppManifestSnapshot struct {
+	App      App
+	Manifest string
+}
+
+// InstalledApp is the user-facing, non-secret projection of an app installed
+// in one workspace. It deliberately excludes developer credentials and the raw
+// manifest from the process boundary.
+type InstalledApp struct {
+	ID                  AppID
+	Name                string
+	Description         string
+	HomeTabEnabled      bool
+	MessagesTabEnabled  bool
+	MessagesTabReadOnly bool
+	BotDisplayName      string
+	BotUserID           UserID
+}
+
+// AppTrigger is the durable one-use, short-lived capability produced by an
+// interaction. TokenHash is a digest; the plaintext trigger_id is returned only
+// in the signed request to the owning app.
+type AppTrigger struct {
+	TokenHash   string
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	ConsumedAt  time.Time
+}
+
+// AppResponseURL is the durable capability behind response_url. Slack permits
+// at most five uses in thirty minutes. OriginalMessageID is populated for
+// interactive-message actions and empty for slash commands.
+type AppResponseURL struct {
+	TokenHash         string
+	AppID             AppID
+	WorkspaceID       WorkspaceID
+	UserID            UserID
+	ConversationID    ConversationID
+	OriginalMessageID MessageID
+	ThreadTimestamp   MessageTimestamp
+	CreatedAt         time.Time
+	ExpiresAt         time.Time
+	UsesRemaining     int
+}
+
+type AppBlockAction struct {
+	MessageID MessageID
+	BlockID   string
+	ActionID  string
+	Type      string
+	Value     string
+}
+
+// AppViewBlockAction is an interaction with an element rendered inside a
+// modal or App Home view. State is the complete Slack view.state object at the
+// instant of the action, not only the element that changed.
+type AppViewBlockAction struct {
+	ViewID   ViewID
+	BlockID  string
+	ActionID string
+	Type     string
+	Value    string
+	State    string
+}
+
+// AppOptionQuery identifies one external_select or multi_external_select
+// element. Exactly one of MessageID and ViewID is set.
+type AppOptionQuery struct {
+	AppID     AppID
+	MessageID MessageID
+	ViewID    ViewID
+	BlockID   string
+	ActionID  string
+	Value     string
+}
+
+type AppOption struct {
+	Text        string
+	Value       string
+	Description string
+	Group       string
+}
+
+type AppShortcut struct {
+	AppID       AppID
+	AppName     string
+	Name        string
+	CallbackID  string
+	Description string
+	Type        string
+}
+
+// AppConfigurationToken authenticates the manifest-management APIs. Only
+// digests are persisted; plaintext access and refresh tokens are returned once
+// by the service that creates or rotates them.
+type AppConfigurationToken struct {
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	ExpiresAt   time.Time
+	Revoked     bool
+}
+
+type AppConfigurationCredentials struct {
+	Token        string
+	RefreshToken string
+	WorkspaceID  WorkspaceID
+	UserID       UserID
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
+}
+
+type AppCredentials struct {
+	ClientID          string
+	ClientSecret      string
+	SigningSecret     string
+	VerificationToken string
+}
+
 type IncomingWebhook struct {
 	ID             IncomingWebhookID
 	WorkspaceID    WorkspaceID
@@ -776,6 +1002,19 @@ type IncomingWebhook struct {
 	SecretHash     string
 	Enabled        bool
 	CreatedAt      time.Time
+}
+
+// AppDatastoreItem is one durable JSON object owned by one installed hosted
+// app. Item contains canonical JSON; ID is the value of the datastore's
+// declared primary key and is indexed separately so reads never depend on a
+// database-specific JSON query implementation.
+type AppDatastoreItem struct {
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	Datastore   string
+	ID          string
+	Item        string
+	UpdatedAt   time.Time
 }
 
 type AppPermissionRequest struct {
@@ -886,17 +1125,69 @@ func (value RemoteFileLookup) Valid() bool {
 }
 
 type Message struct {
-	ID              MessageID
-	WorkspaceID     WorkspaceID
-	Conversation    ConversationID
-	AuthorID        UserID
-	Text            string
-	Blocks          string
-	Attachments     string
+	ID           MessageID
+	WorkspaceID  WorkspaceID
+	Conversation ConversationID
+	AuthorID     UserID
+	// AppID identifies the Slack app that authored the message. It is empty for
+	// first-party human messages. Interactive elements must route through this
+	// durable provenance rather than guessing from an action label or bot user.
+	AppID       AppID
+	Text        string
+	Blocks      string
+	Attachments string
+	// Metadata is Slack's app-authored message metadata object as normalized
+	// JSON. StreamState is an internal durable projection of chat.*Stream
+	// chunks; it is not emitted by the Web API.
+	Metadata        string
+	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	CreatedAt       time.Time
 	Deleted         bool
 	Unfurls         map[string]string
+	// Files are the durable file shares carried by this message. A file that
+	// merely names a channel in its metadata is not visible conversation
+	// content; the message relationship supplies ordering, threads, events, API
+	// projection, and the first-party timeline.
+	Files []File
+}
+
+type MessageStreamStart struct {
+	Conversation    ConversationID
+	ThreadTimestamp MessageTimestamp
+	AppID           AppID
+	BotID           BotID
+	RecipientTeamID WorkspaceID
+	RecipientUserID UserID
+	MarkdownText    string
+	Chunks          string
+	TaskDisplayMode string
+	Username        string
+	IconEmoji       string
+	IconURL         string
+}
+
+type MessageStreamMutation struct {
+	Conversation ConversationID
+	Timestamp    MessageTimestamp
+	AppID        AppID
+	MarkdownText string
+	Chunks       string
+	Blocks       string
+	Metadata     string
+}
+
+type MessageStreamState struct {
+	Active          bool              `json:"active"`
+	TaskDisplayMode string            `json:"task_display_mode,omitempty"`
+	BotID           BotID             `json:"bot_id,omitempty"`
+	Username        string            `json:"username,omitempty"`
+	IconEmoji       string            `json:"icon_emoji,omitempty"`
+	IconURL         string            `json:"icon_url,omitempty"`
+	PlanTitle       string            `json:"plan_title,omitempty"`
+	Tasks           []json.RawMessage `json:"tasks,omitempty"`
+	ChunkBlocks     []json.RawMessage `json:"chunk_blocks,omitempty"`
+	Warnings        []string          `json:"warnings,omitempty"`
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a
@@ -964,14 +1255,17 @@ func NormalizeUnfurls(values map[string]string) (map[string]string, error) {
 }
 
 type EphemeralMessage struct {
+	ID           MessageID
 	WorkspaceID  WorkspaceID
 	Conversation ConversationID
 	AuthorID     UserID
+	AppID        AppID
 	RecipientID  UserID
 	Text         string
 	Blocks       string
 	Attachments  string
 	Timestamp    MessageTimestamp
+	CreatedAt    time.Time
 }
 
 type AccessLog struct {
@@ -1025,6 +1319,27 @@ type SocketModeResponse struct {
 	ReceivedAt     time.Time
 	LeaseOwner     string
 	LeaseExpiresAt time.Time
+	AcknowledgedAt time.Time
+}
+
+// SocketModeInteraction is a durable, app-targeted slash command or
+// interactivity envelope. It is separate from the workspace event outbox:
+// interactions belong to exactly one app, while an ordinary workspace event
+// may be subscribed to by several apps.
+type SocketModeInteraction struct {
+	EnvelopeID     string
+	AppID          AppID
+	WorkspaceID    WorkspaceID
+	UserID         UserID
+	Type           string
+	Payload        string
+	Response       AppResponseURL
+	CreatedAt      time.Time
+	LeaseOwner     string
+	LeaseExpiresAt time.Time
+	RetryAt        time.Time
+	RetryCount     int
+	RetryReason    string
 	AcknowledgedAt time.Time
 }
 

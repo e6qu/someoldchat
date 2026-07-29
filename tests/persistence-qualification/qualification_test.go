@@ -616,7 +616,7 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 
 	t.Run("views retain ownership and enforce expected hash", func(t *testing.T) {
 		viewID := domain.ViewID("V-" + suffix)
-		view := domain.View{ID: viewID, WorkspaceID: workspaceID, UserID: userID, Type: "home", ExternalID: "home-" + suffix, Payload: `{"type":"home","blocks":[]}`, Hash: "hash-1", CreatedAt: now, UpdatedAt: now}
+		view := domain.View{ID: viewID, AppID: domain.AppID("A-" + suffix), WorkspaceID: workspaceID, UserID: userID, Type: "home", ExternalID: "home-" + suffix, Payload: `{"type":"home","blocks":[]}`, Hash: "hash-1", CreatedAt: now, UpdatedAt: now}
 		if err := repository.CreateView(ctx, view, event("view-create", "view.created", string(viewID))); err != nil {
 			t.Fatal(err)
 		}
@@ -624,21 +624,35 @@ func publishedIntegrationRepositoryContract(t *testing.T, open opener) {
 		if err != nil || loaded.UserID != userID || loaded.Payload != view.Payload {
 			t.Fatalf("view=%+v err=%v", loaded, err)
 		}
-		if published, err := repository.GetPublishedView(ctx, workspaceID, userID); err != nil || published.ID != viewID {
+		if published, err := repository.GetPublishedView(ctx, workspaceID, userID, view.AppID); err != nil || published.ID != viewID {
 			t.Fatalf("published=%+v err=%v", published, err)
+		}
+		if _, err := repository.GetPublishedView(ctx, workspaceID, userID, "A-other"); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("another app read the published view: %v", err)
+		}
+		if _, err := repository.GetViewByExternalID(ctx, workspaceID, "A-other", view.ExternalID); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("another app resolved the external id: %v", err)
+		}
+		wrongOwner := view
+		wrongOwner.AppID = "A-other"
+		if _, err := repository.UpdateView(ctx, wrongOwner, "", event("view-owner", "view.update_rejected", string(viewID))); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("another app updated the view: %v", err)
 		}
 		updated := view
 		updated.Payload = `{"type":"home","blocks":[{"type":"divider"}]}`
+		updated.State = `{"values":{"block":{"action":{"type":"plain_text_input","value":"kept"}}}}`
+		updated.Errors = map[string]string{"block": "Try again"}
 		updated.Hash = "hash-2"
 		updated.UpdatedAt = now.Add(time.Minute)
 		if _, err := repository.UpdateView(ctx, updated, "stale-hash", event("view-conflict", "view.update_rejected", string(viewID))); !errors.Is(err, store.ErrConflict) {
 			t.Fatalf("stale view update error=%v, want ErrConflict", err)
 		}
 		updatedView, err := repository.UpdateView(ctx, updated, view.Hash, event("view-update", "view.updated", string(viewID)))
-		if err != nil || updatedView.Hash != updated.Hash || updatedView.Payload != updated.Payload {
+		if err != nil || updatedView.Hash != updated.Hash || updatedView.Payload != updated.Payload ||
+			updatedView.State != updated.State || updatedView.Errors["block"] != "Try again" {
 			t.Fatalf("updated view=%+v err=%v", updatedView, err)
 		}
-		if latest, err := repository.GetLatestView(ctx, workspaceID, userID, "home"); err != nil || latest.Hash != "hash-2" {
+		if latest, err := repository.GetLatestView(ctx, workspaceID, userID, view.AppID, "home"); err != nil || latest.Hash != "hash-2" {
 			t.Fatalf("latest=%+v err=%v", latest, err)
 		}
 	})

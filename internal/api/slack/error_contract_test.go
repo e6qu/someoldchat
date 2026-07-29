@@ -796,6 +796,10 @@ func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
+	wrongBot := callAPI(t, handler, http.MethodPost, "/internal/admin/incoming-webhooks/create", "app_id=A1&channel_id=C1&bot_user_id=U1")
+	if envelope := decodeEnvelope(t, wrongBot); envelope.OK {
+		t.Fatalf("created an A1 webhook using a user who is not A1's bot: %+v", envelope)
+	}
 	created := callAPI(t, handler, http.MethodPost, "/internal/admin/incoming-webhooks/create", "app_id=A1&channel_id=C1&bot_user_id=U2")
 	var hook struct {
 		OK              bool `json:"ok"`
@@ -833,6 +837,15 @@ func TestIncomingWebhookRejectsEverySecretItDidNotIssue(t *testing.T) {
 	}
 	if response := post("/services/T1/A1/"+secret, `{}`); response.Code != http.StatusBadRequest || response.Body.String() != "invalid_payload" {
 		t.Errorf("empty payload: status=%d body=%s, want 400 invalid_payload", response.Code, response.Body)
+	}
+	if response := callAPI(t, handler, http.MethodPost, "/api/conversations.archive", "channel=C1"); response.Code != http.StatusOK {
+		t.Fatalf("archive channel status=%d body=%s", response.Code, response.Body)
+	}
+	if response := post("/services/T1/A1/"+secret, `{"text":"hello"}`); response.Code != http.StatusGone || response.Body.String() != "channel_is_archived" {
+		t.Errorf("archived webhook status=%d body=%s, want 410 channel_is_archived", response.Code, response.Body)
+	}
+	if response := callAPI(t, handler, http.MethodPost, "/api/conversations.unarchive", "channel=C1"); response.Code != http.StatusOK {
+		t.Fatalf("unarchive channel status=%d body=%s", response.Code, response.Body)
 	}
 	// A disabled hook must stop accepting posts.
 	if response := callAPI(t, handler, http.MethodPost, "/internal/admin/incoming-webhooks/enable", "webhook_id="+hook.IncomingWebhook.ID+"&enabled=0"); response.Code != http.StatusOK {

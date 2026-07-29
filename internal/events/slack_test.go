@@ -55,6 +55,82 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 	}
 }
 
+func TestAppHomeOpenedIsDeliveredOnlyToItsOwningApp(t *testing.T) {
+	event, err := New("Ev-home", "T1", "U1", NewPayload("app.home_opened",
+		String("target_app_id", "A1"),
+		String("user_id", "U1"),
+		String("channel_id", "D1"),
+		String("tab", "home"),
+		JSON("view", `{"id":"V1","type":"home","app_id":"A1","blocks":[]}`),
+	), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := Record{Sequence: 1, Event: event}
+	bodies, err := SlackEventBodies(record, "A1")
+	if err != nil || len(bodies) != 1 {
+		t.Fatalf("owning app bodies=%d err=%v", len(bodies), err)
+	}
+	var envelope struct {
+		AppID string `json:"api_app_id"`
+		Event struct {
+			Type    string         `json:"type"`
+			User    string         `json:"user"`
+			Channel string         `json:"channel"`
+			Tab     string         `json:"tab"`
+			View    map[string]any `json:"view"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(bodies[0], &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.AppID != "A1" || envelope.Event.Type != "app_home_opened" ||
+		envelope.Event.User != "U1" || envelope.Event.Channel != "D1" || envelope.Event.Tab != "home" ||
+		envelope.Event.View["id"] != "V1" {
+		t.Fatalf("envelope=%s", bodies[0])
+	}
+	if string(bodies[0]) == "" || containsJSONField(bodies[0], "target_app_id") {
+		t.Fatalf("routing metadata leaked into Slack payload: %s", bodies[0])
+	}
+	other, err := SlackEventBodies(record, "A2")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other app received %d bodies err=%v", len(other), err)
+	}
+	socket, err := SocketModeEnvelopes(record, "A2")
+	if err != nil || len(socket) != 0 {
+		t.Fatalf("other app received %d socket envelopes err=%v", len(socket), err)
+	}
+}
+
+func containsJSONField(encoded []byte, field string) bool {
+	var value any
+	if json.Unmarshal(encoded, &value) != nil {
+		return false
+	}
+	return jsonTreeContainsField(value, field)
+}
+
+func jsonTreeContainsField(value any, field string) bool {
+	switch value := value.(type) {
+	case map[string]any:
+		if _, ok := value[field]; ok {
+			return true
+		}
+		for _, child := range value {
+			if jsonTreeContainsField(child, field) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range value {
+			if jsonTreeContainsField(child, field) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func TestPretranslatedEventCannotBypassKnownTopicSurface(t *testing.T) {
 	event := Event{
 		ID:          "Ev1",

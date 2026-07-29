@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -71,12 +72,60 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 CREATE TABLE IF NOT EXISTS workspace_default_channels (workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id), PRIMARY KEY (workspace_id, conversation_id));
 CREATE TABLE IF NOT EXISTS conversation_teams (conversation_id TEXT NOT NULL REFERENCES conversations(id), team_id TEXT NOT NULL REFERENCES workspaces(id), org_channel INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (conversation_id, team_id));
+CREATE TABLE IF NOT EXISTS slack_apps (
+ id TEXT PRIMARY KEY, development_workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
+ name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', client_id TEXT NOT NULL UNIQUE, signing_secret_hash TEXT NOT NULL,
+ signing_secret_ciphertext TEXT NOT NULL DEFAULT '',
+ verification_token_hash TEXT NOT NULL, verification_token_ciphertext TEXT NOT NULL DEFAULT '',
+ manifest_version INTEGER NOT NULL, distribution TEXT NOT NULL DEFAULT 'private',
+ socket_mode_enabled INTEGER NOT NULL DEFAULT 0, token_rotation_enabled INTEGER NOT NULL DEFAULT 0,
+ deleted INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS slack_apps_owner ON slack_apps(development_workspace_id, owner_id, deleted, name, id);
+CREATE TABLE IF NOT EXISTS app_manifest_revisions (
+ app_id TEXT NOT NULL REFERENCES slack_apps(id), version INTEGER NOT NULL, manifest TEXT NOT NULL,
+ created_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, PRIMARY KEY (app_id, version)
+);
+CREATE TABLE IF NOT EXISTS app_datastore_items (
+ app_id TEXT NOT NULL REFERENCES slack_apps(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ datastore TEXT NOT NULL, item_id TEXT NOT NULL, item TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY (app_id, workspace_id, datastore, item_id)
+);
+CREATE INDEX IF NOT EXISTS app_datastore_items_lookup ON app_datastore_items(app_id, workspace_id, datastore, item_id);
+CREATE TABLE IF NOT EXISTS app_event_cursors (
+ app_id TEXT NOT NULL REFERENCES slack_apps(id), surface TEXT NOT NULL, sequence INTEGER NOT NULL DEFAULT 0,
+ leased_sequence INTEGER NOT NULL DEFAULT 0, lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0,
+ retry_at INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, retry_reason TEXT NOT NULL DEFAULT '',
+ PRIMARY KEY (app_id, surface)
+);
+CREATE TABLE IF NOT EXISTS app_triggers (
+ token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ user_id TEXT NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+ consumed_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS app_response_urls (
+ token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ user_id TEXT NOT NULL REFERENCES users(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ original_message_id TEXT NOT NULL DEFAULT '', thread_timestamp TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, uses_remaining INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_configuration_tokens (
+ access_hash TEXT PRIMARY KEY, refresh_hash TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ user_id TEXT NOT NULL REFERENCES users(id), expires_at TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS oauth_clients (id TEXT PRIMARY KEY, secret_hash TEXT NOT NULL, app_id TEXT NOT NULL);
 -- oauth_codes.code holds domain.HashToken(code), never the code itself: an
 -- authorization code is a bearer credential, and a database copy, backup or
 -- replica of it is enough to redeem the grant. expires_at is UnixNano and bounds
 -- redemption to store.OAuthCodeLifetime.
 CREATE TABLE IF NOT EXISTS oauth_codes (code TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, bot_id TEXT NOT NULL DEFAULT '', bot_user_id TEXT NOT NULL DEFAULT '', bot_scopes TEXT NOT NULL DEFAULT '[]', user_scopes TEXT NOT NULL DEFAULT '[]', redirect_uri TEXT NOT NULL DEFAULT '', code_challenge TEXT NOT NULL DEFAULT '', code_challenge_method TEXT NOT NULL DEFAULT '', expires_at INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS oauth_refresh_tokens (
+ refresh_hash TEXT PRIMARY KEY, access_hash TEXT NOT NULL, client_id TEXT NOT NULL REFERENCES oauth_clients(id),
+ app_id TEXT NOT NULL, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ installer_id TEXT NOT NULL REFERENCES users(id), bot_id TEXT NOT NULL DEFAULT '', scopes TEXT NOT NULL, token_type TEXT NOT NULL,
+ access_expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL, revoked INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS oauth_refresh_identity ON oauth_refresh_tokens(client_id, workspace_id, user_id, bot_id, token_type, created_at DESC);
 CREATE TABLE IF NOT EXISTS openid_refresh_tokens (token_hash TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES oauth_clients(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS rtm_connections (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS app_tokens (token_hash TEXT PRIMARY KEY, app_id TEXT NOT NULL, scopes TEXT NOT NULL, revoked INTEGER NOT NULL DEFAULT 0);
@@ -84,6 +133,15 @@ CREATE TABLE IF NOT EXISTS socket_mode_connections (id TEXT PRIMARY KEY, app_id 
 CREATE TABLE IF NOT EXISTS socket_mode_admission (app_id TEXT PRIMARY KEY, ticket INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_cursors (app_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS socket_mode_responses (app_id TEXT NOT NULL, envelope_id TEXT NOT NULL, payload TEXT NOT NULL, received_at INTEGER NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (app_id, envelope_id));
+CREATE TABLE IF NOT EXISTS socket_mode_interactions (
+ envelope_id TEXT PRIMARY KEY, app_id TEXT NOT NULL REFERENCES slack_apps(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, payload TEXT NOT NULL,
+ response_token_hash TEXT NOT NULL REFERENCES app_response_urls(token_hash), created_at INTEGER NOT NULL,
+ lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at INTEGER NOT NULL DEFAULT 0,
+ retry_at INTEGER NOT NULL DEFAULT 0, retry_count INTEGER NOT NULL DEFAULT 0, retry_reason TEXT NOT NULL DEFAULT '',
+ acknowledged_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS socket_mode_interactions_claim ON socket_mode_interactions(app_id, acknowledged_at, retry_at, lease_expires_at, created_at, envelope_id);
 CREATE TABLE IF NOT EXISTS conversation_prefs (
  conversation_id TEXT PRIMARY KEY REFERENCES conversations(id),
  can_thread_types TEXT NOT NULL DEFAULT '[]', can_thread_users TEXT NOT NULL DEFAULT '[]',
@@ -95,9 +153,9 @@ CREATE TABLE IF NOT EXISTS app_installations (app_id TEXT NOT NULL, workspace_id
 CREATE TABLE IF NOT EXISTS incoming_webhooks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, conversation_id TEXT NOT NULL REFERENCES conversations(id), user_id TEXT NOT NULL REFERENCES users(id), secret_hash TEXT NOT NULL UNIQUE, enabled INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspace_id, app_id, secret_hash, enabled);
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT '', errors TEXT NOT NULL DEFAULT '{}', hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
-CREATE INDEX IF NOT EXISTS views_published_user ON views(workspace_id, user_id, type, updated_at);
+CREATE INDEX IF NOT EXISTS views_published_user_app ON views(workspace_id, user_id, app_id, type, updated_at);
 CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS dialogs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), payload TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, image_36 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '', image_72 TEXT NOT NULL DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
@@ -111,10 +169,19 @@ CREATE TABLE IF NOT EXISTS conversation_members (
 CREATE TABLE IF NOT EXISTS messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
 	conversation TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
-	text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', thread_timestamp TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, unfurls TEXT NOT NULL DEFAULT '{}',
+	app_id TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '[]',
+	metadata TEXT NOT NULL DEFAULT '', stream_state TEXT NOT NULL DEFAULT '', thread_timestamp TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, unfurls TEXT NOT NULL DEFAULT '{}',
 	text_folded TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS messages_conversation_created ON messages(conversation, created_at, id);
+CREATE TABLE IF NOT EXISTS ephemeral_messages (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+ conversation_id TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
+ app_id TEXT NOT NULL DEFAULT '', recipient_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL,
+ blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '[]', timestamp TEXT NOT NULL,
+ created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ephemeral_messages_recipient_conversation_created ON ephemeral_messages(workspace_id, recipient_id, conversation_id, created_at DESC, id DESC);
 CREATE TABLE IF NOT EXISTS reactions (
  message_id TEXT NOT NULL REFERENCES messages(id), name TEXT NOT NULL, user_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL,
  PRIMARY KEY (message_id, name, user_id)
@@ -251,7 +318,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 86
+const schemaVersion = 101
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -264,6 +331,7 @@ const schemaVersion = 86
 var storedTimestampColumns = []struct{ table, column string }{
 	{"sessions", "expires_at"},
 	{"messages", "created_at"},
+	{"ephemeral_messages", "created_at"},
 	{"reactions", "created_at"},
 	{"pins", "created_at"},
 	{"stars", "created_at"},
@@ -1484,7 +1552,7 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 48 {
-		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
 			return fmt.Errorf("migrate views: %w", err)
 		}
 		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS views_workspace_external`); err != nil {
@@ -1940,6 +2008,127 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 89 {
+		columns, err := s.tableColumns(ctx, db, "slack_apps")
+		if err != nil {
+			return err
+		}
+		if !columns["signing_secret_ciphertext"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE slack_apps ADD COLUMN signing_secret_ciphertext TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate application signing-secret ciphertext: %w", err)
+			}
+		}
+	}
+	if version < 90 {
+		columns, err := s.tableColumns(ctx, db, "slack_apps")
+		if err != nil {
+			return err
+		}
+		if !columns["verification_token_ciphertext"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE slack_apps ADD COLUMN verification_token_ciphertext TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate application verification-token ciphertext: %w", err)
+			}
+		}
+	}
+	if version < 92 {
+		columns, err := s.tableColumns(ctx, db, "messages")
+		if err != nil {
+			return err
+		}
+		if !columns["app_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN app_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate message application provenance: %w", err)
+			}
+		}
+	}
+	if version < 95 {
+		columns, err := s.tableColumns(ctx, db, "views")
+		if err != nil {
+			return err
+		}
+		if !columns["app_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE views ADD COLUMN app_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate view application provenance: %w", err)
+			}
+		}
+	}
+	if version < 96 {
+		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS views_published_user`); err != nil {
+			return fmt.Errorf("drop app-agnostic published-view index: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `DROP INDEX IF EXISTS views_workspace_app_external`); err != nil {
+			return fmt.Errorf("drop invalid app-scoped view external-id index: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> ''`); err != nil {
+			return fmt.Errorf("index workspace-scoped view external ids: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS views_published_user_app ON views(workspace_id, user_id, app_id, type, updated_at)`); err != nil {
+			return fmt.Errorf("index app-scoped published views: %w", err)
+		}
+	}
+	if version < 97 {
+		columns, err := s.tableColumns(ctx, db, "views")
+		if err != nil {
+			return err
+		}
+		if !columns["errors"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE views ADD COLUMN errors TEXT NOT NULL DEFAULT '{}'`); err != nil {
+				return fmt.Errorf("migrate durable view validation errors: %w", err)
+			}
+		}
+	}
+	if version < 98 {
+		columns, err := s.tableColumns(ctx, db, "views")
+		if err != nil {
+			return err
+		}
+		if !columns["state"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE views ADD COLUMN state TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate durable view submission state: %w", err)
+			}
+		}
+	}
+	if version < 99 {
+		columns, err := s.tableColumns(ctx, db, "messages")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"metadata TEXT NOT NULL DEFAULT ''",
+			"stream_state TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate message stream field %s: %w", name, err)
+			}
+		}
+	}
+	if version < 100 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS app_datastore_items (
+			app_id TEXT NOT NULL REFERENCES slack_apps(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+			datastore TEXT NOT NULL, item_id TEXT NOT NULL, item TEXT NOT NULL, updated_at TEXT NOT NULL,
+			PRIMARY KEY (app_id, workspace_id, datastore, item_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate app datastore items: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS app_datastore_items_lookup ON app_datastore_items(app_id, workspace_id, datastore, item_id)`); err != nil {
+			return fmt.Errorf("index app datastore items: %w", err)
+		}
+	}
+	if version < 101 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS message_files (
+			message_id TEXT NOT NULL REFERENCES messages(id), file_id TEXT NOT NULL REFERENCES files(id), position INTEGER NOT NULL,
+			PRIMARY KEY (message_id, file_id), UNIQUE (message_id, position)
+		)`); err != nil {
+			return fmt.Errorf("migrate message file shares: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS message_files_file ON message_files(file_id, message_id)`); err != nil {
+			return fmt.Errorf("index message file shares: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2210,7 +2399,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -2962,6 +3151,25 @@ func (s *Store) SeedAppToken(ctx context.Context, token string, record domain.Ap
 	return err
 }
 
+func (s *Store) CreateAppToken(ctx context.Context, token string, record domain.AppTokenRecord) error {
+	record.Scopes = domain.NormalizeScopes(record.Scopes)
+	if strings.TrimSpace(token) == "" || record.AppID == "" || len(record.Scopes) == 0 || record.Revoked {
+		return store.InvalidArgument("invalid app token")
+	}
+	result, err := s.db.ExecContext(ctx, `INSERT INTO app_tokens(token_hash, app_id, scopes, revoked) SELECT ?, ?, ?, 0 WHERE EXISTS (SELECT 1 FROM slack_apps WHERE id = ? AND deleted = 0)`, domain.HashToken(token), record.AppID, strings.Join(record.Scopes, " "), record.AppID)
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) LookupAppToken(ctx context.Context, token string) (domain.AppTokenRecord, error) {
 	var record domain.AppTokenRecord
 	var scopes string
@@ -3472,6 +3680,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 	}
 	statements := []string{
 		`DELETE FROM remote_file_shares WHERE conversation_id = ?`,
+		`DELETE FROM file_shares WHERE conversation_id = ?`,
 		`DELETE FROM conversation_teams WHERE conversation_id = ?`,
 		`DELETE FROM user_group_channels WHERE conversation_id = ?`,
 		`DELETE FROM conversation_access_groups WHERE conversation_id = ?`,
@@ -3482,6 +3691,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM stars WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
+		`DELETE FROM message_files WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM messages WHERE conversation = ?`,
 		`DELETE FROM conversation_members WHERE conversation_id = ?`,
 	}
@@ -3809,6 +4019,9 @@ func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID
 	if _, err := tx.ExecContext(ctx, `UPDATE incoming_webhooks SET enabled = 0 WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM app_datastore_items WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `UPDATE bots SET deleted = 1 WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
 		return err
 	}
@@ -3887,7 +4100,7 @@ func (s *Store) CreateAppPermissionRequest(ctx context.Context, value domain.App
 }
 
 func (s *Store) CreateView(ctx context.Context, value domain.View, event events.Event) error {
-	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
+	if value.ID == "" || value.AppID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Type == "" || value.Payload == "" || value.Hash == "" || value.CreatedAt.IsZero() {
 		return store.InvalidArgument("invalid view")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -3895,7 +4108,11 @@ func (s *Store) CreateView(ctx context.Context, value domain.View, event events.
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO views(id, workspace_id, user_id, type, external_id, payload, hash, root_view_id, previous_view_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.Type, value.ExternalID, value.Payload, value.Hash, value.RootViewID, value.PreviousViewID, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano()); err != nil {
+	encodedErrors, err := json.Marshal(value.Errors)
+	if err != nil {
+		return store.InvalidArgument("invalid view errors")
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO views(id, app_id, workspace_id, user_id, type, external_id, payload, state, errors, hash, root_view_id, previous_view_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.AppID, value.WorkspaceID, value.UserID, value.Type, value.ExternalID, value.Payload, value.State, string(encodedErrors), value.Hash, value.RootViewID, value.PreviousViewID, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -3906,8 +4123,12 @@ func (s *Store) CreateView(ctx context.Context, value domain.View, event events.
 
 func scanView(row interface{ Scan(...any) error }) (domain.View, error) {
 	var value domain.View
+	var encodedErrors string
 	var created, updated int64
-	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.Hash, &value.RootViewID, &value.PreviousViewID, &created, &updated); err != nil {
+	if err := row.Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.State, &encodedErrors, &value.Hash, &value.RootViewID, &value.PreviousViewID, &created, &updated); err != nil {
+		return domain.View{}, err
+	}
+	if err := json.Unmarshal([]byte(encodedErrors), &value.Errors); err != nil {
 		return domain.View{}, err
 	}
 	value.CreatedAt = time.Unix(0, created).UTC()
@@ -3915,30 +4136,43 @@ func scanView(row interface{ Scan(...any) error }) (domain.View, error) {
 	return value, nil
 }
 
-const viewColumns = `id, workspace_id, user_id, type, external_id, payload, hash, root_view_id, previous_view_id, created_at, updated_at`
+const viewColumns = `id, app_id, workspace_id, user_id, type, external_id, payload, state, errors, hash, root_view_id, previous_view_id, created_at, updated_at`
 
 func (s *Store) GetView(ctx context.Context, workspace domain.WorkspaceID, id domain.ViewID) (domain.View, error) {
 	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, workspace, id))
 	return value, translateNotFound(err)
 }
 
-func (s *Store) GetViewByExternalID(ctx context.Context, workspace domain.WorkspaceID, externalID string) (domain.View, error) {
-	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND external_id = ?`, workspace, externalID))
+func (s *Store) GetViewByExternalID(ctx context.Context, workspace domain.WorkspaceID, appID domain.AppID, externalID string) (domain.View, error) {
+	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND app_id = ? AND external_id = ?`, workspace, appID, externalID))
 	return value, translateNotFound(err)
 }
 
-func (s *Store) GetPublishedView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.View, error) {
-	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND user_id = ? AND type = 'home' ORDER BY updated_at DESC, id DESC LIMIT 1`, workspace, user))
+func (s *Store) GetPublishedView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, appID domain.AppID) (domain.View, error) {
+	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND user_id = ? AND app_id = ? AND type = 'home' ORDER BY updated_at DESC, id DESC LIMIT 1`, workspace, user, appID))
 	return value, translateNotFound(err)
 }
 
-func (s *Store) GetLatestView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, viewType string) (domain.View, error) {
-	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND user_id = ? AND type = ? ORDER BY updated_at DESC, id DESC LIMIT 1`, workspace, user, viewType))
+func (s *Store) GetLatestView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, appID domain.AppID, viewType string) (domain.View, error) {
+	order := "updated_at"
+	if viewType == "modal" {
+		order = "created_at"
+	}
+	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND user_id = ? AND app_id = ? AND type = ? ORDER BY `+order+` DESC, id DESC LIMIT 1`, workspace, user, appID, viewType))
+	return value, translateNotFound(err)
+}
+
+func (s *Store) GetCurrentView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, viewType string) (domain.View, error) {
+	order := "updated_at"
+	if viewType == "modal" {
+		order = "created_at"
+	}
+	value, err := scanView(s.db.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND user_id = ? AND type = ? ORDER BY `+order+` DESC, id DESC LIMIT 1`, workspace, user, viewType))
 	return value, translateNotFound(err)
 }
 
 func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash string, event events.Event) (domain.View, error) {
-	if value.ID == "" || value.WorkspaceID == "" || value.Payload == "" || value.Hash == "" {
+	if value.ID == "" || value.AppID == "" || value.WorkspaceID == "" || value.Payload == "" || value.Hash == "" {
 		return domain.View{}, store.InvalidArgument("invalid view")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -3946,8 +4180,12 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 		return domain.View{}, err
 	}
 	defer tx.Rollback()
-	query := `UPDATE views SET type = ?, external_id = ?, payload = ?, hash = ?, root_view_id = ?, previous_view_id = ?, updated_at = ? WHERE workspace_id = ? AND id = ?`
-	args := []any{value.Type, value.ExternalID, value.Payload, value.Hash, value.RootViewID, value.PreviousViewID, value.UpdatedAt.UTC().UnixNano(), value.WorkspaceID, value.ID}
+	encodedErrors, err := json.Marshal(value.Errors)
+	if err != nil {
+		return domain.View{}, store.InvalidArgument("invalid view errors")
+	}
+	query := `UPDATE views SET type = ?, external_id = ?, payload = ?, state = ?, errors = ?, hash = ?, root_view_id = ?, previous_view_id = ?, updated_at = ? WHERE workspace_id = ? AND app_id = ? AND id = ?`
+	args := []any{value.Type, value.ExternalID, value.Payload, value.State, string(encodedErrors), value.Hash, value.RootViewID, value.PreviousViewID, value.UpdatedAt.UTC().UnixNano(), value.WorkspaceID, value.AppID, value.ID}
 	if expectedHash != "" {
 		query += ` AND hash = ?`
 		args = append(args, expectedHash)
@@ -3961,6 +4199,14 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 		return domain.View{}, err
 	}
 	if changed != 1 {
+		var exists int
+		ownershipErr := tx.QueryRowContext(ctx, `SELECT 1 FROM views WHERE workspace_id = ? AND app_id = ? AND id = ?`, value.WorkspaceID, value.AppID, value.ID).Scan(&exists)
+		if errors.Is(ownershipErr, sql.ErrNoRows) {
+			return domain.View{}, store.ErrNotFound
+		}
+		if ownershipErr != nil {
+			return domain.View{}, ownershipErr
+		}
 		if expectedHash != "" {
 			return domain.View{}, store.ErrConflict
 		}
@@ -3969,7 +4215,11 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.View{}, err
 	}
-	if err := tx.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, value.WorkspaceID, value.ID).Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.Hash, &value.RootViewID, &value.PreviousViewID, new(int64), new(int64)); err != nil {
+	var storedErrors string
+	if err := tx.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND id = ?`, value.WorkspaceID, value.ID).Scan(&value.ID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.ExternalID, &value.Payload, &value.State, &storedErrors, &value.Hash, &value.RootViewID, &value.PreviousViewID, new(int64), new(int64)); err != nil {
+		return domain.View{}, err
+	}
+	if err := json.Unmarshal([]byte(storedErrors), &value.Errors); err != nil {
 		return domain.View{}, err
 	}
 	// Read the committed value through the transaction so callers receive the
@@ -3984,6 +4234,38 @@ func (s *Store) UpdateView(ctx context.Context, value domain.View, expectedHash 
 		return domain.View{}, err
 	}
 	return value, nil
+}
+
+func (s *Store) DeleteView(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.ViewID, clear bool, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	current, err := scanView(tx.QueryRowContext(ctx, `SELECT `+viewColumns+` FROM views WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id))
+	if err != nil {
+		return translateNotFound(err)
+	}
+	var result sql.Result
+	if clear {
+		result, err = tx.ExecContext(ctx, `DELETE FROM views WHERE workspace_id = ? AND user_id = ? AND app_id = ? AND root_view_id = ?`, workspace, user, current.AppID, current.RootViewID)
+	} else {
+		result, err = tx.ExecContext(ctx, `DELETE FROM views WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id)
+	}
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func scanWorkflowStep(row interface{ Scan(...any) error }) (domain.WorkflowStep, error) {
@@ -4080,6 +4362,19 @@ func (s *Store) GetBot(ctx context.Context, workspace domain.WorkspaceID, id dom
 	var value domain.Bot
 	var deleted, updated int64
 	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, app_id, user_id, name, image_36, image_48, image_72, deleted, updated_at FROM bots WHERE workspace_id = ? AND id = ?`, workspace, id).Scan(&value.ID, &value.WorkspaceID, &value.AppID, &value.UserID, &value.Name, &value.Image36, &value.Image48, &value.Image72, &deleted, &updated)
+	if err := translateNotFound(err); err != nil {
+		return domain.Bot{}, err
+	}
+	value.Deleted = deleted != 0
+	value.UpdatedAt = time.Unix(updated, 0).UTC()
+	return value, nil
+}
+
+func (s *Store) GetBotByApp(ctx context.Context, workspace domain.WorkspaceID, appID domain.AppID) (domain.Bot, error) {
+	var value domain.Bot
+	var deleted, updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, app_id, user_id, name, image_36, image_48, image_72, deleted, updated_at FROM bots WHERE workspace_id = ? AND app_id = ? AND deleted = 0 ORDER BY id LIMIT 1`, workspace, appID).
+		Scan(&value.ID, &value.WorkspaceID, &value.AppID, &value.UserID, &value.Name, &value.Image36, &value.Image48, &value.Image72, &deleted, &updated)
 	if err := translateNotFound(err); err != nil {
 		return domain.Bot{}, err
 	}
@@ -4445,17 +4740,6 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
 	token.CodeVerifier = ""
-	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, codeHash, clientID, redirect)
-	if err != nil {
-		return domain.OAuthToken{}, err
-	}
-	changed, err := result.RowsAffected()
-	if err != nil {
-		return domain.OAuthToken{}, err
-	}
-	if changed != 1 {
-		return domain.OAuthToken{}, store.ErrNotFound
-	}
 	tokenType := strings.TrimSpace(token.TokenType)
 	if tokenType == "" {
 		tokenType = "user"
@@ -4477,7 +4761,62 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 	if len(tokenScopes) == 0 {
 		return domain.OAuthToken{}, store.ErrNotFound
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)`, domain.HashToken(accessToken), grant.WorkspaceID, subjectID, appID, tokenBotID, strings.Join(domain.NormalizeScopes(tokenScopes), " "), tokenType); err != nil {
+	normalizedUserScopes := domain.NormalizeScopes(grant.UserScopes)
+	if tokenType == "bot" && len(normalizedUserScopes) != 0 && strings.TrimSpace(token.AuthedUserAccessToken) == "" {
+		return domain.OAuthToken{}, store.InvalidArgument("missing installer user access token")
+	}
+	rotating := strings.TrimSpace(token.RefreshToken) != ""
+	if rotating && (!token.ExpiresAt.After(now) || tokenType == "bot" && len(normalizedUserScopes) != 0 && (strings.TrimSpace(token.AuthedUserRefreshToken) == "" || !token.AuthedUserExpiresAt.After(now))) {
+		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM oauth_codes WHERE code = ? AND client_id = ? AND redirect_uri = ?`, codeHash, clientID, redirect)
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if changed != 1 {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	accessHash := domain.HashToken(accessToken)
+	accessExpiresAt := int64(0)
+	if !token.ExpiresAt.IsZero() {
+		accessExpiresAt = token.ExpiresAt.UTC().UnixNano()
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`, accessHash, grant.WorkspaceID, subjectID, appID, tokenBotID, strings.Join(domain.NormalizeScopes(tokenScopes), " "), tokenType, accessExpiresAt); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if rotating {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, domain.HashToken(token.RefreshToken), accessHash, clientID, appID, grant.WorkspaceID, subjectID, grant.UserID, tokenBotID, strings.Join(domain.NormalizeScopes(tokenScopes), " "), tokenType, accessExpiresAt, now.UnixNano()); err != nil {
+			return domain.OAuthToken{}, err
+		}
+	}
+	if tokenType == "bot" && len(normalizedUserScopes) != 0 {
+		userAccessHash := domain.HashToken(token.AuthedUserAccessToken)
+		userExpiresAt := int64(0)
+		if !token.AuthedUserExpiresAt.IsZero() {
+			userExpiresAt = token.AuthedUserExpiresAt.UTC().UnixNano()
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, '', ?, 'user', ?, 0)`, userAccessHash, grant.WorkspaceID, grant.UserID, appID, strings.Join(normalizedUserScopes, " "), userExpiresAt); err != nil {
+			return domain.OAuthToken{}, err
+		}
+		if rotating {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, 'user', ?, ?, 0)`, domain.HashToken(token.AuthedUserRefreshToken), userAccessHash, clientID, appID, grant.WorkspaceID, grant.UserID, grant.UserID, strings.Join(normalizedUserScopes, " "), userExpiresAt, now.UnixNano()); err != nil {
+				return domain.OAuthToken{}, err
+			}
+		}
+		token.AuthedUserScopes = append([]string(nil), normalizedUserScopes...)
+	} else {
+		token.AuthedUserAccessToken = ""
+		token.AuthedUserScopes = nil
+	}
+	// The authorization code, access token, and installation are one durable
+	// state transition. Keeping this in the same transaction prevents an
+	// installation write failure from consuming the one-time code while
+	// leaving an orphaned live token behind.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO app_installations(app_id, workspace_id, enabled, created_at) VALUES (?, ?, 1, ?) ON CONFLICT(app_id, workspace_id) DO UPDATE SET enabled = 1`, appID, grant.WorkspaceID, now.UnixNano()); err != nil {
 		return domain.OAuthToken{}, err
 	}
 	token.AccessToken = accessToken
@@ -4493,6 +4832,184 @@ func (s *Store) exchangeOAuthCodeOnce(ctx context.Context, clientID, secret, cod
 		return domain.OAuthToken{}, err
 	}
 	return token, nil
+}
+
+func (s *Store) LookupOAuthRefreshToken(ctx context.Context, clientID, refreshToken string) (domain.OAuthRefreshGrant, error) {
+	var value domain.OAuthRefreshGrant
+	var scopes string
+	var accessExpiresAt, createdAt int64
+	var revoked int
+	err := s.db.QueryRowContext(ctx, `SELECT refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked FROM oauth_refresh_tokens WHERE refresh_hash = ? AND client_id = ?`, domain.HashToken(strings.TrimSpace(refreshToken)), strings.TrimSpace(clientID)).Scan(
+		&value.TokenHash, &value.AccessTokenHash, &value.ClientID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.InstallerID, &value.BotID, &scopes, &value.TokenType, &accessExpiresAt, &createdAt, &revoked,
+	)
+	if err := translateNotFound(err); err != nil {
+		return domain.OAuthRefreshGrant{}, err
+	}
+	if revoked != 0 {
+		return domain.OAuthRefreshGrant{}, store.ErrNotFound
+	}
+	value.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	value.AccessExpiresAt = time.Unix(0, accessExpiresAt).UTC()
+	value.CreatedAt = time.Unix(0, createdAt).UTC()
+	return value, nil
+}
+
+func (s *Store) ExchangeOAuthRefreshToken(ctx context.Context, clientID, secret, oldRefreshToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
+	var exchanged domain.OAuthToken
+	err := underContention(ctx, func() error {
+		value, err := s.exchangeOAuthRefreshTokenOnce(ctx, clientID, secret, oldRefreshToken, nextAccessToken, nextRefreshToken, expiresAt)
+		if err == nil {
+			exchanged = value
+		}
+		return err
+	})
+	return exchanged, err
+}
+
+func (s *Store) exchangeOAuthRefreshTokenOnce(ctx context.Context, clientID, secret, oldRefreshToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	defer tx.Rollback()
+	var storedSecretHash string
+	if err := tx.QueryRowContext(ctx, `SELECT secret_hash FROM oauth_clients WHERE id = ?`, strings.TrimSpace(clientID)).Scan(&storedSecretHash); err != nil {
+		return domain.OAuthToken{}, translateNotFound(err)
+	}
+	if !hmac.Equal([]byte(storedSecretHash), []byte(domain.HashToken(strings.TrimSpace(secret)))) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	if strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
+		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
+	}
+	oldHash := domain.HashToken(strings.TrimSpace(oldRefreshToken))
+	var grant domain.OAuthRefreshGrant
+	var scopes string
+	var oldAccessExpiresAt, createdAt int64
+	var revoked int
+	err = tx.QueryRowContext(ctx, `SELECT refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked FROM oauth_refresh_tokens WHERE refresh_hash = ? AND client_id = ?`, oldHash, clientID).Scan(
+		&grant.TokenHash, &grant.AccessTokenHash, &grant.ClientID, &grant.AppID, &grant.WorkspaceID, &grant.UserID, &grant.InstallerID, &grant.BotID, &scopes, &grant.TokenType, &oldAccessExpiresAt, &createdAt, &revoked,
+	)
+	if err := translateNotFound(err); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if revoked != 0 {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	grant.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	result, err := tx.ExecContext(ctx, `UPDATE oauth_refresh_tokens SET revoked = 1 WHERE refresh_hash = ? AND revoked = 0`, oldHash)
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if changed != 1 {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	nextAccessHash := domain.HashToken(nextAccessToken)
+	nextRefreshHash := domain.HashToken(nextRefreshToken)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextAccessHash, grant.WorkspaceID, grant.UserID, grant.AppID, grant.BotID, strings.Join(grant.Scopes, " "), grant.TokenType, expiresAt.UTC().UnixNano()); err != nil {
+		return domain.OAuthToken{}, classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextRefreshHash, nextAccessHash, grant.ClientID, grant.AppID, grant.WorkspaceID, grant.UserID, grant.InstallerID, grant.BotID, strings.Join(grant.Scopes, " "), grant.TokenType, expiresAt.UTC().UnixNano(), now.UnixNano()); err != nil {
+		return domain.OAuthToken{}, classify(err)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT access_hash FROM oauth_refresh_tokens WHERE client_id = ? AND workspace_id = ? AND user_id = ? AND bot_id = ? AND token_type = ? ORDER BY created_at DESC, access_hash DESC LIMIT -1 OFFSET 2`, grant.ClientID, grant.WorkspaceID, grant.UserID, grant.BotID, grant.TokenType)
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	var staleAccessHashes []string
+	for rows.Next() {
+		var hash string
+		if err := rows.Scan(&hash); err != nil {
+			rows.Close()
+			return domain.OAuthToken{}, err
+		}
+		staleAccessHashes = append(staleAccessHashes, hash)
+	}
+	if err := rows.Close(); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	for _, hash := range staleAccessHashes {
+		if _, err := tx.ExecContext(ctx, `UPDATE tokens SET revoked = 1 WHERE token_hash = ?`, hash); err != nil {
+			return domain.OAuthToken{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt.UTC(), ClientID: clientID, AppID: grant.AppID, WorkspaceID: grant.WorkspaceID, UserID: grant.UserID, InstallerID: grant.InstallerID, BotID: grant.BotID, Scopes: append([]string(nil), grant.Scopes...), TokenType: grant.TokenType}, nil
+}
+
+func (s *Store) ExchangeOAuthAccessToken(ctx context.Context, clientID, secret, oldAccessToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
+	var exchanged domain.OAuthToken
+	err := underContention(ctx, func() error {
+		value, err := s.exchangeOAuthAccessTokenOnce(ctx, clientID, secret, oldAccessToken, nextAccessToken, nextRefreshToken, expiresAt)
+		if err == nil {
+			exchanged = value
+		}
+		return err
+	})
+	return exchanged, err
+}
+
+func (s *Store) exchangeOAuthAccessTokenOnce(ctx context.Context, clientID, secret, oldAccessToken, nextAccessToken, nextRefreshToken string, expiresAt time.Time) (domain.OAuthToken, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	defer tx.Rollback()
+	var appID domain.AppID
+	var storedSecretHash string
+	if err := tx.QueryRowContext(ctx, `SELECT app_id, secret_hash FROM oauth_clients WHERE id = ?`, strings.TrimSpace(clientID)).Scan(&appID, &storedSecretHash); err != nil {
+		return domain.OAuthToken{}, translateNotFound(err)
+	}
+	if !hmac.Equal([]byte(storedSecretHash), []byte(domain.HashToken(strings.TrimSpace(secret)))) {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	now := time.Now().UTC()
+	if strings.TrimSpace(nextAccessToken) == "" || strings.TrimSpace(nextRefreshToken) == "" || !expiresAt.After(now) {
+		return domain.OAuthToken{}, store.InvalidArgument("invalid rotating OAuth credentials")
+	}
+	oldAccessHash := domain.HashToken(strings.TrimSpace(oldAccessToken))
+	var record domain.TokenRecord
+	var scopes string
+	var oldExpiresAt int64
+	var revoked int
+	err = tx.QueryRowContext(ctx, `SELECT workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked FROM tokens WHERE token_hash = ?`, oldAccessHash).Scan(&record.WorkspaceID, &record.UserID, &record.AppID, &record.BotID, &scopes, &record.TokenType, &oldExpiresAt, &revoked)
+	if err := translateNotFound(err); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if revoked != 0 || record.AppID != appID || oldExpiresAt != 0 || record.TokenType != "bot" && record.TokenType != "user" {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	var alreadyExchanged int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM oauth_refresh_tokens WHERE access_hash = ?`, oldAccessHash).Scan(&alreadyExchanged); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	if alreadyExchanged != 0 {
+		return domain.OAuthToken{}, store.ErrNotFound
+	}
+	record.Scopes = domain.NormalizeScopes(strings.Fields(scopes))
+	nextAccessHash := domain.HashToken(nextAccessToken)
+	nextRefreshHash := domain.HashToken(nextRefreshToken)
+	if _, err := tx.ExecContext(ctx, `INSERT INTO tokens(token_hash, workspace_id, user_id, app_id, bot_id, scopes, token_type, expires_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextAccessHash, record.WorkspaceID, record.UserID, record.AppID, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, expiresAt.UTC().UnixNano()); err != nil {
+		return domain.OAuthToken{}, classify(err)
+	}
+	legacyHash := "legacy:" + oldAccessHash
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1)`, legacyHash, oldAccessHash, clientID, record.AppID, record.WorkspaceID, record.UserID, record.UserID, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, now.Add(-time.Nanosecond).UnixNano()); err != nil {
+		return domain.OAuthToken{}, classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO oauth_refresh_tokens(refresh_hash, access_hash, client_id, app_id, workspace_id, user_id, installer_id, bot_id, scopes, token_type, access_expires_at, created_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, nextRefreshHash, nextAccessHash, clientID, record.AppID, record.WorkspaceID, record.UserID, record.UserID, record.BotID, strings.Join(record.Scopes, " "), record.TokenType, expiresAt.UTC().UnixNano(), now.UnixNano()); err != nil {
+		return domain.OAuthToken{}, classify(err)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.OAuthToken{}, err
+	}
+	return domain.OAuthToken{AccessToken: nextAccessToken, RefreshToken: nextRefreshToken, ExpiresAt: expiresAt.UTC(), ClientID: clientID, AppID: record.AppID, WorkspaceID: record.WorkspaceID, UserID: record.UserID, InstallerID: record.UserID, BotID: record.BotID, Scopes: append([]string(nil), record.Scopes...), TokenType: record.TokenType}, nil
 }
 
 func (s *Store) CreateOpenIDRefreshToken(ctx context.Context, value domain.OpenIDRefreshToken) error {
@@ -4820,6 +5337,27 @@ func (s *Store) RecordSocketModeResponse(ctx context.Context, value domain.Socke
 	return nil
 }
 
+func (s *Store) GetSocketModeResponse(ctx context.Context, appID domain.AppID, envelopeID string) (domain.SocketModeResponse, error) {
+	if appID == "" || strings.TrimSpace(envelopeID) == "" {
+		return domain.SocketModeResponse{}, store.InvalidArgument("Socket Mode response identity is required")
+	}
+	var value domain.SocketModeResponse
+	var receivedAt, leaseExpiresAt, acknowledgedAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT app_id, envelope_id, payload, received_at, lease_owner, lease_expires_at, acknowledged_at FROM socket_mode_responses WHERE app_id = ? AND envelope_id = ?`, appID, strings.TrimSpace(envelopeID)).
+		Scan(&value.AppID, &value.EnvelopeID, &value.Payload, &receivedAt, &value.LeaseOwner, &leaseExpiresAt, &acknowledgedAt)
+	if err != nil {
+		return domain.SocketModeResponse{}, translateNotFound(err)
+	}
+	value.ReceivedAt = time.Unix(0, receivedAt).UTC()
+	if leaseExpiresAt != 0 {
+		value.LeaseExpiresAt = time.Unix(0, leaseExpiresAt).UTC()
+	}
+	if acknowledgedAt != 0 {
+		value.AcknowledgedAt = time.Unix(0, acknowledgedAt).UTC()
+	}
+	return value, nil
+}
+
 func (s *Store) ClaimSocketModeResponses(ctx context.Context, appID domain.AppID, owner string, limit int, lease time.Duration) ([]domain.SocketModeResponse, error) {
 	if appID == "" || strings.TrimSpace(owner) == "" || limit < 1 || limit > 1000 || lease <= 0 {
 		return nil, store.InvalidArgument("invalid Socket Mode response lease")
@@ -4983,6 +5521,144 @@ func (s *Store) ReleaseSocketModeResponses(ctx context.Context, owner string, va
 		return store.ErrConflict
 	}
 	return tx.Commit()
+}
+
+func validSocketModeInteractionValue(value domain.SocketModeInteraction) bool {
+	if value.EnvelopeID == "" || value.AppID == "" || value.WorkspaceID == "" || value.UserID == "" ||
+		(value.Type != "slash_commands" && value.Type != "interactive") || strings.TrimSpace(value.Payload) == "" ||
+		value.Response.TokenHash == "" || value.Response.AppID != value.AppID ||
+		value.Response.WorkspaceID != value.WorkspaceID || value.Response.UserID != value.UserID ||
+		value.Response.ConversationID == "" || value.CreatedAt.IsZero() {
+		return false
+	}
+	var payload map[string]any
+	return json.Unmarshal([]byte(value.Payload), &payload) == nil && payload != nil
+}
+
+func (s *Store) CreateSocketModeInteraction(ctx context.Context, value domain.SocketModeInteraction) error {
+	if !validSocketModeInteractionValue(value) {
+		return store.InvalidArgument("invalid Socket Mode interaction")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO socket_mode_interactions(envelope_id, app_id, workspace_id, user_id, type, payload, response_token_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.EnvelopeID, value.AppID, value.WorkspaceID, value.UserID, value.Type, value.Payload, value.Response.TokenHash, value.CreatedAt.UTC().UnixNano())
+	return classify(err)
+}
+
+func scanSocketModeInteraction(scanner interface{ Scan(...any) error }) (domain.SocketModeInteraction, error) {
+	var value domain.SocketModeInteraction
+	var createdAt, leaseExpiresAt, retryAt, acknowledgedAt int64
+	var responseCreatedAt, responseExpiresAt int64
+	err := scanner.Scan(
+		&value.EnvelopeID, &value.AppID, &value.WorkspaceID, &value.UserID, &value.Type, &value.Payload,
+		&createdAt, &value.LeaseOwner, &leaseExpiresAt, &retryAt, &value.RetryCount, &value.RetryReason, &acknowledgedAt,
+		&value.Response.TokenHash, &value.Response.AppID, &value.Response.WorkspaceID, &value.Response.UserID,
+		&value.Response.ConversationID, &value.Response.OriginalMessageID, &value.Response.ThreadTimestamp,
+		&responseCreatedAt, &responseExpiresAt, &value.Response.UsesRemaining,
+	)
+	if err != nil {
+		return domain.SocketModeInteraction{}, translateNotFound(err)
+	}
+	value.CreatedAt = time.Unix(0, createdAt).UTC()
+	if leaseExpiresAt != 0 {
+		value.LeaseExpiresAt = time.Unix(0, leaseExpiresAt).UTC()
+	}
+	if retryAt != 0 {
+		value.RetryAt = time.Unix(0, retryAt).UTC()
+	}
+	if acknowledgedAt != 0 {
+		value.AcknowledgedAt = time.Unix(0, acknowledgedAt).UTC()
+	}
+	value.Response.CreatedAt = time.Unix(0, responseCreatedAt).UTC()
+	value.Response.ExpiresAt = time.Unix(0, responseExpiresAt).UTC()
+	return value, nil
+}
+
+const socketModeInteractionSelect = `SELECT i.envelope_id, i.app_id, i.workspace_id, i.user_id, i.type, i.payload,
+	i.created_at, i.lease_owner, i.lease_expires_at, i.retry_at, i.retry_count, i.retry_reason, i.acknowledged_at,
+	r.token_hash, r.app_id, r.workspace_id, r.user_id, r.conversation_id, r.original_message_id, r.thread_timestamp,
+	r.created_at, r.expires_at, r.uses_remaining
+	FROM socket_mode_interactions i JOIN app_response_urls r ON r.token_hash = i.response_token_hash`
+
+func (s *Store) GetSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID string) (domain.SocketModeInteraction, error) {
+	return scanSocketModeInteraction(s.db.QueryRowContext(ctx, socketModeInteractionSelect+` WHERE i.app_id = ? AND i.envelope_id = ?`, appID, envelopeID))
+}
+
+func (s *Store) ClaimSocketModeInteraction(ctx context.Context, appID domain.AppID, owner string, lease time.Duration) (domain.SocketModeInteraction, bool, error) {
+	if appID == "" || strings.TrimSpace(owner) == "" || lease <= 0 {
+		return domain.SocketModeInteraction{}, false, store.InvalidArgument("invalid Socket Mode interaction lease")
+	}
+	var claimed domain.SocketModeInteraction
+	var found bool
+	err := underContention(ctx, func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		now := time.Now().UTC()
+		var envelopeID string
+		err = tx.QueryRowContext(ctx, `SELECT envelope_id FROM socket_mode_interactions
+			WHERE app_id = ? AND acknowledged_at = 0 AND retry_at <= ? AND lease_expires_at <= ?
+			ORDER BY created_at, envelope_id LIMIT 1`, appID, now.UnixNano(), now.UnixNano()).Scan(&envelopeID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return tx.Commit()
+		}
+		if err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `UPDATE socket_mode_interactions SET lease_owner = ?, lease_expires_at = ?
+			WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND retry_at <= ? AND lease_expires_at <= ?`,
+			owner, now.Add(lease).UnixNano(), appID, envelopeID, now.UnixNano(), now.UnixNano())
+		if err != nil {
+			return err
+		}
+		changed, err := result.RowsAffected()
+		if err != nil || changed != 1 {
+			return err
+		}
+		claimed, err = scanSocketModeInteraction(tx.QueryRowContext(ctx, socketModeInteractionSelect+` WHERE i.app_id = ? AND i.envelope_id = ?`, appID, envelopeID))
+		if err != nil {
+			return err
+		}
+		found = true
+		return tx.Commit()
+	})
+	return claimed, found, err
+}
+
+func (s *Store) AckSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner string) error {
+	now := time.Now().UTC().UnixNano()
+	result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_interactions SET acknowledged_at = ?, lease_owner = '', lease_expires_at = 0
+		WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`, now, appID, envelopeID, owner, now)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	return nil
+}
+
+func (s *Store) ReleaseSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner, reason string, retryAt time.Time) error {
+	if strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+		return store.InvalidArgument("invalid Socket Mode interaction release")
+	}
+	now := time.Now().UTC().UnixNano()
+	result, err := s.db.ExecContext(ctx, `UPDATE socket_mode_interactions SET lease_owner = '', lease_expires_at = 0,
+		retry_at = ?, retry_count = retry_count + 1, retry_reason = ?
+		WHERE app_id = ? AND envelope_id = ? AND acknowledged_at = 0 AND lease_owner = ? AND lease_expires_at > ?`,
+		retryAt.UTC().UnixNano(), strings.TrimSpace(reason), appID, envelopeID, owner, now)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	return nil
 }
 
 func (s *Store) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
@@ -5592,7 +6268,7 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 		_ = tx.Rollback()
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls, text_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.Text, blocks, attachments, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text)); err != nil {
+	if _, err = tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text)); err != nil {
 		_ = tx.Rollback()
 		// A duplicate identifier is ErrAlreadyExists and a missing conversation,
 		// author or workspace is ErrNotFound; neither may reach the caller as a raw
@@ -5607,8 +6283,237 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 		}
 		return classified
 	}
+	if err := insertMessageFiles(ctx, tx, message); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		_ = tx.Rollback()
+		return err
+	}
+	return tx.Commit()
+}
+
+func insertMessageFiles(ctx context.Context, tx *sql.Tx, message domain.Message) error {
+	seen := make(map[domain.FileID]struct{}, len(message.Files))
+	for position, file := range message.Files {
+		if file.ID == "" {
+			return store.InvalidArgument("message file id is required")
+		}
+		if _, duplicate := seen[file.ID]; duplicate {
+			return store.InvalidArgument("message file ids must be unique")
+		}
+		seen[file.ID] = struct{}{}
+		var workspace domain.WorkspaceID
+		var deleted int
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, deleted FROM files WHERE id = ?`, file.ID).Scan(&workspace, &deleted); errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if workspace != message.WorkspaceID || deleted != 0 {
+			return store.ErrNotFound
+		}
+		var shared int
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM file_shares WHERE file_id = ? AND conversation_id = ?`, file.ID, message.Conversation).Scan(&shared); errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO message_files(message_id, file_id, position) VALUES (?, ?, ?)`, message.ID, file.ID, position); err != nil {
+			return classify(err)
+		}
+	}
+	return nil
+}
+
+func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Message, event events.Event) error {
+	message.CreatedAt = domain.MessageInstant(message.CreatedAt)
+	blocks, err := domain.NormalizeBlocks([]byte(message.Blocks))
+	if err != nil {
+		return err
+	}
+	attachments, err := domain.NormalizeAttachments([]byte(message.Attachments))
+	if err != nil {
+		return err
+	}
+	if attachments == "" {
+		attachments = "[]"
+	}
+	unfurls, err := encodeUnfurls(message.Unfurls)
+	if err != nil {
+		return err
+	}
+	stored := domain.NewStoredTime(message.CreatedAt)
+	var owner domain.MessageID
+	switch err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE conversation = ? AND created_at = ?`, message.Conversation, stored).Scan(&owner); {
+	case err == nil:
+		if owner == message.ID {
+			return store.ErrAlreadyExists
+		}
+		return store.ErrMessageTimestampTaken
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+		message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text)); err != nil {
+		return classify(err)
+	}
+	if err := insertMessageFiles(ctx, tx, message); err != nil {
+		return err
+	}
+	return insertOutbox(ctx, tx, event)
+}
+
+func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
+	if len(fileIDs) == 0 {
+		return store.InvalidArgument("a file share message requires a file")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	message.Files = make([]domain.File, len(fileIDs))
+	for index, fileID := range fileIDs {
+		var workspace domain.WorkspaceID
+		var deleted int
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, deleted FROM files WHERE id = ?`, fileID).Scan(&workspace, &deleted); errors.Is(err, sql.ErrNoRows) {
+			return store.ErrNotFound
+		} else if err != nil {
+			return err
+		}
+		if workspace != message.WorkspaceID || deleted != 0 {
+			return store.ErrNotFound
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id) VALUES (?, ?) ON CONFLICT(file_id, conversation_id) DO NOTHING`, fileID, message.Conversation); err != nil {
+			return classify(err)
+		}
+		message.Files[index].ID = fileID
+	}
+	if err := insertFileShareMessage(ctx, tx, message, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateEphemeralMessage(ctx context.Context, value domain.EphemeralMessage, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.Conversation == "" || value.AuthorID == "" || value.RecipientID == "" || value.CreatedAt.IsZero() || value.Timestamp == "" {
+		return store.InvalidArgument("invalid ephemeral message")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO ephemeral_messages(id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.Conversation, value.AuthorID, value.AppID, value.RecipientID, value.Text, value.Blocks, value.Attachments, value.Timestamp, domain.NewStoredTime(value.CreatedAt)); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListEphemeralMessages(ctx context.Context, workspaceID domain.WorkspaceID, recipientID domain.UserID, conversationID domain.ConversationID, limit int) ([]domain.EphemeralMessage, error) {
+	if workspaceID == "" || recipientID == "" || conversationID == "" || limit <= 0 || limit > 1000 {
+		return nil, store.InvalidArgument("invalid ephemeral message page")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at
+		FROM ephemeral_messages WHERE workspace_id = ? AND recipient_id = ? AND conversation_id = ?
+		ORDER BY created_at DESC, id DESC LIMIT ?`, workspaceID, recipientID, conversationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]domain.EphemeralMessage, 0, limit)
+	for rows.Next() {
+		var value domain.EphemeralMessage
+		var createdAt string
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.RecipientID, &value.Text, &value.Blocks, &value.Attachments, &value.Timestamp, &createdAt); err != nil {
+			return nil, err
+		}
+		value.CreatedAt, err = domain.ParseStoredTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.Reverse(result)
+	return result, nil
+}
+
+func scanEphemeralMessage(scanner interface{ Scan(...any) error }) (domain.EphemeralMessage, error) {
+	var value domain.EphemeralMessage
+	var createdAt string
+	if err := scanner.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.RecipientID, &value.Text, &value.Blocks, &value.Attachments, &value.Timestamp, &createdAt); err != nil {
+		return domain.EphemeralMessage{}, translateNotFound(err)
+	}
+	parsed, err := domain.ParseStoredTime(createdAt)
+	if err != nil {
+		return domain.EphemeralMessage{}, err
+	}
+	value.CreatedAt = parsed
+	return value, nil
+}
+
+func (s *Store) GetEphemeralMessage(ctx context.Context, workspaceID domain.WorkspaceID, recipientID domain.UserID, id domain.MessageID) (domain.EphemeralMessage, error) {
+	if workspaceID == "" || recipientID == "" || id == "" {
+		return domain.EphemeralMessage{}, store.InvalidArgument("invalid ephemeral message key")
+	}
+	return scanEphemeralMessage(s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation_id, author_id, app_id, recipient_id, text, blocks, attachments, timestamp, created_at
+		FROM ephemeral_messages WHERE workspace_id = ? AND recipient_id = ? AND id = ?`, workspaceID, recipientID, id))
+}
+
+func (s *Store) UpdateEphemeralMessage(ctx context.Context, value domain.EphemeralMessage, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.Conversation == "" || value.AuthorID == "" || value.RecipientID == "" || value.CreatedAt.IsZero() || value.Timestamp == "" {
+		return store.InvalidArgument("invalid ephemeral message")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE ephemeral_messages SET text = ?, blocks = ?, attachments = ?
+		WHERE id = ? AND workspace_id = ? AND recipient_id = ? AND conversation_id = ? AND author_id = ? AND app_id = ? AND timestamp = ? AND created_at = ?`,
+		value.Text, value.Blocks, value.Attachments, value.ID, value.WorkspaceID, value.RecipientID, value.Conversation, value.AuthorID, value.AppID, value.Timestamp, domain.NewStoredTime(value.CreatedAt))
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrConflict
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteEphemeralMessage(ctx context.Context, workspaceID domain.WorkspaceID, recipientID domain.UserID, id domain.MessageID, event events.Event) error {
+	if workspaceID == "" || recipientID == "" || id == "" {
+		return store.InvalidArgument("invalid ephemeral message key")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM ephemeral_messages WHERE workspace_id = ? AND recipient_id = ? AND id = ?`, workspaceID, recipientID, id)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -5635,7 +6540,7 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	var deleted int
 	var stored string
 	var blocks, attachments, unfurls string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(domain.MessageInstant(createdAt))).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &blocks, &attachments, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND created_at = ? ORDER BY id LIMIT 1`, conversation, domain.NewStoredTime(domain.MessageInstant(createdAt))).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.AppID, &message.Text, &blocks, &attachments, &message.Metadata, &message.StreamState, &message.ThreadTimestamp, &stored, &deleted, &unfurls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
@@ -5653,6 +6558,11 @@ func (s *Store) GetMessageByCreatedAt(ctx context.Context, conversation domain.C
 	if err != nil {
 		return domain.Message{}, err
 	}
+	values := []domain.Message{message}
+	if err := s.hydrateMessageFiles(ctx, values); err != nil {
+		return domain.Message{}, err
+	}
+	message = values[0]
 	return message, nil
 }
 
@@ -5681,7 +6591,7 @@ func (s *Store) UpdateMessage(ctx context.Context, message domain.Message, event
 	if message.Deleted {
 		deleted = 1
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, text_folded = ?, blocks = ?, attachments = ?, deleted = ?, unfurls = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, domain.FoldSearchText(message.Text), blocks, attachments, deleted, unfurls, message.ID, message.WorkspaceID, message.Conversation)
+	result, err := tx.ExecContext(ctx, `UPDATE messages SET text = ?, text_folded = ?, blocks = ?, attachments = ?, metadata = ?, stream_state = ?, deleted = ?, unfurls = ? WHERE id = ? AND workspace_id = ? AND conversation = ?`, message.Text, domain.FoldSearchText(message.Text), blocks, attachments, message.Metadata, message.StreamState, deleted, unfurls, message.ID, message.WorkspaceID, message.Conversation)
 	if err != nil {
 		return err
 	}
@@ -5808,7 +6718,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	if err != nil {
 		return domain.UserReactionPage{}, err
 	}
-	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	query := `SELECT m.conversation, m.id, m.workspace_id, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, r.name, r.user_id, r.created_at FROM reactions r JOIN messages m ON m.id = r.message_id JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND r.user_id = ? AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user, user}
 	if after != "" {
 		parts := strings.Split(after, "\x00")
@@ -5830,7 +6740,7 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 		var item domain.UserReaction
 		var deleted int
 		var messageCreated, reactionCreated string
-		if err := rows.Scan(&item.Conversation, &item.Message.ID, &item.Message.WorkspaceID, &item.Message.AuthorID, &item.Message.Text, &item.Message.Blocks, &item.Message.Attachments, &item.Message.ThreadTimestamp, &messageCreated, &deleted, &item.Reaction.Name, &item.Reaction.UserID, &reactionCreated); err != nil {
+		if err := rows.Scan(&item.Conversation, &item.Message.ID, &item.Message.WorkspaceID, &item.Message.AuthorID, &item.Message.AppID, &item.Message.Text, &item.Message.Blocks, &item.Message.Attachments, &item.Message.ThreadTimestamp, &messageCreated, &deleted, &item.Reaction.Name, &item.Reaction.UserID, &reactionCreated); err != nil {
 			return domain.UserReactionPage{}, err
 		}
 		item.Message.Deleted = deleted != 0
@@ -5851,6 +6761,16 @@ func (s *Store) ListUserReactions(ctx context.Context, workspace domain.Workspac
 	hasMore := len(items) > request.Limit
 	if hasMore {
 		items = items[:request.Limit]
+	}
+	messages := make([]domain.Message, len(items))
+	for index := range items {
+		messages[index] = items[index].Message
+	}
+	if err := s.hydrateMessageFiles(ctx, messages); err != nil {
+		return domain.UserReactionPage{}, err
+	}
+	for index := range items {
+		items[index].Message = messages[index]
 	}
 	page := domain.UserReactionPage{Items: items, HasMore: hasMore}
 	if hasMore {
@@ -6020,7 +6940,7 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	if err != nil {
 		return nil, "", false, err
 	}
-	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
+	query := `SELECT s.created_at, m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted FROM stars s JOIN messages m ON m.id = s.message_id WHERE s.user_id = ? AND m.workspace_id = ? AND m.deleted = 0`
 	args := []any{user, workspace}
 	if after != "" {
 		separator := strings.IndexByte(after, 0)
@@ -6043,7 +6963,7 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 		var star domain.Star
 		var starCreated, messageCreated string
 		var deleted int
-		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
+		if err := rows.Scan(&starCreated, &star.Message.ID, &star.Message.WorkspaceID, &star.Message.Conversation, &star.Message.AuthorID, &star.Message.AppID, &star.Message.Text, &star.Message.Blocks, &star.Message.Attachments, &star.Message.ThreadTimestamp, &messageCreated, &deleted); err != nil {
 			return nil, "", false, err
 		}
 		star.UserID = user
@@ -6065,6 +6985,16 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	hasMore := len(values) > request.Limit
 	if hasMore {
 		values = values[:request.Limit]
+	}
+	messages := make([]domain.Message, len(values))
+	for index := range values {
+		messages[index] = values[index].Message
+	}
+	if err := s.hydrateMessageFiles(ctx, messages); err != nil {
+		return nil, "", false, err
+	}
+	for index := range values {
+		values[index].Message = messages[index]
 	}
 	var next domain.Cursor
 	if hasMore {
@@ -7163,7 +8093,7 @@ func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.Extern
 }
 
 func (s *Store) CompleteExternalUpload(ctx context.Context, id domain.ExternalUploadID, file domain.File, channels []domain.ConversationID, event events.Event) error {
-	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event})
+	return s.CompleteExternalUploads(ctx, []domain.ExternalUploadCompletion{{ID: id, Title: file.Title}}, []domain.File{file}, channels, []events.Event{event}, nil, nil)
 }
 
 func (s *Store) SeedFileComment(ctx context.Context, value domain.FileComment) error {
@@ -7649,7 +8579,7 @@ func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Mes
 	var created string
 	var unfurls string
 	var attachments string
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE id = ?`, id).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &attachments, &message.ThreadTimestamp, &created, &deleted, &unfurls)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE id = ?`, id).Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.AppID, &message.Text, &message.Blocks, &attachments, &message.Metadata, &message.StreamState, &message.ThreadTimestamp, &created, &deleted, &unfurls)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Message{}, store.ErrNotFound
 	}
@@ -7666,7 +8596,94 @@ func (s *Store) GetMessage(ctx context.Context, id domain.MessageID) (domain.Mes
 	if err != nil {
 		return domain.Message{}, err
 	}
+	values := []domain.Message{message}
+	if err := s.hydrateMessageFiles(ctx, values); err != nil {
+		return domain.Message{}, err
+	}
+	message = values[0]
 	return message, nil
+}
+
+func (s *Store) hydrateMessageFiles(ctx context.Context, messages []domain.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+	messageIndexes := make(map[domain.MessageID]int, len(messages))
+	arguments := make([]any, 0, len(messages))
+	placeholders := make([]string, 0, len(messages))
+	for index := range messages {
+		messageIndexes[messages[index].ID] = index
+		arguments = append(arguments, messages[index].ID)
+		placeholders = append(placeholders, "?")
+		messages[index].Files = nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT mf.message_id, f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token
+		FROM message_files mf JOIN files f ON f.id = mf.file_id
+		WHERE mf.message_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY mf.message_id, mf.position`, arguments...)
+	if err != nil {
+		return err
+	}
+	type filePosition struct {
+		message int
+		file    int
+	}
+	positions := make(map[domain.FileID][]filePosition)
+	fileIDs := make([]domain.FileID, 0)
+	for rows.Next() {
+		var messageID domain.MessageID
+		var file domain.File
+		var created string
+		var deleted int
+		if err := rows.Scan(&messageID, &file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken); err != nil {
+			rows.Close()
+			return err
+		}
+		file.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		file.Deleted = deleted != 0
+		messageIndex, exists := messageIndexes[messageID]
+		if !exists {
+			rows.Close()
+			return errors.New("message file relationship names an unknown message")
+		}
+		fileIndex := len(messages[messageIndex].Files)
+		messages[messageIndex].Files = append(messages[messageIndex].Files, file)
+		if _, exists := positions[file.ID]; !exists {
+			fileIDs = append(fileIDs, file.ID)
+		}
+		positions[file.ID] = append(positions[file.ID], filePosition{message: messageIndex, file: fileIndex})
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(fileIDs) == 0 {
+		return nil
+	}
+	arguments = arguments[:0]
+	placeholders = placeholders[:0]
+	for _, fileID := range fileIDs {
+		arguments = append(arguments, fileID)
+		placeholders = append(placeholders, "?")
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT file_id, conversation_id FROM file_shares WHERE file_id IN (`+strings.Join(placeholders, ",")+`) ORDER BY file_id, conversation_id`, arguments...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fileID domain.FileID
+		var conversation domain.ConversationID
+		if err := rows.Scan(&fileID, &conversation); err != nil {
+			return err
+		}
+		for _, position := range positions[fileID] {
+			messages[position.message].Files[position.file].SharedChannels = append(messages[position.message].Files[position.file].SharedChannels, conversation)
+		}
+	}
+	return rows.Err()
 }
 
 func (s *Store) GetIdempotentMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, key string) (domain.Message, error) {
@@ -7907,6 +8924,127 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	return result, rows.Err()
 }
 
+func validAppEventSurface(surface string) bool {
+	return surface == "http" || surface == "socket"
+}
+
+func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || lease <= 0 {
+		return events.Record{}, 0, "", false, store.InvalidArgument("app event claim fields are invalid")
+	}
+	var claimed events.Record
+	var retryCount int
+	var retryReason string
+	var found bool
+	err := underContention(ctx, func() error {
+		tx, err := s.db.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		_, err = tx.ExecContext(ctx, `INSERT INTO app_event_cursors(app_id, surface) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM slack_apps a JOIN app_installations i ON i.app_id = a.id AND i.enabled = 1 WHERE a.id = ? AND a.deleted = 0) ON CONFLICT(app_id, surface) DO NOTHING`, appID, surface, appID)
+		if err != nil {
+			return classify(err)
+		}
+		var sequence, leasedSequence uint64
+		var leaseOwner string
+		var leaseUntil, retryAt int64
+		err = tx.QueryRowContext(ctx, `SELECT sequence, leased_sequence, lease_owner, lease_until, retry_at, retry_count, retry_reason FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).
+			Scan(&sequence, &leasedSequence, &leaseOwner, &leaseUntil, &retryAt, &retryCount, &retryReason)
+		if err != nil {
+			return translateNotFound(err)
+		}
+		now := time.Now().UTC()
+		if (leasedSequence != 0 && leaseUntil > now.UnixNano()) || retryAt > now.UnixNano() {
+			return tx.Commit()
+		}
+		predicate, excluded := internalTopicPredicate("o.topic")
+		args := append([]any{appID, sequence}, excluded...)
+		var created string
+		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at
+			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND i.enabled = 1
+			WHERE o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
+			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &created)
+		if errors.Is(err, sql.ErrNoRows) {
+			return tx.Commit()
+		}
+		if err != nil {
+			return err
+		}
+		claimed.Event.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			return err
+		}
+		update, err := tx.ExecContext(ctx, `UPDATE app_event_cursors SET leased_sequence = ?, lease_owner = ?, lease_until = ? WHERE app_id = ? AND surface = ? AND sequence = ? AND (leased_sequence = 0 OR lease_until <= ?) AND retry_at <= ?`,
+			claimed.Sequence, owner, now.Add(lease).UnixNano(), appID, surface, sequence, now.UnixNano(), now.UnixNano())
+		if err != nil {
+			return err
+		}
+		changed, err := update.RowsAffected()
+		if err != nil {
+			return err
+		}
+		found = changed == 1
+		return tx.Commit()
+	})
+	if err != nil {
+		return events.Record{}, 0, "", false, err
+	}
+	return claimed, retryCount, retryReason, found, nil
+}
+
+func (s *Store) AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 {
+		return store.InvalidArgument("app event acknowledgement fields are invalid")
+	}
+	now := time.Now().UTC().UnixNano()
+	result, err := s.db.ExecContext(ctx, `UPDATE app_event_cursors SET sequence = ?, leased_sequence = 0, lease_owner = '', lease_until = 0, retry_at = 0, retry_count = 0, retry_reason = '' WHERE app_id = ? AND surface = ? AND leased_sequence = ? AND lease_owner = ? AND lease_until > ?`, sequence, appID, surface, sequence, owner, now)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 1 {
+		return nil
+	}
+	return s.appEventLeaseError(ctx, appID, surface, owner, sequence, now)
+}
+
+func (s *Store) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
+	if appID == "" || !validAppEventSurface(surface) || strings.TrimSpace(owner) == "" || sequence == 0 || strings.TrimSpace(reason) == "" || retryAt.IsZero() {
+		return store.InvalidArgument("app event release fields are invalid")
+	}
+	now := time.Now().UTC().UnixNano()
+	result, err := s.db.ExecContext(ctx, `UPDATE app_event_cursors SET leased_sequence = 0, lease_owner = '', lease_until = 0, retry_at = ?, retry_count = retry_count + 1, retry_reason = ? WHERE app_id = ? AND surface = ? AND leased_sequence = ? AND lease_owner = ? AND lease_until > ?`, retryAt.UTC().UnixNano(), strings.TrimSpace(reason), appID, surface, sequence, owner, now)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 1 {
+		return nil
+	}
+	return s.appEventLeaseError(ctx, appID, surface, owner, sequence, now)
+}
+
+func (s *Store) appEventLeaseError(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, now int64) error {
+	var leasedSequence uint64
+	var leaseOwner string
+	var leaseUntil int64
+	err := s.db.QueryRowContext(ctx, `SELECT leased_sequence, lease_owner, lease_until FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).Scan(&leasedSequence, &leaseOwner, &leaseUntil)
+	if err := translateNotFound(err); err != nil {
+		return err
+	}
+	if leasedSequence == sequence && leaseOwner == owner && leaseUntil <= now {
+		return store.ErrLeaseConflict
+	}
+	return store.ErrLeaseConflict
+}
+
 // ListMessages pages one conversation in either direction; see the port for why
 // the descending direction exists.
 //
@@ -7920,7 +9058,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	if err := store.CheckPage(request); err != nil {
 		return domain.MessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND deleted = 0`
+	query := `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND deleted = 0`
 	args := []any{conversation}
 	if request.Cursor != "" {
 		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
@@ -7951,7 +9089,7 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 		var value domain.Message
 		var created, attachments, unfurls string
 		var deleted int
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &attachments, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.Text, &value.Blocks, &attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
 		value.CreatedAt, err = domain.ParseStoredTime(created)
@@ -7973,6 +9111,9 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 	if hasMore {
 		values = values[:request.Limit]
 	}
+	if err := s.hydrateMessageFiles(ctx, values); err != nil {
+		return domain.MessagePage{}, err
+	}
 	page := domain.MessagePage{Messages: values, HasMore: hasMore}
 	if hasMore {
 		cursor, err := domain.NewMessageCursor(values[len(values)-1])
@@ -7992,13 +9133,13 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if len(terms) == 0 {
 		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
-	querySQL := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, m.unfurls FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
+	querySQL := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user}
 	for _, term := range terms {
 		querySQL += ` AND m.text_folded LIKE ? ESCAPE '\'`
 		args = append(args, "%"+escapeLikeTerm(term)+"%")
 	}
-	countSQL := strings.Replace(querySQL, `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.text, m.blocks, m.attachments, m.thread_timestamp, m.created_at, m.deleted, m.unfurls`, `SELECT COUNT(*)`, 1)
+	countSQL := strings.Replace(querySQL, `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls`, `SELECT COUNT(*)`, 1)
 	var total int
 	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return domain.MessagePage{}, err
@@ -8024,7 +9165,7 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 		var message domain.Message
 		var created, attachments, unfurls string
 		var deleted int
-		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.Text, &message.Blocks, &attachments, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
+		if err := rows.Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID, &message.AppID, &message.Text, &message.Blocks, &attachments, &message.Metadata, &message.StreamState, &message.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
 		message.CreatedAt, err = domain.ParseStoredTime(created)
@@ -8045,6 +9186,9 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	hasMore := len(values) > request.Limit
 	if hasMore {
 		values = values[:request.Limit]
+	}
+	if err := s.hydrateMessageFiles(ctx, values); err != nil {
+		return domain.MessagePage{}, err
 	}
 	page := domain.MessagePage{Messages: values, HasMore: hasMore, Total: total}
 	if hasMore {
@@ -8378,7 +9522,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
-	query := `SELECT id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND deleted = 0 AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
+	query := `SELECT id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls FROM messages WHERE conversation = ? AND deleted = 0 AND ((created_at = ? AND thread_timestamp = '') OR thread_timestamp = ?)`
 	created := domain.NewStoredTime(createdAt)
 	args := []any{conversation, created, string(timestamp)}
 	if request.Cursor != "" {
@@ -8407,7 +9551,7 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 		var stored string
 		var deleted int
 		var attachments, unfurls string
-		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.Text, &value.Blocks, &attachments, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.Text, &value.Blocks, &attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp, &stored, &deleted, &unfurls); err != nil {
 			return domain.MessagePage{}, err
 		}
 		value.CreatedAt, err = domain.ParseStoredTime(stored)
@@ -8428,6 +9572,9 @@ func (s *Store) ListThreadMessages(ctx context.Context, conversation domain.Conv
 	hasMore := len(values) > request.Limit
 	if hasMore {
 		values = values[:request.Limit]
+	}
+	if err := s.hydrateMessageFiles(ctx, values); err != nil {
+		return domain.MessagePage{}, err
 	}
 	page := domain.MessagePage{Messages: values, HasMore: hasMore}
 	if hasMore {
@@ -8548,8 +9695,8 @@ func (s *Store) listFileShares(ctx context.Context, workspace domain.WorkspaceID
 	return values, nil
 }
 
-func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event) error {
-	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) {
+func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
+	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -8590,6 +9737,11 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 			}
 		}
 		if err := insertOutbox(ctx, tx, emitted[index]); err != nil {
+			return err
+		}
+	}
+	for index, message := range messages {
+		if err := insertFileShareMessage(ctx, tx, message, messageEvents[index]); err != nil {
 			return err
 		}
 	}

@@ -13,6 +13,7 @@ and the application fails at startup when it is missing or invalid:
   -chat-mode local \
   -store postgresql \
   -db 'postgres://sameoldchat:secret@db.example.com:5432/sameoldchat?sslmode=verify-full' \
+  -app-credential-key-hex "$SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX" \
   -api-token "$SAMEOLDCHAT_API_TOKEN" \
   -session-token "$SAMEOLDCHAT_SESSION_TOKEN"
 ```

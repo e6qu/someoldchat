@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,41 @@ import (
 func testHandler() http.Handler {
 	handler, _ := testHandlerWithStore()
 	return handler
+}
+
+func TestBlocksValidateMatchesCurrentSlackResponseShapes(t *testing.T) {
+	call := func(body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/blocks.validate", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer token")
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		testHandler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	valid := call(`{"blocks":[{"type":"section","text":{"type":"plain_text","text":"Hello world"}}]}`)
+	if valid["ok"] != true {
+		t.Fatalf("valid=%v", valid)
+	}
+	invalid := call(`{"blocks":[{"type":"section","text":{"type":"invalid","text":"Hello world"}}]}`)
+	errors, _ := invalid["errors"].([]any)
+	problem, _ := errors[0].(map[string]any)
+	if invalid["ok"] != false || invalid["error"] != "invalid_blocks" ||
+		problem["pointer"] != "/0/text/type" || problem["code"] != "failed_constraint" {
+		t.Fatalf("invalid=%v", invalid)
+	}
+	ambiguous := call(`{"blocks":[],"message":{"blocks":[]}}`)
+	metadata, _ := ambiguous["response_metadata"].(map[string]any)
+	if ambiguous["error"] != "invalid_arguments" || metadata["messages"] == nil {
+		t.Fatalf("ambiguous=%v", ambiguous)
+	}
 }
 
 func TestAppsConnectionsOpenUsesAppTokenAndCreatesSingleUseConnection(t *testing.T) {
@@ -128,7 +164,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -162,6 +198,22 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	if err := s.SeedWorkspaceRole("T1", "U1", domain.WorkspaceRoleAdmin); err != nil {
 		panic(err)
 	}
+	now := time.Now().UTC()
+	if err := s.CreateApp(context.Background(), domain.App{
+		ID: "A1", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Fixture app", ClientID: "fixture-app-client",
+		SigningSecretHash: "fixture-signing-hash", SigningSecretCiphertext: "fixture-signing-ciphertext",
+		VerificationTokenHash: "fixture-verification-hash", VerificationTokenCiphertext: "fixture-verification-ciphertext",
+		ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "A1", Version: 1,
+		Manifest:  `{"display_information":{"name":"Fixture app"},"features":{"app_home":{"home_tab_enabled":true,"messages_tab_enabled":true}}}`,
+		CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "fixture-app-client", SecretHash: "fixture-client-secret-hash", AppID: "A1"}); err != nil {
+		panic(err)
+	}
+	if err := s.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		panic(err)
+	}
 	if err := s.CreateBot(context.Background(), domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "U2", Name: "testbot", UpdatedAt: time.Now().UTC()}); err != nil {
 		panic(err)
 	}
@@ -184,7 +236,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	s.SeedConversationMember("C1", "U1")
 	s.SeedConversationMember("C1", "U2")
 	s.SeedConversationMember("C2", "U1")
-	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes()})
+	s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", Scopes: auth.AllScopes()})
 	if err := s.CreateOAuthClient(context.Background(), domain.OAuthClient{ID: "oauth-client", SecretHash: domain.HashToken("oauth-secret"), AppID: "A1"}); err != nil {
 		panic(err)
 	}
@@ -203,7 +255,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 	}
 	var authenticator auth.Authenticator
 	if stored {
-		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", Scopes: names}); err != nil {
+		if err := s.SeedToken(context.Background(), "token", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", Scopes: names}); err != nil {
 			panic(err)
 		}
 		value, err := auth.NewStored(s)
@@ -212,7 +264,7 @@ func testFixture(stored bool, scopes ...auth.Scope) (http.Handler, *memory.Store
 		}
 		authenticator = value
 	} else {
-		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", Scopes: granted})
+		value, err := auth.NewStatic("token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", Scopes: granted})
 		if err != nil {
 			panic(err)
 		}
@@ -412,13 +464,16 @@ func TestOAuthV2AccessHTTPExchangesCode(t *testing.T) {
 		BotUserID   string `json:"bot_user_id"`
 		TokenType   string `json:"token_type"`
 		AuthedUser  struct {
-			ID string `json:"id"`
+			ID          string `json:"id"`
+			AccessToken string `json:"access_token"`
+			Scope       string `json:"scope"`
+			TokenType   string `json:"token_type"`
 		} `json:"authed_user"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || !strings.HasPrefix(body.AccessToken, "xoxb-") || body.AppID != "A1" || body.BotUserID != "U2" || body.TokenType != "bot" || body.AuthedUser.ID != "U1" {
+	if !body.OK || !strings.HasPrefix(body.AccessToken, "xoxb-") || body.AppID != "A1" || body.BotUserID != "U2" || body.TokenType != "bot" || body.AuthedUser.ID != "U1" || !strings.HasPrefix(body.AuthedUser.AccessToken, "xoxp-") || body.AuthedUser.Scope == "" || body.AuthedUser.TokenType != "user" {
 		t.Fatalf("unexpected body: %s", response.Body)
 	}
 }
@@ -492,6 +547,99 @@ func TestBotTokenIdentityIsReportedByAuthAndAuthorizations(t *testing.T) {
 				t.Errorf("%s body=%s, want %s", path, response.Body, fragment)
 			}
 		}
+	}
+}
+
+func TestChatStreamMethodsFollowOfficialBotTokenLifecycle(t *testing.T) {
+	ctx := context.Background()
+	repository := memory.New()
+	repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	repository.SeedUser(domain.User{ID: "UBOT", WorkspaceID: "T1", Name: "assistant"})
+	repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	repository.SeedConversationMember("C1", "UBOT")
+	repository.SeedConversationMember("C1", "U1")
+	repository.SeedToken(ctx, "xoxb-stream", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "UBOT", AppID: "A1", BotID: "B1", TokenType: "bot",
+		Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	repository.SeedToken(ctx, "xoxp-user", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user",
+		Scopes: []string{string(auth.ScopeChatWrite)},
+	})
+	messages := service.Messages{Store: repository}
+	parent, err := messages.Post(ctx, "T1", "U1", "C1", "Question", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticator, err := auth.NewStored(repository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(messages, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	call := func(token, path, body string) map[string]any {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer "+token)
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+		}
+		var result map[string]any
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+
+	refused := call("xoxp-user", "/api/chat.startStream", `{"channel":"C1","thread_ts":"`+string(domain.NewMessageTimestamp(parent.CreatedAt))+`"}`)
+	if refused["ok"] != false || refused["error"] != "not_allowed_token_type" {
+		t.Fatalf("user-token response=%v", refused)
+	}
+	started := call("xoxb-stream", "/api/chat.startStream", `{
+		"channel":"C1","thread_ts":"`+string(domain.NewMessageTimestamp(parent.CreatedAt))+`",
+		"recipient_team_id":"T1","recipient_user_id":"U1","markdown_text":"**Hello",
+		"task_display_mode":"dense","username":"Answer bot","icon_emoji":":speech_balloon:"
+	}`)
+	if started["ok"] != true || started["channel"] != "C1" || started["ts"] == "" {
+		t.Fatalf("start response=%v", started)
+	}
+	timestamp := started["ts"].(string)
+	appended := call("xoxb-stream", "/api/chat.appendStream", `{
+		"channel":"C1","ts":"`+timestamp+`","chunks":[
+			{"type":"markdown_text","text":" world**"},
+			{"type":"task_update","id":"answer","title":"Answer","status":"complete"}
+		]
+	}`)
+	if appended["ok"] != true || appended["ts"] != timestamp {
+		t.Fatalf("append response=%v", appended)
+	}
+	stopped := call("xoxb-stream", "/api/chat.stopStream", `{
+		"channel":"C1","ts":"`+timestamp+`","markdown_text":" Done.",
+		"blocks":[{"type":"context","elements":[{"type":"plain_text","text":"Final"}]}],
+		"metadata":{"event_type":"answer","event_payload":{"id":"R1"}}
+	}`)
+	message, _ := stopped["message"].(map[string]any)
+	metadata, _ := message["metadata"].(map[string]any)
+	if stopped["ok"] != true || stopped["ts"] != timestamp ||
+		message["text"] != "**Hello world** Done." || message["bot_id"] != "B1" ||
+		message["username"] != "Answer bot" || metadata["event_type"] != "answer" {
+		t.Fatalf("stop response=%v", stopped)
+	}
+	icons, _ := message["icons"].(map[string]any)
+	if icons["emoji"] != ":speech_balloon:" {
+		t.Fatalf("stop icons=%v", icons)
+	}
+	afterStop := call("xoxb-stream", "/api/chat.appendStream", `{"channel":"C1","ts":"`+timestamp+`","markdown_text":"late"}`)
+	if afterStop["ok"] != false || afterStop["error"] != "message_not_in_streaming_state" {
+		t.Fatalf("append after stop=%v", afterStop)
 	}
 }
 
@@ -577,7 +725,9 @@ func TestIntegrationLogsHTTPExposeActorAttribution(t *testing.T) {
 }
 
 func TestViewsHTTPExposeDurableOpenPushUpdateAndPublish(t *testing.T) {
-	handler := testHandler()
+	handler, store := testHandlerWithStore()
+	seedHTTPInteractionTrigger(t, store, "trigger-1")
+	seedHTTPInteractionTrigger(t, store, "trigger-2")
 	form := func(path string, values url.Values) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(values.Encode()))
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -586,7 +736,7 @@ func TestViewsHTTPExposeDurableOpenPushUpdateAndPublish(t *testing.T) {
 		handler.ServeHTTP(result, req)
 		return result
 	}
-	opened := form("/api/views.open", url.Values{"trigger_id": {"trigger-1"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"First"}}`}})
+	opened := form("/api/views.open", url.Values{"trigger_id": {"trigger-1"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"First"},"blocks":[]}`}})
 	if opened.Code != http.StatusOK {
 		t.Fatalf("open status=%d body=%s", opened.Code, opened.Body)
 	}
@@ -599,17 +749,35 @@ func TestViewsHTTPExposeDurableOpenPushUpdateAndPublish(t *testing.T) {
 	if err := json.Unmarshal(opened.Body.Bytes(), &openedBody); err != nil || openedBody.View.ID == "" || openedBody.View.Hash == "" {
 		t.Fatalf("open body=%s err=%v", opened.Body, err)
 	}
-	pushed := form("/api/views.push", url.Values{"trigger_id": {"trigger-2"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Second"}}`}})
+	pushed := form("/api/views.push", url.Values{"trigger_id": {"trigger-2"}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Second"},"blocks":[]}`}})
 	if pushed.Code != http.StatusOK || !strings.Contains(pushed.Body.String(), openedBody.View.ID) {
 		t.Fatalf("push status=%d body=%s", pushed.Code, pushed.Body)
 	}
-	updated := form("/api/views.update", url.Values{"view_id": {openedBody.View.ID}, "hash": {openedBody.View.Hash}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Updated"}}`}})
+	updated := form("/api/views.update", url.Values{"view_id": {openedBody.View.ID}, "hash": {openedBody.View.Hash}, "view": {`{"type":"modal","title":{"type":"plain_text","text":"Updated"},"blocks":[]}`}})
 	if updated.Code != http.StatusOK || strings.Contains(updated.Body.String(), openedBody.View.Hash) {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body)
 	}
 	published := form("/api/views.publish", url.Values{"user_id": {"U2"}, "view": {`{"type":"home","blocks":[]}`}})
 	if published.Code != http.StatusOK || !strings.Contains(published.Body.String(), `"type":"home"`) {
 		t.Fatalf("publish status=%d body=%s", published.Code, published.Body)
+	}
+}
+
+func seedHTTPInteractionTrigger(t *testing.T, target *memory.Store, plaintext string) {
+	t.Helper()
+	now := time.Now().UTC()
+	err := target.CreateAppInteractionCapabilities(context.Background(),
+		domain.AppTrigger{
+			TokenHash: domain.HashToken(plaintext), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			CreatedAt: now, ExpiresAt: now.Add(3 * time.Second),
+		},
+		domain.AppResponseURL{
+			TokenHash: domain.HashToken("response-" + plaintext), AppID: "A1", WorkspaceID: "T1", UserID: "U1",
+			ConversationID: "C1", CreatedAt: now, ExpiresAt: now.Add(30 * time.Minute), UsesRemaining: 5,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -683,7 +851,8 @@ func TestFunctionsCompleteErrorHTTPValidatesAndCompletes(t *testing.T) {
 }
 
 func TestDialogOpenHTTP(t *testing.T) {
-	handler := testHandler()
+	handler, store := testHandlerWithStore()
+	seedHTTPInteractionTrigger(t, store, "trigger-http")
 	values := url.Values{"trigger_id": {"trigger-http"}, "dialog": {`{"callback_id":"callback","title":"Title","elements":[{"type":"text"}]}`}}
 	req := httptest.NewRequest(http.MethodPost, "/api/dialog.open", strings.NewReader(values.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -1351,7 +1520,7 @@ func TestAdminConversationMutationsAreRegistered(t *testing.T) {
 	}{
 		{endpoint: "admin.conversations.rename", body: "channel_id=C1&name=renamed"},
 		{endpoint: "admin.conversations.archive", body: "channel_id=C1"},
-		{endpoint: "admin.conversations.unarchive", body: "channel_id=C1"},
+		{endpoint: "admin.conversations.unarchive", body: "channel_id=C2"},
 	} {
 		handler := testHandler()
 		request := httptest.NewRequest(http.MethodPost, "/api/"+test.endpoint, strings.NewReader(test.body))
@@ -1663,6 +1832,18 @@ func TestPostMessageForm(t *testing.T) {
 	}
 }
 
+func TestPostMessageRejectsArchivedChannelWithSlackCode(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C2&text=hello"))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	testHandler().ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"is_archived"`) {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body)
+	}
+}
+
 func TestChatUnfurlPersistsMetadata(t *testing.T) {
 	handler := testHandler()
 	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=link"))
@@ -1902,6 +2083,24 @@ func TestSearchMessages(t *testing.T) {
 	}
 	if channel, ok := payload.Messages.Matches[0]["channel"].(map[string]any); !ok || channel["id"] != "C1" {
 		t.Fatalf("search match omitted its channel object: %s", result.Body)
+	}
+}
+
+func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {
+	created := time.Unix(1_700_000_000, 0).UTC()
+	response := messageResponse(domain.Message{
+		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created,
+		Files: []domain.File{{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "report.txt", Title: "Report", MIMEType: "text/plain", Size: 12, CreatedAt: created, SharedChannels: []domain.ConversationID{"C1"}}},
+	})
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(encoded)
+	for _, expected := range []string{`"subtype":"file_share"`, `"upload":true`, `"files":[`, `"id":"F1"`, `"mode":"hosted"`, `"url_private":"/api/files/F1"`, `"channels":["C1"]`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("file share response is missing %s: %s", expected, body)
+		}
 	}
 }
 
@@ -2332,31 +2531,34 @@ func TestUsersSetPhotoAcceptsOfficialMultipartField(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreatePart(textproto.MIMEHeader{
-		"Content-Disposition": {`form-data; name="image"; filename="photo.png"`},
-		"Content-Type":        {"image/png"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// A real PNG signature: the profile service sniffs the bytes and refuses a
-	// stream whose content disagrees with the declared type, which is the upload
-	// half of the stored-XSS repair. The field name is what this test is about.
-	if _, err := part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/api/users.setPhoto", &body)
-	req.Header.Set("Authorization", "Bearer token")
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	result := httptest.NewRecorder()
-	mux.ServeHTTP(result, req)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
-		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	for _, contentType := range []string{"image/png", "application/octet-stream"} {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreatePart(textproto.MIMEHeader{
+			"Content-Disposition": {`form-data; name="image"; filename="photo.png"`},
+			"Content-Type":        {contentType},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// A real PNG signature: the profile service sniffs the bytes and refuses a
+		// stream whose content disagrees with the declared type, which is the upload
+		// half of the stored-XSS repair. The octet-stream case is what Web API 8
+		// emits for a Buffer.
+		if _, err := part.Write([]byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/users.setPhoto", &body)
+		req.Header.Set("Authorization", "Bearer token")
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		result := httptest.NewRecorder()
+		mux.ServeHTTP(result, req)
+		if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"ok":true`) {
+			t.Fatalf("content-type=%s status=%d body=%s", contentType, result.Code, result.Body)
+		}
 	}
 }
 
@@ -3050,6 +3252,8 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
 	store.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
 	store.SeedConversationMember("C1", "U1")
+	store.SeedConversation(domain.Conversation{ID: "C2", WorkspaceID: "T1", Name: "archive", Archived: true})
+	store.SeedConversationMember("C2", "U1")
 	objects, err := blob.NewFilesystem(t.TempDir(), 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -3064,7 +3268,7 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	handler.Register(mux)
-	create := func(name string, content string) string {
+	create := func(name string, content string, sdkMultipart bool) string {
 		request := httptest.NewRequest(http.MethodPost, "/api/files.getUploadURLExternal", strings.NewReader(url.Values{"filename": {name}, "length": {strconv.Itoa(len(content))}}.Encode()))
 		request.Header.Set("Authorization", "Bearer token")
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -3080,8 +3284,26 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		upload := httptest.NewRequest(http.MethodPost, body.UploadURL, strings.NewReader(content))
-		upload.Header.Set("Content-Length", strconv.Itoa(len(content)))
+		var upload *http.Request
+		if sdkMultipart {
+			var encoded bytes.Buffer
+			writer := multipart.NewWriter(&encoded)
+			part, err := writer.CreateFormFile("body", "file")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := io.WriteString(part, content); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			upload = httptest.NewRequest(http.MethodPost, body.UploadURL, &encoded)
+			upload.Header.Set("Content-Type", writer.FormDataContentType())
+		} else {
+			upload = httptest.NewRequest(http.MethodPost, body.UploadURL, strings.NewReader(content))
+			upload.Header.Set("Content-Length", strconv.Itoa(len(content)))
+		}
 		uploadResponse := httptest.NewRecorder()
 		mux.ServeHTTP(uploadResponse, upload)
 		if uploadResponse.Code != http.StatusOK {
@@ -3089,8 +3311,8 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 		}
 		return body.FileID
 	}
-	first := create("first.txt", "first")
-	second := create("second.txt", "second")
+	first := create("first.txt", "first", true)
+	second := create("second.txt", "second", false)
 	filesJSON, err := json.Marshal([]map[string]string{{"id": first, "title": "First"}, {"id": second, "title": "Second"}})
 	if err != nil {
 		t.Fatal(err)
@@ -3113,5 +3335,19 @@ func TestExternalUploadHTTPBatchCompletion(t *testing.T) {
 	}
 	if !result.OK || len(result.Files) != 2 || result.Files[0]["title"] != "First" || result.Files[1]["title"] != "Second" {
 		t.Fatalf("result=%+v", result)
+	}
+
+	archivedFile := create("archived.txt", "archived", false)
+	archivedFilesJSON, err := json.Marshal([]map[string]string{{"id": archivedFile, "title": "Archived"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archived := httptest.NewRequest(http.MethodPost, "/api/files.completeUploadExternal", strings.NewReader(url.Values{"files": {string(archivedFilesJSON)}, "channel_id": {"C2"}}.Encode()))
+	archived.Header.Set("Authorization", "Bearer token")
+	archived.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	refused := httptest.NewRecorder()
+	mux.ServeHTTP(refused, archived)
+	if refused.Code != http.StatusOK || !strings.Contains(refused.Body.String(), `"error":"posting_to_channel_denied"`) {
+		t.Fatalf("archived completion status=%d body=%s", refused.Code, refused.Body)
 	}
 }

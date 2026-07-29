@@ -21,6 +21,8 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/outbox"
 	"github.com/sameoldchat/sameoldchat/internal/scheduler"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
+	"github.com/sameoldchat/sameoldchat/internal/slackapp"
 )
 
 // exitConfiguration and exitRuntime separate "the operator gave us something
@@ -49,11 +51,12 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	dqliteAddress := flags.String("dqlite-address", "", "dqlite node address")
 	dqliteCluster := flags.String("dqlite-cluster", "", "comma-separated dqlite cluster addresses")
 	dqliteDatabase := flags.String("dqlite-database", "", "dqlite database name")
-	workspace := flags.String("workspace", "", "workspace ID (required)")
-	deliveryURL := flags.String("delivery-url", "", "HTTP event delivery URL (required)")
+	workspace := flags.String("workspace", "", "workspace ID (required for record delivery)")
+	deliveryURL := flags.String("delivery-url", "", "HTTP event delivery URL (required for record delivery)")
 	deliveryFormat := flags.String("delivery-format", "", "delivery format: record or slack-events (required)")
-	appID := flags.String("app-id", "", "Slack application ID (required for and specific to slack-events delivery)")
-	signingSecret := flags.String("signing-secret", "", "Slack signing secret (required for and specific to slack-events delivery)")
+	flags.String("app-id", "", "deprecated manual Slack application ID; manifest-driven slack-events delivery rejects it")
+	flags.String("signing-secret", "", "deprecated plaintext Slack signing secret; manifest-driven slack-events delivery rejects it")
+	appCredentialKeyHex := flags.String("app-credential-key-hex", os.Getenv("SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"), "AES-256 key used to decrypt application signing credentials")
 	owner := flags.String("owner", "", "unique worker owner ID (required)")
 	limit := flags.Int("batch-size", 100, "bounded event batch size")
 	lease := flags.Duration("lease", 30*time.Second, "durable delivery lease")
@@ -69,27 +72,26 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		}
 		return exitConfiguration
 	}
-	if *backend == "" || *workspace == "" || *deliveryURL == "" || *deliveryFormat == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 || *failureBudget <= 0 {
-		logger.Error("worker requires explicit store, workspace, delivery URL, delivery format, owner, and positive limits")
+	if *backend == "" || *deliveryFormat == "" || *owner == "" || *limit <= 0 || *lease <= 0 || *poll <= 0 || *failureBudget <= 0 {
+		logger.Error("worker requires explicit store, delivery format, owner, and positive limits")
 		return exitConfiguration
 	}
 	if *deliveryFormat != "record" && *deliveryFormat != "slack-events" {
 		logger.Error("worker delivery format is unsupported", "format", *deliveryFormat, "allowed", "record, slack-events")
 		return exitConfiguration
 	}
-	if *deliveryFormat == "slack-events" && (*appID == "" || *signingSecret == "") {
-		logger.Error("slack-events delivery requires app ID and signing secret")
-		return exitConfiguration
-	}
-	// record delivery signs nothing and names no application, so an app ID or a
-	// signing secret supplied with it would be accepted and never used. Silently
-	// ignoring a Slack signing secret is how a deployment believes it is signing
-	// deliveries that leave unsigned.
 	if *deliveryFormat == "record" {
-		if ignored := explicitlySet(flags, "app-id", "signing-secret"); len(ignored) != 0 {
+		if *workspace == "" || *deliveryURL == "" {
+			logger.Error("record delivery requires a workspace and delivery URL")
+			return exitConfiguration
+		}
+		if ignored := explicitlySet(flags, "app-id", "signing-secret", "app-credential-key-hex"); len(ignored) != 0 {
 			logger.Error("record delivery cannot honour Slack application settings", "ignored", strings.Join(ignored, ", "), "hint", "use -delivery-format slack-events")
 			return exitConfiguration
 		}
+	} else if ignored := explicitlySet(flags, "workspace", "delivery-url", "app-id", "signing-secret"); len(ignored) != 0 {
+		logger.Error("slack-events delivery is driven by installed app manifests and cannot accept manual routing or plaintext credentials", "ignored", strings.Join(ignored, ", "))
+		return exitConfiguration
 	}
 	cluster, err := localchat.ParseCluster(*dqliteCluster)
 	if err != nil {
@@ -102,14 +104,20 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	var delivery outbox.Delivery
 	if *deliveryFormat == "record" {
 		delivery, err = newHTTPDelivery(*deliveryURL)
-	} else {
-		delivery, err = newSlackEventDelivery(*deliveryURL, *appID, *signingSecret)
 	}
 	if err != nil {
 		logger.Error("configure delivery", "error", err)
 		return exitConfiguration
 	}
-	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase})
+	var appCredentialKey []byte
+	if *deliveryFormat == "slack-events" {
+		appCredentialKey, err = secretbox.ParseKeyHex(*appCredentialKeyHex)
+		if err != nil {
+			logger.Error("slack-events delivery requires a valid application credential key")
+			return exitConfiguration
+		}
+	}
+	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, AppCredentialKey: appCredentialKey})
 	if err != nil {
 		logger.Error("open worker store", "error", err)
 		return exitRuntime
@@ -119,19 +127,33 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			logger.Error("close worker store", "error", err)
 		}
 	}()
-	worker, err := outbox.NewWorker(runtime.OutboxSource, *owner, *limit, *lease, delivery)
-	if err != nil {
-		logger.Error("configure outbox worker", "error", err)
-		return exitConfiguration
-	}
-	scheduledWorker, err := scheduler.NewWorker(runtime.ScheduledSource, runtime.Service, *owner, *limit, *lease)
-	if err != nil {
-		logger.Error("configure scheduled worker", "error", err)
-		return exitConfiguration
+	var worker outbox.Worker
+	var scheduledWorker scheduler.Worker
+	var appEventProcessor slackapp.EventProcessor
+	if *deliveryFormat == "record" {
+		worker, err = outbox.NewWorker(runtime.OutboxSource, *owner, *limit, *lease, delivery)
+		if err != nil {
+			logger.Error("configure outbox worker", "error", err)
+			return exitConfiguration
+		}
+		scheduledWorker, err = scheduler.NewWorker(runtime.ScheduledSource, runtime.Service, *owner, *limit, *lease)
+		if err != nil {
+			logger.Error("configure scheduled worker", "error", err)
+			return exitConfiguration
+		}
+	} else {
+		appEventProcessor = slackapp.EventProcessor{Store: runtime.Store, AppCredentialKey: appCredentialKey, Owner: *owner, Lease: *lease}
 	}
 	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	cycle := func(cycleContext context.Context) (bool, error) {
+		if *deliveryFormat == "slack-events" {
+			count, err := appEventProcessor.RunOnce(cycleContext)
+			if err != nil {
+				logger.Error("Slack Events API delivery failed", "count", count, "error", err)
+			}
+			return count > 0, err
+		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if err != nil {

@@ -5,6 +5,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 )
@@ -16,12 +17,45 @@ type Service interface {
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	IssueAppConfigurationToken(context.Context, domain.WorkspaceID, domain.UserID) (domain.AppConfigurationCredentials, error)
+	RotateAppConfigurationToken(context.Context, string) (domain.AppConfigurationCredentials, error)
+	ValidateAppManifest(context.Context, string, string, string) ([]appmanifest.Error, error)
+	CreateAppFromManifest(context.Context, string, string, domain.WorkspaceID) (domain.App, domain.AppCredentials, error)
+	ExportAppManifest(context.Context, string, domain.AppID) (domain.App, string, error)
+	UpdateAppFromManifest(context.Context, string, domain.AppID, string) (domain.App, error)
+	DeleteDeveloperApp(context.Context, string, domain.AppID) error
+	ListDeveloperApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.App, error)
+	ListWorkspaceApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.InstalledApp, error)
+	PutAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string, bool) ([]string, error)
+	GetAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) ([]string, error)
+	DeleteAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) error
+	AppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
+	OpenAppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
+	GetDeveloperApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.App, string, error)
+	IssueDeveloperAppToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, []string) (domain.AppTokenCredentials, error)
+	InspectOAuthAuthorization(context.Context, domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error)
+	AuthorizeOAuth(context.Context, domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error)
 	UninstallApp(context.Context, string, string, domain.WorkspaceID, domain.AppID) error
 	AdminCreateIncomingWebhook(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.ConversationID, domain.UserID) (domain.IncomingWebhook, string, error)
 	AdminSetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.IncomingWebhookID, bool) error
 	PostIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostIncomingWebhookWithAttachments(context.Context, domain.WorkspaceID, domain.AppID, string, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
+	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	DispatchSlashCommand(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, string, string) error
+	DispatchBlockAction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppBlockAction, string) error
+	DispatchViewBlockAction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.AppViewBlockAction, string) error
+	LoadAppOptions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.AppOptionQuery, string) ([]domain.AppOption, error)
+	ListAppShortcuts(context.Context, domain.WorkspaceID, domain.UserID, string) ([]domain.AppShortcut, error)
+	DispatchAppShortcut(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.AppID, string, domain.MessageID, string) error
+	HandleAppResponse(context.Context, string, string) error
+	ClaimSocketModeInteraction(context.Context, domain.AppID, string, time.Duration) (domain.SocketModeInteraction, bool, error)
+	AckSocketModeInteraction(context.Context, domain.AppID, string, string) error
+	ReleaseSocketModeInteraction(context.Context, domain.AppID, string, string, string, time.Time) error
+	HandleSocketModeResponse(context.Context, domain.AppID, string, []byte) error
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	RevokeSession(context.Context, string) error
@@ -35,11 +69,16 @@ type Service interface {
 	ResetUserSessions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) error
 	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
 	PostWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, domain.MessageTimestamp, string) (domain.Message, error)
+	ShareFile(context.Context, domain.WorkspaceID, domain.UserID, domain.FileID, domain.ConversationID, domain.MessageTimestamp) (domain.Message, error)
 	Unfurl(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, map[string]string) (domain.Message, error)
 	PostEphemeral(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string) (domain.EphemeralMessage, error)
 	PostEphemeralWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string) (domain.EphemeralMessage, error)
-	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string) (domain.Message, error)
-	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string) (domain.EphemeralMessage, error)
+	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string, domain.AppID) (domain.Message, error)
+	StartMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamStart) (domain.Message, error)
+	AppendMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
+	StopMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
+	PostEphemeralWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string, string, domain.AppID) (domain.EphemeralMessage, error)
+	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
 	RecordAccess(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	ListAccessLogs(context.Context, domain.WorkspaceID, domain.UserID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	IntegrationLogs(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, int, int) (domain.IntegrationLogPage, error)
@@ -86,20 +125,25 @@ type Service interface {
 	AdminRestrictApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.AppRequestID) error
 	AdminListApps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
 	RequestAppPermissions(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, []string, string) error
-	OpenView(context.Context, domain.WorkspaceID, domain.UserID, string, string) (domain.View, error)
-	PublishView(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID, string, string) (domain.View, error)
-	PushView(context.Context, domain.WorkspaceID, domain.UserID, string, string) (domain.View, error)
-	UpdateView(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string) (domain.View, error)
+	OpenView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.View, error)
+	PublishView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.UserID, string, string) (domain.View, error)
+	PushView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.View, error)
+	UpdateView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, string, string) (domain.View, error)
+	CurrentModalView(context.Context, domain.WorkspaceID, domain.UserID) (domain.View, error)
+	SubmitView(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ViewID, string, string) (domain.ViewInteractionResult, error)
+	CloseView(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ViewID, bool, string) error
 	WorkflowStepCompleted(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	WorkflowStepFailed(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	WorkflowUpdateStep(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string) error
-	OpenDialog(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
+	OpenDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) error
 	BotInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.BotID) (domain.Bot, error)
 	MigrationExchange(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, bool) (domain.MigrationExchange, error)
 	AdminDisconnectSharedConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkspaceID) error
 	AdminConnectedChannelInfo(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID, []domain.WorkspaceID, domain.PageRequest) ([]domain.ConnectedChannelInfo, bool, domain.Cursor, error)
 	OAuthExchange(context.Context, string, string, string, string) (domain.OAuthToken, error)
 	OAuthV2Exchange(context.Context, string, string, string, string, bool) (domain.OAuthToken, error)
+	OAuthV2Refresh(context.Context, string, string, string) (domain.OAuthToken, error)
+	OAuthV2ExchangeToken(context.Context, string, string, string) (domain.OAuthToken, error)
 	OpenIDConnectToken(context.Context, string, string, string, string, string, string, string) (domain.OpenIDToken, error)
 	OpenIDConnectUserInfo(context.Context, string) (domain.OpenIDUserInfo, error)
 	CreateRTMConnection(context.Context, domain.WorkspaceID, domain.UserID) (domain.RTMConnection, error)

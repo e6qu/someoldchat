@@ -10,6 +10,8 @@ message OAuthExchangeRequest {
   string code = 3;
   string redirect_uri = 4;
   bool user_only = 5;
+  string refresh_token = 6;
+  string token = 7;
 }
 
 message OAuthToken {
@@ -22,6 +24,12 @@ message OAuthToken {
   string token_type = 7;
   string installer_id = 8;
   string bot_id = 9;
+  string authed_user_access_token = 10;
+  repeated string authed_user_scopes = 11;
+  string refresh_token = 12;
+  int64 expires_at_unix_nano = 13;
+  string authed_user_refresh_token = 14;
+  int64 authed_user_expires_at_unix_nano = 15;
 }
 
 message OpenIDConnectTokenRequest {
@@ -66,6 +74,8 @@ message OpenIDConnectUserInfoResponse {
 service OAuthService {
   rpc ExchangeOAuth(OAuthExchangeRequest) returns (OAuthToken);
   rpc ExchangeOAuthV2(OAuthExchangeRequest) returns (OAuthToken);
+  rpc RefreshOAuthV2(OAuthExchangeRequest) returns (OAuthToken);
+  rpc ExchangeOAuthV2Token(OAuthExchangeRequest) returns (OAuthToken);
   rpc OpenIDConnectToken(OpenIDConnectTokenRequest) returns (OpenIDConnectTokenResponse);
   rpc OpenIDConnectUserInfo(OpenIDConnectUserInfoRequest) returns (OpenIDConnectUserInfoResponse);
 }

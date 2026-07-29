@@ -19,10 +19,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ViewsService_OpenView_FullMethodName    = "/sameoldchat.chat.v1.ViewsService/OpenView"
-	ViewsService_PublishView_FullMethodName = "/sameoldchat.chat.v1.ViewsService/PublishView"
-	ViewsService_PushView_FullMethodName    = "/sameoldchat.chat.v1.ViewsService/PushView"
-	ViewsService_UpdateView_FullMethodName  = "/sameoldchat.chat.v1.ViewsService/UpdateView"
+	ViewsService_OpenView_FullMethodName         = "/sameoldchat.chat.v1.ViewsService/OpenView"
+	ViewsService_PublishView_FullMethodName      = "/sameoldchat.chat.v1.ViewsService/PublishView"
+	ViewsService_PushView_FullMethodName         = "/sameoldchat.chat.v1.ViewsService/PushView"
+	ViewsService_UpdateView_FullMethodName       = "/sameoldchat.chat.v1.ViewsService/UpdateView"
+	ViewsService_CurrentModalView_FullMethodName = "/sameoldchat.chat.v1.ViewsService/CurrentModalView"
+	ViewsService_AppHome_FullMethodName          = "/sameoldchat.chat.v1.ViewsService/AppHome"
+	ViewsService_OpenAppHome_FullMethodName      = "/sameoldchat.chat.v1.ViewsService/OpenAppHome"
+	ViewsService_SubmitView_FullMethodName       = "/sameoldchat.chat.v1.ViewsService/SubmitView"
+	ViewsService_CloseView_FullMethodName        = "/sameoldchat.chat.v1.ViewsService/CloseView"
 )
 
 // ViewsServiceClient is the client API for ViewsService service.
@@ -33,6 +38,11 @@ type ViewsServiceClient interface {
 	PublishView(ctx context.Context, in *PublishViewRequest, opts ...grpc.CallOption) (*View, error)
 	PushView(ctx context.Context, in *PushViewRequest, opts ...grpc.CallOption) (*View, error)
 	UpdateView(ctx context.Context, in *UpdateViewRequest, opts ...grpc.CallOption) (*View, error)
+	CurrentModalView(ctx context.Context, in *CurrentModalViewRequest, opts ...grpc.CallOption) (*View, error)
+	AppHome(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*AppHomeResponse, error)
+	OpenAppHome(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*AppHomeResponse, error)
+	SubmitView(ctx context.Context, in *ViewSubmissionRequest, opts ...grpc.CallOption) (*ViewInteractionResult, error)
+	CloseView(ctx context.Context, in *CloseViewRequest, opts ...grpc.CallOption) (*ViewMutationResponse, error)
 }
 
 type viewsServiceClient struct {
@@ -83,6 +93,56 @@ func (c *viewsServiceClient) UpdateView(ctx context.Context, in *UpdateViewReque
 	return out, nil
 }
 
+func (c *viewsServiceClient) CurrentModalView(ctx context.Context, in *CurrentModalViewRequest, opts ...grpc.CallOption) (*View, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(View)
+	err := c.cc.Invoke(ctx, ViewsService_CurrentModalView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *viewsServiceClient) AppHome(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*AppHomeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppHomeResponse)
+	err := c.cc.Invoke(ctx, ViewsService_AppHome_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *viewsServiceClient) OpenAppHome(ctx context.Context, in *AppHomeRequest, opts ...grpc.CallOption) (*AppHomeResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppHomeResponse)
+	err := c.cc.Invoke(ctx, ViewsService_OpenAppHome_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *viewsServiceClient) SubmitView(ctx context.Context, in *ViewSubmissionRequest, opts ...grpc.CallOption) (*ViewInteractionResult, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ViewInteractionResult)
+	err := c.cc.Invoke(ctx, ViewsService_SubmitView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *viewsServiceClient) CloseView(ctx context.Context, in *CloseViewRequest, opts ...grpc.CallOption) (*ViewMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ViewMutationResponse)
+	err := c.cc.Invoke(ctx, ViewsService_CloseView_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ViewsServiceServer is the server API for ViewsService service.
 // All implementations should embed UnimplementedViewsServiceServer
 // for forward compatibility.
@@ -91,6 +151,11 @@ type ViewsServiceServer interface {
 	PublishView(context.Context, *PublishViewRequest) (*View, error)
 	PushView(context.Context, *PushViewRequest) (*View, error)
 	UpdateView(context.Context, *UpdateViewRequest) (*View, error)
+	CurrentModalView(context.Context, *CurrentModalViewRequest) (*View, error)
+	AppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error)
+	OpenAppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error)
+	SubmitView(context.Context, *ViewSubmissionRequest) (*ViewInteractionResult, error)
+	CloseView(context.Context, *CloseViewRequest) (*ViewMutationResponse, error)
 }
 
 // UnimplementedViewsServiceServer should be embedded to have
@@ -111,6 +176,21 @@ func (UnimplementedViewsServiceServer) PushView(context.Context, *PushViewReques
 }
 func (UnimplementedViewsServiceServer) UpdateView(context.Context, *UpdateViewRequest) (*View, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateView not implemented")
+}
+func (UnimplementedViewsServiceServer) CurrentModalView(context.Context, *CurrentModalViewRequest) (*View, error) {
+	return nil, status.Error(codes.Unimplemented, "method CurrentModalView not implemented")
+}
+func (UnimplementedViewsServiceServer) AppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AppHome not implemented")
+}
+func (UnimplementedViewsServiceServer) OpenAppHome(context.Context, *AppHomeRequest) (*AppHomeResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method OpenAppHome not implemented")
+}
+func (UnimplementedViewsServiceServer) SubmitView(context.Context, *ViewSubmissionRequest) (*ViewInteractionResult, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubmitView not implemented")
+}
+func (UnimplementedViewsServiceServer) CloseView(context.Context, *CloseViewRequest) (*ViewMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CloseView not implemented")
 }
 func (UnimplementedViewsServiceServer) testEmbeddedByValue() {}
 
@@ -204,6 +284,96 @@ func _ViewsService_UpdateView_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ViewsService_CurrentModalView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CurrentModalViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewsServiceServer).CurrentModalView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewsService_CurrentModalView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewsServiceServer).CurrentModalView(ctx, req.(*CurrentModalViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ViewsService_AppHome_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppHomeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewsServiceServer).AppHome(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewsService_AppHome_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewsServiceServer).AppHome(ctx, req.(*AppHomeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ViewsService_OpenAppHome_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppHomeRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewsServiceServer).OpenAppHome(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewsService_OpenAppHome_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewsServiceServer).OpenAppHome(ctx, req.(*AppHomeRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ViewsService_SubmitView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ViewSubmissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewsServiceServer).SubmitView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewsService_SubmitView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewsServiceServer).SubmitView(ctx, req.(*ViewSubmissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ViewsService_CloseView_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CloseViewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ViewsServiceServer).CloseView(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ViewsService_CloseView_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ViewsServiceServer).CloseView(ctx, req.(*CloseViewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ViewsService_ServiceDesc is the grpc.ServiceDesc for ViewsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -226,6 +396,26 @@ var ViewsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateView",
 			Handler:    _ViewsService_UpdateView_Handler,
+		},
+		{
+			MethodName: "CurrentModalView",
+			Handler:    _ViewsService_CurrentModalView_Handler,
+		},
+		{
+			MethodName: "AppHome",
+			Handler:    _ViewsService_AppHome_Handler,
+		},
+		{
+			MethodName: "OpenAppHome",
+			Handler:    _ViewsService_OpenAppHome_Handler,
+		},
+		{
+			MethodName: "SubmitView",
+			Handler:    _ViewsService_SubmitView_Handler,
+		},
+		{
+			MethodName: "CloseView",
+			Handler:    _ViewsService_CloseView_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

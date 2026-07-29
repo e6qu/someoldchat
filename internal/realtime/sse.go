@@ -102,6 +102,10 @@ type RTMMessageService interface {
 	Post(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, domain.MessageTimestamp, string) (domain.Message, error)
 }
 
+type RTMUserEventSource interface {
+	ListUserEventsAfter(context.Context, domain.WorkspaceID, domain.UserID, uint64, int) ([]events.Record, error)
+}
+
 const maxRTMMessageBytes = 16 << 10
 
 var errUnsupportedRTMCommand = errors.New("unsupported RTM command")
@@ -192,7 +196,13 @@ func (h Handler) rtmWebSocket(conn *websocket.Conn) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		records, listErr := h.Source.ListEventsAfter(request.Context(), h.Workspace, after, 100)
+		var records []events.Record
+		var listErr error
+		if projected, ok := h.Source.(RTMUserEventSource); ok {
+			records, listErr = projected.ListUserEventsAfter(request.Context(), h.Workspace, connection.UserID, after, 100)
+		} else {
+			records, listErr = h.Source.ListEventsAfter(request.Context(), h.Workspace, after, 100)
+		}
 		if listErr != nil {
 			if request.Context().Err() == nil {
 				h.logger().Error("RTM stream ended on an event source failure", "workspace", h.Workspace, "user", connection.UserID, "error", listErr)

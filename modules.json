@@ -7,6 +7,7 @@
       "transport_import": "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc",
       "blob_import": "github.com/sameoldchat/sameoldchat/internal/blob",
       "implementation_type": "Messages",
+      "app_credential_key": true,
       "dependencies": ["store.Store"]
     }
   ],

@@ -4,36 +4,38 @@ import { App } from "@slack/bolt";
 const apiUrl = process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/";
 const token = process.env.SAMEOLDCHAT_API_TOKEN ?? "xoxb-test";
 const app = new App({
-  signingSecret: "qualification-only",
+  signingSecret: "qualification-signing",
   clientOptions: { slackApiUrl: apiUrl },
   authorize: async () => ({ botToken: token, teamId: "T1", userId: "U1" }),
 });
 
-let received = false;
-app.message(async ({ message, client }) => {
-  received = true;
-  assert.equal(message.channel, "C1");
-  assert.equal(message.text, "qualification event");
-  assert.equal((await client.api.test()).ok, true);
+let resolveReceived;
+let rejectReceived;
+const received = new Promise((resolve, reject) => {
+  resolveReceived = resolve;
+  rejectReceived = reject;
+});
+app.event("reaction_added", async ({ event, client }) => {
+  try {
+    assert.equal(event.item.channel, "C1");
+    assert.equal(event.reaction, "wave");
+    assert.equal(event.user, "U1");
+    assert.equal((await client.api.test()).ok, true);
+    resolveReceived();
+  } catch (error) {
+    rejectReceived(error);
+  }
 });
 
-await app.processEvent({
-  body: {
-    type: "event_callback",
-    team_id: "T1",
-    api_app_id: "A1",
-    event_id: "Ev1",
-    event_time: 1,
-    event: {
-      type: "message",
-      channel: "C1",
-      user: "U1",
-      text: "qualification event",
-      ts: "1.000000",
-      event_ts: "1.000000",
-    },
-  },
-  ack: async () => {},
-});
-assert.equal(received, true);
+await app.start(19090);
+try {
+  const response = await fetch("http://127.0.0.1:18080/qualification/bolt-event", { method: "POST" });
+  assert.equal(response.status, 204, await response.text());
+  await Promise.race([
+    received,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("Bolt did not receive the signed Events API request")), 3000)),
+  ]);
+} finally {
+  await app.stop();
+}
 console.log("node-bolt qualification passed");

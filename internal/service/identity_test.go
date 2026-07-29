@@ -61,7 +61,7 @@ func TestPostAdvancesToAFreeMicrosecondWhenOneIsTaken(t *testing.T) {
 	contested := &contestedInstantStore{Store: base, refusals: 2}
 	messages := Messages{Store: contested}
 
-	posted, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "hello", "", "", "", "")
+	posted, err := messages.PostWithBlocksAndAttachments(ctx, "T1", "U1", "C1", "hello", "", "", "", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}

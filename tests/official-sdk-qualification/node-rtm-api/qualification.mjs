@@ -19,8 +19,8 @@ const event = new Promise((resolve, reject) => {
     try {
       assert.equal(message.channel, "C1");
       assert.equal(message.user, "U1");
-      assert.equal(message.ts, "2.000000");
-      assert.equal(message.event_ts, "2.000000");
+      assert.match(message.ts, /^\d+\.\d{6}$/);
+      assert.equal(message.event_ts, message.ts);
       clearTimeout(timer);
       resolve();
     } catch (error) {

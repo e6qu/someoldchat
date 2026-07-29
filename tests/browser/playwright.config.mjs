@@ -14,7 +14,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   webServer: {
-    command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18080 -chat-mode local -store memory -api-token xoxb-browser -session-token browser-session',
+    command: 'cd ../.. && GOCACHE="$PWD/.cache/go-build" go run ./cmd/server -addr 127.0.0.1:18080 -chat-mode local -store memory -blob-dir "$PWD/.cache/browser-blobs" -api-token xoxb-browser -session-token browser-session',
     url: 'http://127.0.0.1:18080/healthz',
     timeout: 120_000,
     reuseExistingServer: false,

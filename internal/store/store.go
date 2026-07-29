@@ -181,6 +181,7 @@ type Store interface {
 	ListAccessLogs(context.Context, domain.WorkspaceID, time.Time, int, int) ([]domain.AccessLog, bool, error)
 	LookupToken(context.Context, string) (domain.TokenRecord, error)
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
+	CreateAppToken(context.Context, string, domain.AppTokenRecord) error
 	LookupSession(context.Context, string) (domain.SessionRecord, error)
 	CreateSession(context.Context, string, domain.SessionRecord) error
 	// GetAuthMethod reports the persisted ADMINISTRATIVE OVERRIDE for one
@@ -257,19 +258,35 @@ type Store interface {
 	ListInviteRequests(context.Context, domain.WorkspaceID, domain.InviteRequestStatus, domain.PageRequest) (domain.InviteRequestPage, error)
 	SetAppApproval(context.Context, domain.WorkspaceID, domain.AppID, domain.AppRequestID, domain.AppApprovalStatus, time.Time, events.Event) error
 	ListAppApprovals(context.Context, domain.WorkspaceID, domain.AppApprovalStatus, domain.PageRequest) (domain.AppApprovalPage, error)
+	CreateAppConfigurationToken(context.Context, string, string, domain.AppConfigurationToken) error
+	LookupAppConfigurationToken(context.Context, string) (domain.AppConfigurationToken, error)
+	LookupAppConfigurationRefreshToken(context.Context, string) (domain.AppConfigurationToken, error)
+	RotateAppConfigurationToken(context.Context, string, string, string, domain.AppConfigurationToken) error
+	CreateApp(context.Context, domain.App, domain.AppManifestRevision, domain.OAuthClient) error
+	GetApp(context.Context, domain.AppID) (domain.App, domain.AppManifestRevision, error)
+	GetAppByClientID(context.Context, string) (domain.App, domain.AppManifestRevision, error)
+	ListDeveloperApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.App, error)
+	UpdateApp(context.Context, domain.App, domain.AppManifestRevision) error
+	DeleteApp(context.Context, domain.AppID, domain.UserID, time.Time) error
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
 	UninstallApp(context.Context, domain.WorkspaceID, domain.AppID) error
 	CreateIncomingWebhook(context.Context, domain.IncomingWebhook) error
 	LookupIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.IncomingWebhook, error)
 	SetIncomingWebhookEnabled(context.Context, domain.WorkspaceID, domain.IncomingWebhookID, bool, events.Event) error
+	PutAppDatastoreItems(context.Context, []domain.AppDatastoreItem) error
+	MergeAppDatastoreItems(context.Context, []domain.AppDatastoreItem) ([]domain.AppDatastoreItem, error)
+	GetAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, []string) ([]domain.AppDatastoreItem, error)
+	DeleteAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, []string) error
 	CreateAppPermissionRequest(context.Context, domain.AppPermissionRequest, events.Event) error
 	CreateView(context.Context, domain.View, events.Event) error
 	GetView(context.Context, domain.WorkspaceID, domain.ViewID) (domain.View, error)
-	GetViewByExternalID(context.Context, domain.WorkspaceID, string) (domain.View, error)
-	GetPublishedView(context.Context, domain.WorkspaceID, domain.UserID) (domain.View, error)
-	GetLatestView(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.View, error)
+	GetViewByExternalID(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.View, error)
+	GetPublishedView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.View, error)
+	GetLatestView(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string) (domain.View, error)
+	GetCurrentView(context.Context, domain.WorkspaceID, domain.UserID, string) (domain.View, error)
 	UpdateView(context.Context, domain.View, string, events.Event) (domain.View, error)
+	DeleteView(context.Context, domain.WorkspaceID, domain.UserID, domain.ViewID, bool, events.Event) error
 	SetWorkflowStep(context.Context, domain.WorkflowStep, events.Event) error
 	GetWorkflowStep(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.WorkflowStep, error)
 	CreateDialog(context.Context, domain.Dialog, events.Event) error
@@ -285,7 +302,11 @@ type Store interface {
 	CreateOAuthClient(context.Context, domain.OAuthClient) error
 	GetOAuthClient(context.Context, string) (domain.OAuthClient, error)
 	CreateOAuthCode(context.Context, domain.OAuthCode) error
+	CreateOAuthAuthorization(context.Context, domain.User, domain.Bot, domain.OAuthCode) error
 	ExchangeOAuthCode(context.Context, string, string, string, string, string, domain.OAuthToken) (domain.OAuthToken, error)
+	LookupOAuthRefreshToken(context.Context, string, string) (domain.OAuthRefreshGrant, error)
+	ExchangeOAuthRefreshToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
+	ExchangeOAuthAccessToken(context.Context, string, string, string, string, string, time.Time) (domain.OAuthToken, error)
 	CreateOpenIDRefreshToken(context.Context, domain.OpenIDRefreshToken) error
 	ExchangeOpenIDRefreshToken(context.Context, string, string, string, string, domain.OpenIDToken) (domain.OpenIDToken, error)
 	CreateRTMConnection(context.Context, domain.RTMConnection) error
@@ -296,10 +317,16 @@ type Store interface {
 	ReleaseSocketModeConnection(context.Context, string) error
 	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 	RecordSocketModeResponse(context.Context, domain.SocketModeResponse) error
+	GetSocketModeResponse(context.Context, domain.AppID, string) (domain.SocketModeResponse, error)
 	ClaimSocketModeResponses(context.Context, domain.AppID, string, int, time.Duration) ([]domain.SocketModeResponse, error)
 	RenewSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Duration) error
 	AckSocketModeResponses(context.Context, string, []domain.SocketModeResponse) error
 	ReleaseSocketModeResponses(context.Context, string, []domain.SocketModeResponse, time.Time) error
+	CreateSocketModeInteraction(context.Context, domain.SocketModeInteraction) error
+	GetSocketModeInteraction(context.Context, domain.AppID, string) (domain.SocketModeInteraction, error)
+	ClaimSocketModeInteraction(context.Context, domain.AppID, string, time.Duration) (domain.SocketModeInteraction, bool, error)
+	AckSocketModeInteraction(context.Context, domain.AppID, string, string) error
+	ReleaseSocketModeInteraction(context.Context, domain.AppID, string, string, string, time.Time) error
 	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
 	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
 	SetConversationPrivate(context.Context, domain.ConversationID, events.Event) (domain.Conversation, error)
@@ -323,6 +350,15 @@ type Store interface {
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
 	ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]events.Record, error)
 	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
+	ListInstalledApps(context.Context) ([]domain.AppManifestSnapshot, error)
+	CreateAppTrigger(context.Context, domain.AppTrigger) error
+	CreateAppInteractionCapabilities(context.Context, domain.AppTrigger, domain.AppResponseURL) error
+	ConsumeAppTrigger(context.Context, string, domain.AppID) (domain.AppTrigger, error)
+	UseAppResponseURL(context.Context, string) (domain.AppResponseURL, error)
+	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
 	ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error)
 	ClaimEventsForTopic(context.Context, domain.WorkspaceID, string, string, int, time.Duration) ([]events.Record, error)
 	RenewEvents(context.Context, string, []uint64, time.Duration) error
@@ -353,6 +389,11 @@ type Store interface {
 	// the sentinel. A fixture that hands the repository two colliding instants is
 	// in the same position as one that hands it two identical identifiers.
 	CreateMessage(context.Context, domain.Message, events.Event, string) error
+	CreateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
+	GetEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.EphemeralMessage, error)
+	ListEphemeralMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, int) ([]domain.EphemeralMessage, error)
+	UpdateEphemeralMessage(context.Context, domain.EphemeralMessage, events.Event) error
+	DeleteEphemeralMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID, events.Event) error
 	GetMessage(context.Context, domain.MessageID) (domain.Message, error)
 	// ListMessages pages the non-deleted messages in one conversation in either
 	// direction. Deleted rows remain individually addressable through GetMessage
@@ -424,7 +465,8 @@ type Store interface {
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
-	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event) error
+	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error
+	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.FileID, domain.FileCommentID, events.Event) error

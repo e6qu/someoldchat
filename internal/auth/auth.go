@@ -54,6 +54,8 @@ const (
 	ScopeIdentityBasic           Scope = "identity.basic"
 	ScopeRTMStream               Scope = "rtm:stream"
 	ScopeConnectionsWrite        Scope = "connections:write"
+	ScopeDatastoreRead           Scope = "datastore:read"
+	ScopeDatastoreWrite          Scope = "datastore:write"
 	ScopeDNDRead                 Scope = "dnd:read"
 	ScopeDNDWrite                Scope = "dnd:write"
 	ScopeStarsRead               Scope = "stars:read"
@@ -270,13 +272,6 @@ func LimitFormBody(r *http.Request) {
 //  2. Does the request carry the token derived from its own session? That is
 //     what stops a request forged by a client that sets its own headers.
 func ValidateCSRF(r *http.Request) error {
-	session, err := r.Cookie(SessionCookieName)
-	if err != nil || strings.TrimSpace(session.Value) == "" {
-		return ErrNoToken
-	}
-	if err := validateRequestSite(r); err != nil {
-		return err
-	}
 	provided := strings.TrimSpace(r.Header.Get(CSRFTokenHeaderName))
 	if provided == "" {
 		// This is the first read of the body on the browser mutation path, so
@@ -284,6 +279,22 @@ func ValidateCSRF(r *http.Request) error {
 		// decodes the form afterwards.
 		LimitFormBody(r)
 		provided = strings.TrimSpace(r.FormValue(CSRFTokenFieldName))
+	}
+	return ValidateCSRFValue(r, provided)
+}
+
+// ValidateCSRFValue applies the cookie and browser-origin checks to a token a
+// bounded streaming handler has already decoded. Large multipart uploads
+// cannot use FormValue: it parses the entire body behind the ordinary 4 MiB
+// form limit and would either reject valid files or force CSRF validation to
+// buffer attacker-controlled bytes.
+func ValidateCSRFValue(r *http.Request, provided string) error {
+	session, err := r.Cookie(SessionCookieName)
+	if err != nil || strings.TrimSpace(session.Value) == "" {
+		return ErrNoToken
+	}
+	if err := validateRequestSite(r); err != nil {
+		return err
 	}
 	if !constantTimeEqual(provided, CSRFToken(session.Value)) {
 		return ErrCSRFToken
@@ -461,6 +472,8 @@ var allScopes = []Scope{
 	ScopeIdentityBasic,
 	ScopeRTMStream,
 	ScopeConnectionsWrite,
+	ScopeDatastoreRead,
+	ScopeDatastoreWrite,
 	ScopeDNDRead,
 	ScopeDNDWrite,
 	ScopeStarsRead,

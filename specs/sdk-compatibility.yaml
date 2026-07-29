@@ -1,6 +1,6 @@
 version: 1
 project: sameoldchat
-retrieved_at: 2026-07-13T00:00:00Z
+retrieved_at: 2026-07-28T00:00:00Z
 
 # This inventory is deliberately fail-closed. A release is not a compatibility
 # claim until its immutable artifact digest, provenance, and executable suite
@@ -34,21 +34,25 @@ sdks:
     ecosystem: npm
     package: '@slack/web-api'
     upstream: https://github.com/slackapi/node-slack-sdk
-    release: 7.19.0
-    revision: b0e335b68e92c22a5195fe8ce6d05d3862690531
-    artifact: slack-web-api-7.19.0.tgz
-    sha256: afaeeab8f5de2c0b59c0306088a0b3db02531e1c9e2c149250c0038473f9c99a
+    release: 8.0.0
+    revision: 70e15b8442745d215f9ae259a2c970b306aff51a
+    artifact: slack-web-api-8.0.0.tgz
+    sha256: 6044ac0b7bae06bce3c4d10a124f4f51bb72b9afa2c0f655e46f9433e9efa054
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-web-api/qualification.mjs
+    note: >-
+      Includes apps.datastore CRUD and bulk methods through WebClient.apiCall;
+      @slack/web-api 8.0.0 does not generate convenience methods for that
+      current Slack method family.
   - id: node-bolt
     ecosystem: npm
     package: '@slack/bolt'
     upstream: https://github.com/slackapi/bolt-js
-    release: 4.7.3
-    revision: 97bfd71a8bbda8534393907018554cfa19be0938
-    artifact: slack-bolt-4.7.3.tgz
-    sha256: 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
+    release: 5.0.0
+    revision: e2b90aa003e5a1de256b31c37b29d032566585ab
+    artifact: slack-bolt-5.0.0.tgz
+    sha256: 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
     license: MIT
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
@@ -169,10 +173,10 @@ bolt:
   - id: bolt-js
     ecosystem: npm
     package: '@slack/bolt'
-    release: 4.7.3
-    revision: 97bfd71a8bbda8534393907018554cfa19be0938
-    artifact: slack-bolt-4.7.3.tgz
-    sha256: 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
+    release: 5.0.0
+    revision: e2b90aa003e5a1de256b31c37b29d032566585ab
+    artifact: slack-bolt-5.0.0.tgz
+    sha256: 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
     suite: passed
     suite_path: tests/official-sdk-qualification/node-bolt/qualification.mjs
     note: >-

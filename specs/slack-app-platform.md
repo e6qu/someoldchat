@@ -9,7 +9,9 @@ official documentation and executable checks through current official SDKs.
 The detailed Web API evidence remains in
 [`compatibility.yaml`](compatibility.yaml), while SDK versions and immutable
 artifact evidence remain in
-[`sdk-compatibility.yaml`](sdk-compatibility.yaml).
+[`sdk-compatibility.yaml`](sdk-compatibility.yaml). The product-wide UI and API
+journey inventory is maintained in
+[`product-gap-audit.md`](product-gap-audit.md).
 
 ## Current support matrix
 
@@ -20,19 +22,51 @@ artifact evidence remain in
 | Exchange a user-only authorization code | `oauth.v2.user.access` returns the user token only under `authed_user`; official Node and Python SDK clients exercise the method | Supported |
 | Legacy OAuth exchange | `oauth.access` and `oauth.token` are exercised by official SDKs | Supported |
 | Uninstall an app | `apps.uninstall` verifies client credentials and token/app identity, disables the installation, and atomically revokes every installation token, webhook, and bot in memory and SQLite; official Node, Python, and Java SDKs exercise distinct installations | Supported |
-| Install through browser consent | There is no `/oauth/v2/authorize` consent journey and authorization codes are currently provisioned internally | Not supported |
-| Combined bot and user grants | A single `oauth.v2.access` exchange cannot yet atomically issue both grants | Not supported |
-| OAuth token rotation | Explicit access-token expiry is enforced, but `oauth.v2.exchange`, refresh-token persistence, single-use refresh rotation, and the two-active-token rule are absent | Not supported |
-| App registration and app manifests | No durable app registration model or `apps.manifest.*` API exists | Not supported |
-| Bot execution | A bot token authenticates as its bot user and reports its app/bot identity; Web API writes use that subject | Partially supported |
-| Incoming webhooks | Durable, revocable webhooks can post messages, but they are provisioned through an internal administration route rather than an app install selection | Partially supported |
-| Events API over HTTP | The worker signs outbound Slack-shaped requests, but subscriptions and request URLs are operator-global rather than app configuration, and several product events cannot yet be translated from the internal payload | Partially supported |
-| Socket Mode | App-level tokens with `connections:write`, connection limits, envelopes, acknowledgements, retries, and official Node/Python/Java clients are exercised | Supported for the implemented event surface |
-| Slash commands | No app-configured command registry, browser trigger, signed HTTP delivery, acknowledgement deadline, or response lifecycle exists | Not supported |
-| Interactivity | View/dialog Web API storage exists, but Block Kit actions, shortcuts, view submissions, options requests, signed delivery, and `response_url` handling are not wired end to end | Not supported |
-| App Home | Views can be published, but no app configuration/install journey makes this a complete Slack app flow | Partially supported |
+| Install through browser consent | `/oauth/v2/authorize` presents authenticated consent, validates exact registered redirects and requested scope subsets, preserves state, supports PKCE S256, and creates one-time authorization codes; the browser and service suites redeem the result | Supported |
+| Combined bot and user grants | A single consent and `oauth.v2.access` exchange atomically creates the bot installation and returns the installer grant under `authed_user`; storage and official SDK qualification assert both token families | Supported |
+| OAuth token rotation | `oauth.v2.exchange` converts legacy tokens, expiring access tokens are rejected, refresh tokens are single-use, and refresh rotates the access/refresh pair; current official Node SDK qualification exercises the lifecycle | Supported |
+| App registration and app manifests | Durable versioned apps, encrypted signing/client credentials, expiring configuration tokens, refresh rotation, `apps.manifest.*`, JSON validation, browser editing, installation, and uninstall are implemented across memory, SQL, local, and gRPC profiles | Supported for the parsed manifest surface |
+| Slack-hosted app datastores | Manifest-declared schemas, isolated durable records, replace/merge/delete semantics, 25-item bulk operations, uninstall cleanup, bot-token scopes, local/gRPC parity, and the current official Node SDK raw-method path are exercised end to end | Supported for CRUD and bulk methods; `query` and `count` remain unimplemented |
+| Bot execution | A bot token authenticates as its bot user and app, reports bot/app identity, writes as that subject, and is revoked with its installation | Supported |
+| Incoming webhooks | Durable, revocable webhooks post as the installed app's verified bot only after bot membership is proved; unknown/disabled credentials are indistinguishable, and archived destinations return Slack's plain-text `410 channel_is_archived`. Provisioning still uses an internal administration route rather than install-time selection | Partially supported |
+| Events API over HTTP | Delivery is selected from each installed manifest, filtered by subscriptions, signed with the app secret, and retried with Slack headers. Every event carrying `channel_id` is filtered by installed-bot membership, and real message/file records are hydrated only after installed-bot conversation access is proved; a TLS receiver test posts and receives an actual private-channel message | Supported for message creation and the implemented content-free event catalog; user subscriptions and message change/delete/file-share variants remain |
+| Socket Mode | App-level tokens with `connections:write`, connection limits, envelopes, acknowledgements, and retries are implemented. The current official Node client receives and acknowledges a real service-posted message rather than a fixture-planted callback | Supported for the implemented event surface |
+| RTM | The current official Node RTM client connects through `rtm.connect` and receives a real stored message hydrated only after connected-user conversation membership is proved. Other events carrying `channel_id` are likewise membership-filtered; the previous hand-authored journal event is gone | Supported for message creation and the implemented content-free event catalog; the legacy RTM event surface remains narrower than Slack's catalog |
+| Slash commands | Manifest commands are discoverable in the composer, validated, signed to HTTP or delivered over Socket Mode, deduplicated, and receive bounded trigger and `response_url` lifecycles | Supported |
+| Interactivity | Message/Home/modal block actions, global and message shortcuts, view submissions and closures, external options, signed HTTP delivery, Socket Mode envelopes, triggers, and `response_url` mutations are wired end to end | Supported for the implemented Block Kit elements |
+| App Home | Installed apps appear in the first-party client, `views.publish` is durable, `app_home_opened` is emitted, and Home-tab actions use the same signed HTTP/Socket delivery as message interactions | Supported |
+| Block Kit in the first-party UI | Every block in Slack's current 2026 catalog has an explicit safe projection, including interactive controls, Markdown/rich text, container, data table, task/plan, card/carousel, and accessible pie/bar/area/line visualizations; Playwright qualifies the user-visible path | Supported for current block types; element-by-element parity remains tracked |
 | Workflow functions | Selected Web API acknowledgement methods exist; app distribution and real trigger/delivery journeys are incomplete | Partially supported |
-| App administration UI | The browser UI exposes authorization administration only; it has no app creation, manifest editor, OAuth settings, event subscriptions, commands, interactivity, installation, token, or delivery-health screens | Not supported |
+| App administration UI | The browser provides manifest creation/validation/edit/delete, one-time credentials, app-level tokens, OAuth installation, installed-app discovery, App Home, shortcuts, commands, and interactive surfaces. Delivery health, install-time incoming-webhook selection, and structured editors for every manifest section remain absent | Partially supported |
+
+## Measured remaining gaps
+
+The compatibility ledger is generated from Slack's current method catalog and
+ratcheted in CI. At this revision, 225 of 320 catalogued Web API methods have
+registered implementations. The 95 unimplemented methods break down as:
+
+| Namespace | Missing | Boundary |
+| --- | ---: | --- |
+| `admin.*` | 50 | Enterprise Grid policy, analytics, roles, org-wide app/workflow administration, and newer object-linked conversation operations |
+| `apps.*` | 7 | Datastore query/count, external-auth token access (2), activity history, app icons, and user connection state |
+| `conversations.*` | 10 | Slack Connect invitations/approvals, external-invite policy, and canvases |
+| `workflows.*` / `functions.*` | 14 | Distribution/trigger permissions, featured workflows, step discovery, and response export |
+| `assistant.*` | 5 | Assistant thread presentation and search context |
+| `auth.*`, `rtm.*`, `search.*`, `team.*`, `users.*` | 9 | Org team enumeration, legacy RTM bootstrap, file/all search, billing/external-team/preferences, and contact discovery |
+
+That count is a coverage inventory, not a claim that all implemented methods
+are live-Slack-equivalent. The ledger currently records 225 as SDK-compatible
+or better, 222 as behavior-compatible, and zero as live-differential
+`verified-against-slack`. The next app-runtime priorities are user-token
+visibility for HTTP/Socket event subscriptions, message change/delete and file
+share/unshare event production, then the manifest sections that are stored but
+not yet executable—functions/workflows, external authentication,
+incoming-webhook install selection, and agent/assistant configuration—before
+Enterprise-only breadth.
+
+Until user-token event authorization is implemented, user-scoped
+`star_added`/`star_removed` callbacks are deliberately withheld from app
+surfaces and delivered through RTM only to the acting user.
 
 “Supported” here means the stated slice is real; it is not a claim that the row
 covers every Slack variant. In particular, Enterprise Grid organization
@@ -48,12 +82,18 @@ before being claimed.
 - [Using token rotation](https://docs.slack.dev/authentication/using-token-rotation/)
 - [Slack token types](https://docs.slack.dev/authentication/tokens/)
 - [App manifests](https://docs.slack.dev/app-manifests/)
+- [Using app datastores](https://docs.slack.dev/tools/deno-slack-sdk/guides/using-datastores/)
+- [`apps.datastore.put`](https://docs.slack.dev/reference/methods/apps.datastore.put/)
+- [`apps.datastore.bulkPut`](https://docs.slack.dev/reference/methods/apps.datastore.bulkPut/)
 - [Events API](https://docs.slack.dev/apis/events-api/)
+- [`star_added` event](https://docs.slack.dev/reference/events/star_added/)
+- [`star_removed` event](https://docs.slack.dev/reference/events/star_removed/)
 - [HTTP request URLs](https://docs.slack.dev/apis/events-api/using-http-request-urls/)
 - [Verifying Slack requests](https://docs.slack.dev/authentication/verifying-requests-from-slack/)
 - [Slash commands](https://docs.slack.dev/interactivity/implementing-slash-commands/)
 - [Handling interactivity](https://docs.slack.dev/interactivity/handling-user-interaction/)
 - [Socket Mode](https://docs.slack.dev/apis/events-api/using-socket-mode/)
+- [Sending messages using incoming webhooks](https://api.slack.com/messaging/webhooks)
 
 ## Qualification rule
 

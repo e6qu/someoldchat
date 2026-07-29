@@ -74,8 +74,8 @@ DENO_SLACK_RUNTIME_URL="file://$work/deno/deno-slack-runtime-1.1.3/src/mod.ts" e
 
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/web-api@7.19.0')
-require_hash "$work/npm/$npm_tarball" afaeeab8f5de2c0b59c0306088a0b3db02531e1c9e2c149250c0038473f9c99a
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/web-api@8.0.0')
+require_hash "$work/npm/$npm_tarball" 6044ac0b7bae06bce3c4d10a124f4f51bb72b9afa2c0f655e46f9433e9efa054
 npm install --prefix "$work/node-web" --no-save --ignore-scripts "$work/npm/$npm_tarball"
 cp "$root/tests/official-sdk-qualification/node-web-api/qualification.mjs" "$work/node-web/qualification.mjs"
 (cd "$work/node-web" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)
@@ -98,8 +98,8 @@ cp "$root/tests/official-sdk-qualification/node-rtm-api/qualification.mjs" "$wor
 stop_fixture
 start_fixture
 
-npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@4.7.3')
-require_hash "$work/npm/$npm_tarball" 455afc51e720c29a70cece533ca7008e35dd122bf81dc8603f872d02a492f0de
+npm_tarball=$(npm pack --silent --pack-destination "$work/npm" '@slack/bolt@5.0.0')
+require_hash "$work/npm/$npm_tarball" 62cedd4e4520ce963721d3a82bf6f5c5a9fc6b66b920eaf4d1cf4bb2f483f84b
 npm install --prefix "$work/node-bolt" --no-save --ignore-scripts "$work/npm/$npm_tarball"
 cp "$root/tests/official-sdk-qualification/node-bolt/qualification.mjs" "$work/node-bolt/qualification.mjs"
 (cd "$work/node-bolt" && SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ node qualification.mjs)

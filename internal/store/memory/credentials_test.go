@@ -110,6 +110,10 @@ func TestOAuthCodeIsHashedAndExpires(t *testing.T) {
 	if token.AccessToken != "access-live" || token.UserID != "U1" {
 		t.Fatalf("exchanged token=%+v", token)
 	}
+	installations, err := s.ListAppInstallations(ctx, "A1")
+	if err != nil || len(installations) != 1 || installations[0].WorkspaceID != "T1" {
+		t.Fatalf("atomic OAuth installation=%+v err=%v", installations, err)
+	}
 	if _, err := s.ExchangeOAuthCode(ctx, "client", "wrong-secret", fresh.Code, fresh.RedirectURI, "access-wrong", domain.OAuthToken{}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("wrong client secret error=%v, want %v", err, store.ErrNotFound)
 	}

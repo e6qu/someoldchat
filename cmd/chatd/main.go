@@ -22,6 +22,7 @@ import (
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	chatgrpc "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc"
 	"github.com/sameoldchat/sameoldchat/internal/observability"
+	"github.com/sameoldchat/sameoldchat/internal/secretbox"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
@@ -87,6 +88,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	// administrator email, which made terraform/ecs-runtime's required
 	// bootstrap_admin_email inert and left administrator sign-in unreachable.
 	bootstrapAdminEmail := flags.String("bootstrap-admin-email", os.Getenv("SAMEOLDCHAT_BOOTSTRAP_ADMIN_EMAIL"), "email address of the initial workspace administrator")
+	appCredentialKeyHex := flags.String("app-credential-key-hex", os.Getenv("SAMEOLDCHAT_APP_CREDENTIAL_KEY_HEX"), "AES-256 key used to encrypt application signing credentials")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -130,7 +132,18 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			return exitConfiguration
 		}
 	}
-	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail})
+	var appCredentialKey []byte
+	if strings.TrimSpace(*appCredentialKeyHex) != "" {
+		appCredentialKey, err = secretbox.ParseKeyHex(*appCredentialKeyHex)
+		if err != nil {
+			logger.Error("invalid application credential key")
+			return exitConfiguration
+		}
+	} else if *backend != string(localchat.BackendMemory) {
+		logger.Error("durable storage requires an application credential key")
+		return exitConfiguration
+	}
+	runtime, err := localchat.Open(ctx, localchat.Config{Backend: localchat.Backend(*backend), DSN: *dsn, DqliteDirectory: *dqliteDirectory, DqliteAddress: *dqliteAddress, DqliteCluster: cluster, DqliteDatabase: *dqliteDatabase, BlobDirectory: *blobDirectory, BlobS3Bucket: *blobS3Bucket, BlobS3Prefix: *blobS3Prefix, BlobMaxBytes: *blobMaxBytes, BootstrapAdminEmail: *bootstrapAdminEmail, AppCredentialKey: appCredentialKey})
 	if err != nil {
 		logger.Error("open local chat", "error", err)
 		return exitRuntime

@@ -76,6 +76,10 @@ var errorClasses = []errorClass{
 	{key: "domain.invalid_cursor", code: codes.InvalidArgument, sentinel: domain.ErrInvalidCursor},
 	{key: "domain.invalid_message_timestamp", code: codes.InvalidArgument, sentinel: domain.ErrInvalidMessageTimestamp},
 	{key: "service.invalid_message", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessage},
+	{key: "service.invalid_message_stream", code: codes.InvalidArgument, sentinel: service.ErrInvalidMessageStream},
+	{key: "service.invalid_stream_chunks", code: codes.InvalidArgument, sentinel: service.ErrInvalidStreamChunks},
+	{key: "service.missing_stream_recipient_team", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientTeam},
+	{key: "service.missing_stream_recipient_user", code: codes.InvalidArgument, sentinel: service.ErrMissingStreamRecipientUser},
 	{key: "service.invalid_timestamp", code: codes.InvalidArgument, sentinel: service.ErrInvalidTimestamp},
 	{key: "service.invalid_conversation", code: codes.InvalidArgument, sentinel: service.ErrInvalidConversation},
 	{key: "service.invalid_workspace", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkspace},
@@ -109,11 +113,22 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_bookmark", code: codes.InvalidArgument, sentinel: service.ErrInvalidBookmark},
 	{key: "service.invalid_canvas", code: codes.InvalidArgument, sentinel: service.ErrInvalidCanvas},
 	{key: "service.invalid_external_upload", code: codes.InvalidArgument, sentinel: service.ErrInvalidExternalUpload},
+	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppManifest},
+	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
+	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
+	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: service.ErrInvalidTrigger},
+	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: service.ErrSlashCommandInThread},
 	// The generic member of the class closes it, and it restores a bare
 	// InvalidArgument: a peer that sent no detail still yields an
 	// invalid-argument classification (HTTP 400) rather than codes.Unavailable
 	// (HTTP 503, which asks a caller to retry a request that can never succeed).
 	{key: "store.invalid_argument", code: codes.InvalidArgument, sentinel: store.ErrInvalidArgument, restoresCode: true},
+
+	// Configuration tokens authenticate a developer rather than an installed
+	// app. Keeping this separate from OAuth validation lets the manifest API
+	// return invalid_auth without pretending a client grant was malformed.
+	{key: "service.app_configuration_authentication", code: codes.Unauthenticated, sentinel: service.ErrAppConfigurationAuthentication, restoresCode: true},
+	{key: "service.app_credential_key_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppCredentialKeyUnavailable},
 
 	// Uniqueness. The two sentinels mean different things to the Slack API:
 	// store.ErrAlreadyExists is "already_reacted" and
@@ -156,15 +171,24 @@ var errorClasses = []errorClass{
 	// because renaming the fallback would change what a peer that sends no detail
 	// means, and only one class per code may hold it.
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
+	{key: "service.message_not_owned_by_app", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwnedByApp},
 	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwned, restoresCode: true},
 	// Refusing to remove a workspace's last owner is a precondition failure, not
 	// a permission failure: the actor has the authority, and the operation is
 	// refused because the workspace would become unadministrable.
 	{key: "service.last_workspace_owner", code: codes.FailedPrecondition, sentinel: service.ErrLastWorkspaceOwner},
+	{key: "service.conversation_already_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationAlreadyArchived},
+	{key: "service.conversation_not_archived", code: codes.FailedPrecondition, sentinel: service.ErrConversationNotArchived},
+	{key: "service.cannot_archive_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotArchiveDefault},
+	{key: "service.cannot_leave_default", code: codes.FailedPrecondition, sentinel: service.ErrCannotLeaveDefault},
 	// Not being in the conversation is the refusal behind not_in_channel: the
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
 	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrNotInConversation},
+	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
+	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},
+	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},
+	{key: "service.message_not_streaming", code: codes.FailedPrecondition, sentinel: service.ErrMessageNotStreaming},
 	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
 
 	// Absence. blob.ErrNotFound is distinct from store.ErrNotFound and reaches a
@@ -174,6 +198,8 @@ var errorClasses = []errorClass{
 	// a missing object was store.ErrNotFound in one composition and
 	// codes.Unavailable in the other.
 	{key: "blob.not_found", code: codes.NotFound, sentinel: blob.ErrNotFound},
+	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: service.ErrSlashCommandNotFound},
+	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: service.ErrAppDatastoreNotFound},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},
 
 	// Corrupt stored data and events a producer could not build. codes.Internal

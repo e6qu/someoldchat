@@ -160,6 +160,11 @@ func NewAppRequestID() (AppRequestID, error) {
 	return AppRequestID(value), err
 }
 
+func NewAppID() (AppID, error) {
+	value, err := PublicID("A")
+	return AppID(value), err
+}
+
 func NewViewID() (ViewID, error) {
 	value, err := PublicID("V")
 	return ViewID(value), err
@@ -168,6 +173,11 @@ func NewViewID() (ViewID, error) {
 func NewDialogID() (DialogID, error) {
 	value, err := PublicID("D")
 	return DialogID(value), err
+}
+
+func NewBotID() (BotID, error) {
+	value, err := PublicID("B")
+	return BotID(value), err
 }
 
 func NewOAuthToken() (string, error) { return NewUserToken() }
@@ -181,6 +191,8 @@ func NewRotatingUserToken() (string, error) { return PublicID("xoxe.xoxp-") }
 func NewRotatingBotToken() (string, error) { return PublicID("xoxe.xoxb-") }
 
 func NewRefreshToken() (string, error) { return PublicID("xoxe-") }
+
+func NewAppToken() (string, error) { return PublicID("xapp-") }
 
 func NewRTMConnectionID() (string, error) { return PublicID("rtm-") }
 

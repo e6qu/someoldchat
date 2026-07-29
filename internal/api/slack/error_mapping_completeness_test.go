@@ -228,9 +228,22 @@ func recordedNonPinnedCodes() map[string]string {
 		"invalid_refresh_token":  "oauth.access legacy refresh rejection; the operation declares no enum",
 		"unsupported_grant_type": "RFC 6749 §5.2 token-endpoint error",
 		"token_expired":          "Slack authentication error for an access token whose explicit lifetime has elapsed",
+		// The immutable legacy OpenAPI snapshot predates the App Manifest APIs.
+		// These codes are declared by the current first-party method references
+		// pinned in specs/compatibility.yaml.
+		"invalid_app_id":   "current apps.manifest.* method references; absent from the legacy OpenAPI snapshot",
+		"invalid_manifest": "current apps.manifest.* method references; absent from the legacy OpenAPI snapshot",
+		"invalid_team_id":  "current apps.manifest.create method reference; absent from the legacy OpenAPI snapshot",
+		"not_enabled":      "current views.publish method reference; returned when the app's Home tab is not enabled and absent from the legacy OpenAPI snapshot",
+		"app_not_hosted":   "current apps.datastore.* method references; absent from the legacy OpenAPI snapshot",
+		"datastore_error":  "current apps.datastore.* structured validation error; absent from the legacy OpenAPI snapshot",
 		// Incoming webhooks answer plain text on hooks.slack.com, not a Web API method.
-		"no_team":         "incoming-webhook plain-text contract, not a Web API method",
-		"invalid_payload": "incoming-webhook plain-text contract, not a Web API method",
+		"no_team":             "incoming-webhook plain-text contract, not a Web API method",
+		"invalid_payload":     "incoming-webhook plain-text contract, not a Web API method",
+		"channel_is_archived": "incoming-webhook plain-text contract; current Slack documentation requires HTTP 410",
+		// files.completeUploadExternal is a current-reference method absent from
+		// the immutable legacy OpenAPI snapshot.
+		"posting_to_channel_denied": "current files.completeUploadExternal method reference; archived channels cannot accept the generated file-share message",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

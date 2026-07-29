@@ -21,6 +21,13 @@ import (
 
 const revision = "bc08db49625630e3585bf2f1322128ea04f2a7f3"
 
+const (
+	currentMethodsPath = "specs/upstream/slack-reference/current-methods.txt"
+	currentMethodsHash = "0c591b74d588fa66ecf442fd672243582ecb2ddbf6de03a5652277bdb0b0d996"
+	currentEventsPath  = "specs/upstream/slack-reference/current-events.txt"
+	currentEventsHash  = "fcf14b31acd19e3666002f99af845cef1d4f5b1c56ad1984df83ac1c6880596b"
+)
+
 type source struct {
 	Path string
 	Hash string
@@ -121,6 +128,7 @@ func verify() error {
 		return fmt.Errorf("decode compatibility ledger: %w", err)
 	}
 	seenMethods := make(map[string]struct{}, len(compatibility.Operations))
+	seenCurrentMethods := make(map[string]struct{}, len(compatibility.Operations))
 	implementedMethods := make(map[string]struct{}, len(compatibility.Operations))
 	for _, operation := range compatibility.Operations {
 		if strings.TrimSpace(operation.Method) == "" || strings.TrimSpace(operation.Status) == "" {
@@ -135,6 +143,7 @@ func verify() error {
 			return fmt.Errorf("compatibility ledger operation %q has invalid status %q", operation.Method, operation.Status)
 		}
 		seenMethods[operation.Method] = struct{}{}
+		seenCurrentMethods[strings.ToLower(operation.Method)] = struct{}{}
 		if operation.Status != "unimplemented" {
 			implementedMethods[operation.Method] = struct{}{}
 		}
@@ -150,6 +159,12 @@ func verify() error {
 			return fmt.Errorf("pinned OpenAPI operation %q is missing from compatibility ledger", method)
 		}
 	}
+	if err := verifyCurrentMethods(seenCurrentMethods); err != nil {
+		return err
+	}
+	if _, err := readCurrentCatalog(currentEventsPath, currentEventsHash, 150); err != nil {
+		return fmt.Errorf("verify current Slack event catalog: %w", err)
+	}
 	for _, path := range []string{"/api.test", "/auth.revoke", "/auth.test", "/chat.postMessage", "/chat.meMessage", "/chat.update", "/chat.delete", "/chat.getPermalink", "/conversations.create", "/conversations.join", "/conversations.invite", "/conversations.leave", "/conversations.kick", "/conversations.rename", "/conversations.setTopic", "/conversations.setPurpose", "/conversations.archive", "/conversations.unarchive", "/conversations.close", "/conversations.open", "/conversations.mark", "/conversations.history", "/conversations.replies", "/conversations.info", "/conversations.list", "/conversations.members", "/files.delete", "/files.info", "/files.list", "/files.upload", "/pins.add", "/pins.remove", "/pins.list", "/reactions.add", "/reactions.remove", "/reactions.get", "/reactions.list", "/search.messages", "/team.info", "/users.info", "/users.list", "/users.lookupByEmail", "/users.getPresence", "/users.setPresence", "/users.profile.get", "/users.profile.set"} {
 		if _, ok := openapi.Paths[path]; !ok {
 			return fmt.Errorf("required path %s missing", path)
@@ -159,6 +174,50 @@ func verify() error {
 		return err
 	}
 	return nil
+}
+
+// verifyCurrentMethods complements the archived OpenAPI source with Slack's
+// current method reference. The documentation sitemap lower-cases method page
+// paths, so comparison is deliberately case-insensitive while the ledger keeps
+// the public method casing consumed by SDKs.
+func verifyCurrentMethods(ledgerMethods map[string]struct{}) error {
+	lines, err := readCurrentCatalog(currentMethodsPath, currentMethodsHash, 310)
+	if err != nil {
+		return fmt.Errorf("verify current Slack method catalog: %w", err)
+	}
+	for _, method := range lines {
+		if _, exists := ledgerMethods[method]; !exists {
+			return fmt.Errorf("current Slack method %q is missing from compatibility ledger", method)
+		}
+	}
+	return nil
+}
+
+func readCurrentCatalog(path, wantHash string, wantCount int) ([]string, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(body)
+	if got := hex.EncodeToString(sum[:]); got != wantHash {
+		return nil, fmt.Errorf("checksum mismatch for %s: got %s want %s", path, got, wantHash)
+	}
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	if len(lines) != wantCount {
+		return nil, fmt.Errorf("%s contains %d entries, want %d", path, len(lines), wantCount)
+	}
+	previous := ""
+	for _, line := range lines {
+		entry := strings.TrimSpace(line)
+		if entry == "" || entry != strings.ToLower(entry) {
+			return nil, fmt.Errorf("%s contains invalid entry %q", path, line)
+		}
+		if entry <= previous {
+			return nil, fmt.Errorf("%s is not strictly sorted at %q", path, entry)
+		}
+		previous = entry
+	}
+	return lines, nil
 }
 
 func decodeLedger(body []byte) (compatibilityLedger, error) {
@@ -228,10 +287,42 @@ func printReport() error {
 	}
 	fmt.Printf("operations=%d implemented=%d/%d verified-against-slack=%d/%d\n", total, implemented, total, counts["verified-against-slack"], total)
 	fmt.Printf("unimplemented=%d\n", unimplemented)
+	for _, namespace := range unimplementedNamespaces(ledger.Operations) {
+		fmt.Printf("unimplemented.%s=%d\n", namespace.Name, namespace.Count)
+	}
 	for _, status := range []string{"schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
 		fmt.Printf("%s-or-better=%d/%d\n", status, counts[status], total)
 	}
 	return nil
+}
+
+type namespaceCount struct {
+	Name  string
+	Count int
+}
+
+func unimplementedNamespaces(operations []operation) []namespaceCount {
+	counts := make(map[string]int)
+	for _, operation := range operations {
+		if operation.Status != "unimplemented" {
+			continue
+		}
+		namespace := operation.Method
+		if index := strings.IndexByte(namespace, '.'); index >= 0 {
+			namespace = namespace[:index]
+		}
+		counts[namespace]++
+	}
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]namespaceCount, 0, len(names))
+	for _, name := range names {
+		result = append(result, namespaceCount{Name: name, Count: counts[name]})
+	}
+	return result
 }
 
 func cumulativeEvidenceCounts(operations []operation) map[string]int {

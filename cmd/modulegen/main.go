@@ -24,6 +24,7 @@ type module struct {
 	TransportImport      string   `json:"transport_import"`
 	BlobImport           string   `json:"blob_import"`
 	ImplementationType   string   `json:"implementation_type"`
+	AppCredentialKey     bool     `json:"app_credential_key"`
 	Dependencies         []string `json:"dependencies"`
 }
 
@@ -108,9 +109,17 @@ func generate(manifestPath, outPath string, check bool) error {
 		name := exported(item.Name)
 		transport := transportAlias(item.Name)
 		if item.BlobImport != "" {
-			output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, blobs blob.Store) %s.Service {\n\treturn %s.%s{Store: dependencies, Blob: blobs}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
+			if item.AppCredentialKey {
+				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, blobs blob.Store, appCredentialKey []byte) %s.Service {\n\treturn %s.%s{Store: dependencies, Blob: blobs, AppCredentialKey: appCredentialKey}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
+			} else {
+				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, blobs blob.Store) %s.Service {\n\treturn %s.%s{Store: dependencies, Blob: blobs}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
+			}
 		} else {
-			output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store) %s.Service {\n\treturn %s.%s{Store: dependencies}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
+			if item.AppCredentialKey {
+				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store, appCredentialKey []byte) %s.Service {\n\treturn %s.%s{Store: dependencies, AppCredentialKey: appCredentialKey}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
+			} else {
+				output.WriteString(fmt.Sprintf("func Provide%sServiceLocal(dependencies store.Store) %s.Service {\n\treturn %s.%s{Store: dependencies}\n}\n\n", name, packageName(item.APIImport), packageName(item.ImplementationImport), item.ImplementationType))
+			}
 		}
 		output.WriteString(fmt.Sprintf("func Provide%sServiceRemote(connection grpc.ClientConnInterface) (%s.Service, auth.TokenStore, auth.SessionStore, auth.SessionRevoker, error) {\n\tremote, err := %s.NewRemote(connection)\n\tif err != nil {\n\t\treturn nil, nil, nil, nil, err\n\t}\n\treturn remote, remote, remote, remote, nil\n}\n\n", name, packageName(item.APIImport), transport))
 		output.WriteString(fmt.Sprintf("func Register%sServiceServer(registrar grpc.ServiceRegistrar, implementation %s.Service, tokens auth.TokenStore, sessions auth.SessionStore, revoker auth.SessionRevoker) error {\n\treturn %s.RegisterServer(registrar, implementation, tokens, sessions, revoker)\n}\n\n", name, packageName(item.APIImport), transport))

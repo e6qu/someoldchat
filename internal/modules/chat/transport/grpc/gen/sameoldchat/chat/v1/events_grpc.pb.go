@@ -20,6 +20,9 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	EventsService_ListEventsAfter_FullMethodName = "/sameoldchat.chat.v1.EventsService/ListEventsAfter"
+	EventsService_ClaimAppEvent_FullMethodName   = "/sameoldchat.chat.v1.EventsService/ClaimAppEvent"
+	EventsService_AckAppEvent_FullMethodName     = "/sameoldchat.chat.v1.EventsService/AckAppEvent"
+	EventsService_ReleaseAppEvent_FullMethodName = "/sameoldchat.chat.v1.EventsService/ReleaseAppEvent"
 )
 
 // EventsServiceClient is the client API for EventsService service.
@@ -27,6 +30,9 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type EventsServiceClient interface {
 	ListEventsAfter(ctx context.Context, in *EventsRequest, opts ...grpc.CallOption) (*EventsResponse, error)
+	ClaimAppEvent(ctx context.Context, in *AppEventClaimRequest, opts ...grpc.CallOption) (*AppEventLease, error)
+	AckAppEvent(ctx context.Context, in *AppEventAckRequest, opts ...grpc.CallOption) (*AppEventMutationResponse, error)
+	ReleaseAppEvent(ctx context.Context, in *AppEventReleaseRequest, opts ...grpc.CallOption) (*AppEventMutationResponse, error)
 }
 
 type eventsServiceClient struct {
@@ -47,11 +53,44 @@ func (c *eventsServiceClient) ListEventsAfter(ctx context.Context, in *EventsReq
 	return out, nil
 }
 
+func (c *eventsServiceClient) ClaimAppEvent(ctx context.Context, in *AppEventClaimRequest, opts ...grpc.CallOption) (*AppEventLease, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppEventLease)
+	err := c.cc.Invoke(ctx, EventsService_ClaimAppEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eventsServiceClient) AckAppEvent(ctx context.Context, in *AppEventAckRequest, opts ...grpc.CallOption) (*AppEventMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppEventMutationResponse)
+	err := c.cc.Invoke(ctx, EventsService_AckAppEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *eventsServiceClient) ReleaseAppEvent(ctx context.Context, in *AppEventReleaseRequest, opts ...grpc.CallOption) (*AppEventMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppEventMutationResponse)
+	err := c.cc.Invoke(ctx, EventsService_ReleaseAppEvent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EventsServiceServer is the server API for EventsService service.
 // All implementations should embed UnimplementedEventsServiceServer
 // for forward compatibility.
 type EventsServiceServer interface {
 	ListEventsAfter(context.Context, *EventsRequest) (*EventsResponse, error)
+	ClaimAppEvent(context.Context, *AppEventClaimRequest) (*AppEventLease, error)
+	AckAppEvent(context.Context, *AppEventAckRequest) (*AppEventMutationResponse, error)
+	ReleaseAppEvent(context.Context, *AppEventReleaseRequest) (*AppEventMutationResponse, error)
 }
 
 // UnimplementedEventsServiceServer should be embedded to have
@@ -63,6 +102,15 @@ type UnimplementedEventsServiceServer struct{}
 
 func (UnimplementedEventsServiceServer) ListEventsAfter(context.Context, *EventsRequest) (*EventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListEventsAfter not implemented")
+}
+func (UnimplementedEventsServiceServer) ClaimAppEvent(context.Context, *AppEventClaimRequest) (*AppEventLease, error) {
+	return nil, status.Error(codes.Unimplemented, "method ClaimAppEvent not implemented")
+}
+func (UnimplementedEventsServiceServer) AckAppEvent(context.Context, *AppEventAckRequest) (*AppEventMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AckAppEvent not implemented")
+}
+func (UnimplementedEventsServiceServer) ReleaseAppEvent(context.Context, *AppEventReleaseRequest) (*AppEventMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ReleaseAppEvent not implemented")
 }
 func (UnimplementedEventsServiceServer) testEmbeddedByValue() {}
 
@@ -102,6 +150,60 @@ func _EventsService_ListEventsAfter_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EventsService_ClaimAppEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppEventClaimRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EventsServiceServer).ClaimAppEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EventsService_ClaimAppEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EventsServiceServer).ClaimAppEvent(ctx, req.(*AppEventClaimRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EventsService_AckAppEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppEventAckRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EventsServiceServer).AckAppEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EventsService_AckAppEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EventsServiceServer).AckAppEvent(ctx, req.(*AppEventAckRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EventsService_ReleaseAppEvent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppEventReleaseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EventsServiceServer).ReleaseAppEvent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EventsService_ReleaseAppEvent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EventsServiceServer).ReleaseAppEvent(ctx, req.(*AppEventReleaseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EventsService_ServiceDesc is the grpc.ServiceDesc for EventsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -112,6 +214,18 @@ var EventsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListEventsAfter",
 			Handler:    _EventsService_ListEventsAfter_Handler,
+		},
+		{
+			MethodName: "ClaimAppEvent",
+			Handler:    _EventsService_ClaimAppEvent_Handler,
+		},
+		{
+			MethodName: "AckAppEvent",
+			Handler:    _EventsService_AckAppEvent_Handler,
+		},
+		{
+			MethodName: "ReleaseAppEvent",
+			Handler:    _EventsService_ReleaseAppEvent_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

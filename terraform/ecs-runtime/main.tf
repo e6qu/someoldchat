@@ -58,6 +58,10 @@ resource "random_id" "auth_state_key" {
   byte_length = 48
 }
 
+resource "random_id" "app_credential_key" {
+  byte_length = 32
+}
+
 resource "aws_secretsmanager_secret" "api_token" {
   name = "${var.name}/api-token"
   tags = local.tags
@@ -84,6 +88,16 @@ resource "aws_secretsmanager_secret" "auth_state_key" {
 resource "aws_secretsmanager_secret_version" "auth_state_key" {
   secret_id     = aws_secretsmanager_secret.auth_state_key.id
   secret_string = random_id.auth_state_key.hex
+}
+
+resource "aws_secretsmanager_secret" "app_credential_key" {
+  name = "${var.name}/app-credential-key"
+  tags = local.tags
+}
+
+resource "aws_secretsmanager_secret_version" "app_credential_key" {
+  secret_id     = aws_secretsmanager_secret.app_credential_key.id
+  secret_string = random_id.app_credential_key.hex
 }
 
 data "aws_iam_policy_document" "task" {

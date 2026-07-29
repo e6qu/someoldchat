@@ -7,61 +7,66 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-
-	"github.com/sameoldchat/sameoldchat/internal/blob"
-	"github.com/sameoldchat/sameoldchat/internal/domain"
-	"github.com/sameoldchat/sameoldchat/internal/events"
-	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
-	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
+	"net/http"
 	"net/url"
 	"reflect"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/sameoldchat/sameoldchat/internal/blob"
+	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
+	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
 var (
-	ErrInvalidMessage           = errors.New("message text and conversation are required")
-	ErrInvalidTimestamp         = errors.New("message timestamp is invalid")
-	ErrMessageNotOwned          = errors.New("message is not owned by user")
-	ErrMessageAlreadyDeleted    = errors.New("message is already deleted")
-	ErrInvalidConversation      = errors.New("conversation name is invalid")
-	ErrInvalidWorkspace         = errors.New("workspace settings are invalid")
-	ErrInvalidConversationPrefs = errors.New("conversation preferences are invalid")
-	ErrInvalidReaction          = errors.New("reaction name is invalid")
-	ErrBlobUnavailable          = errors.New("blob storage is unavailable")
-	ErrInvalidFile              = errors.New("file metadata is invalid")
-	ErrInvalidSearch            = errors.New("search query is invalid")
-	ErrInvalidProfile           = errors.New("user profile is invalid")
-	ErrInvalidPresence          = errors.New("user presence is invalid")
-	ErrInvalidSnooze            = errors.New("snooze duration must be between 1 and 1440 minutes")
-	ErrInvalidReminder          = errors.New("reminder text, user, and time are required")
-	ErrInvalidUserGroup         = errors.New("user group name, handle, and members are invalid")
-	ErrInvalidCall              = errors.New("call external id and join URL are required")
-	ErrInvalidEphemeral         = errors.New("ephemeral message recipient, conversation, and text are required")
-	ErrInvalidAccessLog         = errors.New("access log fields are invalid")
-	ErrInvalidEmoji             = errors.New("custom emoji name or URL is invalid")
-	ErrEmojiAlreadyExists       = errors.New("custom emoji already exists")
-	ErrInvalidRemoteFile        = errors.New("remote file metadata is invalid")
-	ErrInvalidInviteRequest     = errors.New("invite request is invalid")
-	ErrInvalidAppApproval       = errors.New("app approval is invalid")
-	ErrInvalidView              = errors.New("view payload is invalid")
-	ErrInvalidList              = errors.New("list payload is invalid")
-	ErrInvalidEntity            = errors.New("entity payload is invalid")
-	ErrInvalidWorkflowStep      = errors.New("workflow step payload is invalid")
-	ErrInvalidDialog            = errors.New("dialog payload is invalid")
-	ErrInvalidBot               = errors.New("bot identifier is required")
-	ErrInvalidMigration         = errors.New("migration user identifiers are invalid")
-	ErrInvalidOAuth             = errors.New("oauth authorization is invalid")
-	ErrInvalidOAuthClient       = errors.New("oauth client is invalid")
-	ErrOAuthAppMismatch         = errors.New("oauth client and token app do not match")
-	ErrInvalidIntegrationLogs   = errors.New("integration log arguments are invalid")
-	ErrInvalidBookmark          = errors.New("bookmark title, type, and link are invalid")
-	ErrInvalidCanvas            = errors.New("canvas content or access arguments are invalid")
-	ErrInvalidExternalUpload    = errors.New("external upload is invalid")
+	ErrInvalidMessage              = errors.New("message text and conversation are required")
+	ErrInvalidTimestamp            = errors.New("message timestamp is invalid")
+	ErrMessageNotOwned             = errors.New("message is not owned by user")
+	ErrMessageAlreadyDeleted       = errors.New("message is already deleted")
+	ErrInvalidConversation         = errors.New("conversation name is invalid")
+	ErrInvalidWorkspace            = errors.New("workspace settings are invalid")
+	ErrInvalidConversationPrefs    = errors.New("conversation preferences are invalid")
+	ErrInvalidReaction             = errors.New("reaction name is invalid")
+	ErrBlobUnavailable             = errors.New("blob storage is unavailable")
+	ErrInvalidFile                 = errors.New("file metadata is invalid")
+	ErrInvalidSearch               = errors.New("search query is invalid")
+	ErrInvalidProfile              = errors.New("user profile is invalid")
+	ErrInvalidPresence             = errors.New("user presence is invalid")
+	ErrInvalidSnooze               = errors.New("snooze duration must be between 1 and 1440 minutes")
+	ErrInvalidReminder             = errors.New("reminder text, user, and time are required")
+	ErrInvalidUserGroup            = errors.New("user group name, handle, and members are invalid")
+	ErrInvalidCall                 = errors.New("call external id and join URL are required")
+	ErrInvalidEphemeral            = errors.New("ephemeral message recipient, conversation, and text are required")
+	ErrInvalidAccessLog            = errors.New("access log fields are invalid")
+	ErrInvalidEmoji                = errors.New("custom emoji name or URL is invalid")
+	ErrEmojiAlreadyExists          = errors.New("custom emoji already exists")
+	ErrInvalidRemoteFile           = errors.New("remote file metadata is invalid")
+	ErrInvalidInviteRequest        = errors.New("invite request is invalid")
+	ErrInvalidAppApproval          = errors.New("app approval is invalid")
+	ErrInvalidView                 = errors.New("view payload is invalid")
+	ErrAppHomeNotEnabled           = errors.New("app home tab is not enabled")
+	ErrInvalidList                 = errors.New("list payload is invalid")
+	ErrInvalidEntity               = errors.New("entity payload is invalid")
+	ErrInvalidWorkflowStep         = errors.New("workflow step payload is invalid")
+	ErrInvalidDialog               = errors.New("dialog payload is invalid")
+	ErrInvalidBot                  = errors.New("bot identifier is required")
+	ErrInvalidMigration            = errors.New("migration user identifiers are invalid")
+	ErrInvalidOAuth                = errors.New("oauth authorization is invalid")
+	ErrInvalidOAuthClient          = errors.New("oauth client is invalid")
+	ErrOAuthAppMismatch            = errors.New("oauth client and token app do not match")
+	ErrInvalidIntegrationLogs      = errors.New("integration log arguments are invalid")
+	ErrInvalidBookmark             = errors.New("bookmark title, type, and link are invalid")
+	ErrInvalidCanvas               = errors.New("canvas content or access arguments are invalid")
+	ErrInvalidExternalUpload       = errors.New("external upload is invalid")
+	ErrConversationAlreadyArchived = errors.New("conversation is already archived")
+	ErrConversationNotArchived     = errors.New("conversation is not archived")
+	ErrCannotArchiveDefault        = errors.New("required conversation cannot be archived")
+	ErrCannotLeaveDefault          = errors.New("required conversation cannot be left")
 
 	// ErrNotWorkspaceAdmin refuses an administrative operation to an actor whose
 	// durable workspace membership is not an administrator or an owner.
@@ -115,8 +120,10 @@ const (
 )
 
 type Messages struct {
-	Store store.Store
-	Blob  blob.Store
+	Store            store.Store
+	Blob             blob.Store
+	AppCredentialKey []byte
+	AppHTTPClient    *http.Client
 }
 
 var _ chatapi.Service = Messages{}
@@ -152,7 +159,125 @@ func (m Messages) UninstallApp(ctx context.Context, clientID, clientSecret strin
 }
 
 func (m Messages) ListAppEventsAfter(ctx context.Context, appID domain.AppID, after uint64, limit int) ([]events.Record, error) {
-	return m.Store.ListAppEventsAfter(ctx, appID, after, limit)
+	if limit <= 0 {
+		return nil, store.InvalidArgument("event limit must be positive")
+	}
+	result := make([]events.Record, 0, limit)
+	cursor := after
+	for len(result) < limit {
+		records, err := m.Store.ListAppEventsAfter(ctx, appID, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(records) == 0 {
+			return result, nil
+		}
+		for _, record := range records {
+			cursor = record.Sequence
+			prepared, visible, prepareErr := PrepareAppEvent(ctx, m.Store, appID, record)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+			if visible {
+				result = append(result, prepared)
+				if len(result) == limit {
+					return result, nil
+				}
+			}
+		}
+		if len(records) < limit {
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
+func (m Messages) ListUserEventsAfter(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, after uint64, limit int) ([]events.Record, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("event limit must be positive")
+	}
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	result := make([]events.Record, 0, limit)
+	cursor := after
+	for len(result) < limit {
+		records, err := m.Store.ListEventsAfter(ctx, workspaceID, cursor, limit)
+		if err != nil {
+			return nil, err
+		}
+		if len(records) == 0 {
+			return result, nil
+		}
+		for _, record := range records {
+			cursor = record.Sequence
+			prepared, visible, prepareErr := PrepareUserEvent(ctx, m.Store, workspaceID, userID, record)
+			if prepareErr != nil {
+				return nil, prepareErr
+			}
+			if visible {
+				result = append(result, prepared)
+				if len(result) == limit {
+					return result, nil
+				}
+			}
+		}
+		if len(records) < limit {
+			return result, nil
+		}
+	}
+	return result, nil
+}
+
+func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, lease time.Duration) (events.Record, int, string, bool, error) {
+	for {
+		record, attempt, reason, found, err := m.Store.ClaimAppEvent(ctx, appID, surface, owner, lease)
+		if err != nil || !found || surface != "socket" {
+			return record, attempt, reason, found, err
+		}
+		prepared, visible, err := PrepareAppEvent(ctx, m.Store, appID, record)
+		if err != nil {
+			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "event_projection_failed", time.Now().UTC())
+			return events.Record{}, 0, "", false, err
+		}
+		if !visible {
+			if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
+				return events.Record{}, 0, "", false, err
+			}
+			continue
+		}
+		record = prepared
+		snapshot, parsed, err := m.installedApp(ctx, record.Event.WorkspaceID, appID)
+		if err != nil {
+			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "app_configuration_unavailable", time.Now().UTC())
+			return events.Record{}, 0, "", false, err
+		}
+		bodies, err := events.SlackEventBodies(record, string(snapshot.App.ID))
+		if err != nil {
+			// The Socket Mode handler owns the established malformed-record
+			// policy and its operator diagnostics.
+			return record, attempt, reason, true, nil
+		}
+		filtered, err := events.FilterSubscribedSlackEventBodies(ctx, bodies, parsed.BotEvents, parsed.UserEvents, m.Store.GetConversation)
+		if err != nil {
+			_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "subscription_filter_failed", time.Now().UTC())
+			return events.Record{}, 0, "", false, err
+		}
+		if len(filtered) != 0 {
+			return record, attempt, reason, true, nil
+		}
+		if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
+			return events.Record{}, 0, "", false, err
+		}
+	}
+}
+
+func (m Messages) AckAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64) error {
+	return m.Store.AckAppEvent(ctx, appID, surface, owner, sequence)
+}
+
+func (m Messages) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, reason string, retryAt time.Time) error {
+	return m.Store.ReleaseAppEvent(ctx, appID, surface, owner, sequence, reason, retryAt)
 }
 
 func (m Messages) GetSocketModeCursor(ctx context.Context, appID domain.AppID) (uint64, error) {
@@ -201,6 +326,18 @@ func (m Messages) AckSocketModeResponses(ctx context.Context, owner string, valu
 
 func (m Messages) ReleaseSocketModeResponses(ctx context.Context, owner string, values []domain.SocketModeResponse, retryAt time.Time) error {
 	return m.Store.ReleaseSocketModeResponses(ctx, owner, values, retryAt)
+}
+
+func (m Messages) ClaimSocketModeInteraction(ctx context.Context, appID domain.AppID, owner string, lease time.Duration) (domain.SocketModeInteraction, bool, error) {
+	return m.Store.ClaimSocketModeInteraction(ctx, appID, owner, lease)
+}
+
+func (m Messages) AckSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner string) error {
+	return m.Store.AckSocketModeInteraction(ctx, appID, envelopeID, owner)
+}
+
+func (m Messages) ReleaseSocketModeInteraction(ctx context.Context, appID domain.AppID, envelopeID, owner, reason string, retryAt time.Time) error {
+	return m.Store.ReleaseSocketModeInteraction(ctx, appID, envelopeID, owner, reason, retryAt)
 }
 
 func (m Messages) RevokeToken(ctx context.Context, token string) error {
@@ -344,6 +481,9 @@ func (m Messages) FileInfo(ctx context.Context, workspaceID domain.WorkspaceID, 
 	if err != nil || file.WorkspaceID != workspaceID {
 		return domain.File{}, store.ErrNotFound
 	}
+	if err := m.authorizeFileAccess(ctx, userID, file); err != nil {
+		return domain.File{}, err
+	}
 	return file, nil
 }
 
@@ -357,6 +497,9 @@ func (m Messages) OpenFile(ctx context.Context, workspaceID domain.WorkspaceID, 
 	file, err := m.Store.GetFile(ctx, fileID)
 	if err != nil || file.WorkspaceID != workspaceID {
 		return domain.File{}, nil, store.ErrNotFound
+	}
+	if err := m.authorizeFileAccess(ctx, userID, file); err != nil {
+		return domain.File{}, nil, err
 	}
 	object, reader, err := m.Blob.Open(ctx, file.BlobKey)
 	if err != nil {
@@ -372,12 +515,28 @@ func (m Messages) OpenFile(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return file, reader, nil
 }
 
+func (m Messages) authorizeFileAccess(ctx context.Context, userID domain.UserID, file domain.File) error {
+	if file.Uploader == userID {
+		return nil
+	}
+	for _, conversationID := range file.SharedChannels {
+		member, err := m.Store.IsConversationMember(ctx, conversationID, userID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return err
+		}
+		if member {
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
 func (m Messages) DeleteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err
 	}
 	file, err := m.Store.GetFile(ctx, fileID)
-	if err != nil || file.WorkspaceID != workspaceID {
+	if err != nil || file.WorkspaceID != workspaceID || file.Uploader != userID {
 		return store.ErrNotFound
 	}
 	event, err := newEvent(workspaceID, userID, events.BlobKey(events.FileBlobDeleteTopic, file.BlobKey), time.Now().UTC())
@@ -976,6 +1135,24 @@ func (m Messages) AdminSetConversationArchived(ctx context.Context, workspaceID 
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	if archived == conversation.Archived {
+		if archived {
+			return domain.Conversation{}, ErrConversationAlreadyArchived
+		}
+		return domain.Conversation{}, ErrConversationNotArchived
+	}
+	if archived {
+		required, err := m.isDefaultConversation(ctx, workspaceID, conversationID)
+		if err != nil {
+			return domain.Conversation{}, err
+		}
+		if required {
+			return domain.Conversation{}, ErrCannotArchiveDefault
+		}
+	}
 	event, err := newEvent(workspaceID, actorID, events.NewPayload("conversation.archive_changed_by_admin", events.String("channel_id", string(conversationID)), events.Bool("archived", archived)), time.Now().UTC())
 	if err != nil {
 		return domain.Conversation{}, err
@@ -1304,57 +1481,156 @@ func (m Messages) RequestAppPermissions(ctx context.Context, workspaceID domain.
 
 func viewPayload(payload string) (string, string, error) {
 	payload = strings.TrimSpace(payload)
-	if payload == "" {
+	if payload == "" || len(payload) > 250*1024 {
 		return "", "", ErrInvalidView
 	}
-	var fields map[string]json.RawMessage
+	var fields map[string]any
 	if err := json.Unmarshal([]byte(payload), &fields); err != nil || fields == nil {
 		return "", "", ErrInvalidView
 	}
-	var viewType string
-	if raw, ok := fields["type"]; !ok || json.Unmarshal(raw, &viewType) != nil || strings.TrimSpace(viewType) == "" {
+	viewType := strings.TrimSpace(stringValue(fields["type"]))
+	if viewType != "modal" && viewType != "home" {
 		return "", "", ErrInvalidView
 	}
-	var externalID string
-	if raw, ok := fields["external_id"]; ok && json.Unmarshal(raw, &externalID) != nil {
+	externalID, ok := fields["external_id"].(string)
+	if fields["external_id"] != nil && !ok {
 		return "", "", ErrInvalidView
 	}
-	return viewType, strings.TrimSpace(externalID), nil
+	externalID = strings.TrimSpace(externalID)
+	if utf8.RuneCountInString(externalID) > 255 {
+		return "", "", ErrInvalidView
+	}
+	blocks, ok := fields["blocks"].([]any)
+	if !ok || len(blocks) > 100 {
+		return "", "", ErrInvalidView
+	}
+	callback, callbackOK := fields["callback_id"].(string)
+	if (!callbackOK && fields["callback_id"] != nil) || utf8.RuneCountInString(callback) > 255 {
+		return "", "", ErrInvalidView
+	}
+	metadata, metadataOK := fields["private_metadata"].(string)
+	if (!metadataOK && fields["private_metadata"] != nil) || utf8.RuneCountInString(metadata) > 3000 {
+		return "", "", ErrInvalidView
+	}
+	if viewType == "modal" {
+		if !validPlainTextObject(fields["title"], true) || !validPlainTextObject(fields["close"], false) || !validPlainTextObject(fields["submit"], false) {
+			return "", "", ErrInvalidView
+		}
+		hasInput := false
+		for _, raw := range blocks {
+			block, ok := raw.(map[string]any)
+			if !ok {
+				return "", "", ErrInvalidView
+			}
+			blockID, blockIDOK := block["block_id"].(string)
+			if (!blockIDOK && block["block_id"] != nil) || utf8.RuneCountInString(blockID) > 255 {
+				return "", "", ErrInvalidView
+			}
+			if stringValue(block["type"]) != "input" {
+				continue
+			}
+			hasInput = true
+			if !validPlainTextObject(block["label"], true) || !validPlainTextObject(block["hint"], false) {
+				return "", "", ErrInvalidView
+			}
+			element, ok := block["element"].(map[string]any)
+			if !ok {
+				return "", "", ErrInvalidView
+			}
+			actionID := strings.TrimSpace(stringValue(element["action_id"]))
+			if actionID == "" || utf8.RuneCountInString(actionID) > 255 {
+				return "", "", ErrInvalidView
+			}
+		}
+		if hasInput && fields["submit"] == nil {
+			return "", "", ErrInvalidView
+		}
+	}
+	return viewType, externalID, nil
+}
+
+func validPlainTextObject(value any, required bool) bool {
+	if value == nil {
+		return !required
+	}
+	object, ok := value.(map[string]any)
+	if !ok || stringValue(object["type"]) != "plain_text" {
+		return false
+	}
+	text, ok := object["text"].(string)
+	if !ok {
+		return false
+	}
+	length := utf8.RuneCountInString(text)
+	return length > 0 && length <= 24
+}
+
+func normalizeViewPayload(id domain.ViewID, payload string) (string, error) {
+	var fields map[string]any
+	if json.Unmarshal([]byte(payload), &fields) != nil || fields == nil {
+		return "", ErrInvalidView
+	}
+	for _, name := range []string{"id", "team_id", "app_id", "hash", "root_view_id", "previous_view_id", "state", "bot_id"} {
+		delete(fields, name)
+	}
+	blocks, _ := fields["blocks"].([]any)
+	seen := make(map[string]struct{}, len(blocks))
+	for index, raw := range blocks {
+		block, ok := raw.(map[string]any)
+		if !ok {
+			return "", ErrInvalidView
+		}
+		blockID := strings.TrimSpace(stringValue(block["block_id"]))
+		if blockID == "" {
+			blockID = fmt.Sprintf("block_%s_%d", id, index)
+			block["block_id"] = blockID
+		}
+		if _, duplicate := seen[blockID]; duplicate {
+			return "", ErrInvalidView
+		}
+		seen[blockID] = struct{}{}
+	}
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		return "", ErrInvalidView
+	}
+	return string(encoded), nil
 }
 
 func viewHash(id domain.ViewID, payload string, now time.Time) string {
 	return fmt.Sprintf("%x", sha256.Sum256([]byte(string(id)+"\x00"+payload+"\x00"+now.UTC().Format(time.RFC3339Nano))))
 }
 
-func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, triggerID, payload string) (domain.View, error) {
+func (m Messages) OpenView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
-	if strings.TrimSpace(triggerID) == "" {
-		return domain.View{}, ErrInvalidView
+	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	if err != nil {
+		return domain.View{}, err
 	}
-	return m.createView(ctx, workspaceID, actor, payload, "", "", "", "view.opened")
+	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.opened")
 }
 
 // PublishView replaces the App Home surface a workspace member sees.
 //
-// Authority: an actor may always publish to their OWN surface. Publishing to
-// SOMEONE ELSE's is a write to another member's state and requires
-// requireWorkspaceAdmin, exactly as WorkspaceMembership requires it for a read
-// of another member's state.
-//
-// It used to require workspace membership alone, so any member could replace any
-// other member's App Home with attacker-authored Block Kit — a workspace-wide
-// phishing surface delivered inside the product chrome, repeatable for every
-// user in the directory. expectedHash was no defence: the actor could read the
-// current hash or pass none at all.
-func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceID, actor, target domain.UserID, payload, expectedHash string) (domain.View, error) {
-	if actor != target {
-		if err := m.requireWorkspaceAdmin(ctx, workspaceID, actor); err != nil {
-			return domain.View{}, err
-		}
-	} else if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+// Slack defines this as an app-owned surface published for a target user, with
+// no method scope required. AppID is therefore the security boundary: an
+// authenticated app can publish any workspace member's instance of its own Home
+// tab, but cannot read or replace another app's surface.
+func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, target domain.UserID, payload, expectedHash string) (domain.View, error) {
+	if appID == "" {
+		return domain.View{}, ErrInvalidView
+	}
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
+	}
+	_, parsed, err := m.installedApp(ctx, workspaceID, appID)
+	if err != nil {
+		return domain.View{}, err
+	}
+	if !parsed.HomeTabEnabled {
+		return domain.View{}, ErrAppHomeNotEnabled
 	}
 	user, err := m.Store.GetUser(ctx, target)
 	if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
@@ -1364,9 +1640,9 @@ func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil || viewType != "home" {
 		return domain.View{}, ErrInvalidView
 	}
-	current, err := m.Store.GetPublishedView(ctx, workspaceID, target)
+	current, err := m.Store.GetPublishedView(ctx, workspaceID, target, appID)
 	if errors.Is(err, store.ErrNotFound) {
-		return m.createView(ctx, workspaceID, target, payload, "", "", "", "view.published")
+		return m.createView(ctx, workspaceID, appID, target, payload, "", "", "", "view.published")
 	}
 	if err != nil {
 		return domain.View{}, err
@@ -1374,24 +1650,30 @@ func (m Messages) PublishView(ctx context.Context, workspaceID domain.WorkspaceI
 	return m.updateView(ctx, workspaceID, actor, current, payload, expectedHash, "view.published")
 }
 
-func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, triggerID, payload string) (domain.View, error) {
+func (m Messages) PushView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string) (domain.View, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
-	if strings.TrimSpace(triggerID) == "" {
-		return domain.View{}, ErrInvalidView
+	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	if err != nil {
+		return domain.View{}, err
 	}
-	parent, err := m.Store.GetLatestView(ctx, workspaceID, actor, "modal")
+	parent, err := m.Store.GetLatestView(ctx, workspaceID, trigger.UserID, appID, "modal")
 	if errors.Is(err, store.ErrNotFound) {
-		return m.createView(ctx, workspaceID, actor, payload, "", "", "", "view.pushed")
+		return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, "", "", "", "view.pushed")
 	}
 	if err != nil {
 		return domain.View{}, err
 	}
-	return m.createView(ctx, workspaceID, actor, payload, parent.RootViewID, parent.ID, "", "view.pushed")
+	if depth, err := m.viewStackDepth(ctx, parent); err != nil {
+		return domain.View{}, err
+	} else if depth >= 3 {
+		return domain.View{}, ErrInvalidView
+	}
+	return m.createView(ctx, workspaceID, appID, trigger.UserID, payload, parent.RootViewID, parent.ID, "", "view.pushed")
 }
 
-func (m Messages) UpdateView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, viewID, externalID, payload, expectedHash string) (domain.View, error) {
+func (m Messages) UpdateView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, viewID, externalID, payload, expectedHash string) (domain.View, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.View{}, err
 	}
@@ -1403,15 +1685,25 @@ func (m Messages) UpdateView(ctx context.Context, workspaceID domain.WorkspaceID
 	if strings.TrimSpace(viewID) != "" {
 		current, err = m.Store.GetView(ctx, workspaceID, domain.ViewID(strings.TrimSpace(viewID)))
 	} else {
-		current, err = m.Store.GetViewByExternalID(ctx, workspaceID, strings.TrimSpace(externalID))
+		current, err = m.Store.GetViewByExternalID(ctx, workspaceID, appID, strings.TrimSpace(externalID))
 	}
 	if err != nil {
 		return domain.View{}, err
 	}
+	if current.AppID != appID {
+		return domain.View{}, store.ErrNotFound
+	}
 	return m.updateView(ctx, workspaceID, actor, current, payload, expectedHash, "view.updated")
 }
 
-func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID, user domain.UserID, payload string, rootID, previousID domain.ViewID, externalID, topic string) (domain.View, error) {
+func (m Messages) CurrentModalView(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.View, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.View{}, err
+	}
+	return m.Store.GetCurrentView(ctx, workspaceID, userID, "modal")
+}
+
+func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID, appID domain.AppID, user domain.UserID, payload string, rootID, previousID domain.ViewID, externalID, topic string) (domain.View, error) {
 	viewType, payloadExternalID, err := viewPayload(payload)
 	if err != nil {
 		return domain.View{}, err
@@ -1424,14 +1716,18 @@ func (m Messages) createView(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.View{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.View{ID: id, WorkspaceID: domain.WorkspaceID(workspaceID), UserID: domain.UserID(user), Type: viewType, ExternalID: externalID, Payload: strings.TrimSpace(payload), Hash: viewHash(id, payload, now), CreatedAt: now, UpdatedAt: now}
+	payload, err = normalizeViewPayload(id, payload)
+	if err != nil {
+		return domain.View{}, err
+	}
+	value := domain.View{ID: id, AppID: appID, WorkspaceID: domain.WorkspaceID(workspaceID), UserID: domain.UserID(user), Type: viewType, ExternalID: externalID, Payload: payload, Hash: viewHash(id, payload, now), CreatedAt: now, UpdatedAt: now}
 	if rootID == "" {
 		value.RootViewID = id
 	} else {
 		value.RootViewID = rootID
 	}
 	value.PreviousViewID = previousID
-	event, err := newEvent(value.WorkspaceID, user, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("user_id", string(user))), now)
+	event, err := newEvent(value.WorkspaceID, user, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("app_id", string(appID)), events.String("user_id", string(user))), now)
 	if err != nil {
 		return domain.View{}, err
 	}
@@ -1450,18 +1746,37 @@ func (m Messages) updateView(ctx context.Context, workspaceID domain.WorkspaceID
 		externalID = current.ExternalID
 	}
 	now := time.Now().UTC()
+	payload, err = normalizeViewPayload(current.ID, payload)
+	if err != nil {
+		return domain.View{}, err
+	}
 	value := current
 	value.Type = viewType
 	value.ExternalID = externalID
-	value.Payload = strings.TrimSpace(payload)
+	value.Payload = payload
+	value.State = ""
+	value.Errors = nil
 	value.Hash = viewHash(value.ID, value.Payload, now)
 	value.UpdatedAt = now
 	value.UserID = current.UserID
-	event, err := newEvent(workspaceID, actor, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("user_id", string(value.UserID))), now)
+	event, err := newEvent(workspaceID, actor, events.NewPayload(topic, events.String("view_id", string(value.ID)), events.String("app_id", string(value.AppID)), events.String("user_id", string(value.UserID))), now)
 	if err != nil {
 		return domain.View{}, err
 	}
 	return m.Store.UpdateView(ctx, value, expectedHash, event)
+}
+
+func (m Messages) deleteView(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, current domain.View, clear bool, topic string) error {
+	event, err := newEvent(workspaceID, actor, events.NewPayload(topic,
+		events.String("view_id", string(current.ID)),
+		events.String("app_id", string(current.AppID)),
+		events.String("user_id", string(current.UserID)),
+		events.Bool("is_cleared", clear),
+	), time.Now().UTC())
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteView(ctx, workspaceID, current.UserID, current.ID, clear, event)
 }
 
 func workflowJSON(raw string, allowEmpty bool, array bool) (string, error) {
@@ -1556,12 +1871,13 @@ func (m Messages) setWorkflowStepWithValues(ctx context.Context, workspaceID dom
 	return m.Store.SetWorkflowStep(ctx, value, event)
 }
 
-func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, triggerID, payload string) error {
+func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, appID domain.AppID, triggerID, payload string) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return err
 	}
-	if strings.TrimSpace(triggerID) == "" {
-		return ErrInvalidDialog
+	trigger, err := m.consumeAppTrigger(ctx, workspaceID, appID, triggerID)
+	if err != nil {
+		return err
 	}
 	payload = strings.TrimSpace(payload)
 	var fields map[string]json.RawMessage
@@ -1590,7 +1906,7 @@ func (m Messages) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID
 	if err != nil {
 		return err
 	}
-	return m.Store.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: actor, Payload: payload, CreatedAt: now}, event)
+	return m.Store.CreateDialog(ctx, domain.Dialog{ID: id, WorkspaceID: workspaceID, UserID: trigger.UserID, Payload: payload, CreatedAt: now}, event)
 }
 
 func (m Messages) BotInfo(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, botID domain.BotID) (domain.Bot, error) {
@@ -1643,7 +1959,7 @@ func (m Messages) MigrationExchange(ctx context.Context, workspaceID domain.Work
 }
 
 func (m Messages) OAuthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI string) (domain.OAuthToken, error) {
-	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", "user")
+	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", "user", false)
 }
 
 func (m Messages) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, code, redirectURI string, userOnly bool) (domain.OAuthToken, error) {
@@ -1651,10 +1967,12 @@ func (m Messages) OAuthV2Exchange(ctx context.Context, clientID, clientSecret, c
 	if userOnly {
 		tokenType = "user"
 	}
-	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", tokenType)
+	return m.oauthExchange(ctx, clientID, clientSecret, code, redirectURI, "", tokenType, true)
 }
 
-func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier, tokenType string) (domain.OAuthToken, error) {
+const oauthRotatingTokenLifetime = 12 * time.Hour
+
+func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, code, redirectURI, codeVerifier, tokenType string, rotationAllowed bool) (domain.OAuthToken, error) {
 	clientID = strings.TrimSpace(clientID)
 	clientSecret = strings.TrimSpace(clientSecret)
 	code = strings.TrimSpace(code)
@@ -1671,16 +1989,54 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
 		return domain.OAuthToken{}, ErrInvalidOAuthClient
 	}
+	rotating := false
+	if rotationAllowed {
+		app, _, appErr := m.Store.GetApp(ctx, client.AppID)
+		if appErr == nil {
+			rotating = app.TokenRotationEnabled
+		} else if !errors.Is(appErr, store.ErrNotFound) {
+			return domain.OAuthToken{}, appErr
+		}
+	}
 	var accessToken string
-	if tokenType == "bot" {
+	if tokenType == "bot" && rotating {
+		accessToken, err = domain.NewRotatingBotToken()
+	} else if tokenType == "bot" {
 		accessToken, err = domain.NewBotToken()
+	} else if rotating {
+		accessToken, err = domain.NewRotatingUserToken()
 	} else {
 		accessToken, err = domain.NewUserToken()
 	}
 	if err != nil {
 		return domain.OAuthToken{}, err
 	}
-	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, domain.OAuthToken{TokenType: tokenType, CodeVerifier: codeVerifier})
+	exchange := domain.OAuthToken{TokenType: tokenType, CodeVerifier: codeVerifier}
+	if tokenType == "bot" {
+		if rotating {
+			exchange.AuthedUserAccessToken, err = domain.NewRotatingUserToken()
+		} else {
+			exchange.AuthedUserAccessToken, err = domain.NewUserToken()
+		}
+		if err != nil {
+			return domain.OAuthToken{}, err
+		}
+	}
+	if rotating {
+		exchange.RefreshToken, err = domain.NewRefreshToken()
+		if err != nil {
+			return domain.OAuthToken{}, err
+		}
+		exchange.ExpiresAt = time.Now().UTC().Add(oauthRotatingTokenLifetime)
+		if tokenType == "bot" {
+			exchange.AuthedUserRefreshToken, err = domain.NewRefreshToken()
+			if err != nil {
+				return domain.OAuthToken{}, err
+			}
+			exchange.AuthedUserExpiresAt = exchange.ExpiresAt
+		}
+	}
+	token, err := m.Store.ExchangeOAuthCode(ctx, clientID, clientSecret, code, redirectURI, accessToken, exchange)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return domain.OAuthToken{}, ErrInvalidOAuth
@@ -1689,7 +2045,116 @@ func (m Messages) oauthExchange(ctx context.Context, clientID, clientSecret, cod
 	}
 	token.AppID = client.AppID
 	token.TokenType = tokenType
-	if err := m.Store.CreateAppInstallation(ctx, domain.AppInstallation{AppID: client.AppID, WorkspaceID: token.WorkspaceID, Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
+	return token, nil
+}
+
+func (m Messages) OAuthV2Refresh(ctx context.Context, clientID, clientSecret, refreshToken string) (domain.OAuthToken, error) {
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	refreshToken = strings.TrimSpace(refreshToken)
+	if clientID == "" || clientSecret == "" || refreshToken == "" {
+		return domain.OAuthToken{}, ErrInvalidOAuth
+	}
+	client, err := m.Store.GetOAuthClient(ctx, clientID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.OAuthToken{}, ErrInvalidOAuthClient
+		}
+		return domain.OAuthToken{}, err
+	}
+	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
+		return domain.OAuthToken{}, ErrInvalidOAuthClient
+	}
+	app, _, err := m.Store.GetApp(ctx, client.AppID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.OAuthToken{}, ErrInvalidOAuth
+		}
+		return domain.OAuthToken{}, err
+	}
+	if !app.TokenRotationEnabled {
+		return domain.OAuthToken{}, ErrInvalidOAuth
+	}
+	grant, err := m.Store.LookupOAuthRefreshToken(ctx, clientID, refreshToken)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.OAuthToken{}, ErrInvalidOAuth
+		}
+		return domain.OAuthToken{}, err
+	}
+	var nextAccessToken string
+	if grant.TokenType == "bot" {
+		nextAccessToken, err = domain.NewRotatingBotToken()
+	} else {
+		nextAccessToken, err = domain.NewRotatingUserToken()
+	}
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	nextRefreshToken, err := domain.NewRefreshToken()
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	expiresAt := time.Now().UTC().Add(oauthRotatingTokenLifetime)
+	token, err := m.Store.ExchangeOAuthRefreshToken(ctx, clientID, clientSecret, refreshToken, nextAccessToken, nextRefreshToken, expiresAt)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.OAuthToken{}, ErrInvalidOAuth
+		}
+		return domain.OAuthToken{}, err
+	}
+	return token, nil
+}
+
+func (m Messages) OAuthV2ExchangeToken(ctx context.Context, clientID, clientSecret, accessToken string) (domain.OAuthToken, error) {
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
+	accessToken = strings.TrimSpace(accessToken)
+	if clientID == "" || clientSecret == "" || accessToken == "" {
+		return domain.OAuthToken{}, ErrInvalidOAuth
+	}
+	client, err := m.Store.GetOAuthClient(ctx, clientID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.OAuthToken{}, ErrInvalidOAuthClient
+		}
+		return domain.OAuthToken{}, err
+	}
+	if !secretDigestsEqual(client.SecretHash, domain.HashToken(clientSecret)) {
+		return domain.OAuthToken{}, ErrInvalidOAuthClient
+	}
+	app, _, err := m.Store.GetApp(ctx, client.AppID)
+	if err != nil || !app.TokenRotationEnabled {
+		if errors.Is(err, store.ErrNotFound) || err == nil {
+			return domain.OAuthToken{}, ErrInvalidOAuth
+		}
+		return domain.OAuthToken{}, err
+	}
+	record, err := m.Store.LookupToken(ctx, accessToken)
+	if err != nil || record.Revoked || record.AppID != client.AppID || !record.ExpiresAt.IsZero() || record.TokenType != "bot" && record.TokenType != "user" {
+		if errors.Is(err, store.ErrNotFound) || err == nil {
+			return domain.OAuthToken{}, ErrInvalidOAuth
+		}
+		return domain.OAuthToken{}, err
+	}
+	var nextAccessToken string
+	if record.TokenType == "bot" {
+		nextAccessToken, err = domain.NewRotatingBotToken()
+	} else {
+		nextAccessToken, err = domain.NewRotatingUserToken()
+	}
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	nextRefreshToken, err := domain.NewRefreshToken()
+	if err != nil {
+		return domain.OAuthToken{}, err
+	}
+	token, err := m.Store.ExchangeOAuthAccessToken(ctx, clientID, clientSecret, accessToken, nextAccessToken, nextRefreshToken, time.Now().UTC().Add(oauthRotatingTokenLifetime))
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return domain.OAuthToken{}, ErrInvalidOAuth
+		}
 		return domain.OAuthToken{}, err
 	}
 	return token, nil
@@ -2269,6 +2734,13 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
 	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
 	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
 		return domain.Conversation{}, ErrInvalidConversation
@@ -2311,8 +2783,30 @@ func (m Messages) SetConversationPurpose(ctx context.Context, workspaceID domain
 }
 
 func (m Messages) SetConversationArchived(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, archived bool) (domain.Conversation, error) {
-	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Conversation{}, err
+	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	if archived == conversation.Archived {
+		if archived {
+			return domain.Conversation{}, ErrConversationAlreadyArchived
+		}
+		return domain.Conversation{}, ErrConversationNotArchived
+	}
+	if archived {
+		required, err := m.isDefaultConversation(ctx, workspaceID, conversationID)
+		if err != nil {
+			return domain.Conversation{}, err
+		}
+		if required {
+			return domain.Conversation{}, ErrCannotArchiveDefault
+		}
 	}
 	topic := "conversation.unarchived"
 	if archived {
@@ -2332,6 +2826,9 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
+	}
+	if conversation.Archived {
+		return domain.Conversation{}, ErrInvalidConversation
 	}
 	// Joining is self-service, so it is only ever available for an open channel.
 	// A private channel is joined by invitation and a direct conversation by
@@ -2960,6 +3457,9 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 	if err != nil || conversation.WorkspaceID != workspaceID {
 		return domain.Conversation{}, store.ErrNotFound
 	}
+	if conversation.IsDirect || conversation.IsGroupDirect || conversation.Archived {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
 	seen := make(map[domain.UserID]struct{}, len(users))
 	normalized := make([]domain.UserID, 0, len(users))
 	for _, targetID := range users {
@@ -2994,11 +3494,40 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
 		return err
 	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil {
+		return err
+	}
+	if conversation.Archived {
+		return ErrInvalidConversation
+	}
+	if !conversation.IsDirect && !conversation.IsGroupDirect {
+		required, err := m.isDefaultConversation(ctx, workspaceID, conversationID)
+		if err != nil {
+			return err
+		}
+		if required {
+			return ErrCannotLeaveDefault
+		}
+	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.member_left", events.String("channel_id", string(conversationID)), events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return err
 	}
 	return m.Store.RemoveConversationMember(ctx, conversationID, userID, event)
+}
+
+func (m Messages) isDefaultConversation(ctx context.Context, workspaceID domain.WorkspaceID, conversationID domain.ConversationID) (bool, error) {
+	workspace, err := m.Store.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	for _, required := range workspace.DefaultChannelIDs {
+		if required == conversationID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m Messages) KickConversationMember(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, targetID domain.UserID) error {
@@ -3704,7 +4233,7 @@ func (m Messages) Permalink(ctx context.Context, workspaceID domain.WorkspaceID,
 }
 
 func (m Messages) PostEphemeral(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, "", "", "")
 }
 
 func (m Messages) RecordAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ip, userAgent string) error {
@@ -3730,7 +4259,64 @@ func (m Messages) ListAccessLogs(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (m Messages) Post(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, "", "", threadTimestamp, idempotencyKey)
+	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, "", "", threadTimestamp, idempotencyKey, "")
+}
+
+// ShareFile publishes an existing upload as durable conversation content.
+// The file/share/message/outbox mutation is atomic in every storage profile:
+// callers never observe an orphan share when creating the message fails.
+func (m Messages) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, fileID domain.FileID, conversationID domain.ConversationID, threadTimestamp domain.MessageTimestamp) (domain.Message, error) {
+	if fileID == "" || conversationID == "" {
+		return domain.Message{}, ErrInvalidFile
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.Message{}, err
+	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return domain.Message{}, store.ErrNotFound
+	}
+	if conversation.Archived {
+		return domain.Message{}, ErrConversationAlreadyArchived
+	}
+	file, err := m.Store.GetFile(ctx, fileID)
+	if err != nil || file.WorkspaceID != workspaceID || file.Uploader != userID || file.Deleted {
+		return domain.Message{}, store.ErrNotFound
+	}
+	threadTimestampValue := domain.MessageTimestamp("")
+	if threadTimestamp != "" {
+		createdAt, parseErr := domain.ParseMessageTimestamp(threadTimestamp)
+		if parseErr != nil {
+			return domain.Message{}, ErrInvalidTimestamp
+		}
+		parent, lookupErr := m.Store.GetMessageByCreatedAt(ctx, conversationID, createdAt)
+		if lookupErr != nil || parent.WorkspaceID != workspaceID {
+			return domain.Message{}, store.ErrNotFound
+		}
+		threadTimestampValue = threadTimestamp
+	}
+	id, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message := domain.Message{
+		ID: id, WorkspaceID: workspaceID, Conversation: conversationID, AuthorID: userID,
+		ThreadTimestamp: threadTimestampValue, CreatedAt: domain.MessageInstant(time.Now()),
+		Files: []domain.File{file},
+	}
+	for {
+		event, eventErr := newEvent(workspaceID, userID, messagePayload("message.created", message), message.CreatedAt)
+		if eventErr != nil {
+			return domain.Message{}, eventErr
+		}
+		if err := m.Store.CreateFileShareMessage(ctx, []domain.FileID{fileID}, message, event); errors.Is(err, store.ErrMessageTimestampTaken) {
+			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
+			continue
+		} else if err != nil {
+			return domain.Message{}, err
+		}
+		return m.Store.GetMessage(ctx, message.ID)
+	}
 }
 
 func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID domain.WorkspaceID, actorID domain.UserID, appID domain.AppID, conversationID domain.ConversationID, botUserID domain.UserID) (domain.IncomingWebhook, string, error) {
@@ -3761,8 +4347,22 @@ func (m Messages) AdminCreateIncomingWebhook(ctx context.Context, workspaceID do
 	if err != nil || bot.WorkspaceID != workspaceID || bot.Deleted {
 		return domain.IncomingWebhook{}, "", store.ErrNotFound
 	}
-	if err := m.authorizeConversation(ctx, workspaceID, botUserID, conversationID); err != nil {
+	appBot, err := m.Store.GetBotByApp(ctx, workspaceID, appID)
+	if err != nil || appBot.UserID != botUserID || appBot.Deleted {
+		return domain.IncomingWebhook{}, "", store.ErrNotFound
+	}
+	// The generated hook posts as the installed app's bot. Creating a hook that
+	// only the administering human can reach produces a URL that can never
+	// succeed, and accepting another app's bot user is cross-app impersonation.
+	if err := m.requireConversationMembership(ctx, workspaceID, botUserID, conversationID); err != nil {
 		return domain.IncomingWebhook{}, "", err
+	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return domain.IncomingWebhook{}, "", store.ErrNotFound
+	}
+	if conversation.Archived {
+		return domain.IncomingWebhook{}, "", ErrConversationAlreadyArchived
 	}
 	secret, err := domain.PublicID("whsec_")
 	if err != nil {
@@ -4153,7 +4753,7 @@ func (m Messages) SynchronizeExternalUserRole(ctx context.Context, workspaceID d
 }
 
 func (m Messages) PostWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
-	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, blocks, "", threadTimestamp, idempotencyKey)
+	return m.PostWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, text, blocks, "", threadTimestamp, idempotencyKey, "")
 }
 
 func (m Messages) UpdateWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks string) (domain.Message, error) {
@@ -4165,7 +4765,7 @@ func (m Messages) ScheduleMessageWithBlocks(ctx context.Context, workspaceID dom
 }
 
 func (m Messages) PostEphemeralWithBlocks(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks string) (domain.EphemeralMessage, error) {
-	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "")
+	return m.PostEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, "", "")
 }
 
 func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text, blocks, attachments string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -4197,7 +4797,11 @@ func (m Messages) ScheduleMessageWithBlocksAndAttachments(ctx context.Context, w
 	return value, nil
 }
 
-func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string) (domain.EphemeralMessage, error) {
+func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID) (domain.EphemeralMessage, error) {
+	return m.postEphemeralWithBlocksAndAttachments(ctx, workspaceID, authorID, conversation, recipientID, text, blocks, attachments, appID, "")
+}
+
+func (m Messages) postEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID, idempotencyKey string) (domain.EphemeralMessage, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.EphemeralMessage{}, err
 	}
@@ -4218,14 +4822,31 @@ func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	if err != nil || !isMember {
 		return domain.EphemeralMessage{}, store.ErrNotFound
 	}
-	now := time.Now().UTC()
-	value := domain.EphemeralMessage{WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now)}
+	var id domain.MessageID
+	if idempotencyKey == "" {
+		id, err = domain.NewMessageID()
+		if err != nil {
+			return domain.EphemeralMessage{}, err
+		}
+	} else {
+		// Ephemeral messages do not use the ordinary message idempotency table,
+		// because they are recipient-scoped and never enter channel history.
+		// A stable identifier gives a retried Socket Mode acknowledgement the
+		// same atomic insert boundary in both stores.
+		id = domain.MessageID("msg_ephemeral_" + domain.HashToken(
+			string(workspaceID) + "\x00" + string(authorID) + "\x00" + string(conversation) + "\x00" +
+				string(recipientID) + "\x00" + string(appID) + "\x00" + idempotencyKey,
+		)[:40])
+	}
+	now := domain.MessageInstant(time.Now().UTC())
+	value := domain.EphemeralMessage{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, RecipientID: recipientID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Timestamp: domain.NewMessageTimestamp(now), CreatedAt: now}
 	// user_id names the single recipient. Every consumer that fans this record
 	// out has to filter on it, which is why it is a first-class payload field.
 	payload := events.NewPayload(events.EphemeralMessageTopic,
 		events.String("workspace_id", string(value.WorkspaceID)),
 		events.String("channel_id", string(value.Conversation)),
 		events.String("author_id", string(value.AuthorID)),
+		events.String("app_id", string(value.AppID)),
 		events.String("user_id", string(value.RecipientID)),
 		events.String("text", value.Text),
 		events.String("blocks", value.Blocks),
@@ -4236,13 +4857,23 @@ func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, wor
 	if err != nil {
 		return domain.EphemeralMessage{}, err
 	}
-	if err := m.Store.AppendEvent(ctx, event); err != nil {
+	if err := m.Store.CreateEphemeralMessage(ctx, value, event); err != nil {
+		if idempotencyKey != "" && errors.Is(err, store.ErrAlreadyExists) {
+			return value, nil
+		}
 		return domain.EphemeralMessage{}, err
 	}
 	return value, nil
 }
 
-func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string) (domain.Message, error) {
+func (m Messages) ListEphemeralMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, limit int) ([]domain.EphemeralMessage, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
+		return nil, err
+	}
+	return m.Store.ListEphemeralMessages(ctx, workspaceID, userID, conversationID, limit)
+}
+
+func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
 	if idempotencyKey != "" {
 		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
 		if err == nil {
@@ -4266,6 +4897,13 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 	if err := m.requireConversationMembership(ctx, workspaceID, authorID, conversation); err != nil {
 		return domain.Message{}, err
 	}
+	target, err := m.Store.GetConversation(ctx, conversation)
+	if err != nil || target.WorkspaceID != workspaceID {
+		return domain.Message{}, store.ErrNotFound
+	}
+	if target.Archived {
+		return domain.Message{}, ErrConversationAlreadyArchived
+	}
 	threadTimestampValue := domain.MessageTimestamp("")
 	if threadTimestamp != "" {
 		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
@@ -4282,7 +4920,7 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: domain.MessageInstant(time.Now())}
+	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: domain.MessageInstant(time.Now())}
 	// A message's ts is its public identifier and it carries microseconds, so two
 	// messages in one conversation may not be created on the same microsecond.
 	// The repository refuses the collision; the remedy is the next microsecond,
@@ -4315,7 +4953,7 @@ func (m Messages) PostIncomingWebhookWithAttachments(ctx context.Context, worksp
 	if err != nil {
 		return domain.Message{}, err
 	}
-	return m.PostWithBlocksAndAttachments(ctx, workspaceID, value.UserID, value.ConversationID, text, blocks, attachments, threadTimestamp, idempotencyKey)
+	return m.PostWithBlocksAndAttachments(ctx, workspaceID, value.UserID, value.ConversationID, text, blocks, attachments, threadTimestamp, idempotencyKey, value.AppID)
 }
 
 func (m Messages) UpdateWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, timestamp domain.MessageTimestamp, text, blocks, attachments string) (domain.Message, error) {
@@ -4418,12 +5056,19 @@ func (m Messages) CreateExternalUpload(ctx context.Context, workspaceID domain.W
 }
 
 func (m Messages) UploadExternalFile(ctx context.Context, id domain.ExternalUploadID, size int64, source io.Reader) error {
-	if m.Blob == nil || source == nil || size < 0 {
+	// A negative size means the transport is a multipart part whose own length
+	// is not exposed by net/http. The upload ticket remains authoritative and
+	// the blob store still reads exactly Size+1 bytes, so short and oversized
+	// parts fail closed just like raw bodies.
+	if m.Blob == nil || source == nil || size < -1 {
 		return ErrInvalidExternalUpload
 	}
 	value, err := m.Store.GetExternalUpload(ctx, id)
 	if err != nil {
 		return err
+	}
+	if size == -1 {
+		size = value.Size
 	}
 	if value.Status != domain.ExternalUploadPending || !value.ExpiresAt.After(time.Now().UTC()) || value.Size != size {
 		return ErrInvalidExternalUpload
@@ -4449,24 +5094,6 @@ func (m Messages) CompleteExternalUpload(ctx context.Context, workspaceID domain
 		return domain.File{}, errors.New("external upload completion returned an unexpected file count")
 	}
 	return files[0], nil
-}
-
-func (m Messages) publishExternalUploadComments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, completions []domain.ExternalUploadCompletion, channels []domain.ConversationID, text, blocks string, threadTimestamp domain.MessageTimestamp) error {
-	if strings.TrimSpace(text) == "" && blocks == "" {
-		return nil
-	}
-	uploadIDs := make([]string, len(completions))
-	for index, completion := range completions {
-		uploadIDs[index] = string(completion.ID)
-	}
-	sort.Strings(uploadIDs)
-	publicationID := strings.Join(uploadIDs, ",")
-	for _, channel := range channels {
-		if _, err := m.PostWithBlocksAndAttachments(ctx, workspaceID, userID, channel, text, blocks, "", threadTimestamp, "external-upload:"+publicationID+":"+string(channel)); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func normalizeFileShareChannels(values []domain.ConversationID) []domain.ConversationID {
@@ -4520,21 +5147,34 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		values[index] = value
 	}
 	for _, channel := range channels {
-		if err := m.authorizeConversation(ctx, workspaceID, userID, channel); err != nil {
+		if err := m.requireConversationMembership(ctx, workspaceID, userID, channel); err != nil {
 			return nil, err
 		}
+		conversation, err := m.Store.GetConversation(ctx, channel)
+		if err != nil || conversation.WorkspaceID != workspaceID {
+			return nil, store.ErrNotFound
+		}
+		if conversation.Archived {
+			return nil, ErrConversationAlreadyArchived
+		}
+	}
+	threadTimestampValue := domain.MessageTimestamp("")
+	if threadTimestamp != "" {
+		createdAt, parseErr := domain.ParseMessageTimestamp(threadTimestamp)
+		if parseErr != nil {
+			return nil, ErrInvalidTimestamp
+		}
+		parent, lookupErr := m.Store.GetMessageByCreatedAt(ctx, channels[0], createdAt)
+		if lookupErr != nil || parent.WorkspaceID != workspaceID {
+			return nil, store.ErrNotFound
+		}
+		threadTimestampValue = threadTimestamp
 	}
 	completed, allCompleted, err := m.completedExternalUploadFiles(ctx, workspaceID, userID, completions)
 	if err != nil {
 		return nil, err
 	}
 	if allCompleted {
-		if !sameFileShareChannels(completed, channels) {
-			channels = completed[0].SharedChannels
-		}
-		if err := m.publishExternalUploadComments(ctx, workspaceID, userID, completions, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
-			return nil, err
-		}
 		return completed, nil
 	}
 	for _, value := range values {
@@ -4561,7 +5201,44 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		}
 		eventsToEmit[index] = emitted
 	}
-	if err := m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit); err != nil {
+	messages := make([]domain.Message, len(channels))
+	messageEvents := make([]events.Event, len(channels))
+	createdAt := domain.MessageInstant(time.Now())
+	for index, channel := range channels {
+		messageID, idErr := domain.NewMessageID()
+		if idErr != nil {
+			return nil, idErr
+		}
+		messages[index] = domain.Message{
+			ID: messageID, WorkspaceID: workspaceID, Conversation: channel, AuthorID: userID,
+			Text: initialComment, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue,
+			CreatedAt: createdAt.Add(time.Duration(index) * time.Microsecond), Files: append([]domain.File(nil), files...),
+		}
+		emitted, eventErr := newEvent(workspaceID, userID, messagePayload("message.created", messages[index]), messages[index].CreatedAt)
+		if eventErr != nil {
+			return nil, eventErr
+		}
+		messageEvents[index] = emitted
+	}
+	for {
+		err := m.Store.CompleteExternalUploads(ctx, completions, files, channels, eventsToEmit, messages, messageEvents)
+		if errors.Is(err, store.ErrMessageTimestampTaken) {
+			// Completion is transactional, so none of the tickets or shares
+			// changed. Move the public message timestamps together and retry;
+			// the upload must not fail merely because another message occupied
+			// the host clock's current microsecond.
+			for index := range messages {
+				messages[index].CreatedAt = messages[index].CreatedAt.Add(time.Microsecond)
+				messageEvents[index], err = newEvent(workspaceID, userID, messagePayload("message.created", messages[index]), messages[index].CreatedAt)
+				if err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		if err == nil {
+			break
+		}
 		// A concurrent caller may have completed these tickets between the read
 		// above and this write. The store rejects the second writer rather than
 		// completing twice, which is correct, but the caller's upload did
@@ -4576,12 +5253,7 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 			return nil, err
 		}
 		files = settled
-		if !sameFileShareChannels(files, channels) {
-			channels = files[0].SharedChannels
-		}
-	}
-	if err := m.publishExternalUploadComments(ctx, workspaceID, userID, completions, channels, initialComment, normalizedBlocks, threadTimestamp); err != nil {
-		return nil, err
+		break
 	}
 	return files, nil
 }

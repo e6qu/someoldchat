@@ -48,48 +48,16 @@ type ConnectionStore interface {
 	CountSocketModeConnections(context.Context, domain.AppID) (int, error)
 }
 
-type EventSource interface {
-	ListAppEventsAfter(context.Context, domain.AppID, uint64, int) ([]events.Record, error)
+type EventQueue interface {
+	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
+	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
+	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
 }
 
-// CursorStore is the per-app delivery position, and it is the only delivery
-// mechanism any deployment can select.
-//
-// It is keyed on the application alone while domain.SocketModeConnectionLimit
-// deliberately permits ten concurrent connections per app, so every connection
-// seeds its own copy from the same row and every envelope is delivered once per
-// open connection — ten times for an app that holds the limit open during a
-// redeploy, which is what the limit exists for. Slack's Socket Mode contract
-// delivers each envelope to exactly one connection.
-//
-// OPEN DEFECT: duplicate delivery is live, and this is where it lives.
-//
-// The previous change shipped an EnvelopeQueue interface, a claim-based
-// delivery path and a conformance test for per-envelope ownership, but no store
-// implemented the interface and no composition root set the field, so the whole
-// path was selectable only by a test double and the duplicate delivery it was
-// written to remove was untouched. That code has been deleted rather than left
-// standing, because an interface with no implementation reads as a fix. What is
-// left is the real behaviour plus an operator-visible report of it (see
-// ServeHTTP), so nobody mistakes the duplication for exactly-once delivery.
-//
-// Closing the defect needs storage this package does not own. The contract is:
-//
-//	ClaimAppEvent(ctx, appID domain.AppID, owner string, lease time.Duration) (events.Record, bool, error)
-//	RenewAppEvent(ctx, owner string, sequence uint64, lease time.Duration) error
-//	AckAppEvent(ctx, owner string, sequence uint64) error
-//	ReleaseAppEvent(ctx, owner string, sequence uint64, retryAt time.Time) error
-//
-// with the owner being the connection identifier, the same visibility rules
-// ListAppEventsAfter applies (the application's installed workspaces only, never
-// an internal topic), and store.ErrLeaseConflict when the owner no longer holds
-// the record. It needs an implementation in internal/store/memory and
-// internal/store/sqlstore, the four matching RPCs on the chat seam so the split
-// composition can reach them, and wiring in cmd/server. Until all four exist
-// this interface, its row and every connection's copy of it stay as they are.
-type CursorStore interface {
-	GetSocketModeCursor(context.Context, domain.AppID) (uint64, error)
-	SetSocketModeCursor(context.Context, domain.AppID, uint64) error
+type InteractionQueue interface {
+	ClaimSocketModeInteraction(context.Context, domain.AppID, string, time.Duration) (domain.SocketModeInteraction, bool, error)
+	AckSocketModeInteraction(context.Context, domain.AppID, string, string) error
+	ReleaseSocketModeInteraction(context.Context, domain.AppID, string, string, string, time.Time) error
 }
 
 type ResponseSink interface {
@@ -166,13 +134,13 @@ func (s Service) Open(ctx context.Context, appID domain.AppID) (OpenResult, erro
 
 type Handler struct {
 	Store ConnectionStore
-	// Events and Cursors are the delivery path: the application's durable
-	// records, and the shared position it has acknowledged up to. See
-	// CursorStore for the ownership defect that position carries.
-	Events    EventSource
-	Cursors   CursorStore
-	Responses ResponseSink
-	Upgrader  websocket.Upgrader
+	// Queue leases each durable record to one connection. An application may
+	// keep up to ten connections open, but Slack delivers each Socket Mode
+	// envelope to only one of them.
+	Queue        EventQueue
+	Interactions InteractionQueue
+	Responses    ResponseSink
+	Upgrader     websocket.Upgrader
 	// Logger records connection-level failures that are handled rather than
 	// returned to a caller: a released connection slot that could not be
 	// released, and a durable record that can never be delivered to an app.
@@ -237,26 +205,28 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(writeTimeout))
 	}
-	delivery, err := h.newDelivery(r.Context(), connection)
-	if err != nil {
-		closeWith(websocket.CloseInternalServerErr, "event delivery state unavailable")
-		return
+	delivery := h.newDelivery(connection)
+	if delivery != nil {
+		defer func() {
+			if releaseErr := delivery.release(context.Background(), "connection_closed", time.Now().UTC()); releaseErr != nil &&
+				!errors.Is(releaseErr, store.ErrLeaseConflict) && !errors.Is(releaseErr, store.ErrNotFound) {
+				h.logger().Error("Socket Mode event lease was not released", "connection", connection.ID, "app", connection.AppID, "error", releaseErr)
+			}
+		}()
+	}
+	interactionDelivery := h.newInteractionDelivery(connection)
+	if interactionDelivery != nil {
+		defer func() {
+			if releaseErr := interactionDelivery.release(context.Background(), "connection_closed", time.Now().UTC()); releaseErr != nil &&
+				!errors.Is(releaseErr, store.ErrLeaseConflict) && !errors.Is(releaseErr, store.ErrNotFound) {
+				h.logger().Error("Socket Mode interaction lease was not released", "connection", connection.ID, "app", connection.AppID, "error", releaseErr)
+			}
+		}()
 	}
 	connectionCount, err := h.Store.CountSocketModeConnections(r.Context(), connection.AppID)
 	if err != nil {
 		closeWith(websocket.CloseInternalServerErr, "connection state unavailable")
 		return
-	}
-	if delivery != nil && connectionCount > 1 {
-		// The delivery position is keyed on the application, so this connection
-		// is about to deliver every record the other connections are also
-		// delivering. That is a live defect (see CursorStore) which nothing else
-		// makes visible: the app's handler simply runs once per open connection
-		// per event, side effects included. Reporting it here means it is
-		// happening now, on this app, rather than being a possibility recorded
-		// in a comment.
-		h.logger().Warn("Socket Mode delivers app events from a shared per-app position, so every open connection of this app receives every envelope",
-			"app", connection.AppID, "connection", connection.ID, "connections", connectionCount)
 	}
 	// debug_info.host identifies the host serving the connection. Reporting the
 	// app ID there makes SDK diagnostics and reconnect logs describe the client
@@ -303,7 +273,11 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer leaseTicker.Stop()
 	pingTicker := time.NewTicker(pingPeriod)
 	defer pingTicker.Stop()
-	pending := make(map[string]uint64, 1)
+	type pendingEnvelope struct {
+		sequence    uint64
+		interaction bool
+	}
+	pending := make(map[string]pendingEnvelope, 1)
 	var pendingSince time.Time
 	for {
 		select {
@@ -319,13 +293,13 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				closeWith(websocket.CloseProtocolError, "envelope_id is required")
 				return
 			}
-			if delivery == nil {
+			if delivery == nil && interactionDelivery == nil {
 				if err := writeJSON(map[string]string{"envelope_id": envelope.EnvelopeID}); err != nil {
 					return
 				}
 				continue
 			}
-			sequence, exists := pending[envelope.EnvelopeID]
+			current, exists := pending[envelope.EnvelopeID]
 			if !exists {
 				closeWith(websocket.CloseProtocolError, "unknown envelope_id")
 				return
@@ -355,32 +329,63 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if len(pending) != 0 {
 				continue
 			}
-			if err := delivery.consume(r.Context(), sequence); err != nil {
-				closeWith(deliveryCloseCode(err))
-				return
+			if current.interaction {
+				if err := interactionDelivery.consume(r.Context(), envelope.EnvelopeID); err != nil {
+					closeWith(deliveryCloseCode(err))
+					return
+				}
+			} else {
+				if err := delivery.consume(r.Context(), current.sequence); err != nil {
+					closeWith(deliveryCloseCode(err))
+					return
+				}
 			}
 		case <-ticker.C:
-			if delivery == nil {
+			if delivery == nil && interactionDelivery == nil {
 				continue
 			}
 			if len(pending) != 0 {
 				if time.Since(pendingSince) < envelopeTimeout {
 					continue
 				}
-				// The app never answered, so the position is not advanced and
-				// the connection is closed rather than left waiting forever
-				// with no error anywhere.
-				//
-				// OPEN DEFECT: the record is then redelivered on the next
-				// connection with no attempt bound, so an app whose handler
-				// fails on one envelope shape blocks its own event stream at one
-				// cycle per envelopeTimeout indefinitely. Bounding it needs a
-				// delivery-attempt count on the queued record, which the shared
-				// per-app position cannot express — it is the same storage this
-				// package does not own; see CursorStore.
 				h.logger().Warn("Socket Mode envelope was not acknowledged", "app", connection.AppID, "connection", connection.ID, "timeout", envelopeTimeout)
+				var releaseErr error
+				for _, current := range pending {
+					if current.interaction {
+						releaseErr = interactionDelivery.release(r.Context(), "ack_timeout", time.Now().UTC())
+					} else {
+						releaseErr = delivery.release(r.Context(), "ack_timeout", time.Now().UTC())
+					}
+					break
+				}
+				if releaseErr != nil {
+					closeWith(deliveryCloseCode(releaseErr))
+					return
+				}
 				closeWith(websocket.CloseTryAgainLater, "envelope was not acknowledged")
 				return
+			}
+			if interactionDelivery != nil {
+				interaction, ok, err := interactionDelivery.next(r.Context())
+				if err != nil {
+					closeWith(websocket.CloseInternalServerErr, "interaction source unavailable")
+					return
+				}
+				if ok {
+					var payload json.RawMessage = []byte(interaction.Payload)
+					if err := writeJSON(map[string]any{
+						"envelope_id": interaction.EnvelopeID, "type": interaction.Type,
+						"payload": payload, "accepts_response_payload": true,
+					}); err != nil {
+						return
+					}
+					pending[interaction.EnvelopeID] = pendingEnvelope{interaction: true}
+					pendingSince = time.Now()
+					continue
+				}
+			}
+			if delivery == nil {
+				continue
 			}
 			record, ok, err := delivery.next(r.Context())
 			if err != nil {
@@ -440,7 +445,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					written = false
 					break
 				}
-				pending[envelope.ID] = record.Sequence
+				pending[envelope.ID] = pendingEnvelope{sequence: record.Sequence}
 			}
 			if !written {
 				return
@@ -469,52 +474,108 @@ func servingHost(r *http.Request) string {
 	return r.Host
 }
 
-// newDelivery prepares this connection's view of the application's delivery
-// position. A handler with no event source delivers nothing and answers
+// newDelivery prepares this connection's lease owner. A handler with no queue
+// delivers nothing and answers
 // acknowledgements, which is what the response-only deployments use.
-func (h Handler) newDelivery(ctx context.Context, connection domain.SocketModeConnection) (*cursorDelivery, error) {
-	if h.Events == nil {
-		return nil, nil
-	}
-	delivery := &cursorDelivery{events: h.Events, cursors: h.Cursors, appID: connection.AppID}
-	if h.Cursors != nil {
-		cursor, err := h.Cursors.GetSocketModeCursor(ctx, connection.AppID)
-		if err != nil {
-			return nil, err
-		}
-		delivery.cursor = cursor
-	}
-	return delivery, nil
-}
-
-// cursorDelivery is the shared per-application position. Every connection of an
-// application reads and writes the same row, so each of them delivers every
-// envelope; see CursorStore.
-type cursorDelivery struct {
-	events  EventSource
-	cursors CursorStore
-	appID   domain.AppID
-	cursor  uint64
-}
-
-func (d *cursorDelivery) next(ctx context.Context) (events.Record, bool, error) {
-	records, err := d.events.ListAppEventsAfter(ctx, d.appID, d.cursor, 1)
-	if err != nil || len(records) == 0 {
-		return events.Record{}, false, err
-	}
-	return records[0], true, nil
-}
-
-func (d *cursorDelivery) consume(ctx context.Context, sequence uint64) error {
-	if sequence <= d.cursor {
+func (h Handler) newDelivery(connection domain.SocketModeConnection) *leasedDelivery {
+	if h.Queue == nil {
 		return nil
 	}
-	if d.cursors != nil {
-		if err := d.cursors.SetSocketModeCursor(ctx, d.appID, sequence); err != nil {
-			return err
-		}
+	return &leasedDelivery{queue: h.Queue, appID: connection.AppID, owner: connection.ID}
+}
+
+func (h Handler) newInteractionDelivery(connection domain.SocketModeConnection) *leasedInteractionDelivery {
+	if h.Interactions == nil {
+		return nil
 	}
-	d.cursor = sequence
+	return &leasedInteractionDelivery{queue: h.Interactions, appID: connection.AppID, owner: connection.ID}
+}
+
+type leasedInteractionDelivery struct {
+	queue      InteractionQueue
+	appID      domain.AppID
+	owner      string
+	envelopeID string
+}
+
+func (d *leasedInteractionDelivery) next(ctx context.Context) (domain.SocketModeInteraction, bool, error) {
+	if d.envelopeID != "" {
+		return domain.SocketModeInteraction{}, false, errors.New("Socket Mode delivery already owns an interaction")
+	}
+	value, found, err := d.queue.ClaimSocketModeInteraction(ctx, d.appID, d.owner, envelopeTimeout+writeTimeout)
+	if errors.Is(err, store.ErrNotFound) {
+		return domain.SocketModeInteraction{}, false, nil
+	}
+	if err != nil || !found {
+		return domain.SocketModeInteraction{}, false, err
+	}
+	d.envelopeID = value.EnvelopeID
+	return value, true, nil
+}
+
+func (d *leasedInteractionDelivery) consume(ctx context.Context, envelopeID string) error {
+	if d.envelopeID != envelopeID {
+		return store.ErrLeaseConflict
+	}
+	if err := d.queue.AckSocketModeInteraction(ctx, d.appID, envelopeID, d.owner); err != nil {
+		return err
+	}
+	d.envelopeID = ""
+	return nil
+}
+
+func (d *leasedInteractionDelivery) release(ctx context.Context, reason string, retryAt time.Time) error {
+	if d.envelopeID == "" {
+		return nil
+	}
+	if err := d.queue.ReleaseSocketModeInteraction(ctx, d.appID, d.envelopeID, d.owner, reason, retryAt); err != nil {
+		return err
+	}
+	d.envelopeID = ""
+	return nil
+}
+
+type leasedDelivery struct {
+	queue    EventQueue
+	appID    domain.AppID
+	owner    string
+	sequence uint64
+}
+
+func (d *leasedDelivery) next(ctx context.Context) (events.Record, bool, error) {
+	if d.sequence != 0 {
+		return events.Record{}, false, errors.New("Socket Mode delivery already owns an event")
+	}
+	record, _, _, found, err := d.queue.ClaimAppEvent(ctx, d.appID, "socket", d.owner, envelopeTimeout+writeTimeout)
+	if errors.Is(err, store.ErrNotFound) {
+		return events.Record{}, false, nil
+	}
+	if err != nil || !found {
+		return events.Record{}, false, err
+	}
+	d.sequence = record.Sequence
+	return record, true, nil
+}
+
+func (d *leasedDelivery) consume(ctx context.Context, sequence uint64) error {
+	if d.sequence != sequence {
+		return store.ErrLeaseConflict
+	}
+	if err := d.queue.AckAppEvent(ctx, d.appID, "socket", d.owner, sequence); err != nil {
+		return err
+	}
+	d.sequence = 0
+	return nil
+}
+
+func (d *leasedDelivery) release(ctx context.Context, reason string, retryAt time.Time) error {
+	if d.sequence == 0 {
+		return nil
+	}
+	if err := d.queue.ReleaseAppEvent(ctx, d.appID, "socket", d.owner, d.sequence, reason, retryAt); err != nil {
+		return err
+	}
+	d.sequence = 0
 	return nil
 }
 

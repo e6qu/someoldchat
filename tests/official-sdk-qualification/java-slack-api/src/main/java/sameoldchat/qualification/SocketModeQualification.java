@@ -7,10 +7,12 @@ import com.slack.api.SlackConfig;
 import com.slack.api.socket_mode.SocketModeClient;
 import com.slack.api.socket_mode.request.EventsApiEnvelope;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -24,6 +26,7 @@ public final class SocketModeQualification {
         String qualificationUrl = env("SAMEOLDCHAT_QUALIFICATION_URL", "http://127.0.0.1:18080");
         CountDownLatch received = new CountDownLatch(1);
         AtomicReference<Throwable> failure = new AtomicReference<>();
+        AtomicReference<String> eventEnvelopeId = new AtomicReference<>();
 
         SlackConfig config = new SlackConfig();
         config.setMethodsEndpointUrlPrefix(baseUrl);
@@ -36,7 +39,8 @@ public final class SocketModeQualification {
                 failure.compareAndSet(null, error);
                 received.countDown();
             });
-            client.addEventsApiEnvelopeListener(envelope -> handleEvent(client, envelope, received, failure));
+            client.addEventsApiEnvelopeListener(envelope ->
+                    handleEvent(client, envelope, received, failure, eventEnvelopeId));
             client.connect();
 
             Qualification.require(received.await(5, TimeUnit.SECONDS), "Java Socket Mode event was not received");
@@ -45,7 +49,8 @@ public final class SocketModeQualification {
             }
             HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(qualificationUrl + "/qualification/socket-mode-response?envelope_id=qualification-socket-event"))
+                    .uri(URI.create(qualificationUrl + "/qualification/socket-mode-response?envelope_id="
+                            + URLEncoder.encode(eventEnvelopeId.get(), StandardCharsets.UTF_8)))
                     .timeout(Duration.ofSeconds(5))
                     .GET()
                     .build();
@@ -62,14 +67,26 @@ public final class SocketModeQualification {
             SocketModeClient client,
             EventsApiEnvelope envelope,
             CountDownLatch received,
-            AtomicReference<Throwable> failure) {
+            AtomicReference<Throwable> failure,
+            AtomicReference<String> eventEnvelopeId) {
         try {
             JsonObject event = envelope.getPayload().getAsJsonObject().getAsJsonObject("event");
+            if (!"socket qualification event".equals(event.get("text").getAsString())) {
+                JsonObject response = new JsonObject();
+                response.addProperty("envelope_id", envelope.getEnvelopeId());
+                client.sendSocketModeResponse(response.toString());
+                return;
+            }
             Qualification.require("message".equals(event.get("type").getAsString()), "Java Socket Mode event type mismatch");
             Qualification.require("C1".equals(event.get("channel").getAsString()), "Java Socket Mode channel mismatch");
             Qualification.require("U1".equals(event.get("user").getAsString()), "Java Socket Mode user mismatch");
             Qualification.require("socket qualification event".equals(event.get("text").getAsString()),
                     "Java Socket Mode text mismatch");
+            Qualification.require(event.get("ts").getAsString().matches("\\d+\\.\\d{6}"),
+                    "Java Socket Mode timestamp mismatch");
+            Qualification.require(event.get("ts").getAsString().equals(event.get("event_ts").getAsString()),
+                    "Java Socket Mode event timestamp mismatch");
+            eventEnvelopeId.set(envelope.getEnvelopeId());
             JsonObject response = new JsonObject();
             response.addProperty("envelope_id", envelope.getEnvelopeId());
             JsonObject responsePayload = new JsonObject();
@@ -79,8 +96,11 @@ public final class SocketModeQualification {
         } catch (Throwable error) {
             failure.compareAndSet(null, error);
         } finally {
-            received.countDown();
+            if (failure.get() != null) {
+                received.countDown();
+            }
         }
+        received.countDown();
     }
 
     private static String env(String name, String defaultValue) {
