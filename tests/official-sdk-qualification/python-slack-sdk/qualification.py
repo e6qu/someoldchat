@@ -744,7 +744,7 @@ assert history["ok"] is True
 assert len(history["messages"]) >= 3
 assert all(message["ts"] != posted["ts"] for message in history["messages"])
 assert history["has_more"] is False
-search = client.search_messages(query="thread", count=999, cursor="*")
+search = reminder_client.search_messages(query="thread", count=999, cursor="*")
 assert search["ok"] is True
 assert len(search["messages"]["matches"]) >= 2
 assert search["messages"]["total"] >= 2
@@ -755,6 +755,13 @@ assert search["messages"]["matches"][0]["channel"]["name"] == "general"
 assert search["messages"]["matches"][0]["team"] == "T1"
 assert search["messages"]["matches"][0]["username"] == "alice"
 assert isinstance(search["messages"]["matches"][0]["permalink"], str)
+file_search = reminder_client.search_files(query="qualification", count=10, page=1)
+assert file_search["ok"] is True
+assert any(file["name"] == "qualification.txt" for file in file_search["files"]["matches"])
+all_search = reminder_client.search_all(query="thread", count=10, page=1)
+assert all_search["ok"] is True
+assert len(all_search["messages"]["matches"]) >= 2
+assert isinstance(all_search["files"]["matches"], list)
 
 users = client.users_list(limit=10)
 assert users["ok"] is True

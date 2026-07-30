@@ -376,7 +376,9 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if err := repository.CreateMessage(ctx, message, event("message", "message.created", string(message.ID)), ""); err != nil {
 		t.Fatal(err)
 	}
-	search, err := repository.SearchMessages(ctx, workspaceID, userID, "wave one search", domain.PageRequest{Limit: 1})
+	search, err := repository.SearchMessages(ctx, workspaceID, userID, domain.MessageSearch{
+		Terms: []string{"wave one search"}, Page: domain.PageRequest{Limit: 1},
+	})
 	if err != nil || len(search.Messages) != 1 || search.Messages[0].ID != message.ID || search.HasMore {
 		t.Fatalf("search=%+v err=%v", search, err)
 	}

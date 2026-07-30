@@ -1028,12 +1028,26 @@ public final class Qualification {
             require(history.getMessages() != null && history.getMessages().size() >= 3, "history page mismatch");
             require(history.getMessages().stream().noneMatch(message -> posted.getTs().equals(message.getTs())),
                     "deleted message remained in history");
-            com.slack.api.methods.response.search.SearchMessagesResponse search = methods.searchMessages(
+            com.slack.api.methods.response.search.SearchMessagesResponse search = reminderMethods.searchMessages(
                     com.slack.api.methods.request.search.SearchMessagesRequest.builder().query("thread").build());
             require(search.isOk() && search.getMessages() != null
                             && search.getMessages().getMatches() != null
                             && search.getMessages().getMatches().size() >= 2,
                     "search.messages failed: " + search.getError());
+            com.slack.api.methods.response.search.SearchFilesResponse fileSearch = reminderMethods.searchFiles(
+                    com.slack.api.methods.request.search.SearchFilesRequest.builder().query("qualification").build());
+            require(fileSearch.isOk() && fileSearch.getFiles() != null
+                            && fileSearch.getFiles().getMatches() != null
+                            && fileSearch.getFiles().getMatches().stream()
+                                    .anyMatch(file -> "qualification.txt".equals(file.getName())),
+                    "search.files failed: " + fileSearch.getError());
+            com.slack.api.methods.response.search.SearchAllResponse allSearch = reminderMethods.searchAll(
+                    com.slack.api.methods.request.search.SearchAllRequest.builder().query("thread").build());
+            require(allSearch.isOk() && allSearch.getMessages() != null
+                            && allSearch.getMessages().getMatches() != null
+                            && allSearch.getMessages().getMatches().size() >= 2
+                            && allSearch.getFiles() != null,
+                    "search.all failed: " + allSearch.getError());
 
             UsersListResponse users = methods.usersList(
                     com.slack.api.methods.request.users.UsersListRequest.builder().limit(10).build());

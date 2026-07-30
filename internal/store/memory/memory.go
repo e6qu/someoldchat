@@ -5509,7 +5509,22 @@ func (s *Store) CreateFile(_ context.Context, file domain.File, event events.Eve
 	if _, exists := s.files[file.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	shares := make([]domain.ConversationID, 0, len(file.SharedChannels))
+	seen := make(map[domain.ConversationID]struct{}, len(file.SharedChannels))
+	for _, conversationID := range file.SharedChannels {
+		conversation, exists := s.conversations[conversationID]
+		if !exists || conversation.WorkspaceID != file.WorkspaceID {
+			return store.ErrNotFound
+		}
+		if _, duplicate := seen[conversationID]; duplicate {
+			continue
+		}
+		seen[conversationID] = struct{}{}
+		shares = append(shares, conversationID)
+	}
+	file.SharedChannels = nil
 	s.files[file.ID] = file
+	s.fileShares[file.ID] = shares
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -5628,6 +5643,116 @@ func (s *Store) ListFiles(_ context.Context, workspace domain.WorkspaceID, reque
 		}
 	}
 	return page, nil
+}
+
+func (s *Store) ListVisibleFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.FilePage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	s.mu.RLock()
+	values := make([]domain.File, 0, request.Limit+1)
+	for _, file := range s.files {
+		if file.WorkspaceID != workspace || file.Deleted || (after != "" && string(file.ID) <= after) || !s.fileVisibleToUser(file, user) {
+			continue
+		}
+		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[file.ID]...)
+		values = appendSorted(values, file, request.Limit+1, func(left, right domain.File) bool { return left.ID < right.ID })
+	}
+	s.mu.RUnlock()
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.FilePage{Files: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) SearchFiles(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, search domain.FileSearch) (domain.FilePage, error) {
+	if search.Count <= 0 || search.Page <= 0 || search.Page > 100 {
+		return domain.FilePage{}, store.InvalidArgument("file search page is invalid")
+	}
+	s.mu.RLock()
+	values := make([]domain.File, 0)
+	for _, file := range s.files {
+		if file.WorkspaceID != workspace || file.Deleted || !s.fileVisibleToUser(file, user) {
+			continue
+		}
+		text := domain.FoldSearchText(file.Name + " " + file.Title)
+		if !searchTextMatches(text, search.Terms, search.ExcludedTerms) ||
+			(search.Uploader != "" && file.Uploader != search.Uploader) ||
+			(search.ExcludedUploader != "" && file.Uploader == search.ExcludedUploader) ||
+			(search.Conversation != "" && !s.fileSharedIn(file.ID, search.Conversation)) ||
+			(search.ExcludedConversation != "" && s.fileSharedIn(file.ID, search.ExcludedConversation)) ||
+			(search.FileType != "" && !fileMatchesType(file, search.FileType)) ||
+			(!search.After.IsZero() && file.CreatedAt.Before(search.After)) ||
+			(!search.Before.IsZero() && !file.CreatedAt.Before(search.Before)) {
+			continue
+		}
+		file.SharedChannels = append([]domain.ConversationID(nil), s.fileShares[file.ID]...)
+		values = append(values, file)
+	}
+	s.mu.RUnlock()
+	sort.Slice(values, func(left, right int) bool {
+		if values[left].CreatedAt.Equal(values[right].CreatedAt) {
+			if search.Direction == domain.SearchDirectionDescending {
+				return values[left].ID > values[right].ID
+			}
+			return values[left].ID < values[right].ID
+		}
+		if search.Direction == domain.SearchDirectionDescending {
+			return values[left].CreatedAt.After(values[right].CreatedAt)
+		}
+		return values[left].CreatedAt.Before(values[right].CreatedAt)
+	})
+	total := len(values)
+	start := (search.Page - 1) * search.Count
+	if start >= total {
+		return domain.FilePage{Files: []domain.File{}, Total: total}, nil
+	}
+	end := min(start+search.Count, total)
+	return domain.FilePage{Files: values[start:end], HasMore: end < total, Total: total}, nil
+}
+
+func (s *Store) fileVisibleToUser(file domain.File, user domain.UserID) bool {
+	if file.Uploader == user {
+		return true
+	}
+	for _, conversationID := range s.fileShares[file.ID] {
+		conversation, exists := s.conversations[conversationID]
+		if !exists {
+			continue
+		}
+		if !conversation.IsPrivate {
+			return true
+		}
+		if _, member := s.memberships[conversationID][user]; member {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Store) fileSharedIn(file domain.FileID, conversation domain.ConversationID) bool {
+	for _, candidate := range s.fileShares[file] {
+		if candidate == conversation {
+			return true
+		}
+	}
+	return false
+}
+
+func fileMatchesType(file domain.File, wanted string) bool {
+	wanted = strings.TrimPrefix(domain.FoldSearchText(wanted), ".")
+	name := domain.FoldSearchText(file.Name)
+	mime := domain.FoldSearchText(file.MIMEType)
+	return strings.HasSuffix(name, "."+wanted) || strings.Contains(mime, wanted)
 }
 
 func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.WorkspaceID, visit func(string) error) error {
@@ -6215,20 +6340,19 @@ func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.Workspa
 	return page, nil
 }
 
-func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, search domain.MessageSearch) (domain.MessagePage, error) {
+	if err := store.CheckPage(search.Page); err != nil {
 		return domain.MessagePage{}, err
 	}
-	terms := strings.Fields(domain.FoldSearchText(query))
-	if len(terms) == 0 {
+	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && search.SavedBy == "" {
 		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
-	startTime, startID, err := domain.DecodeMessageCursor(request.Cursor)
+	startTime, startID, err := domain.DecodeMessageCursor(search.Page.Cursor)
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
 	s.mu.RLock()
-	values := make([]domain.Message, 0, request.Limit+1)
+	values := make([]domain.Message, 0, search.Page.Limit+1)
 	total := 0
 	for conversationID, messages := range s.messages {
 		conversation, exists := s.conversations[conversationID]
@@ -6240,31 +6364,49 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 				continue
 			}
 		}
+		if (search.Conversation != "" && conversationID != search.Conversation) ||
+			(search.ExcludedConversation != "" && conversationID == search.ExcludedConversation) {
+			continue
+		}
+		if search.WithUser != "" {
+			if _, member := s.memberships[conversationID][search.WithUser]; !member {
+				continue
+			}
+		}
 		for _, message := range messages {
 			if message.Deleted {
 				continue
 			}
 			text := domain.FoldSearchText(message.Text)
-			matches := true
-			for _, term := range terms {
-				if !strings.Contains(text, term) {
-					matches = false
-					break
+			if !searchTextMatches(text, search.Terms, search.ExcludedTerms) ||
+				(search.Author != "" && message.AuthorID != search.Author) ||
+				(search.ExcludedAuthor != "" && message.AuthorID == search.ExcludedAuthor) ||
+				(!search.After.IsZero() && message.CreatedAt.Before(search.After)) ||
+				(!search.Before.IsZero() && !message.CreatedAt.Before(search.Before)) ||
+				(search.ThreadOnly && message.ThreadTimestamp == "") ||
+				(search.HasFiles && len(message.Files) == 0) ||
+				(search.HasPins && len(s.pins[message.ID]) == 0) ||
+				(search.HasReactions && len(s.reactions[message.ID]) == 0) ||
+				(search.SavedBy != "" && !s.messageSavedBy(message.ID, search.SavedBy)) {
+				continue
+			}
+			total++
+			if search.Page.Cursor != "" && !search.Page.PageAfter(message.CreatedAt, message.ID, startTime, startID) {
+				continue
+			}
+			less := messageBefore
+			if search.Page.Descending {
+				less = func(left, right domain.Message) bool {
+					return messageBefore(right, left)
 				}
 			}
-			if matches {
-				total++
-				if request.Cursor != "" && (message.CreatedAt.Before(startTime) || (message.CreatedAt.Equal(startTime) && message.ID <= startID)) {
-					continue
-				}
-				values = appendSorted(values, cloneMessage(message), request.Limit+1, messageBefore)
-			}
+			values = appendSorted(values, cloneMessage(message), search.Page.Limit+1, less)
 		}
 	}
 	s.mu.RUnlock()
-	hasMore := len(values) > request.Limit
+	hasMore := len(values) > search.Page.Limit
 	if hasMore {
-		values = values[:request.Limit]
+		values = values[:search.Page.Limit]
 	}
 	page := domain.MessagePage{Messages: values, HasMore: hasMore, Total: total}
 	if hasMore {
@@ -6274,6 +6416,29 @@ func (s *Store) SearchMessages(_ context.Context, workspace domain.WorkspaceID, 
 		}
 	}
 	return page, nil
+}
+
+func searchTextMatches(text string, terms, excluded []string) bool {
+	for _, term := range terms {
+		if !strings.Contains(text, domain.FoldSearchText(term)) {
+			return false
+		}
+	}
+	for _, term := range excluded {
+		if strings.Contains(text, domain.FoldSearchText(term)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) messageSavedBy(message domain.MessageID, user domain.UserID) bool {
+	for _, item := range s.savedItems {
+		if item.UserID == user && item.MessageID == message {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) ListThreadMessages(_ context.Context, conversation domain.ConversationID, timestamp domain.MessageTimestamp, request domain.PageRequest) (domain.MessagePage, error) {

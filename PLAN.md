@@ -218,14 +218,14 @@ In progress. The 2026-07-30 post-merge audit reconciled the ledger with Slack's
 current method catalog rather than treating every historical ledger entry as a
 current method:
 
-- Slack's current reference contains 310 methods. SameOldChat registers 215 of
-  them and leaves 95 unimplemented.
+- Slack's current reference contains 310 methods. SameOldChat registers 217 of
+  them and leaves 93 unimplemented.
 - The 320-entry ledger also retains ten legacy methods for clients that still
   call them. Those methods are useful compatibility inventory, but they are not
   part of the current Slack denominator.
 - After correcting overstated method claims and separating deprecated
-  `reminders.*` from first-party Later, the ledger records 205 current methods
-  as `behavior-compatible`, eight as `sdk-compatible`, two as
+  `reminders.*` from first-party Later, the ledger records 204 current methods
+  as `behavior-compatible`, 11 as `sdk-compatible`, two as
   `schema-compatible`, and none as
   `verified-against-slack`. A passing route, local test, or SDK parse is not
   itself live Slack equivalence.
@@ -233,9 +233,9 @@ current method:
   explicit, reviewed downgrade backed by a concrete deviation; otherwise a
   false compatibility claim becomes permanent.
 
-The remaining 95 current methods break down as 50 `admin.*`, seven `apps.*`,
+The remaining 93 current methods break down as 50 `admin.*`, seven `apps.*`,
 five `assistant.*`, one `auth.*`, ten `conversations.*`, six `functions.*`, one
-`rtm.*`, two `search.*`, four `team.*`, one `users.*`, and eight
+`rtm.*`, four `team.*`, one `users.*`, and eight
 `workflows.*`.
 
 Before another breadth wave, complete the following evidence-backed work in
@@ -321,10 +321,25 @@ surface. They are now recorded as `sdk-compatible`, not
 delivery, retirement behavior, and controlled live outcomes have their own
 evidence.
 
+The search-depth sweep now defines SEARCH-01 through SEARCH-03 as explicit
+Slack-matching journeys and implements a typed cross-layer search contract.
+Quoted and excluded text plus sender, conversation, participant, date, thread,
+saved, file, pin, reaction, and file-type modifiers flow through the local and
+generated gRPC compositions. Message and hosted-file search apply viewer
+visibility before totals and pagination across memory and shared SQL storage;
+file browse, search, metadata, and download share one public/private access
+rule. The first-party UI exposes real Messages, Files, People, and Channels
+types, URL-backed filters/order, authenticated file results, and explicit
+current-conversation `Command/Control+F` scope. The pinned Node, Python, and
+Java SDKs now invoke the user-token-only `search.messages`, `search.files`, and
+legacy `search.all` methods. Canvases, suggestions/history, semantic ranking
+and highlighting, the complete modifier inventory, exact thread entry scope,
+visual baselines, and live-Slack differential results remain named gaps.
+
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 101 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 33 Playwright scenarios cite 63 IDs. `make journey-check` rejects
+and 34 Playwright scenarios cite 66 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -335,15 +350,15 @@ SDK evidence is now measured at the HTTP boundary too. The pinned official
 Node, Python, and Java clients record every `/api/{method}` path they actually
 request, and the Deno runtime records its two verified function-completion
 requests at its own receiver. `make sdk-qualification` fails if any operation
-claimed at `sdk-compatible` or above is absent. The current result is 223 of
-223 claimed methods observed (213 current plus ten retained legacy methods);
+claimed at `sdk-compatible` or above is absent. The current result is 225 of
+225 claimed methods observed (215 current plus ten retained legacy methods);
 this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 87 representative exact assertions
-explicitly citing 43 of the 101 journey IDs across every journey domain.
-`make journey-check` prints the other 58 as upstream-text evidence
+developer pages and currently checks 97 representative exact assertions
+explicitly citing 44 of the 101 journey IDs across every journey domain.
+`make journey-check` prints the other 57 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and
@@ -393,8 +408,8 @@ Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
 that per-method record. The compatibility report now makes the missing records
-explicit: only eight of the 213 current methods claimed at `sdk-compatible` or
-above carry method-level evidence in the ledger; 205 claims still require
+explicit: only 11 of the 215 current methods claimed at `sdk-compatible` or
+above carry method-level evidence in the ledger; 204 claims still require
 individual review and evidence even though the official SDK aggregate observes
 their request paths.
 

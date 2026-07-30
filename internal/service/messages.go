@@ -525,6 +525,19 @@ func (m Messages) authorizeFileAccess(ctx context.Context, userID domain.UserID,
 		return nil
 	}
 	for _, conversationID := range file.SharedChannels {
+		conversation, err := m.Store.GetConversation(ctx, conversationID)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				continue
+			}
+			return err
+		}
+		if conversation.WorkspaceID != file.WorkspaceID {
+			continue
+		}
+		if !conversation.IsPrivate {
+			return nil
+		}
 		member, err := m.Store.IsConversationMember(ctx, conversationID, userID)
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			return err
@@ -640,7 +653,7 @@ func (m Messages) Files(ctx context.Context, workspaceID domain.WorkspaceID, use
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.FilePage{}, err
 	}
-	return m.Store.ListFiles(ctx, workspaceID, request)
+	return m.Store.ListVisibleFiles(ctx, workspaceID, userID, request)
 }
 
 func (m Messages) AddRemoteFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.RemoteFile) (domain.RemoteFile, error) {
@@ -819,14 +832,281 @@ func normalizeRemoteFileChannels(values []domain.ConversationID) ([]domain.Conve
 }
 
 func (m Messages) Search(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
+	return m.SearchMessages(ctx, workspaceID, userID, domain.MessageSearchRequest{Query: query, Page: request})
+}
+
+func (m Messages) SearchMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageSearchRequest) (domain.MessagePage, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.MessagePage{}, err
 	}
-	query = strings.Join(strings.Fields(strings.ToLower(query)), " ")
-	if query == "" || len(query) > 500 {
+	request.Query = strings.TrimSpace(request.Query)
+	if request.Query == "" || utf8.RuneCountInString(request.Query) > 500 {
 		return domain.MessagePage{}, ErrInvalidSearch
 	}
-	return m.Store.SearchMessages(ctx, workspaceID, userID, query, request)
+	sortOrder, direction, err := domain.NormalizeSearchOrder(string(request.Sort), string(request.Direction))
+	if err != nil {
+		return domain.MessagePage{}, ErrInvalidSearch
+	}
+	parsed, err := parseSearchQuery(request.Query)
+	if err != nil {
+		return domain.MessagePage{}, ErrInvalidSearch
+	}
+	search := domain.MessageSearch{
+		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
+		After: parsed.after, Before: parsed.before,
+		ThreadOnly: parsed.threadOnly, HasFiles: parsed.hasFiles,
+		HasPins: parsed.hasPins, HasReactions: parsed.hasReactions,
+		Sort: sortOrder, Direction: direction, Page: request.Page,
+	}
+	search.Page.Descending = direction == domain.SearchDirectionDescending
+	if request.Conversation != "" {
+		if _, err := m.ConversationInfo(ctx, workspaceID, userID, request.Conversation); err != nil {
+			return domain.MessagePage{}, err
+		}
+		search.Conversation = request.Conversation
+	}
+	if parsed.conversation != "" {
+		search.Conversation = m.resolveSearchConversation(ctx, workspaceID, userID, parsed.conversation)
+	}
+	if parsed.excludedConversation != "" {
+		search.ExcludedConversation = m.resolveSearchConversation(ctx, workspaceID, userID, parsed.excludedConversation)
+	}
+	if parsed.author != "" {
+		search.Author = m.resolveSearchUser(ctx, workspaceID, userID, parsed.author)
+	}
+	if parsed.excludedAuthor != "" {
+		search.ExcludedAuthor = m.resolveSearchUser(ctx, workspaceID, userID, parsed.excludedAuthor)
+	}
+	if parsed.withUser != "" {
+		search.WithUser = m.resolveSearchUser(ctx, workspaceID, userID, parsed.withUser)
+	}
+	if parsed.saved {
+		search.SavedBy = userID
+	}
+	return m.Store.SearchMessages(ctx, workspaceID, userID, search)
+}
+
+func (m Messages) SearchFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.FileSearchRequest) (domain.FilePage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.FilePage{}, err
+	}
+	request.Query = strings.TrimSpace(request.Query)
+	if request.Query == "" || utf8.RuneCountInString(request.Query) > 500 || request.Count <= 0 || request.Count > 100 || request.Page <= 0 || request.Page > 100 {
+		return domain.FilePage{}, ErrInvalidSearch
+	}
+	sortOrder, direction, err := domain.NormalizeSearchOrder(string(request.Sort), string(request.Direction))
+	if err != nil {
+		return domain.FilePage{}, ErrInvalidSearch
+	}
+	parsed, err := parseSearchQuery(request.Query)
+	if err != nil {
+		return domain.FilePage{}, ErrInvalidSearch
+	}
+	search := domain.FileSearch{
+		Terms: parsed.terms, ExcludedTerms: parsed.excludedTerms,
+		FileType: parsed.fileType, After: parsed.after, Before: parsed.before,
+		Sort: sortOrder, Direction: direction, Count: request.Count, Page: request.Page,
+	}
+	if request.Conversation != "" {
+		if _, err := m.ConversationInfo(ctx, workspaceID, userID, request.Conversation); err != nil {
+			return domain.FilePage{}, err
+		}
+		search.Conversation = request.Conversation
+	}
+	if parsed.author != "" {
+		search.Uploader = m.resolveSearchUser(ctx, workspaceID, userID, parsed.author)
+	}
+	if parsed.excludedAuthor != "" {
+		search.ExcludedUploader = m.resolveSearchUser(ctx, workspaceID, userID, parsed.excludedAuthor)
+	}
+	if parsed.conversation != "" {
+		search.Conversation = m.resolveSearchConversation(ctx, workspaceID, userID, parsed.conversation)
+	}
+	if parsed.excludedConversation != "" {
+		search.ExcludedConversation = m.resolveSearchConversation(ctx, workspaceID, userID, parsed.excludedConversation)
+	}
+	return m.Store.SearchFiles(ctx, workspaceID, userID, search)
+}
+
+type parsedSearchQuery struct {
+	terms, excludedTerms                 []string
+	conversation, excludedConversation   string
+	author, excludedAuthor, withUser     string
+	fileType                             string
+	after, before                        time.Time
+	threadOnly, hasFiles, hasPins, saved bool
+	hasReactions                         bool
+}
+
+func parseSearchQuery(raw string) (parsedSearchQuery, error) {
+	tokens, err := domain.SearchQueryTokens(raw)
+	if err != nil {
+		return parsedSearchQuery{}, err
+	}
+	var result parsedSearchQuery
+	for _, token := range tokens {
+		excluded := strings.HasPrefix(token, "-") && len(token) > 1
+		if excluded {
+			token = strings.TrimPrefix(token, "-")
+		}
+		name, value, modifier := strings.Cut(token, ":")
+		if modifier {
+			name, value = strings.ToLower(name), strings.TrimSpace(value)
+			switch name {
+			case "in":
+				if excluded {
+					result.excludedConversation = value
+				} else {
+					result.conversation = value
+				}
+				continue
+			case "from":
+				if excluded {
+					result.excludedAuthor = value
+				} else {
+					result.author = value
+				}
+				continue
+			case "with":
+				if !excluded {
+					result.withUser = value
+					continue
+				}
+			case "before", "after", "on":
+				if excluded {
+					break
+				}
+				date, parseErr := time.Parse("2006-01-02", value)
+				if parseErr != nil {
+					return parsedSearchQuery{}, parseErr
+				}
+				switch name {
+				case "before":
+					result.before = date
+				case "after":
+					result.after = date
+				case "on":
+					result.after, result.before = date, date.AddDate(0, 0, 1)
+				}
+				continue
+			case "during":
+				if excluded {
+					break
+				}
+				month, parseErr := time.Parse("2006-01", value)
+				if parseErr != nil {
+					return parsedSearchQuery{}, parseErr
+				}
+				result.after, result.before = month, month.AddDate(0, 1, 0)
+				continue
+			case "is":
+				if excluded {
+					break
+				}
+				switch strings.ToLower(value) {
+				case "thread":
+					result.threadOnly = true
+					continue
+				case "saved":
+					result.saved = true
+					continue
+				}
+			case "has":
+				if excluded {
+					break
+				}
+				switch strings.ToLower(value) {
+				case "file":
+					result.hasFiles = true
+					continue
+				case "pin":
+					result.hasPins = true
+					continue
+				case "reaction":
+					result.hasReactions = true
+					continue
+				}
+				if strings.HasPrefix(value, ":") && strings.HasSuffix(value, ":") {
+					result.hasReactions = true
+					continue
+				}
+			case "type":
+				if !excluded {
+					result.fileType = value
+					continue
+				}
+			}
+		}
+		if excluded {
+			result.excludedTerms = append(result.excludedTerms, domain.FoldSearchText(token))
+		} else {
+			result.terms = append(result.terms, domain.FoldSearchText(token))
+		}
+	}
+	if len(result.terms) == 0 && result.conversation == "" && result.author == "" && result.withUser == "" && result.after.IsZero() && result.before.IsZero() && !result.threadOnly && !result.hasFiles && !result.hasPins && !result.hasReactions && !result.saved && result.fileType == "" {
+		return parsedSearchQuery{}, ErrInvalidSearch
+	}
+	return result, nil
+}
+
+func (m Messages) resolveSearchConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reference string) domain.ConversationID {
+	reference = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(reference, "#"), "<#"))
+	reference = strings.TrimSuffix(strings.SplitN(reference, "|", 2)[0], ">")
+	if reference == "" {
+		return domain.ConversationID("__no_search_match__")
+	}
+	if conversation, err := m.ConversationInfo(ctx, workspaceID, userID, domain.ConversationID(reference)); err == nil {
+		return conversation.ID
+	}
+	folded := domain.FoldSearchText(reference)
+	request := domain.ConversationListRequest{Limit: 200, IncludeClosedDirects: true}
+	for {
+		page, err := m.Conversations(ctx, workspaceID, userID, request)
+		if err != nil {
+			return domain.ConversationID("__no_search_match__")
+		}
+		for _, conversation := range page.Conversations {
+			if domain.FoldSearchText(conversation.Name) == folded {
+				return conversation.ID
+			}
+		}
+		if !page.HasMore {
+			break
+		}
+		request.Cursor = page.NextCursor
+	}
+	return domain.ConversationID("__no_search_match__")
+}
+
+func (m Messages) resolveSearchUser(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reference string) domain.UserID {
+	reference = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(reference, "@"), "<@"))
+	reference = strings.TrimSuffix(strings.SplitN(reference, "|", 2)[0], ">")
+	if reference == "" {
+		return domain.UserID("__no_search_match__")
+	}
+	if user, err := m.UserInfo(ctx, workspaceID, userID, domain.UserID(reference)); err == nil {
+		return user.ID
+	}
+	folded := domain.FoldSearchText(reference)
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := m.Users(ctx, workspaceID, userID, request)
+		if err != nil {
+			return domain.UserID("__no_search_match__")
+		}
+		for _, user := range page.Users {
+			for _, candidate := range []string{user.Name, user.RealName, user.Profile.DisplayName, user.Email} {
+				if domain.FoldSearchText(candidate) == folded {
+					return user.ID
+				}
+			}
+		}
+		if !page.HasMore {
+			break
+		}
+		request.Cursor = page.NextCursor
+	}
+	return domain.UserID("__no_search_match__")
 }
 
 func (m Messages) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceID, after uint64, limit int) ([]events.Record, error) {

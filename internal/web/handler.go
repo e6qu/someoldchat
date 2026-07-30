@@ -359,12 +359,46 @@ type directExpansionReviewData struct {
 }
 
 type searchData struct {
-	Query    string
-	Channel  string
-	Messages []messageView
-	Error    string
-	MoreURL  string
-	Searched bool
+	Query                string
+	Channel              string
+	Type                 string
+	Sort                 string
+	Direction            string
+	Messages             []messageView
+	Files                []searchFileView
+	People               []memberView
+	Conversations        []conversationView
+	Tabs                 []searchTabView
+	ConversationOptions  []conversationView
+	MemberOptions        []memberView
+	SelectedConversation string
+	SelectedMember       string
+	After                string
+	Before               string
+	Has                  string
+	CurrentOnly          bool
+	ResultCount          int
+	Error                string
+	MoreURL              string
+	Searched             bool
+}
+
+type searchTabView struct {
+	Label   string
+	URL     string
+	Current bool
+}
+
+type searchFileView struct {
+	ID          string
+	Name        string
+	Title       string
+	MIMEType    string
+	Size        string
+	Uploader    string
+	DisplayTime string
+	MachineTime string
+	DownloadURL string
 }
 
 type activityData struct {
@@ -1598,10 +1632,12 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 .bar input{flex:1 1 auto;min-width:0;border:1px solid #ffffff8a;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:var(--on-accent)}
 .bar input::placeholder{color:#ffffffd6}
 .bar button{border:1px solid #ffffff6b;background:transparent;color:var(--on-accent);border-radius:5px;padding:6px 10px}
-.layout{max-width:900px;margin:0 auto;padding:28px 22px}
+.layout{max-width:980px;margin:0 auto;padding:28px 22px}
 .heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
 .heading h1{margin:0 0 4px;font-size:26px}
 .muted{color:var(--muted)}
+.search-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow:auto;margin-bottom:14px}.search-tabs a{padding:9px 13px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent;white-space:nowrap}.search-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}
+.filters{display:grid;grid-template-columns:repeat(6,minmax(110px,1fr));gap:9px;align-items:end;padding:13px;margin-bottom:18px;background:var(--panel);border:1px solid var(--line);border-radius:8px}.filters label{display:grid;gap:4px;font-size:12px;font-weight:800}.filters select,.filters input{min-width:0;width:100%;border:1px solid var(--field-line);border-radius:5px;padding:7px;background:var(--field);color:var(--text)}.filters button{border:0;border-radius:5px;padding:8px 12px;background:var(--action);color:var(--on-strong);font-weight:800}.scope-note{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.scope-note a{color:var(--action)}
 .results{display:grid;gap:8px}
 .result{display:block;padding:14px;background:var(--panel);border:1px solid var(--line);border-radius:8px;color:inherit;text-decoration:none}
 .result:hover{border-color:var(--action)}
@@ -1609,11 +1645,29 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 .time{color:var(--muted);font-size:12px;margin-left:8px}
 .channel{color:var(--muted);font-size:12px;margin-left:8px}
 .text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+.file-result{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.file-result .text{color:var(--muted)}.result-kind{color:var(--muted);font-size:12px;font-weight:700}
 .empty{color:var(--muted);padding:22px;text-align:center}
-@media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}}
+.pager{text-align:center;margin-top:18px}.pager a{color:var(--action);font-weight:800}
+@media(max-width:820px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}.filters{grid-template-columns:1fr}.file-result{grid-template-columns:1fr}}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search messages</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"></form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">Messages matching “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to find messages.</p>{{end}}</div><section class="results" aria-label="Results">{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if .Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages, files, people, and channels" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">{{.ResultCount}} results in {{.Type}} for “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to search this workspace.</p>{{end}}</div>
+{{if .CurrentOnly}}<p class="scope-note">Searching only this conversation. <a href="/app/search?q={{.Query}}&amp;channel={{.Channel}}&amp;type={{.Type}}">Search the whole workspace</a></p>{{end}}
+{{if .Searched}}<nav class="search-tabs" aria-label="Search result types">{{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+{{if or (eq .Type "messages") (eq .Type "files")}}<form class="filters" method="get" action="/app/search" aria-label="Search filters"><input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">
+<label>From<select name="from"><option value="">Anyone</option>{{range .MemberOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedMember}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+<label>In<select name="in"><option value="">Anywhere</option>{{range .ConversationOptions}}<option value="{{.ID}}"{{if eq .ID $.SelectedConversation}} selected{{end}}>{{.Name}}</option>{{end}}</select></label>
+<label>After<input type="date" name="after" value="{{.After}}"></label><label>Before<input type="date" name="before" value="{{.Before}}"></label>
+<label>Contains<select name="has"><option value="">Anything</option>{{if eq .Type "messages"}}<option value="file"{{if eq .Has "file"}} selected{{end}}>A file</option><option value="pin"{{if eq .Has "pin"}} selected{{end}}>A pin</option><option value="reaction"{{if eq .Has "reaction"}} selected{{end}}>A reaction</option>{{else}}<option value="images"{{if eq .Has "images"}} selected{{end}}>Images</option><option value="pdf"{{if eq .Has "pdf"}} selected{{end}}>PDF files</option><option value="text"{{if eq .Has "text"}} selected{{end}}>Text files</option>{{end}}</select></label>
+<label>Sort<select name="order"><option value="relevant"{{if eq .Sort "score"}} selected{{end}}>Most relevant</option><option value="newest"{{if and (eq .Sort "timestamp") (eq .Direction "desc")}} selected{{end}}>Newest</option><option value="oldest"{{if eq .Direction "asc"}} selected{{end}}>Oldest</option></select></label><button type="submit">Apply filters</button>
+{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form>{{end}}{{end}}
+<section class="results" aria-label="{{.Type}} search results">
+{{if eq .Type "messages"}}{{range .Messages}}<a class="result" href="{{.Permalink}}"><span class="author">{{.AuthorName}}</span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="channel">{{.ChannelPrefix}}{{.ChannelName}}</span><p class="text">{{.Text}}</p></a>{{else}}{{if $.Searched}}<p class="empty">No matching messages.</p>{{end}}{{end}}
+{{else if eq .Type "files"}}{{range .Files}}<a class="result file-result" href="{{.DownloadURL}}"><span><span class="author">{{if .Title}}{{.Title}}{{else}}{{.Name}}{{end}}</span><span class="result-kind">{{.MIMEType}} · {{.Size}}</span><p class="text">Uploaded by {{.Uploader}}</p></span><time class="time" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></a>{{else}}<p class="empty">No matching files.</p>{{end}}
+{{else if eq .Type "people"}}{{range .People}}<a class="result" href="/app/members?user={{.ID}}"><span class="author">{{.Name}}</span>{{if .RealName}}<p class="text">{{.RealName}}</p>{{end}}</a>{{else}}<p class="empty">No matching people.</p>{{end}}
+{{else}}{{range .Conversations}}<a class="result" href="/app?channel={{.ID}}"><span class="author"># {{.Name}}</span></a>{{else}}<p class="empty">No matching channels.</p>{{end}}{{end}}
+</section>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more results</a></p>{{end}}</main>{{end}}`
 
 var searchTemplate = mustPage(searchMarkup)
 
@@ -2255,6 +2309,14 @@ if(!search)return;
 event.preventDefault();
 search.focus();
 search.select();
+return;
+}
+if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='f'){
+if(!search)return;
+event.preventDefault();
+var channelInput=search.form?search.form.querySelector('input[name=channel]'):null;
+var searchParams=new URLSearchParams({channel:channelInput?channelInput.value:'',scope:'channel',type:'messages'});
+window.location.assign('/app/search?'+searchParams.toString());
 return;
 }
 if(primaryShortcut(event)&&!event.shiftKey&&!event.altKey&&key==='k'){
@@ -4473,35 +4535,239 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = string(h.Channel)
 	}
-	data := searchData{Query: query, Channel: channel, Searched: query != ""}
+	resultType := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("type")))
+	switch resultType {
+	case "", "messages":
+		resultType = "messages"
+	case "files", "people", "channels":
+	default:
+		resultType = "messages"
+	}
+	sortOrder, direction := domain.SearchSortScore, domain.SearchDirectionDescending
+	switch r.URL.Query().Get("order") {
+	case "newest":
+		sortOrder = domain.SearchSortTimestamp
+	case "oldest":
+		sortOrder, direction = domain.SearchSortTimestamp, domain.SearchDirectionAscending
+	}
+	data := searchData{
+		Query: query, Channel: channel, Type: resultType, Searched: query != "",
+		Sort: string(sortOrder), Direction: string(direction),
+		SelectedConversation: strings.TrimSpace(r.URL.Query().Get("in")),
+		SelectedMember:       strings.TrimSpace(r.URL.Query().Get("from")),
+		After:                strings.TrimSpace(r.URL.Query().Get("after")),
+		Before:               strings.TrimSpace(r.URL.Query().Get("before")),
+		Has:                  strings.TrimSpace(r.URL.Query().Get("has")),
+		CurrentOnly:          r.URL.Query().Get("scope") == "channel",
+	}
 	if query == "" {
 		h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 		return
 	}
-	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
-	results, err := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: searchWindow, Cursor: cursor})
+	data.MemberOptions, data.ConversationOptions, err = h.searchFilterOptions(r.Context(), principal)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidSearch):
-			data.Error = "Enter between one and 500 characters to search."
-			data.Searched = false
-			h.writeHTML(w, searchTemplate, data, http.StatusBadRequest, "search rendering unavailable")
-		case errors.Is(err, domain.ErrInvalidCursor):
-			data.Error = "That results link is no longer valid. Search again to see matches."
-			data.Searched = false
-			h.writeHTML(w, searchTemplate, data, http.StatusBadRequest, "search rendering unavailable")
-		default:
-			h.writeStoreError(w, err, "Search is temporarily unavailable.")
-		}
+		h.writeStoreError(w, err, "Search filters are temporarily unavailable.")
 		return
 	}
-	names := h.newUserNames(r.Context(), principal)
-	data.Messages = h.newResultViews(r.Context(), principal, results.Messages, names)
-	if results.HasMore && results.NextCursor != "" {
-		values := url.Values{"q": {query}, "channel": {channel}, "cursor": {string(results.NextCursor)}}
-		data.MoreURL = "/app/search?" + values.Encode()
+	for _, tab := range []struct{ value, label string }{{"messages", "Messages"}, {"files", "Files"}, {"people", "People"}, {"channels", "Channels"}} {
+		values := cloneURLValues(r.URL.Query())
+		values.Set("type", tab.value)
+		values.Del("cursor")
+		values.Del("page")
+		data.Tabs = append(data.Tabs, searchTabView{Label: tab.label, URL: "/app/search?" + values.Encode(), Current: resultType == tab.value})
+	}
+	effectiveQuery := searchQueryWithFilters(query, data)
+	textTokens, tokenErr := domain.SearchQueryTokens(query)
+	if tokenErr != nil {
+		h.writeSearchError(w, data, service.ErrInvalidSearch)
+		return
+	}
+	switch resultType {
+	case "messages":
+		request := domain.MessageSearchRequest{
+			Query: effectiveQuery, Sort: sortOrder, Direction: direction,
+			Page: domain.PageRequest{Limit: searchWindow, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))},
+		}
+		if data.CurrentOnly {
+			request.Conversation = domain.ConversationID(channel)
+		}
+		results, searchErr := h.Messages.SearchMessages(r.Context(), principal.WorkspaceID, principal.UserID, request)
+		if searchErr != nil {
+			h.writeSearchError(w, data, searchErr)
+			return
+		}
+		data.Messages = h.newResultViews(r.Context(), principal, results.Messages, h.newUserNames(r.Context(), principal))
+		data.ResultCount = results.Total
+		if results.HasMore && results.NextCursor != "" {
+			values := cloneURLValues(r.URL.Query())
+			values.Set("cursor", string(results.NextCursor))
+			data.MoreURL = "/app/search?" + values.Encode()
+		}
+	case "files":
+		pageNumber := 1
+		if raw := strings.TrimSpace(r.URL.Query().Get("page")); raw != "" {
+			pageNumber, err = strconv.Atoi(raw)
+		}
+		if err != nil || pageNumber <= 0 || pageNumber > 100 {
+			h.writeSearchError(w, data, domain.ErrInvalidCursor)
+			return
+		}
+		request := domain.FileSearchRequest{
+			Query: effectiveQuery, Sort: sortOrder, Direction: direction, Count: searchWindow, Page: pageNumber,
+		}
+		if data.CurrentOnly {
+			request.Conversation = domain.ConversationID(channel)
+		}
+		results, searchErr := h.Messages.SearchFiles(r.Context(), principal.WorkspaceID, principal.UserID, request)
+		if searchErr != nil {
+			h.writeSearchError(w, data, searchErr)
+			return
+		}
+		names := h.newUserNames(r.Context(), principal)
+		for _, file := range results.Files {
+			data.Files = append(data.Files, searchFileView{
+				ID: string(file.ID), Name: file.Name, Title: file.Title, MIMEType: file.MIMEType,
+				Size: formatFileSize(file.Size), Uploader: names.name(file.Uploader),
+				DisplayTime: formatTime(file.CreatedAt), MachineTime: file.CreatedAt.UTC().Format(time.RFC3339Nano),
+				DownloadURL: "/api/files/" + url.PathEscape(string(file.ID)),
+			})
+		}
+		data.ResultCount = results.Total
+		if results.HasMore {
+			values := cloneURLValues(r.URL.Query())
+			values.Set("page", strconv.Itoa(pageNumber+1))
+			data.MoreURL = "/app/search?" + values.Encode()
+		}
+	case "people":
+		for _, member := range data.MemberOptions {
+			if searchTextContainsTerms(member.Name+" "+member.RealName, textTokens) {
+				data.People = append(data.People, member)
+			}
+		}
+		data.ResultCount = len(data.People)
+	case "channels":
+		for _, conversation := range data.ConversationOptions {
+			if searchTextContainsTerms(conversation.Name, textTokens) {
+				data.Conversations = append(data.Conversations, conversation)
+			}
+		}
+		data.ResultCount = len(data.Conversations)
 	}
 	h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
+}
+
+func (h Handler) writeSearchError(w http.ResponseWriter, data searchData, err error) {
+	switch {
+	case errors.Is(err, service.ErrInvalidSearch):
+		data.Error = "Enter between one and 500 characters and use supported Slack search modifiers."
+	case errors.Is(err, store.ErrInvalidArgument):
+		data.Error = "Check the query and filters, then search again."
+	case errors.Is(err, domain.ErrInvalidCursor):
+		data.Error = "That results link is no longer valid. Search again to see matches."
+	default:
+		h.writeStoreError(w, err, "Search is temporarily unavailable.")
+		return
+	}
+	data.Searched = false
+	h.writeHTML(w, searchTemplate, data, http.StatusBadRequest, "search rendering unavailable")
+}
+
+func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Principal) ([]memberView, []conversationView, error) {
+	members := make([]memberView, 0)
+	userRequest := domain.PageRequest{Limit: 200}
+	for {
+		page, err := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, userRequest)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, user := range page.Users {
+			if user.Deleted {
+				continue
+			}
+			name := displayName(user)
+			members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
+		}
+		if !page.HasMore {
+			break
+		}
+		userRequest.Cursor = page.NextCursor
+	}
+	sort.Slice(members, func(left, right int) bool { return members[left].Name < members[right].Name })
+	conversations := make([]conversationView, 0)
+	conversationRequest := domain.ConversationListRequest{Limit: 200, IncludeClosedDirects: true}
+	for {
+		page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, conversationRequest)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, conversation := range page.Conversations {
+			if conversation.IsDirect || conversation.IsGroupDirect {
+				continue
+			}
+			conversations = append(conversations, conversationView{ID: string(conversation.ID), Name: conversationName(conversation)})
+		}
+		if !page.HasMore {
+			break
+		}
+		conversationRequest.Cursor = page.NextCursor
+	}
+	sort.Slice(conversations, func(left, right int) bool { return conversations[left].Name < conversations[right].Name })
+	return members, conversations, nil
+}
+
+func searchQueryWithFilters(query string, data searchData) string {
+	values := []string{strings.TrimSpace(query)}
+	if data.SelectedMember != "" {
+		values = append(values, "from:"+data.SelectedMember)
+	}
+	if data.SelectedConversation != "" && !data.CurrentOnly {
+		values = append(values, "in:"+data.SelectedConversation)
+	}
+	if data.After != "" {
+		values = append(values, "after:"+data.After)
+	}
+	if data.Before != "" {
+		values = append(values, "before:"+data.Before)
+	}
+	if data.Has != "" {
+		if data.Type == "files" {
+			values = append(values, "type:"+data.Has)
+		} else {
+			values = append(values, "has:"+data.Has)
+		}
+	}
+	return strings.Join(values, " ")
+}
+
+func searchTextContainsTerms(text string, tokens []string) bool {
+	text = domain.FoldSearchText(text)
+	for _, raw := range tokens {
+		excluded := strings.HasPrefix(raw, "-") && len(raw) > 1
+		if excluded {
+			raw = strings.TrimPrefix(raw, "-")
+		}
+		name, _, modifier := strings.Cut(raw, ":")
+		if modifier && slices.Contains([]string{"after", "before", "creator", "during", "from", "has", "hasmy", "in", "is", "on", "to", "type", "with"}, strings.ToLower(name)) {
+			continue
+		}
+		term := domain.FoldSearchText(raw)
+		if term == "" {
+			continue
+		}
+		contains := strings.Contains(text, term)
+		if (excluded && contains) || (!excluded && !contains) {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneURLValues(source url.Values) url.Values {
+	values := make(url.Values, len(source))
+	for key, entries := range source {
+		values[key] = append([]string(nil), entries...)
+	}
+	return values
 }
 
 func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, messages []domain.Message, names *userNames) []messageView {

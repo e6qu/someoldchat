@@ -44,6 +44,16 @@ and search, paginates stably, and opens the file or containing message. File
 results in global search agree with this visibility. Empty, indexing, and
 failure states remain distinct.
 
+Visibility is evaluated before totals and page boundaries: the uploader can
+see an unshared file, every workspace member can see a file shared to a public
+channel, and only members of each private channel/DM can discover its share.
+The same decision governs Files browse, message/file/combined search, file
+metadata, previews, and byte download. Search covers safe name/title text,
+uploader, conversation, date, and Slack-supported file-type refinements and
+preserves them in a reloadable URL. Sorting is deterministic for equal
+timestamps, and a later permission loss makes a previously returned link fail
+closed without revealing whether the object still exists.
+
 ## FILE-05 — Download, share, and copy a file link
 
 Download requires an authorized current session/token and streams the exact
@@ -79,6 +89,13 @@ and message projections.
   across SQLite, PostgreSQL, and dqlite.
 - Differential tests compare count/size limits, message projection, errors, and
   file events in a dedicated Slack workspace.
+- Memory and shared SQL persistence apply viewer visibility before file-list
+  and file-search pagination; SQL persists folded file name/title columns for
+  Unicode-insensitive matching after reopen. Generated gRPC parity tests carry
+  the viewer, filters, totals, and order. Official Node, Python, and Java SDK
+  qualification invokes both `search.files` and legacy combined `search.all`,
+  and browser qualification searches a real hosted upload through the Files
+  result type before following its authenticated link.
 
 ## Journey-source map
 

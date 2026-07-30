@@ -2406,6 +2406,51 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 	requireContains(t, "opened search result", opened.Body.String(), `id="message-M1"`, "searchable hello")
 }
 
+func TestSearchPageSupportsTypedResultsFiltersAndConversationScope(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedConversation(domain.Conversation{ID: "Cother", WorkspaceID: "T1", Name: "other"})
+	s.SeedConversationMember("Cother", "U1")
+	seedMessage(t, s, "Mscope", "needle in general", time.Unix(1_700_000_100, 0).UTC())
+	other := domain.Message{ID: "Mother", WorkspaceID: "T1", Conversation: "Cother", AuthorID: "U1", Text: "needle elsewhere", CreatedAt: time.Unix(1_700_000_200, 0).UTC()}
+	if err := s.CreateMessage(context.Background(), other, events.Event{ID: "EMother", WorkspaceID: "T1", Topic: "message.created", CreatedAt: other.CreatedAt}, ""); err != nil {
+		t.Fatal(err)
+	}
+	file := domain.File{ID: "Fneedle", WorkspaceID: "T1", Uploader: "U1", Name: "needle.txt", Title: "Needle notes", MIMEType: "text/plain", BlobKey: "needle", SharedChannels: []domain.ConversationID{"Cdev"}, CreatedAt: time.Unix(1_700_000_300, 0).UTC()}
+	if err := s.CreateFile(context.Background(), file, events.Event{ID: "EFneedle", WorkspaceID: "T1", Topic: "file.created", CreatedAt: file.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	otherFile := domain.File{ID: "Fother", WorkspaceID: "T1", Uploader: "U1", Name: "needle-other.txt", Title: "Needle elsewhere", MIMEType: "text/plain", BlobKey: "needle-other", SharedChannels: []domain.ConversationID{"Cother"}, CreatedAt: time.Unix(1_700_000_400, 0).UTC()}
+	if err := s.CreateFile(context.Background(), otherFile, events.Event{ID: "EFother", WorkspaceID: "T1", Topic: "file.created", CreatedAt: otherFile.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+
+	blankScope := get(t, mux, "/app/search?type=messages&scope=channel&channel=Cdev")
+	requireContains(t, "blank scoped search", blankScope.Body.String(), "Searching only this conversation", `name="scope" value="channel"`)
+
+	scoped := get(t, mux, "/app/search?q=needle&type=messages&scope=channel&channel=Cdev&from=U1&order=newest")
+	if scoped.Code != http.StatusOK {
+		t.Fatalf("scoped status=%d body=%s", scoped.Code, scoped.Body)
+	}
+	requireContains(t, "scoped search", scoped.Body.String(), "needle in general", "Searching only this conversation", "Messages", "Files", "People", "Channels", `option value="U1" selected`)
+	requireMissing(t, "scoped search", scoped.Body.String(), "needle elsewhere")
+
+	files := get(t, mux, "/app/search?q=needle&type=files&has=text&channel=Cdev")
+	if files.Code != http.StatusOK {
+		t.Fatalf("files status=%d body=%s", files.Code, files.Body)
+	}
+	requireContains(t, "file search", files.Body.String(), "Needle notes", "Needle elsewhere", "text/plain", "/api/files/Fneedle", "2 results in files")
+	scopedFiles := get(t, mux, "/app/search?q=needle&type=files&scope=channel&channel=Cdev")
+	requireContains(t, "scoped file search", scopedFiles.Body.String(), "Needle notes", "1 results in files")
+	requireMissing(t, "scoped file search", scopedFiles.Body.String(), "Needle elsewhere")
+
+	people := get(t, mux, "/app/search?q=Ada&type=people&channel=Cdev")
+	requireContains(t, "people search", people.Body.String(), "Ada Developer", `/app/members?user=U1`)
+	excludedPeople := get(t, mux, "/app/search?q=Ada+-Developer&type=people&channel=Cdev")
+	requireMissing(t, "excluded people search", excludedPeople.Body.String(), "Ada Developer")
+	channels := get(t, mux, "/app/search?q=general&type=channels&channel=Cdev")
+	requireContains(t, "channel search", channels.Body.String(), "# general", `/app?channel=Cdev`)
+}
+
 func TestWorkspaceRendersStructuredMessagesWithoutDestructiveEditor(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	created := time.Unix(1700000000, 123456000).UTC()

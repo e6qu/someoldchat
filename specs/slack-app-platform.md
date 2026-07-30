@@ -42,9 +42,9 @@ journey inventory is maintained in
 ## Measured remaining gaps
 
 The compatibility ledger is generated from Slack's current method catalog and
-ratcheted in CI. At this revision, 215 of 310 current Web API methods have
+ratcheted in CI. At this revision, 217 of 310 current Web API methods have
 registered implementations. Ten additional legacy methods remain in the
-320-entry ledger but are not counted in the current denominator. The 95
+320-entry ledger but are not counted in the current denominator. The 93
 unimplemented current methods break down as:
 
 | Namespace | Missing | Boundary |
@@ -54,15 +54,15 @@ unimplemented current methods break down as:
 | `conversations.*` | 10 | Slack Connect invitations/approvals, external-invite policy, and canvases |
 | `workflows.*` / `functions.*` | 14 | Distribution/trigger permissions, featured workflows, step discovery, and response export |
 | `assistant.*` | 5 | Assistant thread presentation and search context |
-| `auth.*`, `rtm.*`, `search.*`, `team.*`, `users.*` | 9 | Org team enumeration, legacy RTM bootstrap, file/all search, billing/external-team/preferences, and contact discovery |
+| `auth.*`, `rtm.*`, `team.*`, `users.*` | 7 | Org team enumeration, legacy RTM bootstrap, billing/external-team/preferences, and contact discovery |
 
 That count is a coverage inventory, not a claim that all implemented methods
-are live-Slack-equivalent. The ledger currently records 205 current methods as
-behavior-compatible, eight as SDK-compatible, two as schema-compatible, and
-zero as live-differential `verified-against-slack`. Only eight of the 213
+are live-Slack-equivalent. The ledger currently records 204 current methods as
+behavior-compatible, 11 as SDK-compatible, two as schema-compatible, and
+zero as live-differential `verified-against-slack`. Only 11 of the 215
 current methods claimed at SDK compatibility or better carry method-level
 ledger evidence; the aggregate SDK path inventory does not promote the other
-205 claims. The next app-runtime priorities are user-token visibility for
+204 claims. The next app-runtime priorities are user-token visibility for
 HTTP/Socket event subscriptions, message change/delete and file share/unshare
 event production, then the manifest sections that are stored but not yet
 executable—functions/workflows, external authentication, incoming-webhook

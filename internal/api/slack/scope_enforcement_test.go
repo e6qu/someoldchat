@@ -222,6 +222,8 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/calls.participants.add", auth.ScopeCallsWrite},
 		{http.MethodPost, "/api/calls.participants.remove", auth.ScopeCallsWrite},
 		{http.MethodGet, "/api/search.messages", auth.ScopeSearchRead},
+		{http.MethodGet, "/api/search.files", auth.ScopeSearchRead},
+		{http.MethodGet, "/api/search.all", auth.ScopeSearchRead},
 		{http.MethodGet, "/api/files.info", auth.ScopeFilesRead},
 		{http.MethodPost, "/api/files.delete", auth.ScopeFilesWrite},
 		{http.MethodPost, "/api/files.comments.delete", auth.ScopeFilesWrite},

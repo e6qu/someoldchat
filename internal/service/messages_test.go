@@ -1620,6 +1620,89 @@ func TestSearchNormalizesTermsAndHidesPrivateConversations(t *testing.T) {
 	}
 }
 
+func TestSearchResolvesSlackModifiersAndPreservesDeterministicOrder(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Example"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	for _, message := range []domain.Message{
+		{ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "Release candidate ready", CreatedAt: time.Date(2025, 1, 5, 12, 0, 0, 0, time.UTC)},
+		{ID: "M2", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U2", Text: "Release draft", CreatedAt: time.Date(2025, 1, 6, 12, 0, 0, 0, time.UTC)},
+		{ID: "M3", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "Release candidate ready", CreatedAt: time.Date(2025, 1, 7, 12, 0, 0, 0, time.UTC)},
+	} {
+		if err := s.CreateMessage(ctx, message, events.Event{ID: domain.EventID("E" + string(message.ID)), WorkspaceID: "T1", Topic: "message.created", CreatedAt: message.CreatedAt}, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := Messages{Store: s}
+	page, err := messages.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{
+		Query: `"release candidate" -draft from:@bob in:#general after:2025-01-01 before:2025-02-01`,
+		Sort:  domain.SearchSortTimestamp, Direction: domain.SearchDirectionDescending,
+		Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || page.Total != 1 || len(page.Messages) != 1 || page.Messages[0].ID != "M1" {
+		t.Fatalf("search=%+v err=%v", page, err)
+	}
+	if _, err := messages.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{Query: "release before:not-a-date", Page: domain.PageRequest{Limit: 10}}); !errors.Is(err, ErrInvalidSearch) {
+		t.Fatalf("malformed modifier err=%v, want ErrInvalidSearch", err)
+	}
+}
+
+func TestFileListingAndSearchApplyViewerVisibilityBeforePagination(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	s.SeedConversation(domain.Conversation{ID: "Cpublic", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "secret", IsPrivate: true})
+	s.SeedConversationMember("Cprivate", "U2")
+	files := []domain.File{
+		{ID: "FOWN", WorkspaceID: "T1", Uploader: "U1", Name: "release-notes.txt", Title: "Release notes", MIMEType: "text/plain", BlobKey: "own", CreatedAt: time.Unix(10, 0).UTC()},
+		{ID: "FPUBLIC", WorkspaceID: "T1", Uploader: "U2", Name: "release-plan.pdf", Title: "Release plan", MIMEType: "application/pdf", BlobKey: "public", SharedChannels: []domain.ConversationID{"Cpublic"}, CreatedAt: time.Unix(20, 0).UTC()},
+		{ID: "FPRIVATE", WorkspaceID: "T1", Uploader: "U2", Name: "release-secret.pdf", Title: "Release secret", MIMEType: "application/pdf", BlobKey: "private", SharedChannels: []domain.ConversationID{"Cprivate"}, CreatedAt: time.Unix(30, 0).UTC()},
+	}
+	for _, file := range files {
+		if err := s.CreateFile(ctx, file, events.Event{ID: domain.EventID("E" + string(file.ID)), WorkspaceID: "T1", Topic: "file.created", CreatedAt: file.CreatedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages := Messages{Store: s}
+	listed, err := messages.Files(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+	if err != nil || len(listed.Files) != 2 {
+		t.Fatalf("visible files=%+v err=%v", listed, err)
+	}
+	public, err := messages.FileInfo(ctx, "T1", "U1", "FPUBLIC")
+	if err != nil || public.ID != "FPUBLIC" {
+		t.Fatalf("public file info=%+v err=%v", public, err)
+	}
+	if _, err := messages.FileInfo(ctx, "T1", "U1", "FPRIVATE"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("private file info err=%v, want not found", err)
+	}
+	found, err := messages.SearchFiles(ctx, "T1", "U1", domain.FileSearchRequest{
+		Query: "release type:pdf -from:@alice -in:#secret", Sort: domain.SearchSortTimestamp, Direction: domain.SearchDirectionDescending, Count: 1, Page: 1,
+	})
+	if err != nil || found.Total != 1 || len(found.Files) != 1 || found.Files[0].ID != "FPUBLIC" || found.HasMore {
+		t.Fatalf("file search=%+v err=%v", found, err)
+	}
+	scoped, err := messages.SearchFiles(ctx, "T1", "U1", domain.FileSearchRequest{
+		Query: "release", Conversation: "Cpublic", Count: 10, Page: 1,
+	})
+	if err != nil || scoped.Total != 1 || len(scoped.Files) != 1 || scoped.Files[0].ID != "FPUBLIC" {
+		t.Fatalf("conversation file search=%+v err=%v", scoped, err)
+	}
+	excluded, err := messages.SearchFiles(ctx, "T1", "U1", domain.FileSearchRequest{
+		Query: "release -from:@bob -in:#general", Count: 10, Page: 1,
+	})
+	if err != nil || excluded.Total != 1 || len(excluded.Files) != 1 || excluded.Files[0].ID != "FOWN" {
+		t.Fatalf("excluded file search=%+v err=%v", excluded, err)
+	}
+}
+
 func TestSetUserProfileNormalizesAndPersists(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})

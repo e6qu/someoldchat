@@ -41,8 +41,8 @@ import (
 //     is an index range seek over its own 500 values instead of a scan of the
 //     table; the index is dropped when the pass finishes. messages.created_at is
 //     walked through the covering index messages(conversation, created_at, id)
-//     that already exists, one conversation at a time. The four folded-search
-//     copies are walked through their table's primary key, which needs no
+//     that already exists, one conversation at a time. Folded-search copies are
+//     walked through their table's primary key, which needs no
 //     transient index at all — an index on free text would be as large as the
 //     table it is meant to make cheap. Measured rates are in
 //     TestSQLiteBackfillRateIsLinear and TestSQLiteFoldBackfillRateIsLinear.
@@ -205,6 +205,8 @@ var foldedColumns = []struct{ table, source, folded string }{
 	{"conversations", "name", "name_folded"},
 	{"conversations", "topic", "topic_folded"},
 	{"conversations", "purpose", "purpose_folded"},
+	{"files", "name", "name_folded"},
+	{"files", "title", "title_folded"},
 }
 
 // foldPending selects the rows whose folded copy has not been computed yet.

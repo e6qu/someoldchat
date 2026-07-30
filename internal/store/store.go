@@ -575,6 +575,8 @@ type Store interface {
 	RevokeFilePublic(context.Context, domain.WorkspaceID, domain.FileID, events.Event) error
 	GetPublicFile(context.Context, string) (domain.File, error)
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
+	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
+	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
 	AddRemoteFile(context.Context, domain.RemoteFile, events.Event) error
 	GetRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup) (domain.RemoteFile, error)
@@ -591,7 +593,7 @@ type Store interface {
 	// GetCanvasAccess resolves the effective access one user has to one canvas.
 	// See GetListAccess for the resolution rules; canvases follow them exactly.
 	GetCanvasAccess(context.Context, domain.CanvasID, domain.UserID) (domain.CanvasAccess, error)
-	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
+	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearch) (domain.MessagePage, error)
 	CreateList(context.Context, domain.List, events.Event) error
 	// CreateListWithItems creates a list and its initial items as one unit.
 	//

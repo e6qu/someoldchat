@@ -25,6 +25,7 @@ message FilePage {
   repeated File files = 1;
   string next_cursor = 2;
   bool has_more = 3;
+  int32 total = 4;
 }
 
 message ExternalUpload {
@@ -171,6 +172,17 @@ message FilesRequest {
   string cursor = 4;
 }
 
+message SearchFilesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  int32 count = 4;
+  int32 page = 5;
+  string sort = 6;
+  string direction = 7;
+  string conversation_id = 8;
+}
+
 message DeleteFileResponse {
   bool ok = 1;
 }
@@ -276,6 +288,7 @@ service FilesService {
   rpc DeleteFile(FileRequest) returns (DeleteFileResponse);
   rpc DeleteFileComment(FileCommentDeleteRequest) returns (DeleteFileResponse);
   rpc Files(FilesRequest) returns (FilePage);
+  rpc SearchFiles(SearchFilesRequest) returns (FilePage);
   rpc SharePublicURL(PublicFileRequest) returns (File);
   rpc RevokePublicURL(PublicFileRequest) returns (File);
   rpc AddRemoteFile(AddRemoteFileRequest) returns (RemoteFile);
