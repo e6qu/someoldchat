@@ -32,7 +32,7 @@ journey inventory is maintained in
 | Events API over HTTP | Delivery is selected from each installed manifest, filtered by subscriptions, signed with the app secret, and retried with Slack headers. Every event carrying `channel_id` is filtered by installed-bot membership, and real message/file records are hydrated only after installed-bot conversation access is proved; a TLS receiver test posts and receives an actual private-channel message | Supported for message creation and the implemented content-free event catalog; user subscriptions and message change/delete/file-share variants remain |
 | Socket Mode | App-level tokens with `connections:write`, connection limits, envelopes, acknowledgements, and retries are implemented. The current official Node client receives and acknowledges a real service-posted message rather than a fixture-planted callback | Supported for the implemented event surface |
 | RTM | The current official Node RTM client connects through `rtm.connect` and receives a real stored message hydrated only after connected-user conversation membership is proved. Other events carrying `channel_id` are likewise membership-filtered; the previous hand-authored journal event is gone | Supported for message creation and the implemented content-free event catalog; the legacy RTM event surface remains narrower than Slack's catalog |
-| Slash commands | Manifest commands can be validated and dispatched to signed HTTP or Socket Mode receivers, with deduplication and bounded trigger/`response_url` lifecycles. Composer discovery, built-in commands, `should_escape`, exact `response_url` authorization, and realistic human/bot qualification identities remain absent | Partially supported |
+| Slash commands | Manifest commands are validated and dispatched to signed HTTP or Socket Mode receivers with deduplication, exact `response_url` authorization, bounded trigger/response lifecycles, manifest-controlled `should_escape`, composer discovery, and implemented built-in commands. Current HTTP and Socket qualifications use distinct human callers and installed bot identities | Supported for implemented built-ins and installed app commands; workflow/Enterprise command breadth remains tracked |
 | Interactivity | Message/Home/modal block actions, global and message shortcuts, view submissions and closures, external options, signed HTTP delivery, Socket Mode envelopes, triggers, and `response_url` mutations are wired end to end | Supported for the implemented Block Kit elements |
 | App Home | Installed apps appear in the first-party client, `views.publish` is durable, `app_home_opened` is emitted, and Home-tab actions use the same signed HTTP/Socket delivery as message interactions | Supported |
 | Block Kit in the first-party UI | Every block in Slack's current 2026 catalog has an explicit safe projection, including interactive controls, Markdown/rich text, container, data table, task/plan, card/carousel, and accessible pie/bar/area/line visualizations; Playwright qualifies the user-visible path | Supported for current block types; element-by-element parity remains tracked |
@@ -57,14 +57,17 @@ unimplemented current methods break down as:
 | `auth.*`, `rtm.*`, `search.*`, `team.*`, `users.*` | 9 | Org team enumeration, legacy RTM bootstrap, file/all search, billing/external-team/preferences, and contact discovery |
 
 That count is a coverage inventory, not a claim that all implemented methods
-are live-Slack-equivalent. The ledger currently records 210 current methods as
-behavior-compatible, three as SDK-compatible, two as schema-compatible, and
-zero as live-differential `verified-against-slack`. The next app-runtime priorities are user-token
-visibility for HTTP/Socket event subscriptions, message change/delete and file
-share/unshare event production, then the manifest sections that are stored but
-not yet executable—functions/workflows, external authentication,
-incoming-webhook install selection, and agent/assistant configuration—before
-Enterprise-only breadth.
+are live-Slack-equivalent. The ledger currently records 205 current methods as
+behavior-compatible, eight as SDK-compatible, two as schema-compatible, and
+zero as live-differential `verified-against-slack`. Only eight of the 213
+current methods claimed at SDK compatibility or better carry method-level
+ledger evidence; the aggregate SDK path inventory does not promote the other
+205 claims. The next app-runtime priorities are user-token visibility for
+HTTP/Socket event subscriptions, message change/delete and file share/unshare
+event production, then the manifest sections that are stored but not yet
+executable—functions/workflows, external authentication, incoming-webhook
+install selection, and agent/assistant configuration—before Enterprise-only
+breadth.
 
 Until user-token event authorization is implemented, user-scoped
 `star_added`/`star_removed` callbacks are deliberately withheld from app

@@ -101,6 +101,19 @@ VoiceOver/Safari and NVDA/Firefox or documented equivalent coverage. Automated
 checks MUST include current axe rules, HTML/name validation, focus assertions,
 and no horizontal overflow at target widths.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| A11Y-01 | [Accessibility in Slack](https://slack.com/help/articles/4455747966739-Accessibility-in-Slack) | Slack provides keyboard operation, visible focus, zoom, and accessibility preferences. |
+| A11Y-02 | [Use Slack with a screen reader](https://slack.com/help/articles/360000411963-Use-Slack-with-a-screen-reader) | Slack documents landmarks, message navigation, announcements, and screen-reader modes. |
+| A11Y-03 | [Accessibility in Slack](https://slack.com/help/articles/4455747966739-Accessibility-in-Slack) | Slack supports accessible visual presentation, motion preferences, and media alternatives. |
+| RESPONSIVE-01 | [Accessibility in Slack](https://slack.com/help/articles/4455747966739-Accessibility-in-Slack) | Slack's web experience remains operable with zoom and accessibility settings. |
+| RESILIENCE-01 | [Events API](https://docs.slack.dev/apis/events-api/) | Slack event delivery uses acknowledgements, retries, and duplicate-tolerant consumers. |
+| RESILIENCE-02 | [Events API](https://docs.slack.dev/apis/events-api/) | Slow and retried external delivery has bounded acknowledgement behavior. |
+| RESILIENCE-03 | [Events API](https://docs.slack.dev/apis/events-api/) | Retried and concurrent event delivery requires idempotent observable outcomes. |
+| RESILIENCE-04 | [Accessibility in Slack](https://slack.com/help/articles/4455747966739-Accessibility-in-Slack) | Recoverable errors and dynamic state must remain perceivable and operable. |
+
 Sources checked 2026-07-29:
 
 - [Accessibility in Slack](https://slack.com/help/articles/4455747966739-Accessibility-in-Slack)

@@ -214,7 +214,7 @@ Implement methods in domain waves:
 An operation is complete only after input, authorization, success, warning,
 error, pagination, SDK, SQLite, and dqlite tests pass as applicable.
 
-In progress. The 2026-07-29 post-merge audit reconciled the ledger with Slack's
+In progress. The 2026-07-30 post-merge audit reconciled the ledger with Slack's
 current method catalog rather than treating every historical ledger entry as a
 current method:
 
@@ -223,9 +223,10 @@ current method:
 - The 320-entry ledger also retains ten legacy methods for clients that still
   call them. Those methods are useful compatibility inventory, but they are not
   part of the current Slack denominator.
-- After correcting the overstated `chat.postMessage` and `files.upload`
-  claims, the ledger records 210 current methods as `behavior-compatible`,
-  three as `sdk-compatible`, two as `schema-compatible`, and none as
+- After correcting overstated method claims and separating deprecated
+  `reminders.*` from first-party Later, the ledger records 205 current methods
+  as `behavior-compatible`, eight as `sdk-compatible`, two as
+  `schema-compatible`, and none as
   `verified-against-slack`. A passing route, local test, or SDK parse is not
   itself live Slack equivalence.
 - Several recorded evidence levels are too high. The ratchet must permit an
@@ -262,8 +263,8 @@ order:
    comparison, then add opt-in differential runs against a dedicated Slack
    developer workspace.
 
-Current sweep status (2026-07-29): the normative catalog and stable-ID mapping
-for all 27 first-party browser journeys are in place; Slack web keyboard and
+Current sweep status (2026-07-30): the normative catalog and stable-ID mapping
+for all 28 first-party browser journeys are in place; Slack web keyboard and
 slash-command discovery/escaping semantics are corrected; and the journeys now
 qualify in Chromium, Firefox, and WebKit with representative automated WCAG
 checks. Visual baselines, manual assistive-technology evidence, complete
@@ -293,10 +294,12 @@ delivery, retirement behavior, and controlled live outcomes have their own
 evidence.
 
 UI evidence is now measured against the normative catalog rather than counted
-from test files: 28 Playwright scenarios cite 51 of 101 stable journey IDs.
-`make journey-check` rejects duplicate/unknown IDs and any journey file that
-loses its observation date or official Slack source. The remaining IDs are
-printed as an explicit browser gap list; a citation is not promoted
+from test files: every one of the 101 stable journey IDs has exactly one local
+source-map row linking the specific current official Slack contract,
+and 28 Playwright scenarios cite 51 IDs. `make journey-check` rejects
+duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
+and empty behavioral assertions. The remaining IDs are printed as an explicit
+browser gap list; a citation is not promoted
 to full compatibility without the domain, transport, accessibility, visual,
 and differential layers required by the catalog.
 
@@ -308,13 +311,18 @@ claimed at `sdk-compatible` or above is absent. The current result is 223 of
 223 claimed methods observed (213 current plus ten retained legacy methods);
 this proves SDK serialization/decoding only, not live Slack equivalence.
 
-The reminder/Later contract is also checked upstream on every SDK CI run.
-`make external-contract-qualification` fetches the current official Slack Help
-and developer pages and fails if their text no longer supports the journey's
-entry points, organization, privacy, local-time default, recurrence, guest,
-editability, retirement, or Later-versus-app-API separation. This detects
-documentation drift; controlled live-workspace behavior and visual comparison
-remain distinct evidence layers.
+The journey contract is also checked upstream on every SDK CI run.
+`make external-contract-qualification` fetches current official Slack Help and
+developer pages and currently fails on 56 representative exact
+assertions explicitly citing 34 of the 101 journey IDs across every journey
+domain. `make journey-check` prints the other 67 as upstream-text evidence
+gaps. This pass corrected two local targets
+that had drifted from Slack: a conversation canvas is created or attached as a
+tab rather than modeled as a separate invented channel-canvas object, and
+Slack Connect acceptance must account atomically for Slack's current
+250-organization capacity including the host. This gate detects documentation
+drift; controlled live-workspace behavior and visual comparison remain
+distinct evidence layers.
 
 The first-party reminder slice now has a durable model separate from deprecated
 `reminders.*`, message `M` presets/custom time, Later CRUD and filtering,
@@ -339,7 +347,11 @@ reminder test.
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
-that per-method record.
+that per-method record. The compatibility report now makes the missing records
+explicit: only eight of the 213 current methods claimed at `sdk-compatible` or
+above carry method-level evidence in the ledger; 205 claims still require
+individual review and evidence even though the official SDK aggregate observes
+their request paths.
 
 ### Phase 6: Differential verification and production hardening
 

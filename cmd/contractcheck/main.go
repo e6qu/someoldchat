@@ -347,32 +347,50 @@ func partitionOperations(operations []operation, current map[string]struct{}) ([
 
 func printOperationReport(prefix string, operations []operation) {
 	counts := cumulativeEvidenceCounts(operations)
-	implemented := 0
-	unimplemented := 0
-	evidenced := 0
-	deviating := 0
-	for _, item := range operations {
-		if item.Status == "unimplemented" {
-			unimplemented++
-		} else {
-			implemented++
-		}
-		if len(item.Evidence) != 0 {
-			evidenced++
-		}
-		if len(item.Deviations) != 0 {
-			deviating++
-		}
-	}
+	metadata := operationMetadataCounts(operations)
 	total := len(operations)
-	fmt.Printf("%s.operations=%d %s.implemented=%d/%d %s.verified-against-slack=%d/%d\n", prefix, total, prefix, implemented, total, prefix, counts["verified-against-slack"], total)
-	fmt.Printf("%s.unimplemented=%d %s.method-evidence=%d/%d %s.known-deviations=%d\n", prefix, unimplemented, prefix, evidenced, total, prefix, deviating)
+	fmt.Printf("%s.operations=%d %s.implemented=%d/%d %s.verified-against-slack=%d/%d\n", prefix, total, prefix, metadata.Implemented, total, prefix, counts["verified-against-slack"], total)
+	fmt.Printf("%s.unimplemented=%d %s.method-evidence=%d/%d %s.known-deviations=%d\n", prefix, metadata.Unimplemented, prefix, metadata.Evidenced, total, prefix, metadata.Deviating)
+	fmt.Printf("%s.sdk-compatible-claims-with-method-evidence=%d/%d %s.sdk-compatible-claims-without-method-evidence=%d\n", prefix, metadata.EvidencedSDKClaims, metadata.SDKClaims, prefix, metadata.SDKClaims-metadata.EvidencedSDKClaims)
 	for _, namespace := range unimplementedNamespaces(operations) {
 		fmt.Printf("%s.unimplemented.%s=%d\n", prefix, namespace.Name, namespace.Count)
 	}
 	for _, status := range []string{"schema-compatible", "sdk-compatible", "behavior-compatible", "verified-against-slack"} {
 		fmt.Printf("%s.%s-or-better=%d/%d\n", prefix, status, counts[status], total)
 	}
+}
+
+type operationMetadata struct {
+	Implemented        int
+	Unimplemented      int
+	Evidenced          int
+	Deviating          int
+	SDKClaims          int
+	EvidencedSDKClaims int
+}
+
+func operationMetadataCounts(operations []operation) operationMetadata {
+	var counts operationMetadata
+	for _, item := range operations {
+		if item.Status == "unimplemented" {
+			counts.Unimplemented++
+		} else {
+			counts.Implemented++
+		}
+		if len(item.Evidence) != 0 {
+			counts.Evidenced++
+		}
+		if len(item.Deviations) != 0 {
+			counts.Deviating++
+		}
+		if statusRank[item.Status] >= statusRank["sdk-compatible"] {
+			counts.SDKClaims++
+			if len(item.Evidence) != 0 {
+				counts.EvidencedSDKClaims++
+			}
+		}
+	}
+	return counts
 }
 
 type namespaceCount struct {

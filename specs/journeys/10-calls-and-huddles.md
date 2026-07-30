@@ -59,6 +59,16 @@ match the current API contract.
   quality comparison is separately bounded and MUST not be inferred from API
   success.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| HUDDLE-01 | [Use huddles in Slack](https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack) | Eligible members start a huddle from a channel or direct message. |
+| HUDDLE-02 | [Use huddles in Slack](https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack) | Huddles provide audio, video, screen sharing, reactions, and a dedicated thread. |
+| HUDDLE-03 | [Use huddles in Slack](https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack) | Conversation members and explicitly invited people can join active huddles. |
+| HUDDLE-04 | [Use huddles in Slack](https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack) | Leaving and ending a huddle are distinct member and shared actions. |
+| CALL-01 | [Calls API](https://docs.slack.dev/apis/web-api/using-the-calls-api/) | Apps register external call metadata and participants without Slack carrying media. |
+
 Sources checked 2026-07-29:
 
 - [Use huddles in Slack](https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack)

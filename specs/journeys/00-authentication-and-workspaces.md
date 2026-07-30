@@ -81,6 +81,16 @@ the initial channel visibility matches workspace policy.
 - Differential: perform equivalent entry, switching, and sign-out observations
   in a dedicated Slack workspace.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| AUTH-01 | [Sign in to Slack](https://slack.com/help/articles/212681477-Sign-in-to-Slack) | Slack identifies and opens an authorized workspace after sign-in. |
+| AUTH-02 | [Switch between workspaces](https://slack.com/help/articles/212675257-Switch-between-workspaces) | Slack exposes explicit switching among signed-in workspaces. |
+| AUTH-03 | [Sign out of Slack](https://slack.com/help/articles/201375146-Sign-out-of-Slack) | Slack provides workspace and global sign-out entry points. |
+| AUTH-04 | [Sign in to Slack](https://slack.com/help/articles/212681477-Sign-in-to-Slack) | Reauthentication returns the member to an authorized Slack workspace. |
+| AUTH-05 | [Sign in to Slack](https://slack.com/help/articles/212681477-Sign-in-to-Slack) | Workspace invitation and account entry precede authenticated workspace use. |
+
 Sources checked 2026-07-29:
 
 - [Sign in to Slack](https://slack.com/help/articles/212681477-Sign-in-to-Slack)

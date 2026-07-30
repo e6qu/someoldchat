@@ -137,6 +137,20 @@ without deleting user-owned workspace history Slack retains.
 - Live differential tests compare exact form/JSON envelopes after normalizing
   secrets, IDs, and timestamps.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| APP-01 | [Guide to apps in Slack](https://slack.com/help/articles/360001537467-Guide-to-apps-in-Slack) | Slack identifies installed apps, their publisher, permissions, and app surfaces. |
+| APP-02 | [Installing with OAuth](https://docs.slack.dev/authentication/installing-with-oauth/) | Slack app installation exchanges explicit approved scopes for installation credentials. |
+| APP-03 | [Guide to apps in Slack](https://slack.com/help/articles/360001537467-Guide-to-apps-in-Slack) | Installed apps expose bot identities, messages, and App Home surfaces. |
+| APP-04 | [Shortcuts](https://docs.slack.dev/interactivity/implementing-shortcuts/) | Global and message shortcuts deliver contextual interaction payloads. |
+| APP-05 | [Implementing slash commands](https://docs.slack.dev/interactivity/implementing-slash-commands/) | Slash commands send form payloads, escape configured entities, and require prompt acknowledgement. |
+| APP-06 | [Handling user interaction](https://docs.slack.dev/interactivity/handling-user-interaction/) | Response URLs are bounded capabilities for ephemeral or in-channel interaction responses. |
+| APP-07 | [Modals](https://docs.slack.dev/surfaces/modals/) | Trigger IDs, hashes, view stacks, validation, and acknowledgement govern modal interaction. |
+| APP-08 | [Events API](https://docs.slack.dev/apis/events-api/) | Events API and Socket Mode require acknowledgements, retries, and scoped event delivery. |
+| APP-09 | [Installing with OAuth](https://docs.slack.dev/authentication/installing-with-oauth/) | Revocation and uninstall disable associated tokens, commands, webhooks, and bot access. |
+
 Sources checked 2026-07-29:
 
 - [Guide to apps in Slack](https://slack.com/help/articles/360001537467-Guide-to-apps-in-Slack)

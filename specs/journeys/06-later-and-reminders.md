@@ -133,6 +133,19 @@ Still required before claiming live Slack equivalence:
 - observed decisions for undocumented recurrence edge cases such as a monthly
   reminder anchored on the 29th–31st.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| LATER-01 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Slack saves and removes private Later items from source actions. |
+| LATER-02 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Later exposes In progress, Archived, Completed, and upcoming reminder organization. |
+| LATER-03 | [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later) | Later items can be completed, restored, archived, and removed. |
+| REMIND-01 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | Message and file actions create private reminders associated with the source. |
+| REMIND-02 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | Personal reminders are created and managed from Later in local time. |
+| REMIND-03 | [Set a reminder](https://slack.com/help/articles/208423427-Set-a-reminder) | The built-in remind command creates and privately lists channel reminders. |
+| REMIND-04 | [Introducing the new Activity view](https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack/) | Due personal reminders appear in Activity while retaining their Later lifecycle. |
+| REMIND-API-01 | [Stars and reminders changelog](https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/) | Deprecated reminder APIs are separate from current Later and remain degraded. |
+
 Sources checked 2026-07-30:
 
 - [Save messages and files for later](https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later)

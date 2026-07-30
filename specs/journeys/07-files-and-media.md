@@ -80,6 +80,18 @@ and message projections.
 - Differential tests compare count/size limits, message projection, errors, and
   file events in a dedicated Slack workspace.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| FILE-01 | [Add files to Slack](https://slack.com/help/articles/201330736-Add-files-to-Slack) | Slack stages up to ten files, previews them, and sends them with a message. |
+| FILE-02 | [Upload files to Slack](https://docs.slack.dev/messaging/working-with-files/) | Current app uploads use the external upload URL and completion sequence. |
+| FILE-03 | [Add files to Slack](https://slack.com/help/articles/201330736-Add-files-to-Slack) | Slack renders safe file previews subject to documented type and size limits. |
+| FILE-04 | [Add files to Slack](https://slack.com/help/articles/201330736-Add-files-to-Slack) | Files has a visible browse surface and conversation-specific Files and links tab. |
+| FILE-05 | [Share files in Slack](https://slack.com/help/articles/204399343-Share-files-in-Slack) | Files can be shared internally or through an explicit external link. |
+| FILE-06 | [Share files in Slack](https://slack.com/help/articles/204399343-Share-files-in-Slack) | File shares and external links have explicit removal and access consequences. |
+| FILE-07 | [Upload files to Slack](https://docs.slack.dev/messaging/working-with-files/) | Slack distinguishes hosted upload bytes from app-managed remote file metadata. |
+
 Sources checked 2026-07-29:
 
 - [Add files to Slack](https://slack.com/help/articles/201330736-Add-files-to-Slack)

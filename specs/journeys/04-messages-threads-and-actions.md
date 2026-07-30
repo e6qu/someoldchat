@@ -102,6 +102,20 @@ copy-text contains the message content Slack exposes rather than hidden HTML.
 - Differential fixtures record Slack's shortcut context, confirmation,
   tombstone, broadcast, and cursor behavior.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| MSG-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack renders conversation history, unread state, and rich message content. |
+| MSG-02 | [Slack keyboard shortcuts](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands) | Escape and modifier-click provide Slack's read and unread actions. |
+| MSG-03 | [Edit or delete messages](https://slack.com/help/articles/202395258-Edit-or-delete-messages) | Eligible authors can edit messages and Slack marks the result edited. |
+| MSG-04 | [Edit or delete messages](https://slack.com/help/articles/202395258-Edit-or-delete-messages) | Eligible authors can delete messages under workspace policy. |
+| THREAD-01 | [Use threads](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions) | Thread replies open with their parent conversation context. |
+| THREAD-02 | [Use threads](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions) | A thread reply may also be sent to the channel. |
+| ACT-01 | [Understand your actions](https://slack.com/help/articles/360002063088-Understand-your-actions-in-Slack) | Focused messages expose Slack's action menu and one-key actions. |
+| ACT-02 | [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions) | Members add and remove emoji reactions from messages. |
+| ACT-03 | [Understand your actions](https://slack.com/help/articles/360002063088-Understand-your-actions-in-Slack) | Slack message actions include pinning, forwarding, sharing, and copying. |
+
 Sources checked 2026-07-29:
 
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)

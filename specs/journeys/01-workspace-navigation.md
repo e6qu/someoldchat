@@ -76,6 +76,17 @@ reload or discard in-progress work.
   navigation, section collapse, unread ordering, and focus announcements.
 - Keep desktop and narrow visual baselines for every shell region and theme.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| NAV-01 | [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard) | Slack exposes named regions and predictable focus movement through its workspace. |
+| NAV-02 | [Slack keyboard shortcuts](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands) | Slack publishes platform-specific global navigation shortcuts. |
+| NAV-03 | [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard) | Command or Control K opens a searchable channel and person switcher. |
+| NAV-04 | [Slack keyboard shortcuts](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands) | Option or Alt with arrow keys moves among conversations. |
+| NAV-05 | [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard) | Slack preserves message navigation and focused reading position. |
+| NAV-06 | [Change your Slack theme](https://slack.com/help/articles/205166337-Change-your-Slack-theme) | Slack persists member-selected appearance across the client. |
+
 Sources checked 2026-07-29:
 
 - [Slack keyboard shortcuts and commands](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands)
