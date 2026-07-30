@@ -32,6 +32,12 @@ name; invite or remove members; manage posting/notification settings; and copy
 the channel identifier/link. Unauthorized controls are absent or disabled with
 an explanation, while direct backend requests remain denied.
 
+Inviting a workspace member works for both public and private channels and
+commits membership, its durable event, and the recipient's Invitations Activity
+item as one mutation. Repeating an ordinary `conversations.invite` for a member
+already present returns Slack's `already_in_channel` error and does not create a
+second event or Activity item.
+
 ## CONV-04 — Leave, archive, unarchive, and delete
 
 - Leaving removes the member after Slack's applicable confirmation and moves

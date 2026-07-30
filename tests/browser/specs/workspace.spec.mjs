@@ -65,7 +65,7 @@ async function installActivityBot(page, request) {
     display_information: { name },
     oauth_config: {
       redirect_urls: [redirectURI],
-      scopes: { bot: ['channels:join', 'chat:write'] },
+      scopes: { bot: ['channels:join', 'channels:manage', 'chat:write'] },
     },
   }, redirectURI);
 
@@ -271,11 +271,29 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     const second = `app mention two ${Date.now()}`;
     await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${first}` });
     await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${second}` });
+    const invitationChannelName = `activity-invite-${Date.now()}`;
+    const invitationChannelResponse = await request.post('/api/conversations.create', {
+      headers: { authorization: `Bearer ${activityBot.token}`, 'content-type': 'application/json' },
+      data: { name: invitationChannelName, is_private: true },
+    });
+    const invitationChannel = await invitationChannelResponse.json();
+    expect(invitationChannel.ok, JSON.stringify(invitationChannel)).toBe(true);
+    const invitationResponse = await request.post('/api/conversations.invite', {
+      headers: { authorization: `Bearer ${activityBot.token}`, 'content-type': 'application/json' },
+      data: { channel: invitationChannel.channel.id, users: 'Udev' },
+    });
+    const invitation = await invitationResponse.json();
+    expect(invitation.ok, JSON.stringify(invitation)).toBe(true);
     await page.goto('/app/activity');
 
     await expect(page.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
     await expect(page.getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
     await expect(page.getByText(selfMessage)).toHaveCount(0);
+    await page.getByRole('link', { name: 'Invitations' }).click();
+    await expect(page.getByRole('link', { name: 'Invitations' })).toHaveAttribute('aria-current', 'page');
+    const invitationRow = page.locator('[data-activity-row]', { hasText: `Added you to #${invitationChannelName}.` });
+    await expect(invitationRow).toBeVisible();
+    await expect(invitationRow.locator('[data-activity-source]')).toHaveAttribute('href', `/app?channel=${invitationChannel.channel.id}`);
     await page.getByRole('link', { name: 'Apps' }).click();
     await expect(page).toHaveURL(/kind=app/);
     await expect(page.getByRole('link', { name: 'Apps' })).toHaveAttribute('aria-current', 'page');

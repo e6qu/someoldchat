@@ -135,6 +135,11 @@ Implemented evidence:
 - Activity items and per-member presentation state are durable in memory,
   SQLite, dqlite, and PostgreSQL through the shared SQL implementation. The
   local and gRPC compositions expose the same typed, paginated contract.
+- Adding a member to a public or private channel creates one Invitations item
+  atomically with the new membership. The item identifies the inviter, links to
+  the real channel, survives restart, and is not duplicated by a repeated
+  invite. Official Slack Help and all three official SDK qualifications cover
+  the corresponding product/API boundary.
 - New DMs and MPIM messages, explicit mentions, replies to a thread root
   authored or followed by the member, replies in channels configured to follow
   every thread, all-new-post channel notifications, exact channel-keyword
@@ -191,9 +196,10 @@ Implemented evidence:
 
 Known gaps, which MUST NOT be reported as full Activity compatibility:
 
-- invitation, VIP, section notifications, and custom saved views depend on
-  product models not yet implemented; those filters are not rendered as empty
-  fake controls;
+- Slack Connect and canvas-share invitations, VIP and section notifications,
+  and custom saved views depend on product models not yet implemented. Internal
+  public/private channel additions are implemented in Invitations; unsupported
+  invitation types are not fabricated;
 - schema version 107 creates the durable Activity store but does not backfill
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with
@@ -220,7 +226,7 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
 | ACTIVITY-02 | [Introducing the new Activity view](https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack) | Activity provides typed filters, custom views, and plan-dependent channel or section filters. |
 | ACTIVITY-03 | [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard) | Activity supports Up/Down navigation, Enter to reply, X selection, C clear, and R mark-read actions. |
 
-Sources checked 2026-07-30:
+Sources checked 2026-07-31:
 
 - [Search in Slack](https://slack.com/help/articles/202528808-Search-in-Slack)
 - [Slack updates and changes](https://slack.com/help/articles/115004846068-Slack-updates-and-changes/)

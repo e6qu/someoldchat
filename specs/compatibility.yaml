@@ -242,8 +242,28 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: conversations.invite
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/conversations.invite/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - tests/external-contract-qualification/qualify.sh
+      - specs/journeys/02-conversations-and-direct-messages.md
+      - specs/journeys/05-search-and-activity.md
+    deviations:
+      - Current public/private alternative invite scopes are not yet distinguished; the route still requires channels:manage.
+      - The force partial-success option and Slack's per-user errors array remain unimplemented.
+      - Workspace guest/channel-limit and Slack Connect invitation policy errors remain unqualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: Public/private membership, duplicate rejection, Activity projection, and current SDK response decoding are qualified, but the previous full claim ignored current scope alternatives and force/error-array behavior.
+      evidence:
+        - https://docs.slack.dev/reference/methods/conversations.invite/
+        - internal/api/slack/handler.go
+        - internal/store/memory/memory.go
+        - internal/store/sqlstore/sqlstore.go
   - method: conversations.leave
     status: behavior-compatible
     provenance: slack-api-specs-openapi

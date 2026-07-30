@@ -4161,6 +4161,13 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 		return domain.Conversation{}, err
 	}
 	if err := m.Store.InviteConversationMembers(ctx, conversationID, normalized, event); err != nil {
+		// admin.conversations.invite historically treats an already-complete
+		// membership set as an idempotent success in our pinned compatibility
+		// surface. Ordinary conversations.invite exposes Slack's documented
+		// already_in_channel error instead.
+		if !asConversationMember && errors.Is(err, store.ErrAlreadyExists) {
+			return conversation, nil
+		}
 		return domain.Conversation{}, err
 	}
 	return conversation, nil

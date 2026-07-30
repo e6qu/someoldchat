@@ -610,6 +610,16 @@ const invited = await client.conversations.invite({ channel: "C1", users: "U2" }
 assert.equal(invited.ok, true);
 const kicked = await client.conversations.kick({ channel: "C1", user: "U2" });
 assert.equal(kicked.ok, true);
+const privateInvitationChannel = await client.conversations.create({
+	name: "sdk-private-invitation",
+	is_private: true,
+});
+assert.equal(privateInvitationChannel.ok, true);
+const privateInvited = await client.conversations.invite({
+	channel: privateInvitationChannel.channel.id,
+	users: "U2",
+});
+assert.equal(privateInvited.ok, true);
 const left = await client.conversations.leave({ channel: "C2" });
 assert.equal(left.ok, true);
 assert.equal((await client.admin.conversations.convertToPrivate({ channel_id: "C2" })).ok, true);

@@ -487,6 +487,20 @@ public final class Qualification {
                     com.slack.api.methods.request.conversations.ConversationsKickRequest.builder()
                             .channel("C1").user("U2").build());
             require(kicked.isOk(), "conversations.kick failed: " + kicked.getError());
+            ConversationsCreateResponse privateInvitationChannel = methods.conversationsCreate(
+                    com.slack.api.methods.request.conversations.ConversationsCreateRequest.builder()
+                            .name("sdk-private-invitation")
+                            .isPrivate(true)
+                            .build());
+            require(privateInvitationChannel.isOk() && privateInvitationChannel.getChannel() != null,
+                    "private conversations.create failed: " + privateInvitationChannel.getError());
+            com.slack.api.methods.response.conversations.ConversationsInviteResponse privateInvited =
+                    methods.conversationsInvite(
+                            com.slack.api.methods.request.conversations.ConversationsInviteRequest.builder()
+                                    .channel(privateInvitationChannel.getChannel().getId())
+                                    .users(java.util.List.of("U2"))
+                                    .build());
+            require(privateInvited.isOk(), "private conversations.invite failed: " + privateInvited.getError());
             com.slack.api.methods.response.conversations.ConversationsLeaveResponse left = methods.conversationsLeave(
                     com.slack.api.methods.request.conversations.ConversationsLeaveRequest.builder().channel("C2").build());
             require(left.isOk(), "conversations.leave failed: " + left.getError());

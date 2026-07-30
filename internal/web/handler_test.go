@@ -731,6 +731,13 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Emention", WorkspaceID: "T1", Topic: "message.created", Payload: "Mmention", CreatedAt: created}, ""); err != nil {
 		t.Fatal(err)
 	}
+	s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "launch-room", IsPrivate: true})
+	s.SeedConversationMember("Cprivate", "U2")
+	if err := s.InviteConversationMembers(context.Background(), "Cprivate", []domain.UserID{"U1"}, events.Event{
+		ID: "Einvitation", WorkspaceID: "T1", ActorID: "U2", Topic: "conversation.members_invited", CreatedAt: created.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	workspace := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "activity navigation", workspace,
@@ -751,11 +758,19 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 		">Dense</button>",
 		"#general",
 		"Mentions",
+		"Invitations",
 		"Bob Builder",
 		"Please review this",
+		"Added you to #launch-room.",
 		`class="slack-mention">@Ada Developer</span>`,
 		`data-read-button`,
 		`data-clear-button`,
+	)
+	invitations := get(t, mux, "/app/activity?channel=Cdev&kind=invitation")
+	requireContains(t, "invitation activity filter", invitations.Body.String(),
+		`aria-current="page">Invitations</a>`,
+		`href="/app?channel=Cprivate"`,
+		"Added you to #launch-room.",
 	)
 	requireContains(t, "activity shortcut", progressiveEnhancementScript, "key==='3'", "activityLink", "window.location.assign(activityHref)")
 }
@@ -923,12 +938,15 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 	requireContains(t, "mark unread restores unread Activity", unread.Body.String(), "triage me", "Mark this activity read")
 
 	layout := postForm(t, mux, "/app/activity/preferences?channel=Cdev", url.Values{
-		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "layout": {"dense"},
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "layout": {"dense"}, "kind": {"mention"}, "unread": {"1"},
 	}.Encode(), false)
 	if layout.Code != http.StatusSeeOther {
 		t.Fatalf("layout status=%d body=%s", layout.Code, layout.Body)
 	}
-	dense := get(t, mux, "/app/activity?channel=Cdev")
+	if location := layout.Header().Get("Location"); location != "/app/activity?channel=Cdev&kind=mention&unread=1" {
+		t.Fatalf("layout redirect lost Activity filters: %q", location)
+	}
+	dense := get(t, mux, "/app/activity?channel=Cdev&kind=mention&unread=1")
 	requireContains(t, "dense layout persisted", dense.Body.String(), `class="activity-list dense"`, `value="dense"><button type="submit" aria-pressed="true"`)
 	requireContains(t, "Activity keyboard contract", activityMarkup,
 		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
@@ -1614,9 +1632,13 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
 	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "invitee"})
 	s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"})
 	s.SeedConversationMember("Cdev", "U1")
 	chat := service.Messages{Store: s}
+	if _, err := chat.InviteConversationMembers(ctx, "T1", "U1", "Cdev", []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
 	message, err := chat.Post(ctx, "T1", "U1", "Cdev", "hello", "", "")
 	if err != nil {
 		t.Fatal(err)
@@ -1696,7 +1718,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 	emitted := map[string]bool{}
 	for _, record := range records {
 		topic := record.Event.Topic
-		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") {
+		if strings.HasPrefix(topic, "message.") || strings.HasPrefix(topic, "reaction.") || strings.HasPrefix(topic, "conversation.") || strings.HasPrefix(topic, "pin.") || strings.HasPrefix(topic, "saved_item.") || strings.HasPrefix(topic, "view.") {
 			emitted[topic] = true
 		}
 	}

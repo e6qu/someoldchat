@@ -3479,8 +3479,11 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	value, ok := s.conversations[conversation]
-	if !ok || value.IsPrivate {
+	if !ok {
 		return store.ErrNotFound
+	}
+	if value.IsDirect || value.IsGroupDirect || value.Archived {
+		return store.ErrInvalidConversationType
 	}
 	for _, user := range users {
 		member, exists := s.users[user]
@@ -3491,8 +3494,27 @@ func (s *Store) InviteConversationMembers(_ context.Context, conversation domain
 	if s.memberships[conversation] == nil {
 		s.memberships[conversation] = make(map[domain.UserID]struct{})
 	}
+	added := make([]domain.UserID, 0, len(users))
 	for _, user := range users {
+		if _, exists := s.memberships[conversation][user]; exists {
+			continue
+		}
 		s.memberships[conversation][user] = struct{}{}
+		added = append(added, user)
+	}
+	if len(added) == 0 {
+		return store.ErrAlreadyExists
+	}
+	for _, user := range added {
+		if user == event.ActorID {
+			continue
+		}
+		id := domain.ActivityIDFor(user, "conversation_invitation:"+string(conversation)+":"+string(event.ID))
+		s.activityItems[id] = domain.ActivityItem{
+			ID: id, WorkspaceID: value.WorkspaceID, UserID: user,
+			Kinds: []domain.ActivityKind{domain.ActivityInvitation}, ActorID: event.ActorID,
+			Conversation: conversation, OccurredAt: event.CreatedAt.UTC(),
+		}
 	}
 	s.outbox = append(s.outbox, event)
 	return nil
@@ -3731,6 +3753,11 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 			conversation, conversationExists := s.conversations[item.Conversation]
 			if messageErr == nil && !message.Deleted && conversationExists && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.Message = cloneMessage(message)
+				item.SourceAvailable = true
+			}
+		}
+		if item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+			if conversation, ok := s.conversations[item.Conversation]; ok && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.SourceAvailable = true
 			}
 		}

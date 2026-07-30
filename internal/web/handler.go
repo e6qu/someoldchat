@@ -143,6 +143,7 @@ var liveEventTopics = []string{
 	"message.unfurled",
 	"reaction.added",
 	"reaction.removed",
+	"conversation.members_invited",
 	"pin.added",
 	"pin.removed",
 	"saved_item.created",
@@ -1924,7 +1925,7 @@ if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldc
 })();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
+<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
 <nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
 <div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
 <div id="activity-feed">
@@ -1935,7 +1936,7 @@ if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldc
 <input class="activity-select" type="checkbox" name="activity_id" value="{{.ID}}" aria-label="Select activity from {{.ActorName}}">
 <div class="activity-main">{{if .ReplyURL}}<a class="visually-hidden" data-activity-reply href="{{.ReplyURL}}">Reply to this activity</a>{{end}}{{if .SourceURL}}<a class="activity-source" data-activity-source href="{{.SourceURL}}">{{end}}<span class="activity-head"><span class="activity-kind">{{.KindLabel}}</span>{{if .ActorName}}<span class="activity-author">{{.ActorName}}</span>{{end}}<time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .ChannelName}}<span class="activity-meta">{{.ChannelName}}</span>{{end}}</span><span class="activity-text{{if .Unavailable}} unavailable{{end}}">{{.Text}}</span>{{if .SourceURL}}</a>{{end}}</div>
 <div class="item-actions">{{if .ReactionURL}}<button type="button" data-activity-react="{{.ReactionURL}}" aria-label="Add a reaction to this message">React</button>{{end}}{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}{{if .Unread}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=unread" aria-label="Mark this activity unread">Unread</button>{{end}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
-</li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
+</li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, invitations, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
 </form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}</div>
 <dialog class="activity-reaction-dialog" id="activity-reaction-dialog" aria-labelledby="activity-reaction-heading"><div class="activity-reaction-shell"><div class="activity-reaction-head"><h3 id="activity-reaction-heading">Add reaction</h3><button id="activity-reaction-close" type="button" aria-label="Close reaction picker">×</button></div><form id="activity-reaction-form" method="post"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><div class="activity-reaction-controls"><label class="visually-hidden" for="activity-reaction-search">Search emoji</label><input id="activity-reaction-search" type="search" autocomplete="off" placeholder="Search emoji"><label class="visually-hidden" for="activity-reaction-category">Category</label><select id="activity-reaction-category"><option value="">All categories</option></select><label class="visually-hidden" for="activity-reaction-tone">Skin tone</label><select id="activity-reaction-tone"><option value="">Default tone</option><option value="2">Skin tone 2</option><option value="3">Skin tone 3</option><option value="4">Skin tone 4</option><option value="5">Skin tone 5</option><option value="6">Skin tone 6</option></select></div><p class="activity-reaction-status" id="activity-reaction-status" role="status"></p><ul class="activity-reaction-results" id="activity-reaction-results" aria-label="Emoji results"></ul><noscript><p>Open the message to add a reaction.</p></noscript></form></div></dialog>
 </main>{{end}}`
@@ -4996,7 +4997,8 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	kindValue := strings.TrimSpace(r.URL.Query().Get("kind"))
 	kindByValue := map[string]domain.ActivityKind{
 		"dm": domain.ActivityDM, "mention": domain.ActivityMention, "thread": domain.ActivityThread,
-		"channel": domain.ActivityChannel, "reaction": domain.ActivityReaction, "app": domain.ActivityApp, "reminder": domain.ActivityReminder,
+		"channel": domain.ActivityChannel, "reaction": domain.ActivityReaction, "invitation": domain.ActivityInvitation,
+		"app": domain.ActivityApp, "reminder": domain.ActivityReminder,
 	}
 	var kinds []domain.ActivityKind
 	if kindValue != "" {
@@ -5076,6 +5078,21 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+		if slices.Contains(item.Kinds, domain.ActivityInvitation) && item.SourceAvailable {
+			conversation, conversationErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, item.Conversation)
+			if conversationErr == nil {
+				name := conversationName(conversation)
+				if !strings.HasPrefix(name, "#") {
+					name = "#" + name
+				}
+				view.Text = template.HTML("Added you to " + template.HTMLEscapeString(name) + ".")
+				view.SourceURL = appURL(string(conversation.ID), "", "", "", "")
+				view.ChannelName = name
+			} else if !errors.Is(conversationErr, store.ErrNotFound) {
+				h.writeStoreError(w, conversationErr, "Activity is temporarily unavailable.")
+				return
+			}
+		}
 		if !item.SourceAvailable || view.Text == "" {
 			view.Text = "This activity’s source is no longer available."
 			view.Unavailable = true
@@ -5085,7 +5102,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	}
 	filterDefinitions := []struct{ value, label string }{
 		{"", "All"}, {"dm", "DMs"}, {"mention", "Mentions"}, {"thread", "Threads"},
-		{"channel", "Channels"}, {"reaction", "Reactions"}, {"app", "Apps"}, {"reminder", "Reminders"},
+		{"channel", "Channels"}, {"reaction", "Reactions"}, {"invitation", "Invitations"}, {"app", "Apps"}, {"reminder", "Reminders"},
 	}
 	for _, filter := range filterDefinitions {
 		data.Filters = append(data.Filters, activityFilterView{
@@ -5126,6 +5143,8 @@ func activityKindLabel(item domain.ActivityItem) string {
 			label = "App"
 		case domain.ActivityReminder:
 			label = "Reminder"
+		case domain.ActivityInvitation:
+			label = "Invitation"
 		}
 		labels = append(labels, label)
 	}
@@ -5233,7 +5252,10 @@ func (h Handler) setActivityPreferences(w http.ResponseWriter, r *http.Request) 
 	if channel == "" {
 		channel = string(h.Channel)
 	}
-	h.redirectMutation(w, r, activityPageURL(channel, "", false, false, ""))
+	h.redirectMutation(w, r, activityPageURL(
+		channel, strings.TrimSpace(fields["kind"]),
+		fields["unread"] == "1", fields["cleared"] == "1", "",
+	))
 }
 
 func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Request) {
@@ -8590,6 +8612,8 @@ func (h Handler) inviteConversationMember(w http.ResponseWriter, r *http.Request
 			h.writeMutationError(w, r, http.StatusBadRequest, "That person cannot be added here", "Members can be added to public and private channels, not direct conversations.")
 		case errors.Is(err, store.ErrNotFound):
 			h.writeMutationError(w, r, http.StatusNotFound, "That person is no longer available", "The member or channel no longer exists.")
+		case errors.Is(err, store.ErrAlreadyExists):
+			h.writeMutationError(w, r, http.StatusConflict, "That person is already in this channel", "No duplicate invitation was created.")
 		default:
 			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The person was not added", "The workspace store is temporarily unavailable. Nothing was changed.")
 		}

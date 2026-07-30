@@ -770,6 +770,24 @@ func TestAdminConversationInviteDoesNotRequireActorMembership(t *testing.T) {
 	}
 }
 
+func TestConversationInviteSupportsPrivateChannelsAndCreatesActivity(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversationMember("C1", "U1")
+	if _, err := (Messages{Store: s}).InviteConversationMembers(context.Background(), "T1", "U1", "C1", []domain.UserID{"U2"}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ListActivity(context.Background(), "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(page.Items) != 1 || !page.Items[0].SourceAvailable || page.Items[0].ActorID != "U1" {
+		t.Fatalf("private invitation activity=%+v err=%v", page, err)
+	}
+}
+
 func TestAdminConversationConversionEnforcesConversationType(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})

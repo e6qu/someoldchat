@@ -2,13 +2,63 @@ package sqlstore
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
+
+func TestSQLitePrivateChannelInvitationActivitySurvivesReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "invitation-activity.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, seed := range []func() error{
+		func() error { return s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}) },
+		func() error { return s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}) },
+		func() error { return s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1"}) },
+		func() error {
+			return s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+		},
+		func() error { return s.SeedConversationMember(ctx, "C1", "U1") },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	created := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
+	event := events.Event{ID: "E-invite", WorkspaceID: "T1", ActorID: "U1", Topic: "conversation.members_invited", CreatedAt: created}
+	if err := s.InviteConversationMembers(ctx, "C1", []domain.UserID{"U2"}, event); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.InviteConversationMembers(ctx, "C1", []domain.UserID{"U2"}, events.Event{ID: "E-duplicate", WorkspaceID: "T1", ActorID: "U1", CreatedAt: created.Add(time.Minute)}); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate invite err=%v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	page, err := s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("persisted invitation activity=%+v err=%v", page, err)
+	}
+	item := page.Items[0]
+	if !item.SourceAvailable || item.ActorID != "U1" || item.Conversation != "C1" || !item.OccurredAt.Equal(created) {
+		t.Fatalf("persisted invitation item=%+v", item)
+	}
+}
 
 func TestSQLiteActivitySurvivesReopenWithFiltersAndTriage(t *testing.T) {
 	ctx := context.Background()

@@ -1862,7 +1862,10 @@ func TestRenameConversationNormalizesAndPersists(t *testing.T) {
 }
 
 func TestInviteConversationNormalizesMembers(t *testing.T) {
-	handler := testHandler()
+	handler, repository := testHandlerWithStore()
+	if err := repository.RemoveConversationMember(context.Background(), "C1", "U2", events.Event{ID: "E-remove-before-invite", WorkspaceID: "T1", ActorID: "U1", Topic: "conversation.member_removed", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	req := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2,U2"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", "Bearer token")
@@ -1870,6 +1873,34 @@ func TestInviteConversationNormalizesMembers(t *testing.T) {
 	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"C1"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	duplicate := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2"))
+	duplicate.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	duplicate.Header.Set("Authorization", "Bearer token")
+	duplicateResponse := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateResponse, duplicate)
+	if duplicateResponse.Code != http.StatusOK || !strings.Contains(duplicateResponse.Body.String(), `"error":"already_in_channel"`) {
+		t.Fatalf("duplicate status=%d body=%s", duplicateResponse.Code, duplicateResponse.Body)
+	}
+}
+
+func TestInviteConversationSupportsPrivateChannels(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedConversation(domain.Conversation{ID: "C-private", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	repository.SeedConversationMember("C-private", "U1")
+	req := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C-private&users=U2"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Authorization", "Bearer token")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"C-private"`) {
+		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	activity, err := repository.ListActivity(context.Background(), "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(activity.Items) != 1 || !activity.Items[0].SourceAvailable {
+		t.Fatalf("private invitation activity=%+v err=%v", activity, err)
 	}
 }
 

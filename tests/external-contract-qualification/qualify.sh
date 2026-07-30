@@ -9,12 +9,14 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 fetch() {
+	raw="$2.raw"
 	curl --fail --silent --show-error --location --compressed \
 		--retry 4 --retry-all-errors --connect-timeout 15 --max-time 45 \
-		--user-agent 'sameoldchat-contract-qualification/1.0' "$1" |
-		sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' |
+		--user-agent 'sameoldchat-contract-qualification/1.0' --output "$raw" "$1"
+	sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' "$raw" |
 		tr '\n\r\t\302\240' '     ' |
 		sed -e 's/  */ /g' >"$2"
+	rm -f "$raw"
 }
 
 assert_contains() {
@@ -71,9 +73,11 @@ screen_reader_url='https://slack.com/help/articles/360000411963-Use-Slack-with-a
 reminder_help_url='https://slack.com/help/articles/208423427-Set-a-reminder'
 later_help_url='https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later'
 activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack'
+activity_work_url='https://slack.com/help/articles/19693583638803-Get-your-work-done-from-the-Activity-view'
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
 conversation_join_url='https://docs.slack.dev/reference/methods/conversations.join/'
+conversation_invite_url='https://docs.slack.dev/reference/methods/conversations.invite/'
 schedule_api_url='https://docs.slack.dev/messaging/sending-and-scheduling-messages/'
 rtm_start_url='https://docs.slack.dev/reference/methods/rtm.start/'
 team_preferences_url='https://docs.slack.dev/reference/methods/team.preferences.list/'
@@ -123,9 +127,11 @@ fetch "$screen_reader_url" "$work/screen-reader.html"
 fetch "$reminder_help_url" "$work/reminders.html"
 fetch "$later_help_url" "$work/later.html"
 fetch "$activity_help_url" "$work/activity.html"
+fetch "$activity_work_url" "$work/activity-work.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
 fetch "$later_api_url" "$work/later-api.html"
 fetch "$conversation_join_url" "$work/conversations-join.html"
+fetch "$conversation_invite_url" "$work/conversations-invite.html"
 fetch "$schedule_api_url" "$work/scheduling-api.html"
 fetch "$rtm_start_url" "$work/rtm-start.html"
 fetch "$team_preferences_url" "$work/team-preferences.html"
@@ -378,6 +384,12 @@ assert_contains "$work/activity.html" 'there’ll always be a record in the Clea
 	'[ACTIVITY-03] cleared notifications remain recoverable' "$activity_help_url"
 assert_contains "$work/activity.html" 'DMs Mentions Threads Channels Reactions Invitations Apps Reminders VIP' \
 	'[ACTIVITY-02] current Activity notification-type filters' "$activity_help_url"
+assert_contains "$work/activity-work.html" 'Notifications about channels you’re added to and new Slack Connect invitations' \
+	'[ACTIVITY-01 ACTIVITY-02 CONV-03] channel additions belong in the Invitations Activity filter' "$activity_work_url"
+assert_contains "$work/conversations-invite.html" 'public or private channel' \
+	'[CONV-03] conversations.invite supports public and private channels' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'already_in_channel' \
+	'[CONV-03] duplicate conversations.invite has a named Slack error' "$conversation_invite_url"
 assert_contains "$work/keyboard-navigation.html" 'Enter to reply to a message' \
 	'[ACTIVITY-03] Activity Enter replies rather than merely opening an item' "$keyboard_navigation_url"
 assert_contains "$work/keyboard-navigation.html" 'X to select or un-select an item' \

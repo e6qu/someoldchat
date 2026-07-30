@@ -6968,16 +6968,18 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 	}
 	defer tx.Rollback()
 	var workspace domain.WorkspaceID
-	var private int
-	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_private FROM conversations WHERE id = ?`, conversation).Scan(&workspace, &private); errors.Is(err, sql.ErrNoRows) {
+	var direct, groupDirect, archived int
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_direct, is_group_direct, archived FROM conversations WHERE id = ?`, conversation).Scan(&workspace, &direct, &groupDirect, &archived); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
 	} else if err != nil {
 		return err
-	} else if private != 0 {
-		return store.ErrNotFound
+	} else if direct != 0 || groupDirect != 0 || archived != 0 {
+		return store.ErrInvalidConversationType
 	}
+	added := make([]domain.UserID, 0, len(users))
 	for _, user := range users {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation, user, workspace); err != nil {
+		result, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id) SELECT ?, id FROM users WHERE id = ? AND workspace_id = ? AND deleted = 0 ON CONFLICT(conversation_id, user_id) DO NOTHING`, conversation, user, workspace)
+		if err != nil {
 			return err
 		}
 		var count int
@@ -6986,6 +6988,29 @@ func (s *Store) InviteConversationMembers(ctx context.Context, conversation doma
 		}
 		if count != 1 {
 			return store.ErrNotFound
+		}
+		changed, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if changed != 0 {
+			added = append(added, user)
+		}
+	}
+	if len(added) == 0 {
+		return store.ErrAlreadyExists
+	}
+	for _, user := range added {
+		if user == event.ActorID {
+			continue
+		}
+		id := domain.ActivityIDFor(user, "conversation_invitation:"+string(conversation)+":"+string(event.ID))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			id, workspace, user, event.ActorID, conversation, event.CreatedAt.UTC().UnixNano()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityInvitation); err != nil {
+			return err
 		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -7335,6 +7360,13 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 					return domain.ActivityPage{}, messageErr
 				}
 			}
+		}
+		if item.MessageID == "" && item.ReminderID == "" && slices.Contains(item.Kinds, domain.ActivityInvitation) {
+			visible, visibilityErr := s.activitySourceVisible(ctx, workspace, user, item.Conversation)
+			if visibilityErr != nil {
+				return domain.ActivityPage{}, visibilityErr
+			}
+			item.SourceAvailable = visible
 		}
 	}
 	return page, nil

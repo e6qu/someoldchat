@@ -431,7 +431,9 @@ memory/SQL stores, SQLite reopen tests, and current first-party Slack Help
 assertions cover this dependency knot. Public-channel mentions may now reach an
 active member before they join, as Slack documents, while private and
 access-group-restricted sources remain fenced during both creation and
-hydration. Invitation/VIP/section notifications,
+hydration. Public/private channel additions now commit a durable, source-linked
+Invitations item atomically with membership and return `already_in_channel`
+without duplicating it. Slack Connect/canvas-share invitations, VIP/section notifications,
 custom views, inline Activity reactions, focus-preserving live updates,
 browser/push/email/sound delivery and timing, notification schedules, urgent
 overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack

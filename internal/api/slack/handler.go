@@ -4080,7 +4080,7 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	conversation, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
 	if err != nil {
-		writeError(w, mapServiceError(err, "channel_not_found"))
+		writeError(w, mapServiceErrorExists(err, "channel_not_found", "already_in_channel"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})

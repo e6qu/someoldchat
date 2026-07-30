@@ -2,12 +2,48 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 )
+
+func TestPrivateChannelInvitationCreatesOneDurableActivityItem(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversationMember("C1", "U1")
+	created := time.Date(2026, 7, 31, 10, 0, 0, 0, time.UTC)
+	event := events.Event{ID: "E-invite", WorkspaceID: "T1", ActorID: "U1", Topic: "conversation.members_invited", CreatedAt: created}
+	if err := s.InviteConversationMembers(ctx, "C1", []domain.UserID{"U2"}, event); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("invitation activity=%+v err=%v", page, err)
+	}
+	item := page.Items[0]
+	if !item.SourceAvailable || item.ActorID != "U1" || item.Conversation != "C1" || !item.OccurredAt.Equal(created) {
+		t.Fatalf("invitation item=%+v", item)
+	}
+	if err := s.InviteConversationMembers(ctx, "C1", []domain.UserID{"U2"}, events.Event{ID: "E-duplicate", WorkspaceID: "T1", ActorID: "U1", CreatedAt: created.Add(time.Minute)}); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate invite err=%v", err)
+	}
+	page, err = s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityInvitation}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(page.Items) != 1 {
+		t.Fatalf("duplicate invitation activity=%+v err=%v", page, err)
+	}
+}
 
 func TestActivityPersistsOverlappingFiltersAndIndependentTriage(t *testing.T) {
 	ctx := context.Background()

@@ -818,19 +818,20 @@ type Reaction struct {
 type ActivityKind string
 
 const (
-	ActivityDM       ActivityKind = "dm"
-	ActivityMention  ActivityKind = "mention"
-	ActivityThread   ActivityKind = "thread"
-	ActivityChannel  ActivityKind = "channel"
-	ActivityKeyword  ActivityKind = "keyword"
-	ActivityReaction ActivityKind = "reaction"
-	ActivityApp      ActivityKind = "app"
-	ActivityReminder ActivityKind = "reminder"
+	ActivityDM         ActivityKind = "dm"
+	ActivityMention    ActivityKind = "mention"
+	ActivityThread     ActivityKind = "thread"
+	ActivityChannel    ActivityKind = "channel"
+	ActivityKeyword    ActivityKind = "keyword"
+	ActivityReaction   ActivityKind = "reaction"
+	ActivityApp        ActivityKind = "app"
+	ActivityReminder   ActivityKind = "reminder"
+	ActivityInvitation ActivityKind = "invitation"
 )
 
 func (kind ActivityKind) Valid() bool {
 	switch kind {
-	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityKeyword, ActivityReaction, ActivityApp, ActivityReminder:
+	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityKeyword, ActivityReaction, ActivityApp, ActivityReminder, ActivityInvitation:
 		return true
 	default:
 		return false
