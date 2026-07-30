@@ -313,9 +313,9 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently fails on 61 representative exact
-assertions explicitly citing 36 of the 101 journey IDs across every journey
-domain. `make journey-check` prints the other 65 as upstream-text evidence
+developer pages and currently fails on 69 representative exact
+assertions explicitly citing 38 of the 101 journey IDs across every journey
+domain. `make journey-check` prints the other 63 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and
@@ -337,20 +337,29 @@ deterministic deployed-worker browser delivery, and undocumented month-end
 recurrence remain explicit gaps.
 
 The 2026 Activity source refresh now drives a durable cross-layer slice rather
-than a projection assembled by the page. DMs/MPIMs, mentions, replies to a
-member-authored thread, reactions, applicable app messages, and delivered
-personal reminders create idempotent per-recipient items in the source
+than a projection assembled by the page. DMs/MPIMs, mentions, followed-thread
+replies, all-new-post channel notifications, exact channel-keyword matches,
+reactions, applicable app messages, and delivered personal reminders create
+idempotent per-recipient items in the source
 transaction. Memory and portable SQL persist overlapping filters, read and
 cleared state, recoverable clear, and detailed/dense preference; the typed
 service and generated gRPC seam preserve pagination and hydration; the web
-implements filters, bulk/per-item actions, source/reply navigation,
+implements filters, bulk/per-item read/unread/clear/restore actions,
+source/reply navigation,
 accessibility, and Activity-local Up/Down, Enter, `X`, `C`, and `R`.
 Repository, reopen, converter-property, differential, web, and three-engine
-browser evidence covers this slice. Invitation/VIP/all-new-post channel
-notifications, followed-thread preferences, custom views, mark-unread/react
-UI, focus-preserving live updates, pre-v107 history backfill, and controlled
-live-Slack/visual comparison remain named gaps rather than empty controls or a
-false full-compatibility claim.
+browser evidence covers the original slice. Durable per-member notification
+defaults now add keyword and Activity inclusion settings; channel exceptions
+add all-post/mention/mute and follow-every-thread behavior; individual thread
+following is available from the thread pane; and preset/custom DND pause and
+resume use the existing Slack-compatible DND model. The generated gRPC seam,
+memory/SQL stores, SQLite reopen tests, and current first-party Slack Help
+assertions cover this dependency knot. Invitation/VIP/section notifications,
+custom views, inline Activity reactions, focus-preserving live updates,
+browser/push/email/sound delivery and timing, notification schedules, urgent
+overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack
+behavior, and visual comparison remain named gaps rather than empty controls
+or a false full-compatibility claim.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison

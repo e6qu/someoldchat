@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 func DirectConversationKey(workspaceID WorkspaceID, members []UserID) string {
@@ -621,6 +622,133 @@ type ReadCursor struct {
 	UpdatedAt    time.Time
 }
 
+// NotificationLevel is the durable trigger selection behind Slack's
+// workspace default and conversation-specific notification controls.
+// NotificationInherit is valid only for a conversation override.
+type NotificationLevel string
+
+const (
+	NotificationInherit  NotificationLevel = "inherit"
+	NotificationAll      NotificationLevel = "all"
+	NotificationMentions NotificationLevel = "mentions"
+	NotificationMute     NotificationLevel = "mute"
+)
+
+func (level NotificationLevel) ValidWorkspaceDefault() bool {
+	return level == NotificationAll || level == NotificationMentions
+}
+
+func (level NotificationLevel) ValidConversationOverride() bool {
+	switch level {
+	case NotificationInherit, NotificationAll, NotificationMentions, NotificationMute:
+		return true
+	default:
+		return false
+	}
+}
+
+type WorkspaceNotificationPreferences struct {
+	WorkspaceID       WorkspaceID
+	UserID            UserID
+	Level             NotificationLevel
+	Keywords          []string
+	ActivityChannels  bool
+	ActivityReminders bool
+}
+
+func DefaultWorkspaceNotificationPreferences(workspace WorkspaceID, user UserID) WorkspaceNotificationPreferences {
+	return WorkspaceNotificationPreferences{
+		WorkspaceID: workspace, UserID: user, Level: NotificationMentions,
+		ActivityChannels: true, ActivityReminders: true,
+	}
+}
+
+func (preferences WorkspaceNotificationPreferences) Valid() bool {
+	if preferences.WorkspaceID == "" || preferences.UserID == "" || !preferences.Level.ValidWorkspaceDefault() || len(preferences.Keywords) > 50 {
+		return false
+	}
+	for _, keyword := range preferences.Keywords {
+		if keyword == "" || len(keyword) > 100 || keyword != strings.TrimSpace(keyword) {
+			return false
+		}
+	}
+	return true
+}
+
+type ConversationNotificationPreferences struct {
+	WorkspaceID       WorkspaceID
+	UserID            UserID
+	Conversation      ConversationID
+	Level             NotificationLevel
+	FollowEveryThread bool
+}
+
+func DefaultConversationNotificationPreferences(workspace WorkspaceID, user UserID, conversation ConversationID) ConversationNotificationPreferences {
+	return ConversationNotificationPreferences{
+		WorkspaceID: workspace, UserID: user, Conversation: conversation, Level: NotificationInherit,
+	}
+}
+
+func (preferences ConversationNotificationPreferences) Valid() bool {
+	return preferences.WorkspaceID != "" && preferences.UserID != "" && preferences.Conversation != "" &&
+		preferences.Level.ValidConversationOverride()
+}
+
+func (preferences ConversationNotificationPreferences) EffectiveLevel(workspace WorkspaceNotificationPreferences) NotificationLevel {
+	if preferences.Level == NotificationInherit {
+		return workspace.Level
+	}
+	return preferences.Level
+}
+
+func NormalizeNotificationKeywords(keywords []string) []string {
+	unique := make(map[string]struct{}, len(keywords))
+	for _, keyword := range keywords {
+		keyword = strings.ToLower(strings.TrimSpace(keyword))
+		if keyword != "" {
+			unique[keyword] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(unique))
+	for keyword := range unique {
+		result = append(result, keyword)
+	}
+	sort.Strings(result)
+	return result
+}
+
+// MatchesNotificationKeyword implements Slack's documented case-insensitive
+// exact-match rule. Letter and number boundaries prevent "ship" from alerting
+// on "shipping", while phrases and punctuation remain usable keywords.
+func MatchesNotificationKeyword(text string, keywords []string) bool {
+	haystack := []rune(strings.ToLower(text))
+	for _, keyword := range keywords {
+		needle := []rune(strings.ToLower(strings.TrimSpace(keyword)))
+		if len(needle) == 0 || len(needle) > len(haystack) {
+			continue
+		}
+		for start := 0; start+len(needle) <= len(haystack); start++ {
+			match := true
+			for offset := range needle {
+				if haystack[start+offset] != needle[offset] {
+					match = false
+					break
+				}
+			}
+			if !match {
+				continue
+			}
+			beforeWord := start > 0 && (unicode.IsLetter(haystack[start-1]) || unicode.IsNumber(haystack[start-1]))
+			end := start + len(needle)
+			afterWord := end < len(haystack) && (unicode.IsLetter(haystack[end]) || unicode.IsNumber(haystack[end]))
+			if !beforeWord && !afterWord {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type Reaction struct {
 	Message   MessageID
 	Name      string
@@ -638,6 +766,7 @@ const (
 	ActivityMention  ActivityKind = "mention"
 	ActivityThread   ActivityKind = "thread"
 	ActivityChannel  ActivityKind = "channel"
+	ActivityKeyword  ActivityKind = "keyword"
 	ActivityReaction ActivityKind = "reaction"
 	ActivityApp      ActivityKind = "app"
 	ActivityReminder ActivityKind = "reminder"
@@ -645,7 +774,7 @@ const (
 
 func (kind ActivityKind) Valid() bool {
 	switch kind {
-	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityReaction, ActivityApp, ActivityReminder:
+	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityKeyword, ActivityReaction, ActivityApp, ActivityReminder:
 		return true
 	default:
 		return false

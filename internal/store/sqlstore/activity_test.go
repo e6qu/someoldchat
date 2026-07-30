@@ -129,6 +129,96 @@ func TestSQLiteActivityReactionReadCursorAndReminderDeliveryAreAtomic(t *testing
 	}
 }
 
+func TestSQLiteNotificationPreferencesAndThreadFollowsSurviveReopen(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "notifications.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	seed(s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "test"}))
+	seed(s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}))
+	seed(s.SeedUser(ctx, domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}))
+	seed(s.SeedConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}))
+	seed(s.SeedConversationMember(ctx, "C1", "U1"))
+	seed(s.SeedConversationMember(ctx, "C1", "U2"))
+	workspacePreferences := domain.DefaultWorkspaceNotificationPreferences("T1", "U2")
+	workspacePreferences.Level = domain.NotificationAll
+	workspacePreferences.Keywords = []string{"release"}
+	workspacePreferences.ActivityReminders = false
+	seed(s.SetWorkspaceNotificationPreferences(ctx, workspacePreferences, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "notification.preferences_changed"}))
+	conversationPreferences := domain.DefaultConversationNotificationPreferences("T1", "U2", "C1")
+	conversationPreferences.FollowEveryThread = true
+	seed(s.SetConversationNotificationPreferences(ctx, conversationPreferences, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "conversation.notification_preferences_changed"}))
+	created := time.Date(2026, 7, 30, 14, 0, 0, 0, time.UTC)
+	rootTimestamp := domain.NewMessageTimestamp(created)
+	seed(s.CreateMessage(ctx, domain.Message{
+		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "root", CreatedAt: created,
+	}, events.Event{ID: "E3", WorkspaceID: "T1", Topic: "message.created"}, ""))
+	seed(s.SetThreadFollowed(ctx, "T1", "U2", "C1", rootTimestamp, true, events.Event{ID: "E4", WorkspaceID: "T1", Topic: "thread.follow_changed"}))
+	seed(s.Close())
+
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	storedWorkspace, err := s.GetWorkspaceNotificationPreferences(ctx, "T1", "U2")
+	if err != nil || storedWorkspace.Level != domain.NotificationAll || len(storedWorkspace.Keywords) != 1 || storedWorkspace.Keywords[0] != "release" || storedWorkspace.ActivityReminders {
+		t.Fatalf("workspace preferences=%+v err=%v", storedWorkspace, err)
+	}
+	storedConversation, err := s.GetConversationNotificationPreferences(ctx, "T1", "U2", "C1")
+	if err != nil || storedConversation.Level != domain.NotificationInherit || !storedConversation.FollowEveryThread {
+		t.Fatalf("conversation preferences=%+v err=%v", storedConversation, err)
+	}
+	followed, err := s.IsThreadFollowed(ctx, "T1", "U2", "C1", rootTimestamp)
+	if err != nil || !followed {
+		t.Fatalf("thread followed=%v err=%v", followed, err)
+	}
+}
+
+func TestSchema108MigrationCreatesDurableNotificationTables(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "activity-migration.db")
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{
+		`DROP TABLE thread_follows`,
+		`DROP TABLE conversation_notification_preferences`,
+		`DROP TABLE notification_preferences`,
+		`UPDATE schema_migrations SET version = 107 WHERE version = 108`,
+	} {
+		if _, err := s.db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, table := range []string{"notification_preferences", "conversation_notification_preferences", "thread_follows"} {
+		var count int
+		if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("schema 108 did not create %s", table)
+		}
+	}
+}
+
 func TestSchema107MigrationCreatesDurableActivityTables(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "activity-migration.db")
@@ -141,6 +231,7 @@ func TestSchema107MigrationCreatesDurableActivityTables(t *testing.T) {
 		`DROP TABLE activity_item_kinds`,
 		`DROP TABLE activity_items`,
 		`UPDATE schema_migrations SET version = 106 WHERE version = 107`,
+		`DELETE FROM schema_migrations WHERE version = 108`,
 	} {
 		if _, err := s.db.ExecContext(ctx, statement); err != nil {
 			t.Fatal(err)

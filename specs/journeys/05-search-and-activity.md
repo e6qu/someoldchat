@@ -84,9 +84,11 @@ Implemented evidence:
   SQLite, dqlite, and PostgreSQL through the shared SQL implementation. The
   local and gRPC compositions expose the same typed, paginated contract.
 - New DMs and MPIM messages, explicit mentions, replies to a thread root
-  authored by the member, reactions to the member's messages, applicable
-  app-authored notifications, and delivered personal reminders create one
-  idempotent item per recipient. Overlapping filters share one triage record.
+  authored or followed by the member, replies in channels configured to follow
+  every thread, all-new-post channel notifications, exact channel-keyword
+  matches, reactions to the member's messages, applicable app-authored
+  notifications, and delivered personal reminders create one idempotent item
+  per recipient. Overlapping filters share one triage record.
 - Browser qualification creates and OAuth-installs a real app, exchanges its
   authorization code, joins the public channel with Slack's current bot
   `channels:join` scope, and posts overlapping app/mention notifications. It
@@ -98,16 +100,16 @@ Implemented evidence:
   removal, source authorization, and persistence.
 - Activity-local Up/Down, Enter, `X`, `C`, and `R` are exercised against those
   real items; Enter opens the correct thread reply composer. Clearing marks
-  read and hides the item, while restore preserves that read state.
+  read and hides the item, while restore preserves that read state. The UI
+  exposes per-item and bulk mark-unread as the inverse durable operation.
 
 Known gaps, which MUST NOT be reported as full Activity compatibility:
 
-- invitation, VIP, all-new-post channel/section notifications, following a
-  thread the member did not author, and custom saved views depend on notification
-  preferences or product models not yet implemented; those filters are not
-  rendered as empty fake controls;
-- the first-party UI does not yet expose mark-unread or inline react actions,
-  and Activity does not yet merge live SSE updates while preserving focus;
+- invitation, VIP, section notifications, and custom saved views depend on
+  product models not yet implemented; those filters are not rendered as empty
+  fake controls;
+- the first-party UI does not yet expose inline react actions, and Activity
+  does not yet merge live SSE updates while preserving focus;
 - schema version 107 creates the durable Activity store but does not backfill
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with

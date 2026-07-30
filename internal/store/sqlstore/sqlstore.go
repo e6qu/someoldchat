@@ -240,6 +240,25 @@ CREATE TABLE IF NOT EXISTS read_cursors (
  last_read TEXT NOT NULL, updated_at TEXT NOT NULL,
  PRIMARY KEY (workspace_id, user_id, conversation_id)
 );
+CREATE TABLE IF NOT EXISTS notification_preferences (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ level TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '[]',
+ activity_channels INTEGER NOT NULL DEFAULT 1, activity_reminders INTEGER NOT NULL DEFAULT 1,
+ PRIMARY KEY (workspace_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS conversation_notification_preferences (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ conversation_id TEXT NOT NULL REFERENCES conversations(id), level TEXT NOT NULL DEFAULT 'inherit',
+ follow_every_thread INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY (workspace_id, user_id, conversation_id)
+);
+CREATE INDEX IF NOT EXISTS conversation_notification_preferences_conversation ON conversation_notification_preferences(conversation_id, user_id);
+CREATE TABLE IF NOT EXISTS thread_follows (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ conversation_id TEXT NOT NULL REFERENCES conversations(id), root_timestamp TEXT NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, conversation_id, root_timestamp)
+);
+CREATE INDEX IF NOT EXISTS thread_follows_conversation_root ON thread_follows(conversation_id, root_timestamp, user_id);
 CREATE TABLE IF NOT EXISTS activity_items (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
@@ -356,7 +375,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 107
+const schemaVersion = 108
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2282,6 +2301,37 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			layout TEXT NOT NULL, PRIMARY KEY (workspace_id, user_id)
 		)`); err != nil {
 			return fmt.Errorf("migrate Activity preferences: %w", err)
+		}
+	}
+	if version < 108 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS notification_preferences (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			level TEXT NOT NULL, keywords TEXT NOT NULL DEFAULT '[]',
+			activity_channels INTEGER NOT NULL DEFAULT 1, activity_reminders INTEGER NOT NULL DEFAULT 1,
+			PRIMARY KEY (workspace_id, user_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate workspace notification preferences: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS conversation_notification_preferences (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			conversation_id TEXT NOT NULL REFERENCES conversations(id), level TEXT NOT NULL DEFAULT 'inherit',
+			follow_every_thread INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (workspace_id, user_id, conversation_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate conversation notification preferences: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS conversation_notification_preferences_conversation ON conversation_notification_preferences(conversation_id, user_id)`); err != nil {
+			return fmt.Errorf("index conversation notification preferences: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS thread_follows (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			conversation_id TEXT NOT NULL REFERENCES conversations(id), root_timestamp TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, user_id, conversation_id, root_timestamp)
+		)`); err != nil {
+			return fmt.Errorf("migrate thread follows: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS thread_follows_conversation_root ON thread_follows(conversation_id, root_timestamp, user_id)`); err != nil {
+			return fmt.Errorf("index thread follows: %w", err)
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -6180,6 +6230,12 @@ func (s *Store) RemoveConversationMember(ctx context.Context, conversation domai
 		return err
 	}
 	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM thread_follows WHERE conversation_id = ? AND user_id = ?`, conversation, user); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_notification_preferences WHERE conversation_id = ? AND user_id = ?`, conversation, user); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM conversation_members WHERE conversation_id = ? AND user_id = ?`, conversation, user)
 	if err != nil {
 		return err
@@ -6209,6 +6265,154 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 	}
 	cursor.UpdatedAt, err = domain.ParseStoredTime(updated)
 	return cursor, err
+}
+
+func (s *Store) GetWorkspaceNotificationPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
+	preferences := domain.DefaultWorkspaceNotificationPreferences(workspace, user)
+	var keywords string
+	var activityChannels, activityReminders int
+	err := s.db.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).
+		Scan(&preferences.Level, &keywords, &activityChannels, &activityReminders)
+	if errors.Is(err, sql.ErrNoRows) {
+		return preferences, nil
+	}
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	if err := json.Unmarshal([]byte(keywords), &preferences.Keywords); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	preferences.Keywords = domain.NormalizeNotificationKeywords(preferences.Keywords)
+	preferences.ActivityChannels = activityChannels != 0
+	preferences.ActivityReminders = activityReminders != 0
+	if !preferences.Valid() {
+		return domain.WorkspaceNotificationPreferences{}, errors.New("stored workspace notification preferences are invalid")
+	}
+	return preferences, nil
+}
+
+func (s *Store) SetWorkspaceNotificationPreferences(ctx context.Context, preferences domain.WorkspaceNotificationPreferences, event events.Event) error {
+	preferences.Keywords = domain.NormalizeNotificationKeywords(preferences.Keywords)
+	if !preferences.Valid() {
+		return store.InvalidArgument("workspace notification preferences are invalid")
+	}
+	keywords, err := json.Marshal(preferences.Keywords)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO notification_preferences(workspace_id, user_id, level, keywords, activity_channels, activity_reminders)
+		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET level = excluded.level, keywords = excluded.keywords, activity_channels = excluded.activity_channels, activity_reminders = excluded.activity_reminders`,
+		preferences.WorkspaceID, preferences.UserID, preferences.Level, string(keywords), boolInt(preferences.ActivityChannels), boolInt(preferences.ActivityReminders)); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetConversationNotificationPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (domain.ConversationNotificationPreferences, error) {
+	var member int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ? WHERE c.id = ? AND c.workspace_id = ?`, user, conversation, workspace).Scan(&member); err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	if member != 1 {
+		return domain.ConversationNotificationPreferences{}, store.ErrNotFound
+	}
+	preferences := domain.DefaultConversationNotificationPreferences(workspace, user, conversation)
+	var followEveryThread int
+	err := s.db.QueryRowContext(ctx, `SELECT level, follow_every_thread FROM conversation_notification_preferences WHERE workspace_id = ? AND user_id = ? AND conversation_id = ?`, workspace, user, conversation).
+		Scan(&preferences.Level, &followEveryThread)
+	if errors.Is(err, sql.ErrNoRows) {
+		return preferences, nil
+	}
+	if err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	preferences.FollowEveryThread = followEveryThread != 0
+	if !preferences.Valid() {
+		return domain.ConversationNotificationPreferences{}, errors.New("stored conversation notification preferences are invalid")
+	}
+	return preferences, nil
+}
+
+func (s *Store) SetConversationNotificationPreferences(ctx context.Context, preferences domain.ConversationNotificationPreferences, event events.Event) error {
+	if !preferences.Valid() {
+		return store.InvalidArgument("conversation notification preferences are invalid")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var member int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ? WHERE c.id = ? AND c.workspace_id = ?`, preferences.UserID, preferences.Conversation, preferences.WorkspaceID).Scan(&member); err != nil {
+		return err
+	}
+	if member != 1 {
+		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_notification_preferences(workspace_id, user_id, conversation_id, level, follow_every_thread)
+		VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET level = excluded.level, follow_every_thread = excluded.follow_every_thread`,
+		preferences.WorkspaceID, preferences.UserID, preferences.Conversation, preferences.Level, boolInt(preferences.FollowEveryThread)); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) IsThreadFollowed(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, root domain.MessageTimestamp) (bool, error) {
+	if _, err := domain.ParseMessageTimestamp(root); err != nil {
+		return false, err
+	}
+	var member, followed int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ? WHERE c.id = ? AND c.workspace_id = ?`, user, conversation, workspace).Scan(&member); err != nil {
+		return false, err
+	}
+	if member != 1 {
+		return false, store.ErrNotFound
+	}
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_follows WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND root_timestamp = ?`, workspace, user, conversation, root).Scan(&followed); err != nil {
+		return false, err
+	}
+	return followed != 0, nil
+}
+
+func (s *Store) SetThreadFollowed(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, root domain.MessageTimestamp, followed bool, event events.Event) error {
+	if _, err := domain.ParseMessageTimestamp(root); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var member int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversations c JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ? WHERE c.id = ? AND c.workspace_id = ?`, user, conversation, workspace).Scan(&member); err != nil {
+		return err
+	}
+	if member != 1 {
+		return store.ErrNotFound
+	}
+	if followed {
+		_, err = tx.ExecContext(ctx, `INSERT INTO thread_follows(workspace_id, user_id, conversation_id, root_timestamp) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id, root_timestamp) DO NOTHING`, workspace, user, conversation, root)
+	} else {
+		_, err = tx.ExecContext(ctx, `DELETE FROM thread_follows WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND root_timestamp = ?`, workspace, user, conversation, root)
+	}
+	if err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, event events.Event) error {
@@ -6785,25 +6989,93 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 		}
 		recipients[user][kind] = struct{}{}
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = ?`, message.Conversation)
+	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = ? ORDER BY user_id`, message.Conversation)
 	if err != nil {
 		return err
 	}
+	members := make([]domain.UserID, 0)
 	for rows.Next() {
 		var user domain.UserID
 		if err := rows.Scan(&user); err != nil {
 			rows.Close()
 			return err
 		}
-		if direct != 0 || groupDirect != 0 {
-			add(user, domain.ActivityDM)
-		}
-		if strings.Contains(message.Text, "<@"+string(user)+">") || strings.Contains(message.Blocks, "<@"+string(user)+">") {
-			add(user, domain.ActivityMention)
-		}
+		members = append(members, user)
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+	root := domain.NewMessageTimestamp(message.CreatedAt)
+	if message.ThreadTimestamp != "" {
+		root = message.ThreadTimestamp
+	}
+	follow := func(user domain.UserID) error {
+		if user == "" {
+			return nil
+		}
+		_, err := tx.ExecContext(ctx, `INSERT INTO thread_follows(workspace_id, user_id, conversation_id, root_timestamp) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id, root_timestamp) DO NOTHING`,
+			message.WorkspaceID, user, message.Conversation, root)
+		return err
+	}
+	if err := follow(message.AuthorID); err != nil {
+		return err
+	}
+	for _, user := range members {
+		if direct != 0 || groupDirect != 0 {
+			add(user, domain.ActivityDM)
+		}
+		mentioned := strings.Contains(message.Text, "<@"+string(user)+">") || strings.Contains(message.Blocks, "<@"+string(user)+">")
+		if mentioned {
+			add(user, domain.ActivityMention)
+			if message.ThreadTimestamp != "" {
+				add(user, domain.ActivityThread)
+				if err := follow(user); err != nil {
+					return err
+				}
+			}
+		}
+		workspacePreferences := domain.DefaultWorkspaceNotificationPreferences(message.WorkspaceID, user)
+		var keywordsJSON string
+		var activityChannels, activityReminders int
+		err := tx.QueryRowContext(ctx, `SELECT level, keywords, activity_channels, activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, message.WorkspaceID, user).
+			Scan(&workspacePreferences.Level, &keywordsJSON, &activityChannels, &activityReminders)
+		if err == nil {
+			if err := json.Unmarshal([]byte(keywordsJSON), &workspacePreferences.Keywords); err != nil {
+				return err
+			}
+			workspacePreferences.Keywords = domain.NormalizeNotificationKeywords(workspacePreferences.Keywords)
+			workspacePreferences.ActivityChannels = activityChannels != 0
+			workspacePreferences.ActivityReminders = activityReminders != 0
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		conversationPreferences := domain.DefaultConversationNotificationPreferences(message.WorkspaceID, user, message.Conversation)
+		var followEveryThread int
+		err = tx.QueryRowContext(ctx, `SELECT level, follow_every_thread FROM conversation_notification_preferences WHERE workspace_id = ? AND user_id = ? AND conversation_id = ?`, message.WorkspaceID, user, message.Conversation).
+			Scan(&conversationPreferences.Level, &followEveryThread)
+		if err == nil {
+			conversationPreferences.FollowEveryThread = followEveryThread != 0
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		effective := conversationPreferences.EffectiveLevel(workspacePreferences)
+		if message.ThreadTimestamp == "" && direct == 0 && groupDirect == 0 {
+			if effective == domain.NotificationAll && workspacePreferences.ActivityChannels {
+				add(user, domain.ActivityChannel)
+			}
+			if effective != domain.NotificationMute && domain.MatchesNotificationKeyword(message.Text, workspacePreferences.Keywords) {
+				add(user, domain.ActivityKeyword)
+			}
+		}
+		if message.ThreadTimestamp != "" {
+			var followed int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM thread_follows WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND root_timestamp = ?`, message.WorkspaceID, user, message.Conversation, root).Scan(&followed); err != nil {
+				return err
+			}
+			if conversationPreferences.FollowEveryThread || followed != 0 {
+				add(user, domain.ActivityThread)
+			}
+		}
 	}
 	if message.ThreadTimestamp != "" {
 		rootAt, err := domain.ParseMessageTimestamp(message.ThreadTimestamp)
@@ -6814,6 +7086,9 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 		err = tx.QueryRowContext(ctx, `SELECT m.author_id FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation AND cm.user_id = m.author_id WHERE m.conversation = ? AND m.created_at = ?`, message.Conversation, domain.NewStoredTime(rootAt)).Scan(&author)
 		if err == nil {
 			add(author, domain.ActivityThread)
+			if err := follow(author); err != nil {
+				return err
+			}
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return err
 		}
@@ -8543,7 +8818,11 @@ func (s *Store) MarkLaterReminderDelivered(ctx context.Context, owner string, id
 		Scan(&reminder.WorkspaceID, &reminder.UserID, &reminder.SourceMessageID, &reminder.SourceConversation, &target); err != nil {
 		return err
 	}
-	if target == domain.LaterReminderPersonal && reminder.UserID != "" {
+	activityReminders := 1
+	if err := tx.QueryRowContext(ctx, `SELECT activity_reminders FROM notification_preferences WHERE workspace_id = ? AND user_id = ?`, reminder.WorkspaceID, reminder.UserID).Scan(&activityReminders); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if target == domain.LaterReminderPersonal && reminder.UserID != "" && activityReminders != 0 {
 		activityID := domain.ActivityIDFor(reminder.UserID, "reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
 		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, conversation_id, message_id, reminder_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
 			activityID, reminder.WorkspaceID, reminder.UserID, reminder.SourceConversation, reminder.SourceMessageID, id, deliveredAt.UnixNano()); err != nil {

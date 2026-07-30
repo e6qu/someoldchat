@@ -220,8 +220,22 @@ func conversionCases() map[string]conversionCase {
 		"RemoteFile":     {sample: &domain.RemoteFile{}, through: through(encodeProtoRemoteFile, decodeProtoRemoteFile)},
 		"RemoteFilePage": {sample: &domain.RemoteFilePage{}, through: through(encodeProtoRemoteFilePage, decodeProtoRemoteFilePage)},
 		"ReadCursor":     {sample: &domain.ReadCursor{}, through: through(encodeProtoReadCursor, decodeProtoReadCursor)},
-		"TokenRecord":    {sample: &domain.TokenRecord{}, through: through(encodeProtoToken, decodeProtoToken)},
-		"SessionRecord":  {sample: &domain.SessionRecord{}, through: through(encodeProtoSession, decodeProtoSession)},
+		"WorkspaceNotificationPreferences": {
+			sample: &domain.WorkspaceNotificationPreferences{},
+			prepare: func(filled any) {
+				filled.(*domain.WorkspaceNotificationPreferences).Level = domain.NotificationAll
+			},
+			through: through(encodeProtoWorkspaceNotificationPreferences, decodeProtoWorkspaceNotificationPreferences),
+		},
+		"ConversationNotificationPreferences": {
+			sample: &domain.ConversationNotificationPreferences{},
+			prepare: func(filled any) {
+				filled.(*domain.ConversationNotificationPreferences).Level = domain.NotificationMute
+			},
+			through: through(encodeProtoConversationNotificationPreferences, decodeProtoConversationNotificationPreferences),
+		},
+		"TokenRecord":   {sample: &domain.TokenRecord{}, through: through(encodeProtoToken, decodeProtoToken)},
+		"SessionRecord": {sample: &domain.SessionRecord{}, through: through(encodeProtoSession, decodeProtoSession)},
 		"AppConfigurationCredentials": {
 			sample:  &domain.AppConfigurationCredentials{},
 			through: through(encodeProtoAppConfigurationCredentials, decodeProtoAppConfigurationCredentials),

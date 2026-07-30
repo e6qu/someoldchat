@@ -70,15 +70,26 @@ data.
 
 ## Evidence
 
-- Browser tests cover profile sources/edit/photo, status expiry, presence,
-  workspace/conversation preferences, mute, DND/resume, and notification deep
-  links.
+- Workspace trigger level, exact case-insensitive channel keywords, Activity
+  channel/reminder inclusion, channel overrides/mute, follow-every-thread, and
+  individual thread follows are durable per member. Memory, SQLite reopen,
+  generated gRPC converter-property, and local-versus-gRPC differential tests
+  cover inheritance and routing.
+- The first-party UI exposes the workspace settings, an exceptions list,
+  channel controls, follow/unfollow in the thread pane, and preset/custom
+  DND with early resume. DND reuses the Slack-compatible `dnd.*` service model
+  and suppresses delivery state without deleting messages or Activity.
+- `make external-contract-qualification` checks Slack's current workspace
+  trigger, keyword, Activity inclusion, conversation override, exception-list,
+  and follow-every-thread text before this behavior can remain claimed.
 - Deterministic-clock and persistence tests cover status/DND expiry through
   restart and hibernation.
 - Official SDK tests exercise `users.profile.*`, `users.setPresence`, and
   `dnd.*` with user tokens and permission/error variants.
-- Differential tests compare effective preference inheritance and event-to-
-  notification routing in a dedicated Slack workspace.
+- Controlled live-Slack comparison remains required. Browser/push/email/sound
+  delivery, per-platform timing and appearance, notification schedules,
+  group-DM overrides, urgent sender override, VIPs, and notification deep-link
+  reconciliation are explicit gaps; the web UI does not claim those controls.
 
 ## Journey-source map
 
@@ -89,13 +100,14 @@ data.
 | STATUS-01 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Status text, emoji, suggestions, and a clear time are user-selectable. |
 | STATUS-02 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Slack distinguishes automatically inferred and manually selected active or away availability. |
 | NOTIFY-01 | [Configure Slack notifications](https://slack.com/help/articles/201355156-Configure-your-Slack-notifications) | Workspace notification triggers, keywords, timing, sound, and delivery are member preferences. |
-| NOTIFY-02 | [Guide to Slack notifications](https://slack.com/help/articles/360025446073-Guide-to-Slack-notifications) | Conversations may override or mute the member's notification behavior. |
+| NOTIFY-02 | [Manage notifications for specific channels and direct messages](https://slack.com/help/articles/360056534254-Manage-notifications-for-specific-channels-and-direct-messages) | Channels and group DMs support all-post/mention choices, mute, following every thread, and a reviewable exceptions list. |
 | NOTIFY-03 | [Pause Slack notifications](https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb) | Members pause, resume, schedule, and urgently override notifications under Slack's rules. |
 | NOTIFY-04 | [Guide to Slack notifications](https://slack.com/help/articles/360025446073-Guide-to-Slack-notifications) | Eligible events route to badges and configured desktop, mobile, and email notifications. |
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-30:
 
 - [Set your Slack status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability)
 - [Configure your Slack notifications](https://slack.com/help/articles/201355156-Configure-your-Slack-notifications)
 - [Guide to Slack notifications](https://slack.com/help/articles/360025446073-Guide-to-Slack-notifications)
+- [Manage notifications for specific channels and direct messages](https://slack.com/help/articles/360056534254-Manage-notifications-for-specific-channels-and-direct-messages)
 - [Pause notifications with Do Not Disturb](https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb)
