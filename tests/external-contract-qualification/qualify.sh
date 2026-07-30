@@ -177,6 +177,10 @@ assert_contains "$work/conversations-close.html" 'already_closed properties' \
 	'[DM-04] a repeated conversations.close reports already_closed' "$close_dm_api_url"
 assert_contains "$work/messages.html" 'automatically save as a draft' \
 	'[DRAFT-01] unfinished composer text is saved as a draft' "$message_url"
+assert_contains "$work/messages.html" 'add any attachments, emoji, mentions, or formatting' \
+	'[DRAFT-01 COMP-01] the draft-capable composer includes attachments' "$message_url"
+assert_contains "$work/files.html" 'Drag and drop up to 10 files into the Slack message field' \
+	'[DRAFT-01 FILE-01] Slack stages up to ten files in the message field before send' "$file_url"
 assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent messages' \
 	'[DRAFT-02] Drafts and sent is the current aggregate work surface' "$message_url"
 assert_contains "$work/messages.html" 'edit, reschedule, send, cancel, or delete it' \

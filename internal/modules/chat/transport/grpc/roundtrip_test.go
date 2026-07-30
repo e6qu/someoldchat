@@ -315,6 +315,14 @@ func conversionCases() map[string]conversionCase {
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"ScheduledStatus":  {sample: &domain.ScheduledStatus{}, through: through(encodeProtoScheduledStatus, decodeProtoScheduledStatus)},
 		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},
+		"DraftAttachments": {
+			sample: &draftAttachmentsRoundTrip{},
+			through: func(t *testing.T, filled any) (any, proto.Message) {
+				value := filled.(*draftAttachmentsRoundTrip)
+				wire := &chatv1.Draft{Attachments: encodeProtoDraftAttachments(value.Attachments)}
+				return &draftAttachmentsRoundTrip{Attachments: decodeProtoDraftAttachments(wire.GetAttachments())}, wire
+			},
+		},
 		"AppDeliveryHealth": {
 			sample: &domain.AppDeliveryHealth{},
 			prepare: func(filled any) {
@@ -451,6 +459,10 @@ type reactionPage struct {
 	Reactions  []domain.Reaction
 	NextCursor domain.Cursor
 	HasMore    bool
+}
+
+type draftAttachmentsRoundTrip struct {
+	Attachments []domain.DraftAttachment
 }
 
 // TestEveryConverterPairIsExercisedByTheProperty derives the case list instead

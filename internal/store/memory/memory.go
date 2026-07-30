@@ -5501,7 +5501,8 @@ func draftCursorKey(value domain.Draft) string {
 }
 
 func (s *Store) UpsertDraft(_ context.Context, value domain.Draft, event events.Event) (domain.Draft, error) {
-	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" || strings.TrimSpace(value.Text) == "" || value.UpdatedAt.IsZero() {
+	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" ||
+		(strings.TrimSpace(value.Text) == "" && len(value.Attachments) == 0) || len(value.Attachments) > 10 || value.UpdatedAt.IsZero() {
 		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
 	}
 	s.mu.Lock()
@@ -5511,10 +5512,28 @@ func (s *Store) UpsertDraft(_ context.Context, value domain.Draft, event events.
 	if !userExists || user.WorkspaceID != value.WorkspaceID || user.Deleted || !conversationExists || conversation.WorkspaceID != value.WorkspaceID {
 		return domain.Draft{}, store.ErrNotFound
 	}
+	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(value.Attachments))
+	for _, attachment := range value.Attachments {
+		upload, exists := s.externalUploads[attachment.UploadID]
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 ||
+			!exists || upload.WorkspaceID != value.WorkspaceID || upload.Uploader != value.UserID || upload.Status != domain.ExternalUploadUploaded {
+			return domain.Draft{}, store.InvalidArgument("draft attachment is incomplete")
+		}
+		if _, duplicate := seenUploads[attachment.UploadID]; duplicate {
+			return domain.Draft{}, store.InvalidArgument("draft attachment is duplicated")
+		}
+		seenUploads[attachment.UploadID] = struct{}{}
+	}
 	value.UpdatedAt = value.UpdatedAt.UTC()
+	value.Attachments = append([]domain.DraftAttachment(nil), value.Attachments...)
 	s.drafts[draftKey(value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp)] = value
 	s.outbox = append(s.outbox, event)
-	return value, nil
+	return cloneDraft(value), nil
+}
+
+func cloneDraft(value domain.Draft) domain.Draft {
+	value.Attachments = append([]domain.DraftAttachment(nil), value.Attachments...)
+	return value
 }
 
 func (s *Store) GetDraft(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
@@ -5524,7 +5543,7 @@ func (s *Store) GetDraft(_ context.Context, workspace domain.WorkspaceID, user d
 	if !ok {
 		return domain.Draft{}, store.ErrNotFound
 	}
-	return value, nil
+	return cloneDraft(value), nil
 }
 
 func (s *Store) ListDrafts(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
@@ -5550,7 +5569,7 @@ func (s *Store) ListDrafts(_ context.Context, workspace domain.WorkspaceID, user
 		if request.Descending {
 			less = func(left, right domain.Draft) bool { return draftCursorKey(left) > draftCursorKey(right) }
 		}
-		values = appendSorted(values, value, request.Limit+1, less)
+		values = appendSorted(values, cloneDraft(value), request.Limit+1, less)
 	}
 	hasMore := len(values) > request.Limit
 	if hasMore {
@@ -6228,6 +6247,16 @@ func (s *Store) blobReferences(workspace domain.WorkspaceID) []string {
 	for _, file := range s.files {
 		if file.WorkspaceID == workspace && !file.Deleted {
 			references = append(references, file.BlobKey)
+		}
+	}
+	for _, draft := range s.drafts {
+		if draft.WorkspaceID != workspace {
+			continue
+		}
+		for _, attachment := range draft.Attachments {
+			if upload, ok := s.externalUploads[attachment.UploadID]; ok && upload.Status == domain.ExternalUploadUploaded {
+				references = append(references, upload.BlobKey)
+			}
 		}
 	}
 	for _, user := range s.users {
@@ -7452,6 +7481,22 @@ func (s *Store) GetExternalUpload(_ context.Context, id domain.ExternalUploadID)
 	return value, nil
 }
 
+func (s *Store) DraftAttachmentExists(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, upload domain.ExternalUploadID) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, draft := range s.drafts {
+		if draft.WorkspaceID != workspace || draft.UserID != user {
+			continue
+		}
+		for _, attachment := range draft.Attachments {
+			if attachment.UploadID == upload {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (s *Store) MarkExternalUploadUploaded(_ context.Context, id domain.ExternalUploadID, uploadedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -7493,7 +7538,22 @@ func (s *Store) CompleteExternalUploads(_ context.Context, completions []domain.
 		if !exists {
 			return store.ErrNotFound
 		}
-		if value.Status != domain.ExternalUploadUploaded || !value.ExpiresAt.After(time.Now().UTC()) {
+		draftOwned := false
+		for _, draft := range s.drafts {
+			if draft.WorkspaceID != value.WorkspaceID || draft.UserID != value.Uploader {
+				continue
+			}
+			for _, attachment := range draft.Attachments {
+				if attachment.UploadID == completion.ID {
+					draftOwned = true
+					break
+				}
+			}
+			if draftOwned {
+				break
+			}
+		}
+		if value.Status != domain.ExternalUploadUploaded || (!value.ExpiresAt.After(time.Now().UTC()) && !draftOwned) {
 			return store.ErrConflict
 		}
 		if _, exists := seenUploads[completion.ID]; exists {

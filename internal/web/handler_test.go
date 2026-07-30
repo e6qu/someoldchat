@@ -316,7 +316,7 @@ func TestWorkspaceUploadsSharesRendersAndDownloadsAFile(t *testing.T) {
 	if page.Code != http.StatusOK {
 		t.Fatalf("workspace status=%d body=%s", page.Code, page.Body)
 	}
-	requireContains(t, "workspace file control", page.Body.String(), "Attach a file", `action="/app/file?channel=Cdev"`, `enctype="multipart/form-data"`)
+	requireContains(t, "workspace file control", page.Body.String(), "Attach a file", `action="/app/file/stage?channel=Cdev"`, `enctype="multipart/form-data"`)
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -385,7 +385,8 @@ func TestComposerStagesPastedAndDroppedFilesIntoOneAtomicMessage(t *testing.T) {
 		"text.addEventListener('paste'",
 		"composer.addEventListener('drop'",
 		"existing.concat(Array.prototype.slice.call(fileList)).slice(0,10)",
-		"stagedUpload=form===composer",
+		"stageSelectedFiles()",
+		"body.set('draft_attachments',JSON.stringify(draftAttachments))",
 		"navigator.mediaDevices.getUserMedia",
 		"clipRecorder.start(1000)",
 		"},300000)",
@@ -434,6 +435,88 @@ func TestComposerStagesPastedAndDroppedFilesIntoOneAtomicMessage(t *testing.T) {
 	}
 	if _, err := s.GetDraft(context.Background(), "T1", "U1", "Cdev", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("sent attachment message left its old draft: %v", err)
+	}
+}
+
+func TestComposerDraftAttachmentsSurviveReloadAndSendOnce(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, value := range map[string]string{
+		auth.CSRFTokenFieldName: auth.CSRFToken("session"),
+		"text":                  "recover this text and its files",
+		"draft_attachments":     "[]",
+	} {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []struct{ name, contents string }{
+		{name: "durable-one.txt", contents: "first durable blob"},
+		{name: "durable-two.txt", contents: "second durable blob"},
+	} {
+		part, err := writer.CreateFormFile("file", file.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte(file.contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/app/file/stage?channel=Cdev", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	request.Header.Set("HX-Request", "true")
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("stage status=%d body=%s", response.Code, response.Body)
+	}
+	var staged struct {
+		Attachments []draftAttachmentView `json:"attachments"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&staged); err != nil || len(staged.Attachments) != 2 {
+		t.Fatalf("staged=%+v err=%v", staged, err)
+	}
+	draft, err := (service.Messages{Store: s}).Draft(context.Background(), "T1", "U1", "Cdev", "")
+	if err != nil || draft.Text != "recover this text and its files" || len(draft.Attachments) != 2 {
+		t.Fatalf("draft=%+v err=%v", draft, err)
+	}
+	if history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10}); err != nil || len(history.Messages) != 0 {
+		t.Fatalf("staging posted early: history=%+v err=%v", history, err)
+	}
+	reloaded := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "DRAFT-01 durable attachment reload", reloaded.Body.String(),
+		"recover this text and its files",
+		"durable-one.txt",
+		"durable-two.txt",
+		"has a draft",
+		`class="draft-badge"`,
+	)
+	drafts := get(t, mux, "/app/drafts?channel=Cdev&tab=drafts")
+	requireContains(t, "DRAFT-02 attachment count", drafts.Body.String(), "2 attachments", "recover this text and its files")
+
+	encoded, err := json.Marshal(staged.Attachments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"recover this text and its files"},
+		"draft_attachments":     {string(encoded)},
+	}.Encode(), false)
+	if sent.Code != http.StatusSeeOther {
+		t.Fatalf("send status=%d body=%s", sent.Code, sent.Body)
+	}
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || len(history.Messages[0].Files) != 2 || history.Messages[0].Text != "recover this text and its files" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	if _, err := s.GetDraft(context.Background(), "T1", "U1", "Cdev", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("sent draft remains: %v", err)
 	}
 }
 

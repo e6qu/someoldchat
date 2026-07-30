@@ -250,6 +250,7 @@ type conversationView struct {
 	IsGroupDirect bool
 	RecentAt      time.Time
 	OpenUsers     string
+	HasDraft      bool
 }
 
 type conversationDetailsView struct {
@@ -314,11 +315,14 @@ type pageData struct {
 	Notice           string
 	Error            string
 	Draft            string
+	DraftAttachments []draftAttachmentView
+	DraftJSON        string
 	ScheduleAt       string
 	ComposeURL       string
 	DraftURL         string
 	ScheduleURL      string
 	UploadURL        string
+	StageUploadURL   string
 	TimelineURL      string
 	ThreadURL        string
 	ThreadFollowURL  string
@@ -581,13 +585,51 @@ type scheduledMessageView struct {
 }
 
 type draftView struct {
-	Text          string
-	MachineTime   string
-	DisplayTime   string
-	ChannelName   string
-	ChannelPrefix string
-	OpenURL       string
-	DeleteURL     string
+	Text            string
+	MachineTime     string
+	DisplayTime     string
+	ChannelName     string
+	ChannelPrefix   string
+	OpenURL         string
+	DeleteURL       string
+	AttachmentCount int
+}
+
+type draftAttachmentView struct {
+	UploadID string `json:"upload_id"`
+	Name     string `json:"name"`
+	Title    string `json:"title"`
+	MIMEType string `json:"mime_type"`
+	Size     int64  `json:"size"`
+}
+
+func newDraftAttachmentViews(values []domain.DraftAttachment) []draftAttachmentView {
+	result := make([]draftAttachmentView, 0, len(values))
+	for _, value := range values {
+		result = append(result, draftAttachmentView{
+			UploadID: string(value.UploadID), Name: value.Name, Title: value.Title,
+			MIMEType: value.MIMEType, Size: value.Size,
+		})
+	}
+	return result
+}
+
+func draftAttachmentsFromJSON(raw string) ([]domain.DraftAttachment, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var values []draftAttachmentView
+	if err := json.Unmarshal([]byte(raw), &values); err != nil || len(values) > 10 {
+		return nil, service.ErrInvalidExternalUpload
+	}
+	result := make([]domain.DraftAttachment, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value.UploadID) == "" {
+			return nil, service.ErrInvalidExternalUpload
+		}
+		result = append(result, domain.DraftAttachment{UploadID: domain.ExternalUploadID(value.UploadID), Title: value.Title})
+	}
+	return result, nil
 }
 
 type sentMessageView struct {
@@ -784,6 +826,7 @@ const pageStyle = `<style>
 .side-empty{margin:0;padding:6px 10px;color:#e8cbe9;font-size:13px}
 .side-more{padding:6px 10px;color:var(--on-accent);font-size:13px}
 .badge{margin-left:auto;background:var(--on-accent);color:var(--accent);border-radius:12px;min-width:20px;text-align:center;padding:1px 6px;font-size:12px;font-weight:800}
+.draft-badge{margin-left:auto;color:#e8cbe9;font-size:11px;font-style:italic}
 .sidebar-bottom{margin-top:auto;border-top:1px solid #ffffff5c;padding-top:12px}
 .signed-in{display:flex;align-items:center;gap:9px;padding:4px 10px 10px;min-width:0}
 .signed-in-avatar{flex:0 0 auto;width:24px;height:24px;border-radius:5px;display:grid;place-items:center;background:#ffffff42;font-size:11px;font-weight:800;text-transform:uppercase;overflow:hidden}
@@ -883,7 +926,7 @@ const pageStyle = `<style>
 .clip-recorder{width:min(560px,calc(100vw - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:18px}.clip-recorder::backdrop{background:#0008}.clip-recorder h2{margin:0 0 6px;font-size:18px}.clip-recorder p{margin:0 0 14px;color:var(--muted)}.clip-recorder video{display:block;width:100%;max-height:min(360px,55vh);margin:0 0 14px;border-radius:9px;background:#111;object-fit:contain}.clip-recorder-actions{display:flex;justify-content:flex-end;gap:8px}.clip-recorder-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:8px 12px;font-weight:800}.clip-recorder-actions .clip-stop{border-color:var(--danger);background:var(--danger);color:var(--on-strong)}
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
 .conversation-switcher::backdrop{background:#0008}.switcher-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.switcher-head label{flex:1}.switcher-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.switcher-close{border:0;background:transparent;color:var(--muted);font-size:20px}.switcher-results{list-style:none;margin:0;padding:8px;overflow:auto}.switcher-results a{display:flex;gap:8px;border-radius:6px;color:var(--text);padding:8px 10px;text-decoration:none}.switcher-results a:hover,.switcher-results a:focus-visible{background:var(--hover)}
-.upload-preview{margin:5px 0 0;color:var(--muted);font-size:13px}
+.upload-preview{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:5px 0 0;color:var(--muted);font-size:13px}.staged-file{display:inline-flex;align-items:center;gap:4px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--panel)}.staged-file button{padding:1px 4px}
 .composer-footer{display:flex;justify-content:space-between;align-items:center;gap:12px}
 .composer-tools{margin:0;color:var(--muted);font-size:13px}
 .send{border:0;border-radius:5px;background:var(--ok);color:var(--on-strong);font-weight:700;padding:7px 14px}
@@ -1268,9 +1311,9 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <nav class="side-section" aria-label="Channels">
         <div class="side-label">Channels</div>
         {{range .Channels}}
-        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}">
+        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}">
           <span class="side-icon" aria-hidden="true">#</span><span class="side-text">{{.Name}}</span>
-          {{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
+          {{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
         </a>
         {{else}}<p class="side-empty">No channels available.</p>{{end}}
         {{if .CanCreate}}
@@ -1289,9 +1332,9 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <nav class="side-section" aria-label="Direct messages">
         <div class="side-label">Direct messages</div>
         {{range .Directs}}
-        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}">
+        <a class="side-link" href="/app?channel={{.ID}}"{{if .Current}} aria-current="page"{{end}} aria-label="{{.Name}}{{if .UnreadCount}}, {{.UnreadCount}} unread messages{{end}}{{if .HasDraft}}, has a draft{{end}}">
           <span class="side-icon" aria-hidden="true">@</span><span class="side-text">{{.Name}}</span>
-          {{if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
+          {{if .HasDraft}}<span class="draft-badge" aria-hidden="true">Draft</span>{{else if .UnreadCount}}<span class="badge" aria-hidden="true">{{.UnreadCount}}</span>{{end}}
         </a>
         {{end}}
       </nav>
@@ -1343,21 +1386,23 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
         {{if .CanPost}}
         {{if .CanUpload}}<details class="composer-shortcuts" id="upload-details"><summary>Attach a file</summary>
-          <form class="upload-form" id="upload-form" method="post" action="{{.UploadURL}}" enctype="multipart/form-data">
+          <form class="upload-form" id="upload-form" method="post" action="{{.StageUploadURL}}" enctype="multipart/form-data">
             <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <input type="hidden" id="upload-comment" name="initial_comment">
+            <input type="hidden" id="upload-comment" name="text" value="{{.Draft}}">
+            <input type="hidden" id="upload-draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
             <label for="upload-file">Files<input id="upload-file" type="file" name="file" multiple required aria-describedby="upload-preview"></label>
-            <p class="upload-preview" id="upload-preview" role="status">No files selected. You can also paste or drop files into the composer.</p>
+            <p class="upload-preview" id="upload-preview" role="status">{{if .DraftAttachments}}{{range $index, $attachment := .DraftAttachments}}{{if $index}} · {{end}}{{$attachment.Name}}{{end}}{{else}}No files selected. You can also paste or drop files into the composer.{{end}}</p>
             <label for="upload-title">Title (optional)<input id="upload-title" type="text" name="title" maxlength="255" aria-describedby="upload-title-hint"></label>
             <span id="upload-title-hint" class="muted">Applied when one file is staged.</span>
             <button type="button" id="upload-clear" hidden>Remove staged files</button>
-            <button type="submit">Upload and send</button>
+            <button type="submit">Add to draft</button>
           </form>
         </details>{{end}}
         <form class="composer{{if .Error}} is-error{{end}}" id="composer" method="post" action="{{.ComposeURL}}" hx-post="{{.ComposeURL}}" hx-target="{{if .ThreadTimestamp}}#thread-messages{{else}}#timeline{{end}}" data-newest="{{.NewestURL}}" data-draft-url="{{.DraftURL}}">
           <p class="form-error" id="composer-error" role="alert" tabindex="-1"{{if .Error}} autofocus{{end}}{{if not .Error}} hidden{{end}}>{{.Error}}</p>
           <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
           <input type="hidden" name="timezone" data-browser-timezone value="UTC">
+          <input type="hidden" id="draft-attachments" name="draft_attachments" value="{{.DraftJSON}}">
           <div class="composer-toolbar" role="toolbar" aria-label="Message formatting and insertions">
             <button class="composer-tool" type="button" data-wrap="*" aria-label="Bold" aria-controls="text"><strong>B</strong></button>
             <button class="composer-tool" type="button" data-wrap="_" aria-label="Italic" aria-controls="text"><em>I</em></button>
@@ -1376,7 +1421,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             </details>{{end}}
           </div>
           <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
-          <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          <textarea id="text" name="text" maxlength="40000"{{if not .DraftAttachments}} required{{end}}{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
           {{if or .ComposerMembers .ComposerGroups}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
             <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
             <button type="button" role="option" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
@@ -2001,7 +2046,7 @@ form.addEventListener('submit',setPostAt);setPostAt();
 <a href="/app/drafts?channel={{.Channel}}&amp;tab=sent" {{if eq .ActiveTab "sent"}}aria-current="page"{{end}}>Sent</a>
 </nav>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-{{if eq .ActiveTab "drafts"}}<ul class="work-list" aria-label="Drafts">{{range .Drafts}}<li class="work-item"><div><div class="work-meta">{{if .OpenURL}}<a class="work-channel" href="{{.OpenURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>Updated <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="work-text">{{.Text}}</p></div><div class="work-actions">{{if .OpenURL}}<a href="{{.OpenURL}}">Continue</a>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Delete draft in {{.ChannelName}}">Delete</button></form></div></li>{{else}}<li class="empty">You have no drafts.</li>{{end}}</ul>{{end}}
+{{if eq .ActiveTab "drafts"}}<ul class="work-list" aria-label="Drafts">{{range .Drafts}}<li class="work-item"><div><div class="work-meta">{{if .OpenURL}}<a class="work-channel" href="{{.OpenURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>Updated <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .AttachmentCount}}<span>{{.AttachmentCount}} attachment{{if ne .AttachmentCount 1}}s{{end}}</span>{{end}}</div><p class="work-text">{{if .Text}}{{.Text}}{{else}}Attachment draft{{end}}</p></div><div class="work-actions">{{if .OpenURL}}<a href="{{.OpenURL}}">Continue</a>{{end}}<form method="post" action="{{.DeleteURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Delete draft in {{.ChannelName}}">Delete</button></form></div></li>{{else}}<li class="empty">You have no drafts.</li>{{end}}</ul>{{end}}
 {{if eq .ActiveTab "scheduled"}}<ul class="work-list" aria-label="Scheduled messages">{{range .Scheduled}}<li class="work-item scheduled-item"><div><div class="work-meta">{{if .ConversationURL}}<a class="work-channel" href="{{.ConversationURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>{{.Status}} for <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span>{{if .Failure}}<span class="failed">{{.Failure}}</span>{{end}}</div><p class="work-text">{{.Text}}</p></div><div class="work-actions"><details><summary>Edit</summary><form class="edit-panel" method="post" action="{{.UpdateURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label>Message<textarea name="text" maxlength="40000" required>{{.Text}}</textarea></label><label>Send date and time<input type="datetime-local" name="schedule_at" data-schedule-at data-local-datetime="{{.MachineTime}}" required></label><input type="hidden" name="post_at"><button type="submit">Save changes</button></form></details><form method="post" action="{{.SendNowURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button type="submit">Send now</button></form><form method="post" action="{{.CancelURL}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><button class="danger" type="submit" aria-label="Cancel scheduled message in {{.ChannelName}}">Cancel message</button></form></div></li>{{else}}<li class="empty">You have no scheduled messages.</li>{{end}}</ul>{{end}}
 {{if eq .ActiveTab "sent"}}<ul class="work-list" aria-label="Sent messages">{{range .Sent}}<li class="work-item"><div><div class="work-meta">{{if .OpenURL}}<a class="work-channel" href="{{.OpenURL}}">{{.ChannelPrefix}}{{.ChannelName}}</a>{{else}}<span class="work-channel">{{.ChannelName}}</span>{{end}}<span>Sent <time datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span></div><p class="work-text">{{.Text}}</p></div>{{if .OpenURL}}<div class="work-actions"><a href="{{.OpenURL}}">View conversation</a></div>{{end}}</li>{{else}}<li class="empty">You have no recently sent messages.</li>{{end}}</ul>{{end}}
 {{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">{{.MoreLabel}}</a></p>{{end}}
@@ -2258,6 +2303,9 @@ var uploadFile=document.getElementById('upload-file');
 var uploadPreview=document.getElementById('upload-preview');
 var uploadForm=document.getElementById('upload-form');
 var uploadComment=document.getElementById('upload-comment');
+var uploadDraftAttachments=document.getElementById('upload-draft-attachments');
+var draftAttachmentInput=document.getElementById('draft-attachments');
+var uploadTitle=document.getElementById('upload-title');
 var uploadClear=document.getElementById('upload-clear');
 var uploadDetails=document.getElementById('upload-details');
 var clipDialog=document.getElementById('clip-recorder');
@@ -2286,6 +2334,9 @@ var inFlight=null;
 var scheduled=null;
 var draftTimer=null;
 var sending=false;
+var stagingFiles=false;
+var draftAttachments=[];
+try{draftAttachments=JSON.parse(draftAttachmentInput&&draftAttachmentInput.value||'[]');if(!Array.isArray(draftAttachments))draftAttachments=[]}catch(error){draftAttachments=[]}
 var streamState='';
 var mentionStart=-1;
 var channelStart=-1;
@@ -2328,6 +2379,7 @@ var csrf=composer.querySelector('input[name="_csrf"]');
 var thread=composer.querySelector('input[name="thread_ts"]');
 body.set('_csrf',csrf?csrf.value:'');
 body.set('text',text.value);
+body.set('draft_attachments',JSON.stringify(draftAttachments));
 if(thread)body.set('thread_ts',thread.value);
 fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin',keepalive:!!keepalive}).then(function(response){if(!response.ok)announce('Your draft has not been saved yet. Keep this tab open and try typing again.')}).catch(function(){announce('Your draft has not been saved yet. Keep this tab open and try typing again.')});
 }
@@ -2743,6 +2795,7 @@ persistDraft();
 text.addEventListener('input',function(){persistDraft();updateAutocomplete()});
 text.addEventListener('click',updateAutocomplete);
 window.addEventListener('pagehide',function(){saveDraftRemote(true)});
+window.addEventListener('beforeunload',function(event){if(stagingFiles){event.preventDefault();event.returnValue=''}});
 }
 if(switcherQuery)switcherQuery.addEventListener('input',filterSwitcher);
 if(switcherClose)switcherClose.addEventListener('click',function(){switcher.close()});
@@ -2798,22 +2851,48 @@ if(shortcutBrowserResults)shortcutBrowserResults.addEventListener('click',functi
 if(shortcutBrowser)shortcutBrowser.addEventListener('click',function(event){if(event.target===shortcutBrowser)closeShortcutBrowser()});
 if(shortcutBrowser)shortcutBrowser.addEventListener('close',function(){if(shortcutBrowserOpen)shortcutBrowserOpen.focus()});
 function formatFileSize(value){var size=value;var unit='B';if(size>=1048576){size=size/1048576;unit='MiB'}else if(size>=1024){size=size/1024;unit='KiB'}return(unit==='B'?size:String(Math.round(size*10)/10))+' '+unit}
+function syncDraftAttachments(){
+var encoded=JSON.stringify(draftAttachments);
+if(draftAttachmentInput)draftAttachmentInput.value=encoded;
+if(uploadDraftAttachments)uploadDraftAttachments.value=encoded;
+}
 function updateUploadPreview(){
 if(!uploadFile||!uploadPreview)return;
 var files=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
-if(!files.length){uploadPreview.textContent='No files selected. You can also paste or drop files into the composer.';if(uploadClear)uploadClear.hidden=true;if(text)text.required=true;return}
-uploadPreview.textContent=files.map(function(file){return(file.name||'Pasted file')+' · '+formatFileSize(file.size)}).join(' · ');
+uploadPreview.textContent='';
+if(!draftAttachments.length&&!files.length){uploadPreview.textContent='No files selected. You can also paste or drop files into the composer.';if(uploadClear)uploadClear.hidden=true;if(text)text.required=true;return}
+draftAttachments.forEach(function(file,index){
+var item=document.createElement('span');item.className='staged-file';item.appendChild(document.createTextNode((file.name||'Staged file')+' · '+formatFileSize(file.size||0)+' '));
+var remove=document.createElement('button');remove.type='button';remove.setAttribute('data-remove-draft-attachment',String(index));remove.setAttribute('aria-label','Remove '+(file.name||'staged file'));remove.textContent='Remove';item.appendChild(remove);uploadPreview.appendChild(item);
+});
+files.forEach(function(file){var item=document.createElement('span');item.className='staged-file';item.textContent=(file.name||'Pasted file')+' · '+formatFileSize(file.size)+(stagingFiles?' · uploading':'');uploadPreview.appendChild(item)});
 if(uploadClear)uploadClear.hidden=false;
 if(uploadDetails)uploadDetails.open=true;
 if(text)text.required=false;
-announce(files.length===1?'One file staged. Send when ready.':files.length+' files staged. Send when ready.');
+}
+function stageSelectedFiles(){
+if(!uploadForm||!uploadFile||!uploadFile.files||!uploadFile.files.length||stagingFiles)return Promise.resolve(false);
+if(draftAttachments.length+uploadFile.files.length>10){showError('A draft can contain up to ten staged files.',composer);return Promise.resolve(false)}
+stagingFiles=true;clearError(composer);updateUploadPreview();
+if(uploadComment)uploadComment.value=text?text.value:'';
+syncDraftAttachments();
+var body=new FormData(uploadForm);
+return fetch(uploadForm.getAttribute('action'),{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){
+if(!response.ok)return response.text().then(function(body){throw new Error(body)});
+return response.json();
+}).then(function(result){
+draftAttachments=result&&Array.isArray(result.attachments)?result.attachments:draftAttachments;
+syncDraftAttachments();uploadFile.value='';if(uploadTitle)uploadTitle.value='';stagingFiles=false;updateUploadPreview();persistDraft();
+announce(draftAttachments.length===1?'One file is saved with this draft.':draftAttachments.length+' files are saved with this draft.');
+return true;
+}).catch(function(error){stagingFiles=false;updateUploadPreview();showError(failure(error,composer),composer);return false});
 }
 function stageFiles(fileList){
 if(!uploadFile||!fileList||!fileList.length)return false;
 if(!window.DataTransfer){announce('Choose pasted files with Attach files in this browser.');return false}
 var transfer=new DataTransfer();var existing=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
 existing.concat(Array.prototype.slice.call(fileList)).slice(0,10).forEach(function(file){transfer.items.add(file)});
-uploadFile.files=transfer.files;updateUploadPreview();return true;
+uploadFile.files=transfer.files;updateUploadPreview();stageSelectedFiles();return true;
 }
 function clearClipTimers(){
 if(clipLimitTimer)window.clearTimeout(clipLimitTimer);
@@ -2892,8 +2971,10 @@ if(clipCancel)clipCancel.addEventListener('click',cancelClip);
 if(clipDialog)clipDialog.addEventListener('cancel',function(event){event.preventDefault();cancelClip()});
 if(clipDialog)clipDialog.addEventListener('click',function(event){if(event.target===clipDialog)cancelClip()});
 if(clipDialog)clipDialog.addEventListener('close',function(){if(clipTrigger&&document.contains(clipTrigger))clipTrigger.focus();clipTrigger=null});
-if(uploadFile){uploadFile.addEventListener('change',updateUploadPreview);updateUploadPreview()}
-if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';updateUploadPreview();if(text)text.focus()});
+if(uploadFile){uploadFile.addEventListener('change',function(){updateUploadPreview();stageSelectedFiles()});syncDraftAttachments();updateUploadPreview()}
+if(uploadForm)uploadForm.addEventListener('submit',function(event){event.preventDefault();stageSelectedFiles()});
+if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';draftAttachments=[];syncDraftAttachments();updateUploadPreview();persistDraft();announce('Staged files removed from the draft.');if(text)text.focus()});
+if(uploadPreview)uploadPreview.addEventListener('click',function(event){var remove=event.target.closest('[data-remove-draft-attachment]');if(!remove)return;var index=Number(remove.getAttribute('data-remove-draft-attachment'));if(index<0||index>=draftAttachments.length)return;var name=draftAttachments[index].name||'Staged file';draftAttachments.splice(index,1);syncDraftAttachments();updateUploadPreview();persistDraft();announce(name+' removed from the draft.');if(text)text.focus()});
 if(text&&uploadFile){
 text.addEventListener('paste',function(event){var files=event.clipboardData&&event.clipboardData.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
 composer.addEventListener('dragover',function(event){if(event.dataTransfer&&event.dataTransfer.types&&Array.prototype.indexOf.call(event.dataTransfer.types,'Files')!==-1){event.preventDefault();composer.classList.add('is-dragging')}});
@@ -2905,15 +2986,18 @@ var form=event.target.closest('form');
 if(!form||!form.hasAttribute('hx-post'))return;
 var submitter=event.submitter;
 var action=submitter&&submitter.getAttribute('formaction')||form.getAttribute('hx-post');
-var stagedUpload=form===composer&&uploadForm&&uploadFile&&uploadFile.files&&uploadFile.files.length>0&&action.indexOf('/app/message/schedule')!==0;
-if(stagedUpload){action=uploadForm.getAttribute('action');if(uploadComment)uploadComment.value=text?text.value:''}
 if(!ownPath(action))return;
 event.preventDefault();
+if(form===composer&&(stagingFiles||(uploadFile&&uploadFile.files&&uploadFile.files.length))){
+if(!stagingFiles)stageSelectedFiles();
+announce('Wait for the selected files to finish saving, then send again.');
+return;
+}
 if(form===composer){if(sending)return;sending=true;if(draftTimer){window.clearTimeout(draftTimer);draftTimer=null}}
 var activeMessage=document.activeElement&&document.activeElement.closest?document.activeElement.closest('.message'):null;
 var restoreMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
 var quiet=form.getAttribute('data-quiet')==='true';
-var body=new FormData(stagedUpload?uploadForm:form);
+var body=new FormData(form);
 var unixInput=form.querySelector('[data-unix-seconds="true"]');
 if(unixInput&&unixInput.value){var unixMillis=new Date(unixInput.value).getTime();if(!isNaN(unixMillis))body.set('value',String(Math.floor(unixMillis/1000)))}
 var scheduleInput=form.querySelector('[data-schedule-at]');
@@ -2927,7 +3011,7 @@ fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
-if(redirect){if(form===composer&&text&&text.value===sent){text.value='';persistDraft()}if(stagedUpload&&uploadFile){uploadFile.value='';updateUploadPreview()}if(ownPath(redirect))window.location.assign(redirect);return null}
+if(redirect){if(form===composer&&text&&text.value===sent){text.value='';draftAttachments=[];syncDraftAttachments();persistDraft()}if(ownPath(redirect))window.location.assign(redirect);return null}
 if(response.status===204)return '';
 return response.text();
 }).then(function(html){
@@ -2946,7 +3030,7 @@ var target=document.querySelector(form.getAttribute('hx-target'));
 if(!target)throw new Error('The page could not be updated. Reload to see the message.');
 target.insertAdjacentHTML('beforeend',html);
 localize(target);
-if(form===composer&&text){if(text.value===sent){text.value='';persistDraft()}if(stagedUpload&&uploadFile){uploadFile.value='';updateUploadPreview()}text.focus()}else{form.reset()}
+if(form===composer&&text){if(text.value===sent){text.value='';draftAttachments=[];syncDraftAttachments();persistDraft()}text.focus()}else{form.reset()}
 toBottom(target);
 toBottom(document.getElementById('timeline'));
 return refresh(true);
@@ -3211,6 +3295,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/schedule/update", h.updateScheduledMessage)
 	mux.HandleFunc("POST /app/message/schedule/send-now", h.sendScheduledMessageNow)
 	mux.HandleFunc("POST /app/message/schedule/cancel", h.cancelScheduledMessage)
+	mux.HandleFunc("POST /app/file/stage", h.stageDraftFiles)
 	mux.HandleFunc("POST /app/file", h.uploadFile)
 	mux.HandleFunc("GET /app/files/{fileID}", h.downloadFile)
 	mux.HandleFunc("POST /app/interaction", h.appInteraction)
@@ -3296,6 +3381,7 @@ func (h Handler) writeMutationError(w http.ResponseWriter, r *http.Request, stat
 // post keeps the text the user typed and says what went wrong.
 type composerState struct {
 	Draft          string
+	Attachments    []domain.DraftAttachment
 	ScheduleAt     string
 	Message        string
 	Notice         string
@@ -3744,16 +3830,36 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			notices = append(notices, "Conversation details are temporarily unavailable.")
 		}
 	}
-	if state.Draft == "" && isMember {
+	if state.Draft == "" && len(state.Attachments) == 0 && isMember {
 		draft, draftErr := h.Messages.Draft(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp))
 		switch {
 		case draftErr == nil:
 			state.Draft = draft.Text
+			state.Attachments = draft.Attachments
 		case errors.Is(draftErr, store.ErrNotFound):
 		default:
 			notices = append(notices, "Your saved draft is temporarily unavailable.")
 		}
 	}
+	if isMember {
+		draftPage, draftErr := h.Messages.Drafts(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 1000, Descending: true})
+		if draftErr != nil {
+			notices = append(notices, "Draft indicators are temporarily unavailable.")
+		} else {
+			withDraft := make(map[domain.ConversationID]bool, len(draftPage.Items))
+			for _, draft := range draftPage.Items {
+				withDraft[draft.ConversationID] = true
+			}
+			for index := range conversations.Channels {
+				conversations.Channels[index].HasDraft = withDraft[domain.ConversationID(conversations.Channels[index].ID)]
+			}
+			for index := range conversations.Directs {
+				conversations.Directs[index].HasDraft = withDraft[domain.ConversationID(conversations.Directs[index].ID)]
+			}
+		}
+	}
+	draftAttachments := newDraftAttachmentViews(state.Attachments)
+	draftJSON, _ := json.Marshal(draftAttachments)
 
 	data := pageData{
 		Timeline:         timeline,
@@ -3782,11 +3888,14 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		Notice:           strings.Join(notices, " "),
 		Error:            state.Message,
 		Draft:            state.Draft,
+		DraftAttachments: draftAttachments,
+		DraftJSON:        string(draftJSON),
 		ScheduleAt:       state.ScheduleAt,
 		ComposeURL:       mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
 		DraftURL:         mutationURL("/app/draft", string(channel), "", threadTimestamp, ""),
 		ScheduleURL:      mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
 		UploadURL:        mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
+		StageUploadURL:   mutationURL("/app/file/stage", string(channel), "", threadTimestamp, ""),
 		TimelineURL:      fragmentURL(string(channel), "", string(before)),
 		ThreadURL:        fragmentURL(string(channel), threadTimestamp, ""),
 		GlobalShortcuts:  globalShortcuts,
@@ -4783,7 +4892,7 @@ func (h Handler) draftsAndSent(w http.ResponseWriter, r *http.Request) {
 			data.Drafts = append(data.Drafts, draftView{
 				Text: item.Text, MachineTime: item.UpdatedAt.UTC().Format(time.RFC3339Nano), DisplayTime: formatTime(item.UpdatedAt),
 				ChannelName: name, ChannelPrefix: prefix, OpenURL: openURL,
-				DeleteURL: "/app/draft/delete?" + deleteQuery.Encode(),
+				DeleteURL: "/app/draft/delete?" + deleteQuery.Encode(), AttachmentCount: len(item.Attachments),
 			})
 		}
 		next, hasMore = page.NextCursor, page.HasMore
@@ -6787,10 +6896,31 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channel := h.requestChannel(r)
+	draftAttachments, attachmentErr := draftAttachmentsFromJSON(fields["draft_attachments"])
+	if attachmentErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The staged files are not valid", "Reload the conversation and stage the files again.")
+		return
+	}
 	command, commandText, isSlashCommand := slashCommandInput(fields["text"])
 	var message domain.Message
 	var slashRedirect string
-	if isSlashCommand {
+	if len(draftAttachments) > 0 {
+		switch {
+		case !principal.HasScope(auth.ScopeFilesWrite):
+			err = auth.ErrMissingScope
+		case isSlashCommand:
+			err = service.ErrInvalidExternalUpload
+		default:
+			completions := make([]domain.ExternalUploadCompletion, 0, len(draftAttachments))
+			for _, attachment := range draftAttachments {
+				completions = append(completions, domain.ExternalUploadCompletion{ID: attachment.UploadID, Title: attachment.Title})
+			}
+			_, err = h.Messages.CompleteExternalUploads(
+				r.Context(), principal.WorkspaceID, principal.UserID, completions, []domain.ConversationID{channel},
+				fields["text"], "", domain.MessageTimestamp(fields["thread_ts"]),
+			)
+		}
+	} else if isSlashCommand {
 		var handled bool
 		message, slashRedirect, handled, err = h.dispatchBuiltInSlashCommand(r.Context(), principal, channel, domain.MessageTimestamp(fields["thread_ts"]), command, commandText, fields["timezone"])
 		if !handled {
@@ -6805,6 +6935,14 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, service.ErrInvalidMessage) {
 			status = http.StatusBadRequest
 			reason = "A message needs some text before it can be sent."
+		}
+		if errors.Is(err, service.ErrInvalidExternalUpload) {
+			status = http.StatusBadRequest
+			reason = "One or more staged files are no longer available. Remove them from the draft or stage them again."
+		}
+		if errors.Is(err, auth.ErrMissingScope) {
+			status = http.StatusForbidden
+			reason = "Your session cannot share files, so the staged attachments were not sent."
 		}
 		if errors.Is(err, service.ErrInvalidTimestamp) {
 			status = http.StatusBadRequest
@@ -6865,7 +7003,7 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 			h.writePageError(w, status, "That message was not sent", reason)
 			return
 		}
-		h.renderApp(w, r, reader, composerState{Draft: fields["text"], Message: reason, Status: status})
+		h.renderApp(w, r, reader, composerState{Draft: fields["text"], Attachments: draftAttachments, Message: reason, Status: status})
 		return
 	}
 	if cleanupErr := h.Messages.DeleteDraft(r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(strings.TrimSpace(fields["thread_ts"]))); cleanupErr != nil {
@@ -6873,6 +7011,10 @@ func (h Handler) postMessage(w http.ResponseWriter, r *http.Request) {
 		// the browser to retry and risk a duplicate, so surface the independent
 		// cleanup result without changing the mutation outcome.
 		w.Header().Set("X-SameOldChat-Draft-Cleanup", "failed")
+	}
+	if len(draftAttachments) > 0 {
+		h.redirectMutation(w, r, h.viewURL(r, strings.TrimSpace(fields["thread_ts"])))
+		return
 	}
 	if isSlashCommand && message.ID == "" {
 		if slashRedirect != "" {
@@ -6923,15 +7065,20 @@ func (h Handler) saveDraft(w http.ResponseWriter, r *http.Request) {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That draft has no destination", "Reload the conversation and try again.")
 		return
 	}
-	if strings.TrimSpace(fields["text"]) == "" {
+	attachments, attachmentErr := draftAttachmentsFromJSON(fields["draft_attachments"])
+	if attachmentErr != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The draft attachments are not valid", "Reload the conversation and stage the files again.")
+		return
+	}
+	if strings.TrimSpace(fields["text"]) == "" && len(attachments) == 0 {
 		err = h.Messages.DeleteDraft(r.Context(), principal.WorkspaceID, principal.UserID, channel, thread)
 	} else {
-		_, err = h.Messages.SaveDraft(r.Context(), principal.WorkspaceID, principal.UserID, channel, thread, fields["text"])
+		_, err = h.Messages.SaveDraftWithAttachments(r.Context(), principal.WorkspaceID, principal.UserID, channel, thread, fields["text"], attachments)
 	}
 	if err != nil {
 		status, reason := http.StatusServiceUnavailable, "The draft could not be saved because the workspace store is temporarily unavailable."
 		switch {
-		case errors.Is(err, service.ErrInvalidMessage), errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, store.ErrInvalidArgument):
+		case errors.Is(err, service.ErrInvalidMessage), errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, service.ErrInvalidExternalUpload), errors.Is(err, store.ErrInvalidArgument):
 			status, reason = http.StatusBadRequest, "The draft text or thread is not valid."
 		case errors.Is(err, service.ErrNotInConversation), errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusForbidden, "You can no longer save a draft in this conversation."
@@ -6979,9 +7126,18 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	attachments, attachmentErr := draftAttachmentsFromJSON(fields["draft_attachments"])
+	if attachmentErr != nil {
+		h.writeScheduleMessageError(w, r, principal, fields["text"], nil, fields["schedule_at"], http.StatusBadRequest, "The staged files are no longer valid. Reload the conversation and stage them again.")
+		return
+	}
+	if len(attachments) > 0 {
+		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], http.StatusBadRequest, "Staged files cannot be scheduled yet. Send them now or remove them before scheduling; the draft was kept.")
+		return
+	}
 	postAtUnix, parseErr := strconv.ParseInt(strings.TrimSpace(fields["post_at"]), 10, 64)
 	if parseErr != nil || postAtUnix <= 0 {
-		h.writeScheduleMessageError(w, r, principal, fields["text"], fields["schedule_at"], http.StatusBadRequest, "Choose a delivery date and time in your browser before scheduling the message.")
+		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], http.StatusBadRequest, "Choose a delivery date and time in your browser before scheduling the message.")
 		return
 	}
 	channel := h.requestChannel(r)
@@ -7013,7 +7169,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, store.ErrNotFound):
 			status, reason = http.StatusNotFound, "That conversation or thread is no longer available."
 		}
-		h.writeScheduleMessageError(w, r, principal, fields["text"], fields["schedule_at"], status, reason)
+		h.writeScheduleMessageError(w, r, principal, fields["text"], attachments, fields["schedule_at"], status, reason)
 		return
 	}
 	query := url.Values{"channel": {string(channel)}, "tab": {"scheduled"}, "scheduled": {"1"}}
@@ -7023,7 +7179,7 @@ func (h Handler) scheduleMessage(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/drafts?"+query.Encode())
 }
 
-func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, draft, scheduleAt string, status int, reason string) {
+func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Request, principal auth.Principal, draft string, attachments []domain.DraftAttachment, scheduleAt string, status int, reason string) {
 	w.Header().Set("Vary", "HX-Request")
 	if r.Header.Get("HX-Request") == "true" {
 		secureHeaders(w, workspaceContentSecurityPolicy)
@@ -7035,7 +7191,7 @@ func (h Handler) writeScheduleMessageError(w http.ResponseWriter, r *http.Reques
 		h.writePageError(w, status, "That message was not scheduled", reason)
 		return
 	}
-	h.renderApp(w, r, reader, composerState{Draft: draft, ScheduleAt: scheduleAt, Message: reason, Status: status})
+	h.renderApp(w, r, reader, composerState{Draft: draft, Attachments: attachments, ScheduleAt: scheduleAt, Message: reason, Status: status})
 }
 
 func (h Handler) updateScheduledMessage(w http.ResponseWriter, r *http.Request) {
@@ -7155,7 +7311,103 @@ func (h Handler) cancelScheduledMessage(w http.ResponseWriter, r *http.Request) 
 const (
 	maxWorkspaceUploadBytes  = 100 << 20
 	maxWorkspaceUploadFields = 1 << 20
+	draftAttachmentTTL       = 15 * time.Minute
 )
+
+func (h Handler) stageDraftFiles(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeFilesWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if !principal.HasScope(auth.ScopeChatWrite) {
+		h.writeAuthError(w, auth.ErrMissingScope)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxWorkspaceUploadBytes+maxWorkspaceUploadFields)
+	if err := r.ParseMultipartForm(maxWorkspaceUploadFields); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Those files could not be read", "Choose up to ten files smaller than 100 MiB in total and try again.")
+		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	if !h.acceptCSRFResult(w, r, auth.ValidateCSRFValue(r, r.FormValue(auth.CSRFTokenFieldName))) {
+		return
+	}
+	existing, err := draftAttachmentsFromJSON(r.FormValue("draft_attachments"))
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The existing draft attachments are not valid", "Reload the conversation before adding files.")
+		return
+	}
+	headers := r.MultipartForm.File["file"]
+	if len(headers) == 0 || len(existing)+len(headers) > 10 {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Choose up to ten files", "A draft can contain between one and ten staged files.")
+		return
+	}
+	attachments := append([]domain.DraftAttachment(nil), existing...)
+	singleTitle := strings.TrimSpace(r.FormValue("title"))
+	for index, header := range headers {
+		name := strings.TrimSpace(header.Filename)
+		if name == "" {
+			name = "pasted-file-" + strconv.Itoa(index+1)
+		}
+		mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		upload, createErr := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, draftAttachmentTTL)
+		if createErr != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That file was not staged", "Choose non-empty files with valid names and try again.")
+			return
+		}
+		source, openErr := header.Open()
+		if openErr != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That file could not be opened", "Choose the files again and retry.")
+			return
+		}
+		uploadErr := h.Messages.UploadExternalFile(r.Context(), upload.ID, header.Size, source)
+		closeErr := source.Close()
+		if uploadErr == nil {
+			uploadErr = closeErr
+		}
+		if uploadErr != nil {
+			status, reason := http.StatusServiceUnavailable, "The file store is temporarily unavailable. Your existing draft is unchanged."
+			if errors.Is(uploadErr, service.ErrInvalidExternalUpload) {
+				status, reason = http.StatusBadRequest, "One selected file is empty or does not match its staged size."
+			}
+			h.writeMutationError(w, r, status, "Those files were not staged", reason)
+			return
+		}
+		title := name
+		if len(headers) == 1 && singleTitle != "" {
+			title = singleTitle
+		}
+		attachments = append(attachments, domain.DraftAttachment{UploadID: upload.ID, Title: title})
+	}
+	channel := h.requestChannel(r)
+	thread := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("thread")))
+	draft, err := h.Messages.SaveDraftWithAttachments(r.Context(), principal.WorkspaceID, principal.UserID, channel, thread, r.FormValue("text"), attachments)
+	if err != nil {
+		status, reason := http.StatusServiceUnavailable, "The files were uploaded, but the draft store is temporarily unavailable. Try adding them again."
+		if errors.Is(err, service.ErrNotInConversation) {
+			status, reason = http.StatusForbidden, "You can no longer save a draft in this conversation."
+		} else if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) {
+			status, reason = http.StatusBadRequest, "The draft destination or staged files are no longer valid."
+		}
+		h.writeMutationError(w, r, status, "Those files were not added to the draft", reason)
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(struct {
+			Attachments []draftAttachmentView `json:"attachments"`
+		}{Attachments: newDraftAttachmentViews(draft.Attachments)})
+		return
+	}
+	h.redirectMutation(w, r, h.viewURL(r, string(thread)))
+}
 
 func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeFilesWrite)

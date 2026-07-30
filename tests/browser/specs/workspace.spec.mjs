@@ -623,7 +623,7 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   await signIn(context);
   await page.goto('/app');
 
-  await page.getByText('Attach a file', { exact: true }).click();
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
   const title = `Browser file ${Date.now()}`;
   await page.getByLabel('Title (optional)').fill(title);
   await page.locator('#upload-file').setInputFiles({
@@ -631,7 +631,8 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
     mimeType: 'text/plain',
     buffer: Buffer.from('browser file contents'),
   });
-  await page.getByRole('button', { name: 'Upload and send' }).click();
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
 
   await expect(page).toHaveURL(/\/app\?channel=Cdev/);
   const card = page.locator('.message-file', { hasText: title }).last();
@@ -657,14 +658,15 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await postThroughTheAPI(request, message);
 
   await page.goto('/app');
-  await page.getByText('Attach a file', { exact: true }).click();
+  await page.locator('#upload-details').evaluate((details) => { details.open = true; });
   await page.getByLabel('Title (optional)').fill(fileTitle);
   await page.locator('#upload-file').setInputFiles({
     name: `${needle}.txt`,
     mimeType: 'text/plain',
     buffer: Buffer.from(`file contents for ${needle}`),
   });
-  await page.getByRole('button', { name: 'Upload and send' }).click();
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.getByRole('button', { name: 'Send', exact: true }).click();
   await expect(page.locator('.message-file', { hasText: fileTitle })).toBeVisible();
 
   const { primary } = await slackModifiers(page);
@@ -1204,6 +1206,11 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   });
   await expect(page.locator('#upload-preview')).toContainText('preview.txt');
   await expect(page.locator('#upload-preview')).toContainText('12 B');
+  await expect(page.locator('#live-status')).toContainText('saved with this draft');
+  await page.reload();
+  await expect(composer).toHaveValue(draft);
+  await expect(page.locator('#upload-preview')).toContainText('preview.txt');
+  await expect(page.locator('.side-link[aria-label*="has a draft"]').first()).toBeVisible();
 
   const sent = `draft cleared ${Date.now()}`;
   await composer.fill(sent);

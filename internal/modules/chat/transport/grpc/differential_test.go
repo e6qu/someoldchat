@@ -1241,8 +1241,20 @@ func parityCases() []parityCase {
 		},
 		{
 			name: "durable drafts and first-party scheduled management",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				now := time.Now().UTC()
+				requireSeed(t, target.CreateExternalUpload(context.Background(), domain.ExternalUpload{
+					ID: "draft-upload", WorkspaceID: "T1", Uploader: "U1", Name: "draft.txt", Title: "draft.txt",
+					MIMEType: "text/plain", BlobKey: "T1/external/draft-upload", Size: 5,
+					Status: domain.ExternalUploadUploaded, CreatedAt: now, ExpiresAt: now.Add(time.Hour), UploadedAt: now,
+				}))
+			},
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				draft, err := chat.SaveDraft(ctx, "T1", "U1", "C1", "", "unfinished thought")
+				if _, err := chat.SaveDraft(ctx, "T1", "U1", "C1", "", "unfinished thought"); err != nil {
+					return nil, err
+				}
+				draft, err := chat.SaveDraftWithAttachments(ctx, "T1", "U1", "C1", "", "unfinished thought", []domain.DraftAttachment{{UploadID: "draft-upload", Title: "Evidence"}})
 				if err != nil {
 					return nil, err
 				}
@@ -1278,7 +1290,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{
-					draft.Text, loaded.Text, len(drafts.Items), updated.Text, len(history.Items),
+					draft.Text, len(draft.Attachments), loaded.Text, len(loaded.Attachments), len(drafts.Items), len(drafts.Items[0].Attachments), updated.Text, len(history.Items),
 					sent.Text, len(sentPage.Messages), sentPage.Messages[0].Text,
 				}, nil
 			},

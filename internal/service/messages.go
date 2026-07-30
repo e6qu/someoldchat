@@ -5162,11 +5162,40 @@ func (m Messages) DeleteScheduledMessageForCredential(ctx context.Context, works
 }
 
 func (m Messages) SaveDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string) (domain.Draft, error) {
+	return m.SaveDraftWithAttachments(ctx, workspaceID, userID, conversation, thread, text, nil)
+}
+
+func (m Messages) SaveDraftWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string, attachments []domain.DraftAttachment) (domain.Draft, error) {
 	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
 		return domain.Draft{}, err
 	}
-	if strings.TrimSpace(text) == "" || messageTextTooLong(text) {
+	if (strings.TrimSpace(text) == "" && len(attachments) == 0) || messageTextTooLong(text) || len(attachments) > 10 {
 		return domain.Draft{}, ErrInvalidMessage
+	}
+	normalizedAttachments := make([]domain.DraftAttachment, 0, len(attachments))
+	seenUploads := make(map[domain.ExternalUploadID]struct{}, len(attachments))
+	for _, attachment := range attachments {
+		attachment.UploadID = domain.ExternalUploadID(strings.TrimSpace(string(attachment.UploadID)))
+		attachment.Title = strings.TrimSpace(attachment.Title)
+		if attachment.UploadID == "" || len(attachment.Title) > 255 {
+			return domain.Draft{}, ErrInvalidExternalUpload
+		}
+		if _, duplicate := seenUploads[attachment.UploadID]; duplicate {
+			return domain.Draft{}, ErrInvalidExternalUpload
+		}
+		upload, err := m.Store.GetExternalUpload(ctx, attachment.UploadID)
+		if err != nil || upload.WorkspaceID != workspaceID || upload.Uploader != userID ||
+			upload.Status != domain.ExternalUploadUploaded || !upload.ExpiresAt.After(time.Now().UTC()) {
+			return domain.Draft{}, ErrInvalidExternalUpload
+		}
+		if attachment.Title == "" {
+			attachment.Title = upload.Title
+		}
+		attachment.Name = upload.Name
+		attachment.MIMEType = upload.MIMEType
+		attachment.Size = upload.Size
+		normalizedAttachments = append(normalizedAttachments, attachment)
+		seenUploads[attachment.UploadID] = struct{}{}
 	}
 	if thread != "" {
 		createdAt, err := domain.ParseMessageTimestamp(thread)
@@ -5181,7 +5210,7 @@ func (m Messages) SaveDraft(ctx context.Context, workspaceID domain.WorkspaceID,
 	now := time.Now().UTC()
 	value := domain.Draft{
 		WorkspaceID: workspaceID, UserID: userID, ConversationID: conversation,
-		ThreadTimestamp: thread, Text: text, UpdatedAt: now,
+		ThreadTimestamp: thread, Text: text, Attachments: normalizedAttachments, UpdatedAt: now,
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload(
 		"draft.saved",
@@ -6656,7 +6685,13 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 			return nil, store.ErrNotFound
 		}
 		if !value.ExpiresAt.After(time.Now().UTC()) {
-			return nil, ErrInvalidExternalUpload
+			draftOwned, draftErr := m.Store.DraftAttachmentExists(ctx, workspaceID, userID, value.ID)
+			if draftErr != nil {
+				return nil, draftErr
+			}
+			if !draftOwned {
+				return nil, ErrInvalidExternalUpload
+			}
 		}
 		values[index] = value
 	}
@@ -6689,6 +6724,14 @@ func (m Messages) CompleteExternalUploads(ctx context.Context, workspaceID domai
 		return nil, err
 	}
 	if allCompleted {
+		// A completed ticket is retry evidence only when it was shared to this
+		// exact destination set. Without this check, a client could complete a
+		// draft-owned upload through files.completeUploadExternal in one
+		// channel, then "send" the stale draft in another; the composer would
+		// report success and clear the draft although no message was posted.
+		if !sameFileShareChannels(completed, channels) {
+			return nil, ErrInvalidExternalUpload
+		}
 		return completed, nil
 	}
 	for _, value := range values {
@@ -6807,7 +6850,7 @@ func normalizeExternalUploadCompletions(values []domain.ExternalUploadCompletion
 	for _, value := range values {
 		value.ID = domain.ExternalUploadID(strings.TrimSpace(string(value.ID)))
 		value.Title = strings.TrimSpace(value.Title)
-		if value.ID == "" {
+		if value.ID == "" || len(value.Title) > 255 {
 			return nil, ErrInvalidExternalUpload
 		}
 		if _, exists := seen[value.ID]; exists {

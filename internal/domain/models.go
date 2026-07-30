@@ -1205,7 +1205,20 @@ type Draft struct {
 	ConversationID  ConversationID
 	ThreadTimestamp MessageTimestamp
 	Text            string
+	Attachments     []DraftAttachment
 	UpdatedAt       time.Time
+}
+
+// DraftAttachment is a private reference to an uploaded-but-unshared blob.
+// The upload remains owned by the draft's member and is not a workspace File
+// until the composer sends it through the ordinary atomic file completion
+// path.
+type DraftAttachment struct {
+	UploadID ExternalUploadID
+	Name     string
+	Title    string
+	MIMEType string
+	Size     int64
 }
 
 type DraftPage struct {

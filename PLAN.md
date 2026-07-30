@@ -288,9 +288,16 @@ inaccessible-source redaction, live reconciliation, portable persistence, and
 local/distributed composition parity. Slack exposes no current Later Web API,
 so official SDK qualification remains evidence for the deliberately separate
 legacy `stars.*` and `reminders.*` contracts rather than being mislabeled as
-Later evidence. Durable staged draft attachments, sidebar draft indicators,
-Slack's suggested scheduling times, reminder dates/delivery, and Later reminder
-filtering remain part of the next stateful client review.
+Later evidence. Composer attachments are now private durable children of the
+exact conversation/thread draft: background staging, reload/process-restart
+recovery, Drafts & sent counts, sidebar indicators, memory/portable-SQL
+persistence, generated-gRPC parity, and blob-reconciliation references share
+one contract. Sending promotes the staged blobs through the ordinary atomic
+multi-file share path and clears the draft only after the message commits.
+Scheduled attachment delivery, Slack's 1 GB per-file allowance versus this
+deployment's explicit 100 MiB request limit, Slack's suggested scheduling
+times, reminder dates/delivery, and Later reminder filtering remain part of the
+next stateful client review.
 
 The direct-message lifecycle now has a dedicated searchable DMs surface,
 multi-recipient composition up to Slack's nine-person total, optional and
@@ -362,7 +369,7 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 134 representative exact assertions
+developer pages and currently checks 136 representative exact assertions
 explicitly citing 51 of the 102 journey IDs across every journey domain.
 `make journey-check` prints the other 51 as upstream-text evidence
 gaps. This pass corrected two local targets

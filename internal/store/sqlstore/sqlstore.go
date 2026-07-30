@@ -355,6 +355,15 @@ CREATE TABLE IF NOT EXISTS drafts (
  PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts)
 );
 CREATE INDEX IF NOT EXISTS drafts_owner_updated ON drafts(workspace_id, user_id, updated_at, conversation_id, thread_ts);
+CREATE TABLE IF NOT EXISTS draft_attachments (
+ workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, thread_ts TEXT NOT NULL DEFAULT '',
+ ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts, ordinal),
+ UNIQUE (upload_id),
+ FOREIGN KEY (workspace_id, user_id, conversation_id, thread_ts)
+  REFERENCES drafts(workspace_id, user_id, conversation_id, thread_ts) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS draft_attachments_owner ON draft_attachments(workspace_id, user_id, conversation_id, thread_ts);
 CREATE TABLE IF NOT EXISTS user_groups (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, handle TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', creator_id TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
@@ -403,7 +412,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 116
+const schemaVersion = 117
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2524,6 +2533,21 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 117 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS draft_attachments (
+			workspace_id TEXT NOT NULL, user_id TEXT NOT NULL, conversation_id TEXT NOT NULL, thread_ts TEXT NOT NULL DEFAULT '',
+			ordinal INTEGER NOT NULL, upload_id TEXT NOT NULL REFERENCES external_uploads(id), title TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts, ordinal),
+			UNIQUE (upload_id),
+			FOREIGN KEY (workspace_id, user_id, conversation_id, thread_ts)
+			 REFERENCES drafts(workspace_id, user_id, conversation_id, thread_ts) ON DELETE CASCADE
+		)`); err != nil {
+			return fmt.Errorf("migrate draft attachments: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS draft_attachments_owner ON draft_attachments(workspace_id, user_id, conversation_id, thread_ts)`); err != nil {
+			return fmt.Errorf("index draft attachments: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2794,7 +2818,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -10391,7 +10415,8 @@ func parseDraftCursor(cursor domain.Cursor) (string, domain.ConversationID, doma
 }
 
 func (s *Store) UpsertDraft(ctx context.Context, value domain.Draft, event events.Event) (domain.Draft, error) {
-	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" || strings.TrimSpace(value.Text) == "" || value.UpdatedAt.IsZero() {
+	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" ||
+		(strings.TrimSpace(value.Text) == "" && len(value.Attachments) == 0) || len(value.Attachments) > 10 || value.UpdatedAt.IsZero() {
 		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -10412,6 +10437,32 @@ func (s *Store) UpsertDraft(ctx context.Context, value domain.Draft, event event
 	if changed != 1 {
 		return domain.Draft{}, store.ErrNotFound
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM draft_attachments WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND thread_ts = ?`,
+		value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp); err != nil {
+		return domain.Draft{}, err
+	}
+	for ordinal, attachment := range value.Attachments {
+		if attachment.UploadID == "" || attachment.Name == "" || attachment.MIMEType == "" || attachment.Size <= 0 {
+			return domain.Draft{}, store.InvalidArgument("draft attachment is incomplete")
+		}
+		var uploadWorkspace domain.WorkspaceID
+		var uploader domain.UserID
+		var status domain.ExternalUploadStatus
+		if err := tx.QueryRowContext(ctx, `SELECT workspace_id, uploader_id, status FROM external_uploads WHERE id = ?`, attachment.UploadID).
+			Scan(&uploadWorkspace, &uploader, &status); errors.Is(err, sql.ErrNoRows) {
+			return domain.Draft{}, store.ErrNotFound
+		} else if err != nil {
+			return domain.Draft{}, err
+		}
+		if uploadWorkspace != value.WorkspaceID || uploader != value.UserID || status != domain.ExternalUploadUploaded {
+			return domain.Draft{}, store.InvalidArgument("draft attachment ownership is invalid")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO draft_attachments(workspace_id, user_id, conversation_id, thread_ts, ordinal, upload_id, title)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp, ordinal, attachment.UploadID, attachment.Title); err != nil {
+			return domain.Draft{}, classify(err)
+		}
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return domain.Draft{}, err
 	}
@@ -10427,7 +10478,31 @@ func (s *Store) GetDraft(ctx context.Context, workspace domain.WorkspaceID, user
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.Draft{}, store.ErrNotFound
 	}
+	if err == nil {
+		err = s.loadDraftAttachments(ctx, &value)
+	}
 	return value, err
+}
+
+func (s *Store) loadDraftAttachments(ctx context.Context, value *domain.Draft) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT a.upload_id, u.name, a.title, u.mime_type, u.size
+		FROM draft_attachments a JOIN external_uploads u ON u.id = a.upload_id
+		WHERE a.workspace_id = ? AND a.user_id = ? AND a.conversation_id = ? AND a.thread_ts = ?
+		ORDER BY a.ordinal`,
+		value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	value.Attachments = nil
+	for rows.Next() {
+		var attachment domain.DraftAttachment
+		if err := rows.Scan(&attachment.UploadID, &attachment.Name, &attachment.Title, &attachment.MIMEType, &attachment.Size); err != nil {
+			return err
+		}
+		value.Attachments = append(value.Attachments, attachment)
+	}
+	return rows.Err()
 }
 
 func (s *Store) ListDrafts(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
@@ -10469,6 +10544,14 @@ func (s *Store) ListDrafts(ctx context.Context, workspace domain.WorkspaceID, us
 	}
 	if err := rows.Err(); err != nil {
 		return domain.DraftPage{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return domain.DraftPage{}, err
+	}
+	for index := range items {
+		if err := s.loadDraftAttachments(ctx, &items[index]); err != nil {
+			return domain.DraftPage{}, err
+		}
 	}
 	page := domain.DraftPage{Items: items, HasMore: len(items) > request.Limit}
 	if page.HasMore {
@@ -11065,6 +11148,15 @@ func (s *Store) GetExternalUpload(ctx context.Context, id domain.ExternalUploadI
 	return value, nil
 }
 
+func (s *Store) DraftAttachmentExists(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, upload domain.ExternalUploadID) (bool, error) {
+	var exists int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM draft_attachments WHERE workspace_id = ? AND user_id = ? AND upload_id = ?`, workspace, user, upload).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
 func (s *Store) MarkExternalUploadUploaded(ctx context.Context, id domain.ExternalUploadID, uploadedAt time.Time) error {
 	result, err := s.db.ExecContext(ctx, `UPDATE external_uploads SET status = ?, uploaded_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadUploaded, domain.NewStoredTime(uploadedAt), id, domain.ExternalUploadPending, domain.NewStoredTime(time.Now()))
 	if err != nil {
@@ -11505,6 +11597,32 @@ func (s *Store) collectBlobReferences(ctx context.Context, workspace domain.Work
 		if reference == "" {
 			rows.Close()
 			return nil, errors.New("database contains an empty blob reference")
+		}
+		references = append(references, reference)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	rows, err = s.db.QueryContext(ctx, `SELECT u.blob_key
+		FROM draft_attachments a
+		JOIN external_uploads u ON u.id = a.upload_id
+		WHERE a.workspace_id = ? AND u.status = ?`, workspace, domain.ExternalUploadUploaded)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var reference string
+		if err := rows.Scan(&reference); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if reference == "" {
+			rows.Close()
+			return nil, errors.New("database contains an empty draft attachment blob reference")
 		}
 		references = append(references, reference)
 	}
@@ -13145,7 +13263,10 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 		}
 		seenUploads[completion.ID] = struct{}{}
 		seenFiles[files[index].ID] = struct{}{}
-		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ? WHERE id = ? AND status = ? AND expires_at > ?`, domain.ExternalUploadCompleted, files[index].ID, domain.NewStoredTime(files[index].CreatedAt), completion.ID, domain.ExternalUploadUploaded, now)
+		result, err := tx.ExecContext(ctx, `UPDATE external_uploads SET status = ?, file_id = ?, completed_at = ?
+			WHERE id = ? AND status = ? AND (expires_at > ? OR EXISTS (SELECT 1 FROM draft_attachments WHERE upload_id = ?))`,
+			domain.ExternalUploadCompleted, files[index].ID, domain.NewStoredTime(files[index].CreatedAt),
+			completion.ID, domain.ExternalUploadUploaded, now, completion.ID)
 		if err != nil {
 			return err
 		}

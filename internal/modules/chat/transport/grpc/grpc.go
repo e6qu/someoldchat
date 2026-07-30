@@ -3182,9 +3182,13 @@ func (r Remote) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 }
 
 func (r Remote) SaveDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string) (domain.Draft, error) {
+	return r.SaveDraftWithAttachments(ctx, workspaceID, userID, conversation, thread, text, nil)
+}
+
+func (r Remote) SaveDraftWithAttachments(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string, attachments []domain.DraftAttachment) (domain.Draft, error) {
 	out, err := r.scheduled.SaveDraft(ctx, &chatv1.DraftRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversation),
-		ThreadTs: string(thread), Text: text,
+		ThreadTs: string(thread), Text: text, Attachments: encodeProtoDraftAttachments(attachments),
 	})
 	if err != nil {
 		return domain.Draft{}, err
@@ -5559,9 +5563,10 @@ func (s *Server) DeleteScheduledMessage(ctx context.Context, input *chatv1.Delet
 }
 
 func (s *Server) SaveDraft(ctx context.Context, input *chatv1.DraftRequest) (*chatv1.Draft, error) {
-	value, err := s.implementation.SaveDraft(
+	value, err := s.implementation.SaveDraftWithAttachments(
 		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
 		domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTs()), input.GetText(),
+		decodeProtoDraftAttachments(input.GetAttachments()),
 	)
 	if err != nil {
 		return nil, mapError(err)
@@ -7876,18 +7881,44 @@ func encodeProtoDraft(value domain.Draft) *chatv1.Draft {
 	return &chatv1.Draft{
 		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ConversationId: string(value.ConversationID),
 		ThreadTs: string(value.ThreadTimestamp), Text: value.Text, UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+		Attachments: encodeProtoDraftAttachments(value.Attachments),
 	}
+}
+
+func encodeProtoDraftAttachments(values []domain.DraftAttachment) []*chatv1.DraftAttachment {
+	result := make([]*chatv1.DraftAttachment, 0, len(values))
+	for _, value := range values {
+		result = append(result, &chatv1.DraftAttachment{
+			UploadId: string(value.UploadID), Name: value.Name, Title: value.Title, MimeType: value.MIMEType, Size: value.Size,
+		})
+	}
+	return result
+}
+
+func decodeProtoDraftAttachments(values []*chatv1.DraftAttachment) []domain.DraftAttachment {
+	result := make([]domain.DraftAttachment, 0, len(values))
+	for _, value := range values {
+		if value == nil {
+			continue
+		}
+		result = append(result, domain.DraftAttachment{
+			UploadID: domain.ExternalUploadID(value.GetUploadId()), Name: value.GetName(), Title: value.GetTitle(),
+			MIMEType: value.GetMimeType(), Size: value.GetSize(),
+		})
+	}
+	return result
 }
 
 func decodeProtoDraft(value *chatv1.Draft) (domain.Draft, error) {
 	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetConversationId() == "" ||
-		value.GetText() == "" || value.GetUpdatedAtUnixNano() <= 0 {
+		(value.GetText() == "" && len(value.GetAttachments()) == 0) || value.GetUpdatedAtUnixNano() <= 0 {
 		return domain.Draft{}, errors.New("typed draft is incomplete")
 	}
 	return domain.Draft{
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
 		ConversationID: domain.ConversationID(value.GetConversationId()), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()),
-		Text: value.GetText(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
+		Text: value.GetText(), Attachments: decodeProtoDraftAttachments(value.GetAttachments()),
+		UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
 	}, nil
 }
 

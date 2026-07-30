@@ -273,6 +273,7 @@ type Service interface {
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID) error
 	DeleteScheduledMessageForCredential(context.Context, domain.WorkspaceID, domain.UserID, string, domain.ConversationID, domain.ScheduledMessageID) error
 	SaveDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) (domain.Draft, error)
+	SaveDraftWithAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string, []domain.DraftAttachment) (domain.Draft, error)
 	Draft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Draft, error)
 	Drafts(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.DraftPage, error)
 	DeleteDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error

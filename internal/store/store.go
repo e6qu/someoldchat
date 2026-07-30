@@ -586,6 +586,7 @@ type Store interface {
 	CreateFile(context.Context, domain.File, events.Event) error
 	CreateExternalUpload(context.Context, domain.ExternalUpload) error
 	GetExternalUpload(context.Context, domain.ExternalUploadID) (domain.ExternalUpload, error)
+	DraftAttachmentExists(context.Context, domain.WorkspaceID, domain.UserID, domain.ExternalUploadID) (bool, error)
 	MarkExternalUploadUploaded(context.Context, domain.ExternalUploadID, time.Time) error
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
 	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error

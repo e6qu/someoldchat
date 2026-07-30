@@ -200,6 +200,14 @@ outcomes are not HTTP 500 responses.
   local-versus-gRPC differential and converter-property tests, while the
   official Node, Python, and Java SDKs continue to exercise only Slack's
   published schedule/list/delete Web API surface.
+- Draft attachment persistence: selected, pasted, dropped, and recorded files
+  are uploaded into a private draft-owned reference without posting a message;
+  memory and portable SQL preserve the exact conversation/thread coordinate
+  and blob reference across reopen; the generated gRPC converter carries every
+  attachment field; the browser reloads the file preview, sidebar indicator,
+  and Drafts & sent count before one send promotes the uploads into one message.
+  Deleting the draft removes the durable references so ordinary blob
+  reconciliation can reclaim the now-orphaned objects.
 - Differential: capture exact suggestion, draft, schedule-window, quota,
   thread, and failure behavior in a dedicated Slack workspace.
 
@@ -210,7 +218,7 @@ outcomes are not HTTP 500 responses.
 | COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips; recordings are at most five minutes and may carry an optional message. |
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
 | COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
-| DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack preserves and exposes drafts associated with their destination. |
+| DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack automatically saves unfinished composer work and the same composer accepts attachments; the separately checked file journey establishes the ten-file staging limit. Exact cross-client retention remains a controlled live-workspace differential even though local reload/restart persistence is executable. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
 | SCHED-01 | [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages) | Slack schedules from the send control using suggested or custom local times. |
 | SCHED-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | First-party scheduled items can be edited, rescheduled, sent, cancelled, or deleted; Slack's developer scheduling guide separately establishes the app-facing delete-plus-schedule update boundary below. |
