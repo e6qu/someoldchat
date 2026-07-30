@@ -387,6 +387,21 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if err != nil || presence.Presence != domain.PresenceAway {
 		t.Fatalf("presence=%+v err=%v", presence, err)
 	}
+	statusDue := now.Add(2 * time.Hour).Truncate(time.Second)
+	statusProfile := presence.Profile
+	statusProfile.StatusText = "Qualifying persistence"
+	statusProfile.StatusEmoji = ":test_tube:"
+	statusProfile.StatusExpiration = statusDue
+	if _, err := repository.UpdateUserProfile(ctx, workspaceID, userID, statusProfile, event("status-set", "user.profile_changed", string(userID))); err != nil {
+		t.Fatal(err)
+	}
+	dueStatuses, err := repository.DueUserStatuses(ctx, workspaceID, statusDue, 10)
+	if err != nil || len(dueStatuses) != 1 || !dueStatuses[0].Profile.StatusExpiration.Equal(statusDue) {
+		t.Fatalf("due statuses=%+v err=%v", dueStatuses, err)
+	}
+	if changed, err := repository.ExpireUserStatus(ctx, workspaceID, userID, statusDue, statusDue, event("status-expired", "user.profile_changed", string(userID))); err != nil || !changed {
+		t.Fatalf("expire status changed=%t err=%v", changed, err)
+	}
 	dnd := domain.DoNotDisturb{WorkspaceID: workspaceID, UserID: userID, Enabled: true, SnoozeUntil: now.Add(time.Hour)}
 	if err := repository.SetDoNotDisturb(ctx, dnd, event("dnd", "user.dnd_changed", string(userID))); err != nil {
 		t.Fatal(err)

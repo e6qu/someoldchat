@@ -164,7 +164,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -1898,6 +1898,22 @@ func TestGetUserProfile(t *testing.T) {
 	}
 }
 
+func TestUserReadsOmitEmailWithoutEmailScope(t *testing.T) {
+	handler, _ := testHandlerWithScopes(auth.ScopeUsersRead, auth.ScopeUsersProfileRead)
+	for _, path := range []string{"/api/users.profile.get?user=U1", "/api/users.info?user=U1", "/api/users.list"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer token")
+		res := httptest.NewRecorder()
+		handler.ServeHTTP(res, req)
+		if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"display_name":"alice"`) {
+			t.Fatalf("%s: status=%d body=%s", path, res.Code, res.Body)
+		}
+		if strings.Contains(res.Body.String(), `"email"`) || strings.Contains(res.Body.String(), "alice@example.com") {
+			t.Fatalf("%s: email escaped users:read.email boundary: %s", path, res.Body)
+		}
+	}
+}
+
 func TestTeamInfo(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/team.info", nil)
 	req.Header.Set("Authorization", "Bearer token")
@@ -2314,12 +2330,12 @@ func TestPresenceEndpointsPersistAndNormalize(t *testing.T) {
 
 func TestUserProfileSet(t *testing.T) {
 	handler := testHandler()
-	request := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(`profile={"display_name":"new-name","status_text":"Ready","status_emoji":":white_check_mark:","image_24":"","image_32":"","image_48":"","image_72":"","image_192":"","image_512":"","image_1024":""}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(`profile={"display_name":"new-name","status_text":"Ready","status_emoji":":white_check_mark:","status_expiration":4102444800,"image_24":"","image_32":"","image_48":"","image_72":"","image_192":"","image_512":"","image_1024":""}`))
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, request)
-	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"display_name":"new-name"`) {
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"display_name":"new-name"`) || !strings.Contains(result.Body.String(), `"status_expiration":4102444800`) {
 		t.Fatalf("status=%d body=%s", result.Code, result.Body)
 	}
 	partial := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(`profile={"status_text":"Still here"}`))
@@ -2329,6 +2345,29 @@ func TestUserProfileSet(t *testing.T) {
 	handler.ServeHTTP(partialResult, partial)
 	if partialResult.Code != http.StatusOK || !strings.Contains(partialResult.Body.String(), `"display_name":"new-name"`) || !strings.Contains(partialResult.Body.String(), `"status_text":"Still here"`) {
 		t.Fatalf("partial status=%d body=%s", partialResult.Code, partialResult.Body)
+	}
+	past := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(`profile={"status_text":"Already gone","status_expiration":1}`))
+	past.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	past.Header.Set("Authorization", "Bearer token")
+	pastResult := httptest.NewRecorder()
+	handler.ServeHTTP(pastResult, past)
+	if pastResult.Code != http.StatusOK || pastResult.Body.String() != "{\"error\":\"invalid_profile\",\"ok\":false}\n" {
+		t.Fatalf("past expiration status=%d body=%s", pastResult.Code, pastResult.Body)
+	}
+}
+
+func TestUserProfileSetOmitsEmailWithoutEmailScope(t *testing.T) {
+	handler, _ := testHandlerWithScopes(auth.ScopeUsersProfileWrite)
+	request := httptest.NewRequest(http.MethodPost, "/api/users.profile.set", strings.NewReader(`profile={"status_text":"Private response"}`))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	result := httptest.NewRecorder()
+	handler.ServeHTTP(result, request)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"status_text":"Private response"`) {
+		t.Fatalf("status=%d body=%s", result.Code, result.Body)
+	}
+	if strings.Contains(result.Body.String(), `"email"`) || strings.Contains(result.Body.String(), "alice@example.com") {
+		t.Fatalf("email escaped users:read.email boundary: %s", result.Body)
 	}
 }
 

@@ -22,18 +22,66 @@ uncommitted image.
 
 ## STATUS-01 — Set and clear a status
 
-The status picker supports emoji, text, Slack presets, and a clear time in the
-member's time zone. The resulting status appears consistently in the profile,
-messages, mentions, People, and API. Automatic expiry clears once despite
-restart, hibernation, or time-zone/DST boundaries. Manual clear cancels expiry.
-An over-limit, invalid custom emoji, or past expiry is handled in place.
+1. From the profile control, the member opens **Update your status**. The
+   dialog/form exposes status text, an emoji, workspace status suggestions, and
+   **Remove status after**. Choosing a suggestion fills editable text and emoji;
+   it does not save until the member activates **Save**.
+2. Status text is plain text of at most 100 characters. Emoji is a workspace
+   emoji name. When text is non-empty and emoji is omitted, clients present
+   Slack's default speech-balloon status emoji rather than inventing an invalid
+   name. The clear time is interpreted in the member's local time and serialized
+   as the `status_expiration` Unix timestamp.
+3. Save commits text, emoji, and expiry as one profile mutation. The resulting
+   status appears beside the member's name wherever Slack exposes identity; the
+   full text and localized clear time are available in the profile. Refresh,
+   reconnect, process restart, and a switch between local/distributed storage
+   preserve the same value.
+4. At the deadline, one worker clears text, emoji, and expiry atomically and
+   emits one profile-change event. Competing workers, a repeated poll, restart,
+   hibernation, or daylight-saving transition cannot clear a replacement status
+   or emit the expiry twice. The lifecycle wake deadline includes this expiry.
+5. **Clear status** explicitly submits empty text and emoji and cancels the
+   pending expiry. Editing the status replaces the old deadline. Cancel or an
+   inline validation failure preserves the prior durable profile.
+6. Over-limit text, malformed/non-workspace emoji, a negative or past API
+   expiration, or an invalid local date is handled in place. A handled Web API
+   rejection is Slack JSON (`ok:false`, `error:"invalid_profile"`), not HTTP
+   500.
 
 ## STATUS-02 — Represent availability and presence
 
-Active/away and manual/automatic presence follow Slack's current semantics and
-do not imply online activity the system cannot observe. Presence changes are
-workspace/member isolated, rate-aware, and projected consistently to Web API,
-events, and the UI. Deactivated users and bots have truthful states.
+1. A member sees an availability dot and an accessible Active/Away label beside
+   every visible member identity. Color is supplementary; screen readers receive
+   the state in text.
+2. Selecting **Away** stores Slack's manual `away` presence for the signed-in
+   member. Selecting **Active (automatic)** stores `auto`; it does not permanently
+   store `active`, because Slack's `users.setPresence` accepts only `auto` and
+   `away`.
+3. `users.getPresence` returns the effective `active` or `away` value, while
+   `users.setPresence` changes only the calling user and returns `{ok:true}`.
+   Invalid values return `invalid_presence`. The durable manual value and its
+   change event remain workspace/member isolated across memory, SQL, and gRPC.
+4. Automatic presence may report active only when the service has truthful
+   client-activity evidence. Until automatic ten-minute inactivity detection is
+   implemented, the UI labels the control as automatic and MUST NOT claim that a
+   green dot proves a live connection. Deactivated members and bots do not
+   receive fabricated human activity.
+
+## STATUS-03 — Schedule statuses in advance
+
+1. **Update your status → Duration → Choose a start and end time** lets a member
+   define editable status text/emoji plus future local start and end instants.
+2. Save creates one of at most five scheduled statuses. It does not replace the
+   current status before its start. The profile menu lists upcoming statuses in
+   chronological order with localized times.
+3. Before start, the member can open an upcoming status, edit every field, or
+   delete it. At start it becomes the current status once; at end it clears only
+   if it is still the active scheduled status. Manual replacement cannot later
+   be erased by a stale scheduled end.
+4. Starts/ends and the five-item limit survive restart and hibernation, publish
+   the lifecycle wake deadline, and remain correct across time-zone/DST changes.
+   Slack exposes this as a first-party client journey, not a fabricated Web API
+   method.
 
 ## NOTIFY-01 — Configure workspace notifications
 
@@ -82,11 +130,13 @@ data.
 - `make external-contract-qualification` checks Slack's current workspace
   trigger, keyword, Activity inclusion, conversation override, exception-list,
   and follow-every-thread text before this behavior can remain claimed.
-- Deterministic-clock and persistence tests cover status/DND expiry through
-  restart and hibernation.
+- Deterministic-clock and persistence tests cover current-status and DND expiry
+  through restart and hibernation.
 - Official SDK tests exercise `users.profile.*`, `users.setPresence`, and
   `dnd.*` with user tokens and permission/error variants.
-- Controlled live-Slack comparison remains required. Browser/push/email/sound
+- Advance status scheduling (STATUS-03) is now a separately measured gap rather
+  than being implied by current-status expiry. Controlled live-Slack comparison
+  remains required. Browser/push/email/sound
   delivery, per-platform timing and appearance, notification schedules,
   group-DM overrides, urgent sender override, VIPs, and notification deep-link
   reconciliation are explicit gaps; the web UI does not claim those controls.
@@ -99,6 +149,7 @@ data.
 | PROFILE-02 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Members edit their own visible profile and status information. |
 | STATUS-01 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Status text, emoji, suggestions, and a clear time are user-selectable. |
 | STATUS-02 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Slack distinguishes automatically inferred and manually selected active or away availability. |
+| STATUS-03 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Slack permits up to five future statuses with editable start/end times and pre-start management. |
 | NOTIFY-01 | [Configure Slack notifications](https://slack.com/help/articles/201355156-Configure-your-Slack-notifications) | Workspace notification triggers, keywords, timing, sound, and delivery are member preferences. |
 | NOTIFY-02 | [Manage notifications for specific channels and direct messages](https://slack.com/help/articles/360056534254-Manage-notifications-for-specific-channels-and-direct-messages) | Channels and group DMs support all-post/mention choices, mute, following every thread, and a reviewable exceptions list. |
 | NOTIFY-03 | [Pause Slack notifications](https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb) | Members pause, resume, schedule, and urgently override notifications under Slack's rules. |

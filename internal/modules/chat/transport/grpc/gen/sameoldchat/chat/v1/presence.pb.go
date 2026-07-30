@@ -22,19 +22,20 @@ const (
 )
 
 type UserProfile struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DisplayName   string                 `protobuf:"bytes,1,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
-	StatusText    string                 `protobuf:"bytes,2,opt,name=status_text,json=statusText,proto3" json:"status_text,omitempty"`
-	StatusEmoji   string                 `protobuf:"bytes,3,opt,name=status_emoji,json=statusEmoji,proto3" json:"status_emoji,omitempty"`
-	Image_24      string                 `protobuf:"bytes,4,opt,name=image_24,json=image24,proto3" json:"image_24,omitempty"`
-	Image_32      string                 `protobuf:"bytes,5,opt,name=image_32,json=image32,proto3" json:"image_32,omitempty"`
-	Image_48      string                 `protobuf:"bytes,6,opt,name=image_48,json=image48,proto3" json:"image_48,omitempty"`
-	Image_72      string                 `protobuf:"bytes,7,opt,name=image_72,json=image72,proto3" json:"image_72,omitempty"`
-	Image_192     string                 `protobuf:"bytes,8,opt,name=image_192,json=image192,proto3" json:"image_192,omitempty"`
-	Image_512     string                 `protobuf:"bytes,9,opt,name=image_512,json=image512,proto3" json:"image_512,omitempty"`
-	Image_1024    string                 `protobuf:"bytes,10,opt,name=image_1024,json=image1024,proto3" json:"image_1024,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	DisplayName      string                 `protobuf:"bytes,1,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	StatusText       string                 `protobuf:"bytes,2,opt,name=status_text,json=statusText,proto3" json:"status_text,omitempty"`
+	StatusEmoji      string                 `protobuf:"bytes,3,opt,name=status_emoji,json=statusEmoji,proto3" json:"status_emoji,omitempty"`
+	Image_24         string                 `protobuf:"bytes,4,opt,name=image_24,json=image24,proto3" json:"image_24,omitempty"`
+	Image_32         string                 `protobuf:"bytes,5,opt,name=image_32,json=image32,proto3" json:"image_32,omitempty"`
+	Image_48         string                 `protobuf:"bytes,6,opt,name=image_48,json=image48,proto3" json:"image_48,omitempty"`
+	Image_72         string                 `protobuf:"bytes,7,opt,name=image_72,json=image72,proto3" json:"image_72,omitempty"`
+	Image_192        string                 `protobuf:"bytes,8,opt,name=image_192,json=image192,proto3" json:"image_192,omitempty"`
+	Image_512        string                 `protobuf:"bytes,9,opt,name=image_512,json=image512,proto3" json:"image_512,omitempty"`
+	Image_1024       string                 `protobuf:"bytes,10,opt,name=image_1024,json=image1024,proto3" json:"image_1024,omitempty"`
+	StatusExpiration int64                  `protobuf:"varint,11,opt,name=status_expiration,json=statusExpiration,proto3" json:"status_expiration,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UserProfile) Reset() {
@@ -135,6 +136,13 @@ func (x *UserProfile) GetImage_1024() string {
 		return x.Image_1024
 	}
 	return ""
+}
+
+func (x *UserProfile) GetStatusExpiration() int64 {
+	if x != nil {
+		return x.StatusExpiration
+	}
+	return 0
 }
 
 type User struct {
@@ -685,7 +693,7 @@ var File_sameoldchat_chat_v1_presence_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\n" +
-	"\"sameoldchat/chat/v1/presence.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xb9\x02\n" +
+	"\"sameoldchat/chat/v1/presence.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xe6\x02\n" +
 	"\vUserProfile\x12!\n" +
 	"\fdisplay_name\x18\x01 \x01(\tR\vdisplayName\x12\x1f\n" +
 	"\vstatus_text\x18\x02 \x01(\tR\n" +
@@ -699,7 +707,8 @@ const file_sameoldchat_chat_v1_presence_proto_rawDesc = "" +
 	"\timage_512\x18\t \x01(\tR\bimage512\x12\x1d\n" +
 	"\n" +
 	"image_1024\x18\n" +
-	" \x01(\tR\timage1024\"\xf2\x01\n" +
+	" \x01(\tR\timage1024\x12+\n" +
+	"\x11status_expiration\x18\v \x01(\x03R\x10statusExpiration\"\xf2\x01\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x14\n" +

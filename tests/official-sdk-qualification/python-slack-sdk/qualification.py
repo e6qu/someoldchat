@@ -716,9 +716,10 @@ presence = client.users_getPresence(user="U1")
 assert presence["ok"] is True
 set_presence = client.users_setPresence(presence="away")
 assert set_presence["ok"] is True
-profile_set = client.users_profile_set(profile={"status_text": "qualification", "status_emoji": ":wave:"})
+profile_set = client.users_profile_set(profile={"status_text": "qualification", "status_emoji": ":wave:", "status_expiration": 4102444800})
 assert profile_set["ok"] is True
 assert profile_set["profile"]["status_text"] == "qualification"
+assert profile_set["profile"]["status_expiration"] == 4102444800
 user_conversations = client.users_conversations(user="U1", limit=1)
 assert user_conversations["ok"] is True
 assert len(user_conversations["channels"]) == 1

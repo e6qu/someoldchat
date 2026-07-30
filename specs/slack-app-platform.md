@@ -57,12 +57,12 @@ unimplemented current methods break down as:
 | `auth.*`, `rtm.*`, `team.*`, `users.*` | 7 | Org team enumeration, legacy RTM bootstrap, billing/external-team/preferences, and contact discovery |
 
 That count is a coverage inventory, not a claim that all implemented methods
-are live-Slack-equivalent. The ledger currently records 204 current methods as
-behavior-compatible, 11 as SDK-compatible, two as schema-compatible, and
-zero as live-differential `verified-against-slack`. Only 11 of the 215
+are live-Slack-equivalent. The ledger currently records 200 current methods as
+behavior-compatible, 15 as SDK-compatible, two as schema-compatible, and
+zero as live-differential `verified-against-slack`. Only 16 of the 215
 current methods claimed at SDK compatibility or better carry method-level
 ledger evidence; the aggregate SDK path inventory does not promote the other
-204 claims. The next app-runtime priorities are user-token visibility for
+199 claims. The next app-runtime priorities are user-token visibility for
 HTTP/Socket event subscriptions, message change/delete and file share/unshare
 event production, then the manifest sections that are stored but not yet
 executable—functions/workflows, external authentication, incoming-webhook

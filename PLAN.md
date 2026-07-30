@@ -224,8 +224,8 @@ current method:
   call them. Those methods are useful compatibility inventory, but they are not
   part of the current Slack denominator.
 - After correcting overstated method claims and separating deprecated
-  `reminders.*` from first-party Later, the ledger records 204 current methods
-  as `behavior-compatible`, 11 as `sdk-compatible`, two as
+  `reminders.*` from first-party Later, the ledger records 200 current methods
+  as `behavior-compatible`, 15 as `sdk-compatible`, two as
   `schema-compatible`, and none as
   `verified-against-slack`. A passing route, local test, or SDK parse is not
   itself live Slack equivalence.
@@ -337,9 +337,9 @@ and highlighting, the complete modifier inventory, exact thread entry scope,
 visual baselines, and live-Slack differential results remain named gaps.
 
 UI evidence is now measured against the normative catalog rather than counted
-from test files: every one of the 101 stable journey IDs has exactly one local
+from test files: every one of the 102 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 34 Playwright scenarios cite 66 IDs. `make journey-check` rejects
+and 34 Playwright scenarios cite 68 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -356,8 +356,8 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 103 representative exact assertions
-explicitly citing 46 of the 101 journey IDs across every journey domain.
+developer pages and currently checks 106 representative exact assertions
+explicitly citing 47 of the 102 journey IDs across every journey domain.
 `make journey-check` prints the other 55 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
@@ -418,12 +418,25 @@ overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack
 behavior, and visual comparison remain named gaps rather than empty controls
 or a false full-compatibility claim.
 
+The profile/presence pass now treats status expiry as a cross-layer lifecycle,
+not a browser-only timer: `status_expiration` is typed through the Slack API,
+domain, generated gRPC seam, memory/SQL stores, first-party UI, and a
+compare-and-set worker whose earliest deadline participates in lifecycle wake
+publication. Current Node, Python, and Java Slack SDKs exercise the field, and
+the browser journey covers status suggestions, expiry selection, manual
+active/away choice, and clearing. `users.profile:read` is enforced separately
+from `users:read`, while profile email in get/set/info/list responses remains
+gated by `users:read.email`. Slack's
+up-to-five future status schedule and live activity-derived automatic presence
+remain explicit STATUS-03/STATUS-02 gaps; the four profile/presence methods are
+therefore recorded as SDK-compatible rather than falsely behavior-compatible.
+
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
 that per-method record. The compatibility report now makes the missing records
-explicit: only 11 of the 215 current methods claimed at `sdk-compatible` or
-above carry method-level evidence in the ledger; 204 claims still require
+explicit: only 16 of the 215 current methods claimed at `sdk-compatible` or
+above carry method-level evidence in the ledger; 199 claims still require
 individual review and evidence even though the official SDK aggregate observes
 their request paths.
 

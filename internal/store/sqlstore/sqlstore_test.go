@@ -506,6 +506,51 @@ func TestSQLiteUserPresenceIsDurable(t *testing.T) {
 	}
 }
 
+func TestSQLiteStatusExpirationIsDurableAndCompareAndSet(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "status-expiration.sqlite")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	due := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Profile: domain.UserProfile{StatusText: "Focused", StatusEmoji: ":dart:", StatusExpiration: due}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	users, err := s.DueUserStatuses(ctx, "T1", due, 10)
+	if err != nil || len(users) != 1 || !users[0].Profile.StatusExpiration.Equal(due) {
+		t.Fatalf("due users=%+v err=%v", users, err)
+	}
+	earliest, err := s.EarliestUserStatusExpiration(ctx, "T1")
+	if err != nil || !earliest.Equal(due) {
+		t.Fatalf("earliest=%s err=%v", earliest, err)
+	}
+	event := events.Event{ID: "status-expired", WorkspaceID: "T1", Topic: "user.profile_changed", CreatedAt: due}
+	changed, err := s.ExpireUserStatus(ctx, "T1", "U1", due.Add(-time.Second), due, event)
+	if err != nil || changed {
+		t.Fatalf("stale compare changed=%t err=%v", changed, err)
+	}
+	changed, err = s.ExpireUserStatus(ctx, "T1", "U1", due, due, event)
+	if err != nil || !changed {
+		t.Fatalf("matching compare changed=%t err=%v", changed, err)
+	}
+	user, err := s.GetUser(ctx, "U1")
+	if err != nil || user.Profile.StatusText != "" || !user.Profile.StatusExpiration.IsZero() {
+		t.Fatalf("expired user=%+v err=%v", user, err)
+	}
+}
+
 func TestSQLiteUserExpirationInvalidatesTokenAndCanBeCleared(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:user-expiration?mode=memory&cache=shared")

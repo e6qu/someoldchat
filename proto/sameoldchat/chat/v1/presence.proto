@@ -17,6 +17,7 @@ message UserProfile {
   string image_192 = 8;
   string image_512 = 9;
   string image_1024 = 10;
+  int64 status_expiration = 11;
 }
 
 message User {

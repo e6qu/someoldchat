@@ -967,12 +967,14 @@ public final class Qualification {
             com.slack.api.model.User.Profile profileRequest = new com.slack.api.model.User.Profile();
             profileRequest.setStatusText("qualification");
             profileRequest.setStatusEmoji(":wave:");
+            profileRequest.setStatusExpiration(4102444800L);
             UsersProfileSetResponse profileSet = methods.usersProfileSet(
                     com.slack.api.methods.request.users.profile.UsersProfileSetRequest.builder()
                             .profile(profileRequest)
                             .build());
             require(profileSet.isOk() && profileSet.getProfile() != null
-                            && "qualification".equals(profileSet.getProfile().getStatusText()),
+                            && "qualification".equals(profileSet.getProfile().getStatusText())
+                            && Long.valueOf(4102444800L).equals(profileSet.getProfile().getStatusExpiration()),
                     "users.profile.set failed");
             UsersConversationsResponse userConversations = methods.usersConversations(
                     com.slack.api.methods.request.users.UsersConversationsRequest.builder()

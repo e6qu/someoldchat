@@ -333,6 +333,7 @@ type memberView struct {
 	Name          string
 	RealName      string
 	Profile       domain.UserProfile
+	Presence      string
 	AvatarURL     string
 	AuthorInitial string
 	IsSelf        bool
@@ -341,6 +342,8 @@ type memberView struct {
 type membersData struct {
 	Members        []memberView
 	Profile        domain.UserProfile
+	Presence       string
+	StatusExpires  int64
 	AvatarURL      string
 	UserInitial    string
 	CSRFToken      string
@@ -1490,6 +1493,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 .person h3{font-size:16px;margin:0}
 .person p{margin:5px 0;color:var(--muted)}
 .person button{border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--text);padding:5px 10px}
+.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}.status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px 9px}.profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.availability-form{margin:0 0 18px;padding:12px;border:1px solid var(--line);border-radius:8px}.availability-form label{display:flex;align-items:end;gap:8px}.availability-form select{min-width:150px}
 @media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
 </style>{{end}}
 {{define "content"}}
@@ -1501,16 +1505,23 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
       <h2 id="profile-heading">Your profile</h2>
       <div class="profile-summary">
         <span class="profile-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.UserInitial}}{{end}}</span>
-        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong>{{if .Profile.StatusText}}<p class="muted">{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
+        <div><strong>{{if .Profile.DisplayName}}{{.Profile.DisplayName}}{{else}}Add a display name{{end}}</strong><p class="muted"><span class="presence {{.Presence}}" aria-hidden="true"></span>{{if eq .Presence "active"}}Active{{else if eq .Presence "away"}}Away{{else}}Automatic{{end}}</p>{{if .Profile.StatusText}}<p class="muted">{{if .Profile.StatusEmoji}}{{.Profile.StatusEmoji}}{{else}}💬{{end}} {{.Profile.StatusText}}{{if .StatusExpires}} · clears <time data-status-expires="{{.StatusExpires}}"></time>{{end}}</p>{{else}}<p class="muted">No status set</p>{{end}}</div>
       </div>
       {{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{end}}
+      {{if .CanEditProfile}}<form class="availability-form" method="post" action="/app/presence">
+        <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+        <label for="presence">Availability<select id="presence" name="presence"><option value="auto"{{if eq .Presence "active"}} selected{{end}}>Active (automatic)</option><option value="away"{{if eq .Presence "away"}} selected{{end}}>Away</option></select><button class="save" type="submit">Update availability</button></label>
+      </form>{{end}}
       {{if .CanEditProfile}}<form method="post" action="/app/profile">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
         <label class="field" for="display_name">Display name<input id="display_name" name="display_name" maxlength="80" value="{{.Profile.DisplayName}}"><small>The name teammates see in messages.</small></label>
+        <div class="status-suggestions" aria-label="Suggested statuses"><button type="button" data-status-text="In a meeting" data-status-emoji=":calendar:">📅 In a meeting</button><button type="button" data-status-text="Commuting" data-status-emoji=":car:">🚗 Commuting</button><button type="button" data-status-text="Out sick" data-status-emoji=":face_with_thermometer:">🤒 Out sick</button><button type="button" data-status-text="Vacationing" data-status-emoji=":palm_tree:">🌴 Vacationing</button><button type="button" data-status-text="Working remotely" data-status-emoji=":house_with_garden:">🏠 Working remotely</button></div>
         <label class="field" for="status_text">Status<input id="status_text" name="status_text" maxlength="100" value="{{.Profile.StatusText}}" placeholder="What are you working on?"></label>
         <label class="field" for="status_emoji">Status emoji<input id="status_emoji" name="status_emoji" maxlength="64" value="{{.Profile.StatusEmoji}}" placeholder=":wave:"></label>
+        <label class="field" for="status_expiration_local">Remove status after<input id="status_expiration_local" type="datetime-local" data-status-expiration-local><small>Leave blank to keep the status until you clear it.</small></label>
+        <input type="hidden" name="status_expiration" value="{{.StatusExpires}}" data-status-expiration>
         <label class="field" for="avatar_url">Profile photo URL<input id="avatar_url" type="url" maxlength="2048" name="avatar_url" value="{{.AvatarURL}}" placeholder="https://example.com/avatar.jpg"><small>Leave blank to use your initial.</small></label>
-        <button class="save" type="submit">Save changes</button>
+        <div class="profile-actions"><button class="save" type="submit">Save changes</button>{{if .Profile.StatusText}}<button class="secondary" type="submit" name="clear_status" value="true">Clear status</button>{{end}}</div>
       </form>{{else}}<p class="muted">Your current permissions allow viewing profiles but not changing yours.</p>{{end}}
     </section>
     <section class="card" aria-labelledby="people-heading">
@@ -1519,7 +1530,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
         {{range .Members}}
         <article class="person">
           <span class="person-avatar">{{if .AvatarURL}}<img src="{{.AvatarURL}}" alt="">{{else}}{{.AuthorInitial}}{{end}}</span>
-          <div class="person-copy"><h3>{{.Name}}</h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{.Profile.StatusEmoji}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}</div>
+          <div class="person-copy"><h3><span class="presence {{.Presence}}" aria-hidden="true"></span>{{.Name}} <span class="visually-hidden">({{if eq .Presence "active"}}active{{else if eq .Presence "away"}}away{{else}}automatic; activity unavailable{{end}})</span></h3>{{if and .RealName (ne .RealName .Name)}}<p>{{.RealName}}</p>{{end}}{{if .Profile.StatusText}}<p>{{if .Profile.StatusEmoji}}{{.Profile.StatusEmoji}}{{else}}💬{{end}} {{.Profile.StatusText}}</p>{{end}}{{if and $.CanMessage (not .IsSelf)}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.ID}}"><button type="submit" aria-label="Message {{.Name}}">Message</button></form>{{end}}</div>
         </article>
         {{else}}<p class="muted">No members available.</p>{{end}}
       </div>
@@ -1527,7 +1538,15 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
     </section>
   </div>
 </main>
-{{end}}`
+{{end}}
+{{define "scripts"}}<script>(function(){
+var hidden=document.querySelector('[data-status-expiration]');
+var local=document.querySelector('[data-status-expiration-local]');
+function localValue(date){var offset=date.getTimezoneOffset()*60000;return new Date(date.getTime()-offset).toISOString().slice(0,16)}
+if(hidden&&local){var current=Number(hidden.value||0);if(current>0)local.value=localValue(new Date(current*1000));local.addEventListener('change',function(){if(!local.value){hidden.value='0';return}var selected=new Date(local.value);hidden.value=isNaN(selected.getTime())?'':String(Math.floor(selected.getTime()/1000))})}
+Array.prototype.forEach.call(document.querySelectorAll('[data-status-text]'),function(button){button.addEventListener('click',function(){var text=document.getElementById('status_text');var emoji=document.getElementById('status_emoji');if(text)text.value=button.getAttribute('data-status-text')||'';if(emoji)emoji.value=button.getAttribute('data-status-emoji')||'';if(text)text.focus()})});
+Array.prototype.forEach.call(document.querySelectorAll('[data-status-expires]'),function(node){var value=Number(node.getAttribute('data-status-expires')||0);if(value>0){var date=new Date(value*1000);node.dateTime=date.toISOString();node.textContent=new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)}});
+})();</script>{{end}}`
 
 var membersTemplate = mustPage(membersMarkup)
 
@@ -2694,6 +2713,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/developer/apps/configuration-token", h.issueDeveloperConfigurationToken)
 	mux.HandleFunc("POST /app/developer/apps/app-token", h.issueDeveloperAppToken)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
+	mux.HandleFunc("POST /app/presence", h.setPresence)
 	mux.HandleFunc("POST /app/join", h.joinConversation)
 	mux.HandleFunc("POST /app/message", h.postMessage)
 	mux.HandleFunc("POST /app/draft", h.saveDraft)
@@ -5313,7 +5333,8 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 			continue
 		}
 		name := displayName(user)
-		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: user.ID == principal.UserID})
+		isSelf := user.ID == principal.UserID
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, Profile: user.Profile, Presence: webPresence(user.Presence, isSelf), AvatarURL: profileImageURL(user.Profile), AuthorInitial: initial(name), IsSelf: isSelf})
 	}
 	profile := current.Profile
 	if submitted != nil {
@@ -5322,6 +5343,8 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	data := membersData{
 		Members:        members,
 		Profile:        profile,
+		Presence:       current.Presence.Current(),
+		StatusExpires:  webUnixSeconds(profile.StatusExpiration),
 		AvatarURL:      profileImageURL(profile),
 		UserInitial:    initial(displayName(current)),
 		CSRFToken:      auth.CSRFToken(sessionCookie.Value),
@@ -5354,6 +5377,23 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 	profile.DisplayName = fields["display_name"]
 	profile.StatusText = fields["status_text"]
 	profile.StatusEmoji = fields["status_emoji"]
+	if fields["clear_status"] != "" {
+		profile.StatusText = ""
+		profile.StatusEmoji = ""
+		profile.StatusExpiration = time.Time{}
+	} else {
+		expiration := strings.TrimSpace(fields["status_expiration"])
+		if expiration == "" || expiration == "0" {
+			profile.StatusExpiration = time.Time{}
+		} else {
+			seconds, parseErr := strconv.ParseInt(expiration, 10, 64)
+			if parseErr != nil || seconds <= time.Now().UTC().Unix() {
+				h.renderMembers(w, r, principal, &profile, "Your profile was not saved. Choose a future time for the status to clear.", http.StatusBadRequest)
+				return
+			}
+			profile.StatusExpiration = time.Unix(seconds, 0).UTC()
+		}
+	}
 	avatarURL := strings.TrimSpace(fields["avatar_url"])
 	if avatarURL != profileImageURL(current.Profile) {
 		profile.Image24 = avatarURL
@@ -5372,6 +5412,28 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		h.renderMembers(w, r, principal, &profile, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
+		return
+	}
+	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
+}
+
+func (h Handler) setPresence(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Your availability could not be read from the form. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	presence := domain.Presence(strings.TrimSpace(fields["presence"]))
+	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
+		h.writePageError(w, http.StatusBadRequest, "That availability is not valid", "Choose Active or Away and try again.")
+		return
+	}
+	if _, err := h.Messages.SetUserPresence(r.Context(), principal.WorkspaceID, principal.UserID, presence); err != nil {
+		h.writeStoreError(w, err, "Your availability could not be updated.")
 		return
 	}
 	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
@@ -7389,7 +7451,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:
@@ -7696,6 +7758,27 @@ func profileImageURL(profile domain.UserProfile) string {
 		}
 	}
 	return ""
+}
+
+func webUnixSeconds(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().Unix()
+}
+
+// webPresence never turns another member's stored automatic mode into evidence
+// that they are online. The current request is activity evidence for the signed
+// in member; everyone else remains neutral until session activity tracking can
+// derive Slack's effective active/away state.
+func webPresence(value domain.Presence, isSelf bool) string {
+	if value == domain.PresenceAway {
+		return "away"
+	}
+	if isSelf {
+		return "active"
+	}
+	return "auto"
 }
 
 func conversationName(conversation domain.Conversation) string {

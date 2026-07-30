@@ -911,6 +911,69 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 	return user, nil
 }
 
+func (s *Store) DueUserStatuses(_ context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) ([]domain.User, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("status expiration limit must be positive")
+	}
+	now = now.UTC()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	users := make([]domain.User, 0, limit)
+	for _, user := range s.users {
+		expiration := user.Profile.StatusExpiration
+		if user.Deleted || expiration.IsZero() || expiration.After(now) || (workspaceID != "" && user.WorkspaceID != workspaceID) {
+			continue
+		}
+		users = append(users, user)
+	}
+	sort.Slice(users, func(left, right int) bool {
+		leftAt, rightAt := users[left].Profile.StatusExpiration, users[right].Profile.StatusExpiration
+		if leftAt.Equal(rightAt) {
+			return users[left].ID < users[right].ID
+		}
+		return leftAt.Before(rightAt)
+	})
+	if len(users) > limit {
+		users = users[:limit]
+	}
+	return users, nil
+}
+
+func (s *Store) EarliestUserStatusExpiration(_ context.Context, workspaceID domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var earliest time.Time
+	for _, user := range s.users {
+		expiration := user.Profile.StatusExpiration
+		if user.Deleted || expiration.IsZero() || (workspaceID != "" && user.WorkspaceID != workspaceID) {
+			continue
+		}
+		if earliest.IsZero() || expiration.Before(earliest) {
+			earliest = expiration
+		}
+	}
+	return earliest, nil
+}
+
+func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected, now time.Time, event events.Event) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[userID]
+	if !ok || user.WorkspaceID != workspaceID || user.Deleted {
+		return false, store.ErrNotFound
+	}
+	expiration := user.Profile.StatusExpiration
+	if expiration.IsZero() || !expiration.Equal(expected.UTC()) || expiration.After(now.UTC()) {
+		return false, nil
+	}
+	user.Profile.StatusText = ""
+	user.Profile.StatusEmoji = ""
+	user.Profile.StatusExpiration = time.Time{}
+	s.users[userID] = user
+	s.outbox = append(s.outbox, event)
+	return true, nil
+}
+
 func (s *Store) SetUserPresence(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence, event events.Event) (domain.User, error) {
 	if presence != domain.PresenceAuto && presence != domain.PresenceAway {
 		return domain.User{}, store.InvalidArgument("invalid user presence")

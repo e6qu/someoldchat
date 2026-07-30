@@ -28,6 +28,7 @@ const (
 	ScopeUsersRead               Scope = "users:read"
 	ScopeUsersReadEmail          Scope = "users:read.email"
 	ScopeUsersWrite              Scope = "users:write"
+	ScopeUsersProfileRead        Scope = "users.profile:read"
 	ScopeUsersProfileWrite       Scope = "users.profile:write"
 	ScopeChannelsRead            Scope = "channels:read"
 	ScopeChannelsJoin            Scope = "channels:join"
@@ -452,6 +453,7 @@ var allScopes = []Scope{
 	ScopeUsersRead,
 	ScopeUsersReadEmail,
 	ScopeUsersWrite,
+	ScopeUsersProfileRead,
 	ScopeUsersProfileWrite,
 	ScopeChannelsRead,
 	ScopeChannelsJoin,

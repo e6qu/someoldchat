@@ -109,16 +109,17 @@ type BillableInfo struct {
 }
 
 type UserProfile struct {
-	DisplayName string
-	StatusText  string
-	StatusEmoji string
-	Image24     string
-	Image32     string
-	Image48     string
-	Image72     string
-	Image192    string
-	Image512    string
-	Image1024   string
+	DisplayName      string
+	StatusText       string
+	StatusEmoji      string
+	StatusExpiration time.Time
+	Image24          string
+	Image32          string
+	Image48          string
+	Image72          string
+	Image192         string
+	Image512         string
+	Image1024        string
 }
 
 type User struct {
