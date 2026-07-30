@@ -6849,8 +6849,9 @@ func (h Handler) identity(w http.ResponseWriter, r *http.Request, heading string
 		return
 	}
 	avatarURL := profileImageURL(user.Profile)
+	username := displayName(user)
 	w.Header().Set("Cache-Control", "no-store")
-	h.writeHTML(w, identityTemplate, identityData{Heading: heading, Username: user.Name, Email: user.Email, Role: role, Release: h.ReleaseRevision, CSRFToken: auth.CSRFToken(sessionCookie.Value), AvatarURL: avatarURL, Avatar: initial(user.Name)}, http.StatusOK, "identity rendering unavailable")
+	h.writeHTML(w, identityTemplate, identityData{Heading: heading, Username: username, Email: user.Email, Role: role, Release: h.ReleaseRevision, CSRFToken: auth.CSRFToken(sessionCookie.Value), AvatarURL: avatarURL, Avatar: initial(username)}, http.StatusOK, "identity rendering unavailable")
 }
 
 // currentRole reports the signed-in user's own workspace role in the vocabulary
