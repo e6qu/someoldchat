@@ -977,6 +977,11 @@ assert.equal(alreadyClosed.already_closed, true);
 const reopenedDirect = await client.conversations.open({ users: "U2" });
 assert.equal(reopenedDirect.ok, true);
 assert.equal(reopenedDirect.channel.id, direct.channel.id);
+const groupDirect = await client.conversations.open({ users: "U2,U3" });
+assert.equal(groupDirect.ok, true);
+const canonicalGroupDirect = await client.conversations.open({ users: "U3,U2" });
+assert.equal(canonicalGroupDirect.ok, true);
+assert.equal(canonicalGroupDirect.channel.id, groupDirect.channel.id);
 const marked = await client.conversations.mark({ channel: "C1", ts: root.ts });
 assert.equal(marked.ok, true);
 
@@ -999,7 +1004,7 @@ assert.equal(typeof search.messages.matches[0].permalink, "string");
 
 const users = await client.users.list({ limit: 10 });
 assert.equal(users.ok, true);
-assert.equal(users.members.length, 2);
+assert.equal(users.members.length, 3);
 assert.equal(users.response_metadata?.next_cursor ?? "", "");
 assert.equal((await client.apiCall("users.setActive")).ok, true);
 assert.equal((await client.admin.users.assign({

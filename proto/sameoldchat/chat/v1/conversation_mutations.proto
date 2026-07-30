@@ -12,6 +12,21 @@ message OpenConversationRequest {
   repeated string users = 3;
 }
 
+message AddPeopleToDirectConversationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  repeated string users = 4;
+  string history = 5;
+}
+
+message ConvertGroupDirectToPrivateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string name = 4;
+}
+
 message CreateConversationRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -112,6 +127,8 @@ message AdminConversationTeamsResponse {
 
 service ConversationMutationsService {
   rpc OpenConversation(OpenConversationRequest) returns (Conversation);
+  rpc AddPeopleToDirectConversation(AddPeopleToDirectConversationRequest) returns (Conversation);
+  rpc ConvertGroupDirectToPrivate(ConvertGroupDirectToPrivateRequest) returns (Conversation);
   rpc CreateConversation(CreateConversationRequest) returns (Conversation);
   rpc JoinConversation(ConversationRequest) returns (Conversation);
   rpc InviteConversationMembers(InviteConversationMembersRequest) returns (Conversation);

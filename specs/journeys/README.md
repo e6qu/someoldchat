@@ -6,7 +6,7 @@ subset SameOldChat happens to implement. A missing control, API, state, or test
 is an implementation gap; it MUST NOT be removed from this contract to make a
 test pass.
 
-The reference snapshot date is **2026-07-29**. Slack can change independently
+The reference snapshot date is **2026-07-30**. Slack can change independently
 of this repository, so every product audit MUST recheck the linked Slack help
 and developer documentation and record the observation date. Where Slack
 desktop and Slack in a browser differ, the files call that out explicitly.

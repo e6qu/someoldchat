@@ -198,6 +198,8 @@ type Service interface {
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
 	OpenConversation(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID) (domain.Conversation, error)
+	AddPeopleToDirectConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.UserID, domain.DirectHistorySelection) (domain.Conversation, error)
+	ConvertGroupDirectToPrivate(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	CreateConversation(context.Context, domain.WorkspaceID, domain.UserID, string, bool) (domain.Conversation, error)
 	RenameConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)
 	SetConversationTopic(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string) (domain.Conversation, error)

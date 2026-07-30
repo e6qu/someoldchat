@@ -2184,6 +2184,24 @@ func (r Remote) OpenConversation(ctx context.Context, workspaceID domain.Workspa
 	return decodeProtoConversation(out)
 }
 
+func (r Remote) AddPeopleToDirectConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, history domain.DirectHistorySelection) (domain.Conversation, error) {
+	in := &chatv1.AddPeopleToDirectConversationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Users: stringIDs(users), History: string(history)}
+	out, err := r.mutations.AddPeopleToDirectConversation(ctx, in)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
+func (r Remote) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, name string) (domain.Conversation, error) {
+	in := &chatv1.ConvertGroupDirectToPrivateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Name: name}
+	out, err := r.mutations.ConvertGroupDirectToPrivate(ctx, in)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return decodeProtoConversation(out)
+}
+
 func (r Remote) CreateConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, private bool) (domain.Conversation, error) {
 	in := &chatv1.CreateConversationRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Name: name, Private: private}
 	out, err := r.mutations.CreateConversation(ctx, in)
@@ -3955,6 +3973,22 @@ func (s *Server) UninstallApp(ctx context.Context, input *chatv1.UninstallAppReq
 
 func (s *Server) OpenConversation(ctx context.Context, input *chatv1.OpenConversationRequest) (*chatv1.Conversation, error) {
 	return s.openConversationProto(ctx, input)
+}
+
+func (s *Server) AddPeopleToDirectConversation(ctx context.Context, input *chatv1.AddPeopleToDirectConversationRequest) (*chatv1.Conversation, error) {
+	result, err := s.implementation.AddPeopleToDirectConversation(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), protoUserIDs(input.GetUsers()), domain.DirectHistorySelection(input.GetHistory()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(result), nil
+}
+
+func (s *Server) ConvertGroupDirectToPrivate(ctx context.Context, input *chatv1.ConvertGroupDirectToPrivateRequest) (*chatv1.Conversation, error) {
+	result, err := s.implementation.ConvertGroupDirectToPrivate(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), input.GetName())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversation(result), nil
 }
 
 func (s *Server) CreateConversation(ctx context.Context, input *chatv1.CreateConversationRequest) (*chatv1.Conversation, error) {

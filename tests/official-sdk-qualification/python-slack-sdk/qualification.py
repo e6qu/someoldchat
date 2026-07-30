@@ -731,6 +731,11 @@ assert already_closed["already_closed"] is True
 reopened_direct = client.conversations_open(users="U2")
 assert reopened_direct["ok"] is True
 assert reopened_direct["channel"]["id"] == direct["channel"]["id"]
+group_direct = client.conversations_open(users="U2,U3")
+assert group_direct["ok"] is True
+canonical_group_direct = client.conversations_open(users="U3,U2")
+assert canonical_group_direct["ok"] is True
+assert canonical_group_direct["channel"]["id"] == group_direct["channel"]["id"]
 marked = client.conversations_mark(channel="C1", ts=root["ts"])
 assert marked["ok"] is True
 
@@ -753,7 +758,7 @@ assert isinstance(search["messages"]["matches"][0]["permalink"], str)
 
 users = client.users_list(limit=10)
 assert users["ok"] is True
-assert len(users["members"]) == 2
+assert len(users["members"]) == 3
 assert client.api_call("users.setActive")["ok"] is True
 assert client.admin_users_assign(
     team_id="T1", user_id="U2", channel_ids=["C1"], is_restricted=False, is_ultra_restricted=False

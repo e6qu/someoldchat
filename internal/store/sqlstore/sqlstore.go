@@ -3759,6 +3759,165 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	return tx.Commit()
 }
 
+func (s *Store) ExpandDirectConversation(ctx context.Context, expansion domain.DirectConversationExpansion, emitted []events.Event) error {
+	if !expansion.History.Valid() || len(emitted) != 3 || !expansion.Target.IsPrivate || expansion.Target.IsDirect || !expansion.Target.IsGroupDirect || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
+		return store.InvalidArgument("invalid direct conversation expansion")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var sourceWorkspace domain.WorkspaceID
+	var sourceDirect, sourceGroupDirect int
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_direct, is_group_direct FROM conversations WHERE id = ?`, expansion.Source).Scan(&sourceWorkspace, &sourceDirect, &sourceGroupDirect); errors.Is(err, sql.ErrNoRows) {
+		return store.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if sourceWorkspace != expansion.Target.WorkspaceID || sourceDirect == 0 && sourceGroupDirect == 0 {
+		return store.ErrNotFound
+	}
+	sourceMembers, err := conversationMemberSet(ctx, tx, expansion.Source)
+	if err != nil {
+		return err
+	}
+	memberSet := make(map[domain.UserID]struct{}, len(expansion.Members))
+	for _, member := range expansion.Members {
+		if _, duplicate := memberSet[member]; duplicate {
+			return store.InvalidArgument("expanded conversation contains duplicate members")
+		}
+		memberSet[member] = struct{}{}
+	}
+	for member := range sourceMembers {
+		if _, retained := memberSet[member]; !retained {
+			return store.InvalidArgument("expanded conversation removed a source member")
+		}
+	}
+	if len(memberSet) <= len(sourceMembers) {
+		return store.InvalidArgument("expanded conversation adds no members")
+	}
+	if expansion.SourceNotice.Conversation != expansion.Source || expansion.TargetNotice.Conversation != expansion.Target.ID ||
+		expansion.SourceNotice.WorkspaceID != expansion.Target.WorkspaceID || expansion.TargetNotice.WorkspaceID != expansion.Target.WorkspaceID {
+		return store.InvalidArgument("invalid direct conversation notices")
+	}
+
+	result, err := tx.ExecContext(ctx, `INSERT INTO conversations(id, workspace_id, name, is_private, is_direct, is_group_direct, direct_key, name_folded) VALUES (?, ?, ?, 1, 0, 1, ?, ?) ON CONFLICT DO NOTHING`,
+		expansion.Target.ID, expansion.Target.WorkspaceID, expansion.Target.Name, domain.DirectConversationKey(expansion.Target.WorkspaceID, expansion.Members), domain.FoldSearchText(expansion.Target.Name))
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrAlreadyExists
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO conversation_teams(conversation_id, team_id, org_channel) VALUES (?, ?, 0)`, expansion.Target.ID, expansion.Target.WorkspaceID); err != nil {
+		return classify(err)
+	}
+	for _, member := range expansion.Members {
+		result, err := tx.ExecContext(ctx, `INSERT INTO conversation_members(conversation_id, user_id)
+			SELECT ?, u.id FROM users u JOIN workspace_members wm ON wm.user_id = u.id AND wm.workspace_id = u.workspace_id
+			WHERE u.id = ? AND u.workspace_id = ? AND u.deleted = 0 AND wm.active = 1`,
+			expansion.Target.ID, member, expansion.Target.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if changed, err := result.RowsAffected(); err != nil {
+			return err
+		} else if changed != 1 {
+			return store.ErrNotFound
+		}
+	}
+	if expansion.History == domain.DirectHistoryAll {
+		history, err := directHistoryRows(ctx, tx, expansion.Source)
+		if err != nil {
+			return err
+		}
+		for _, original := range history {
+			copyID, err := domain.NewMessageID()
+			if err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO messages(id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+				copyID, original.workspaceID, expansion.Target.ID, original.authorID, original.appID, original.text, original.blocks, original.attachments, original.metadata, original.streamState, original.threadTimestamp, original.createdAt, original.unfurls, original.textFolded); err != nil {
+				return classify(err)
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO message_files(message_id, file_id, position)
+				SELECT ?, file_id, position FROM message_files WHERE message_id = ?`, copyID, original.id); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id)
+				SELECT file_id, ? FROM message_files WHERE message_id = ? ON CONFLICT(file_id, conversation_id) DO NOTHING`, expansion.Target.ID, original.id); err != nil {
+				return err
+			}
+		}
+	}
+	if err := insertOutbox(ctx, tx, emitted[0]); err != nil {
+		return err
+	}
+	if err := insertFileShareMessage(ctx, tx, expansion.SourceNotice, emitted[1]); err != nil {
+		return err
+	}
+	if err := insertFileShareMessage(ctx, tx, expansion.TargetNotice, emitted[2]); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+type directHistoryRow struct {
+	id              domain.MessageID
+	workspaceID     domain.WorkspaceID
+	authorID        domain.UserID
+	appID           domain.AppID
+	text            string
+	blocks          string
+	attachments     string
+	metadata        string
+	streamState     string
+	threadTimestamp domain.MessageTimestamp
+	createdAt       string
+	unfurls         string
+	textFolded      string
+}
+
+func directHistoryRows(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID) ([]directHistoryRow, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id, workspace_id, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, unfurls, text_folded
+		FROM messages WHERE conversation = ? AND deleted = 0 ORDER BY created_at, id`, conversation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]directHistoryRow, 0)
+	for rows.Next() {
+		var value directHistoryRow
+		if err := rows.Scan(&value.id, &value.workspaceID, &value.authorID, &value.appID, &value.text, &value.blocks, &value.attachments, &value.metadata, &value.streamState, &value.threadTimestamp, &value.createdAt, &value.unfurls, &value.textFolded); err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func conversationMemberSet(ctx context.Context, tx *sql.Tx, conversation domain.ConversationID) (map[domain.UserID]struct{}, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = ?`, conversation)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make(map[domain.UserID]struct{})
+	for rows.Next() {
+		var user domain.UserID
+		if err := rows.Scan(&user); err != nil {
+			return nil, err
+		}
+		values[user] = struct{}{}
+	}
+	return values, rows.Err()
+}
+
 func (s *Store) SetDirectConversationOpen(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, open bool, event events.Event) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -6024,6 +6183,62 @@ func (s *Store) SetConversationPrivate(ctx context.Context, conversation domain.
 	var value domain.Conversation
 	var private, direct, groupDirect, archived int
 	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversation).Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
+		return domain.Conversation{}, err
+	}
+	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0
+	if err := tx.Commit(); err != nil {
+		return domain.Conversation{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) ConvertGroupDirectToPrivate(ctx context.Context, conversion domain.GroupDirectConversion, emitted []events.Event) (domain.Conversation, error) {
+	if len(emitted) != 2 || strings.TrimSpace(conversion.Name) == "" {
+		return domain.Conversation{}, store.InvalidArgument("invalid group DM conversion")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	defer tx.Rollback()
+	var workspace domain.WorkspaceID
+	var private, direct, groupDirect int
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversion.Conversation).Scan(&workspace, &private, &direct, &groupDirect); errors.Is(err, sql.ErrNoRows) {
+		return domain.Conversation{}, store.ErrNotFound
+	} else if err != nil {
+		return domain.Conversation{}, err
+	}
+	if private == 0 || direct != 0 || groupDirect == 0 {
+		return domain.Conversation{}, store.ErrInvalidConversationType
+	}
+	if conversion.Notice.Conversation != conversion.Conversation || conversion.Notice.WorkspaceID != workspace {
+		return domain.Conversation{}, store.InvalidArgument("invalid group DM conversion notice")
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE conversations
+		SET name = ?, name_folded = ?, is_private = 1, is_direct = 0, is_group_direct = 0, direct_key = ''
+		WHERE id = ? AND is_private = 1 AND is_direct = 0 AND is_group_direct = 1`,
+		conversion.Name, domain.FoldSearchText(conversion.Name), conversion.Conversation)
+	if err != nil {
+		return domain.Conversation{}, classify(err)
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return domain.Conversation{}, err
+	} else if changed != 1 {
+		return domain.Conversation{}, store.ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM closed_direct_conversations WHERE conversation_id = ?`, conversion.Conversation); err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := insertOutbox(ctx, tx, emitted[0]); err != nil {
+		return domain.Conversation{}, err
+	}
+	if err := insertFileShareMessage(ctx, tx, conversion.Notice, emitted[1]); err != nil {
+		return domain.Conversation{}, err
+	}
+	var value domain.Conversation
+	var archived int
+	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, name, topic, purpose, archived, is_private, is_direct, is_group_direct FROM conversations WHERE id = ?`, conversion.Conversation).
+		Scan(&value.ID, &value.WorkspaceID, &value.Name, &value.Topic, &value.Purpose, &archived, &private, &direct, &groupDirect); err != nil {
 		return domain.Conversation{}, err
 	}
 	value.Archived, value.IsPrivate, value.IsDirect, value.IsGroupDirect = archived != 0, private != 0, direct != 0, groupDirect != 0

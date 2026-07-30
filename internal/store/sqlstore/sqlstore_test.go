@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 	"testing"
@@ -689,6 +690,100 @@ func TestSQLiteFileShareMessageIsAtomicAndDurable(t *testing.T) {
 	stored, err := s.GetMessage(ctx, "M-shared")
 	if err != nil || len(stored.Files) != 1 || stored.Files[0].ID != "F1" || len(stored.Files[0].SharedChannels) != 1 || stored.Files[0].SharedChannels[0] != "C1" {
 		t.Fatalf("stored file message=%+v err=%v", stored, err)
+	}
+}
+
+func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "direct-expansion.db")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []domain.UserID{"U1", "U2", "U3"} {
+		if err := s.SeedUser(ctx, domain.User{ID: id, WorkspaceID: "T1", Name: string(id)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Unix(1_700_000_000, 0).UTC()
+	event := func(id, topic string, when time.Time) events.Event {
+		return events.Event{ID: domain.EventID(id), WorkspaceID: "T1", Topic: topic, Payload: "{}", CreatedAt: when}
+	}
+	source := domain.Conversation{ID: "D1", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsDirect: true}
+	if err := s.CreateDirectConversation(ctx, source, []domain.UserID{"U1", "U2"}, event("E-create-source", "conversation.direct_created", at)); err != nil {
+		t.Fatal(err)
+	}
+	file := domain.File{ID: "F1", WorkspaceID: "T1", Uploader: "U1", Name: "context.txt", Title: "Context", MIMEType: "text/plain", BlobKey: "T1/F1", Size: 7, CreatedAt: at}
+	if err := s.CreateFile(ctx, file, event("E-file", "file.created", at)); err != nil {
+		t.Fatal(err)
+	}
+	original := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "D1", AuthorID: "U1", Text: "retained context", CreatedAt: at.Add(time.Microsecond)}
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, original, event("E-message", "message.created", original.CreatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	target := domain.Conversation{ID: "D2", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsGroupDirect: true}
+	sourceNotice := domain.Message{ID: "M2", WorkspaceID: "T1", Conversation: "D1", AuthorID: "U1", Text: "added U3 elsewhere", CreatedAt: at.Add(2 * time.Microsecond)}
+	targetNotice := domain.Message{ID: "M3", WorkspaceID: "T1", Conversation: "D2", AuthorID: "U1", Text: "added U3 here", CreatedAt: at.Add(2 * time.Microsecond)}
+	expansion := domain.DirectConversationExpansion{Source: "D1", Target: target, Members: []domain.UserID{"U1", "U2", "U3"}, History: domain.DirectHistoryAll, SourceNotice: sourceNotice, TargetNotice: targetNotice}
+	if err := s.ExpandDirectConversation(ctx, expansion, []events.Event{
+		event("E-expand", "conversation.direct_members_added", at),
+		event("E-source-notice", "message.created", sourceNotice.CreatedAt),
+		event("E-target-notice", "message.created", targetNotice.CreatedAt),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(ctx, domain.Conversation{ID: "C-conflict", WorkspaceID: "T1", Name: "project-room", IsPrivate: true}); err != nil {
+		t.Fatal(err)
+	}
+	conflictNotice := domain.Message{ID: "M-conflict", WorkspaceID: "T1", Conversation: "D2", AuthorID: "U1", Text: "must roll back", CreatedAt: at.Add(3 * time.Microsecond)}
+	if _, err := s.ConvertGroupDirectToPrivate(ctx, domain.GroupDirectConversion{Conversation: "D2", Name: "project-room", Notice: conflictNotice}, []events.Event{
+		event("E-conflicting-convert", "conversation.group_direct_converted", conflictNotice.CreatedAt),
+		event("E-conflicting-notice", "message.created", conflictNotice.CreatedAt),
+	}); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("conflicting conversion error=%v, want already exists", err)
+	}
+	stillGroup, err := s.GetConversation(ctx, "D2")
+	if err != nil || !stillGroup.IsGroupDirect || stillGroup.Name != "direct" {
+		t.Fatalf("conflicting conversion partially changed conversation=%+v err=%v", stillGroup, err)
+	}
+	beforeSuccess, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	if err != nil || len(beforeSuccess.Messages) != 2 {
+		t.Fatalf("conflicting conversion left a notice: history=%+v err=%v", beforeSuccess, err)
+	}
+	convertedNotice := domain.Message{ID: "M4", WorkspaceID: "T1", Conversation: "D2", AuthorID: "U1", Text: "converted", CreatedAt: at.Add(3 * time.Microsecond)}
+	converted, err := s.ConvertGroupDirectToPrivate(ctx, domain.GroupDirectConversion{Conversation: "D2", Name: "project-room-2", Notice: convertedNotice}, []events.Event{
+		event("E-convert", "conversation.group_direct_converted", convertedNotice.CreatedAt),
+		event("E-convert-notice", "message.created", convertedNotice.CreatedAt),
+	})
+	if err != nil || converted.ID != "D2" || !converted.IsPrivate || converted.IsGroupDirect {
+		t.Fatalf("converted=%+v err=%v", converted, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	converted, err = s.GetConversation(ctx, "D2")
+	if err != nil || converted.Name != "project-room-2" || !converted.IsPrivate || converted.IsDirect || converted.IsGroupDirect {
+		t.Fatalf("reopened conversion=%+v err=%v", converted, err)
+	}
+	history, err := s.ListMessages(ctx, "D2", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 3 || history.Messages[0].Text != original.Text || len(history.Messages[0].Files) != 1 {
+		t.Fatalf("reopened history=%+v err=%v", history, err)
+	}
+	metadata, err := s.GetFile(ctx, "F1")
+	if err != nil || !slices.Contains(metadata.SharedChannels, domain.ConversationID("D2")) {
+		t.Fatalf("copied file visibility=%+v err=%v", metadata, err)
+	}
+	members, err := s.ListConversationMembers(ctx, "D2", domain.PageRequest{Limit: 10})
+	if err != nil || len(members.Users) != 3 {
+		t.Fatalf("converted members=%+v err=%v", members, err)
 	}
 }
 

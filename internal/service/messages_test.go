@@ -1888,6 +1888,79 @@ func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *test
 	}
 }
 
+func TestAddPeopleToDirectConversationCopiesChosenHistoryAndConversionPreservesIdentity(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	for _, id := range []domain.UserID{"U1", "U2", "U3", "U4"} {
+		s.SeedUser(domain.User{ID: id, WorkspaceID: "T1", Name: string(id)})
+	}
+	messages := Messages{Store: s}
+	source, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := messages.Post(ctx, "T1", "U1", source.ID, "history selected for the new DM", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expanded, err := messages.AddPeopleToDirectConversation(ctx, "T1", "U1", source.ID, []domain.UserID{"U3", "U3"}, domain.DirectHistoryAll)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expanded.ID == source.ID || !expanded.IsGroupDirect || !expanded.IsPrivate {
+		t.Fatalf("expanded conversation = %+v", expanded)
+	}
+	sourceMembers, err := messages.ConversationMembers(ctx, "T1", "U1", source.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(sourceMembers.Users) != 2 {
+		t.Fatalf("source membership mutated: %+v err=%v", sourceMembers, err)
+	}
+	targetMembers, err := messages.ConversationMembers(ctx, "T1", "U1", expanded.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(targetMembers.Users) != 3 {
+		t.Fatalf("target members = %+v err=%v", targetMembers, err)
+	}
+	sourceHistory, err := messages.History(ctx, "T1", "U1", source.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(sourceHistory.Messages) != 2 {
+		t.Fatalf("source history = %+v err=%v", sourceHistory, err)
+	}
+	targetHistory, err := messages.History(ctx, "T1", "U1", expanded.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(targetHistory.Messages) != 2 {
+		t.Fatalf("target history = %+v err=%v", targetHistory, err)
+	}
+	if targetHistory.Messages[0].Text != original.Text || targetHistory.Messages[0].ID == original.ID {
+		t.Fatalf("copied history = %+v, original = %+v", targetHistory.Messages[0], original)
+	}
+
+	converted, err := messages.ConvertGroupDirectToPrivate(ctx, "T1", "U1", expanded.ID, "Project Room")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if converted.ID != expanded.ID || !converted.IsPrivate || converted.IsDirect || converted.IsGroupDirect || converted.Name != "project-room" {
+		t.Fatalf("converted conversation = %+v", converted)
+	}
+	convertedHistory, err := messages.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(convertedHistory.Messages) != 3 {
+		t.Fatalf("converted history = %+v err=%v", convertedHistory, err)
+	}
+	convertedMembers, err := messages.ConversationMembers(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(convertedMembers.Users) != 3 {
+		t.Fatalf("converted members = %+v err=%v", convertedMembers, err)
+	}
+	if _, err := messages.ConvertGroupDirectToPrivate(ctx, "T1", "U1", converted.ID, "another-name"); !errors.Is(err, ErrInvalidConversation) {
+		t.Fatalf("second conversion error = %v, want invalid conversation", err)
+	}
+
+	noHistory, err := messages.AddPeopleToDirectConversation(ctx, "T1", "U1", source.ID, []domain.UserID{"U4"}, domain.DirectHistoryNone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyHistory, err := messages.History(ctx, "T1", "U1", noHistory.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(emptyHistory.Messages) != 1 || !strings.Contains(emptyHistory.Messages[0].Text, "added <@U4>") {
+		t.Fatalf("history-free expansion = %+v err=%v", emptyHistory, err)
+	}
+}
+
 func TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()

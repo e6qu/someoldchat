@@ -12,8 +12,8 @@ fetch() {
 	curl --fail --silent --show-error --location --compressed \
 		--retry 4 --retry-all-errors --connect-timeout 15 --max-time 45 \
 		--user-agent 'sameoldchat-contract-qualification/1.0' "$1" |
-		sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' |
-		tr '\n\r\t' '   ' |
+		sed -e 's/<[^>]*>/ /g' -e 's/&nbsp;/ /g' -e 's/&#160;/ /g' -e "s/&#39;/'/g" -e 's/&amp;/\\&/g' |
+		tr '\n\r\t\302\240' '     ' |
 		sed -e 's/  */ /g' >"$2"
 }
 
@@ -111,8 +111,28 @@ assert_contains "$work/dm.html" 'search for a specific conversation' \
 	'[DM-01 DM-04] direct conversations remain searchable' "$dm_url"
 assert_contains "$work/add-dm.html" 'conversation history you choose to include is moved to a new group DM' \
 	'[DM-03] adding DM participants creates a new conversation with selected history' "$add_dm_url"
+assert_contains "$work/add-dm.html" 'Members of the DM will be notified automatically with a message posted to the relevant conversations' \
+	'[DM-03] adding DM participants posts notices to both relevant conversations' "$add_dm_url"
+assert_contains "$work/add-dm.html" 'select them from the list and click Next' \
+	'[DM-03] desktop participant selection precedes the history step' "$add_dm_url"
+assert_contains "$work/add-dm.html" 'Select an option to Include conversation history' \
+	'[DM-03] desktop history selection is a distinct step' "$add_dm_url"
+assert_contains "$work/add-dm.html" 'Click Done and select Confirm' \
+	'[DM-03] desktop history selection is reviewed before confirmation' "$add_dm_url"
 assert_contains "$work/convert-dm.html" 'messages and files from the DM will be visible to any new members' \
 	'[DM-05] converting a group DM preserves its content for future members' "$convert_dm_url"
+assert_contains "$work/convert-dm.html" 'Members of the group DM will be notified about the move in a message posted to the new channel' \
+	'[DM-05] converting a group DM posts the move notice in the resulting channel' "$convert_dm_url"
+assert_contains "$work/convert-dm.html" 'By default, all members and Multi-Channel Guests' \
+	'[DM-05] full members and multi-channel guests may convert by default' "$convert_dm_url"
+assert_contains "$work/convert-dm.html" 'Select the Settings tab' \
+	'[DM-05] conversion begins in group DM settings' "$convert_dm_url"
+assert_contains "$work/convert-dm.html" 'Click Change to a private channel' \
+	'[DM-05] conversion uses Slack current action label' "$convert_dm_url"
+assert_contains "$work/convert-dm.html" 'Enter a name for the new channel' \
+	'[DM-05] conversion requires a channel name' "$convert_dm_url"
+assert_contains "$work/convert-dm.html" 'Click Change to Private' \
+	'[DM-05] conversion uses Slack current confirmation label' "$convert_dm_url"
 assert_contains "$work/conversations-close.html" 'channel was already closed the response will include' \
 	'[DM-04] a repeated conversations.close is an explicit no-op' "$close_dm_api_url"
 assert_contains "$work/conversations-close.html" 'already_closed properties' \

@@ -278,6 +278,43 @@ func parityCases() []parityCase {
 		return domain.NewMessageTimestamp(message.CreatedAt)
 	}
 	return []parityCase{
+		{
+			name: "direct history expansion and private conversion survive the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, target.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				source, err := chat.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.Post(ctx, "T1", "U1", source.ID, "history to retain", "", ""); err != nil {
+					return nil, err
+				}
+				expanded, err := chat.AddPeopleToDirectConversation(ctx, "T1", "U1", source.ID, []domain.UserID{"U3"}, domain.DirectHistoryAll)
+				if err != nil {
+					return nil, err
+				}
+				converted, err := chat.ConvertGroupDirectToPrivate(ctx, "T1", "U1", expanded.ID, "Project Room")
+				if err != nil {
+					return nil, err
+				}
+				history, err := chat.History(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				members, err := chat.ConversationMembers(ctx, "T1", "U1", converted.ID, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				texts := make([]string, len(history.Messages))
+				for index, message := range history.Messages {
+					texts[index] = message.Text
+				}
+				return []any{expanded.IsGroupDirect, converted.IsPrivate, converted.IsDirect, converted.IsGroupDirect, converted.Name, len(members.Users), texts}, nil
+			},
+		},
 		// The privilege-escalation class. A member calling an administrative
 		// mutation must be refused with the same sentinel and the same gRPC code in
 		// both compositions; a refusal that arrives remotely as codes.Unavailable
@@ -1843,7 +1880,6 @@ var parityGaps = map[string]struct{}{
 	"LoadAppOptions":                          {},
 	"MigrationExchange":                       {},
 	"OAuthExchange":                           {},
-	"OpenConversation":                        {},
 	"OpenDialog":                              {},
 	"OpenAppHome":                             {},
 	"OpenIDConnectToken":                      {},
