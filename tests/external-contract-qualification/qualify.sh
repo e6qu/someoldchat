@@ -35,6 +35,9 @@ add_dm_url='https://slack.com/help/articles/1500002969782-Add-people-to-a-direct
 convert_dm_url='https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel'
 close_dm_api_url='https://docs.slack.dev/reference/methods/conversations.close/'
 message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
+mention_url='https://slack.com/help/articles/205240127-Use-mentions-in-Slack'
+user_group_url='https://slack.com/help/articles/212906697-Create-and-edit-user-groups'
+user_group_object_url='https://docs.slack.dev/reference/objects/usergroup-object'
 emoji_help_url='https://slack.com/help/articles/202931348-Use-emoji-and-reactions'
 emoji_list_url='https://docs.slack.dev/reference/methods/emoji.list/'
 message_formatting_url='https://docs.slack.dev/messaging/formatting-message-text/'
@@ -77,6 +80,9 @@ fetch "$add_dm_url" "$work/add-dm.html"
 fetch "$convert_dm_url" "$work/convert-dm.html"
 fetch "$close_dm_api_url" "$work/conversations-close.html"
 fetch "$message_url" "$work/messages.html"
+fetch "$mention_url" "$work/mentions.html"
+fetch "$user_group_url" "$work/user-groups.html"
+fetch "$user_group_object_url" "$work/user-group-object.html"
 fetch "$emoji_help_url" "$work/emoji-help.html"
 fetch "$emoji_list_url" "$work/emoji-list.html"
 fetch "$message_formatting_url" "$work/message-formatting.html"
@@ -161,6 +167,18 @@ assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent message
 	'[DRAFT-02] Drafts and sent is the current aggregate work surface' "$message_url"
 assert_contains "$work/messages.html" 'edit, reschedule, send, cancel, or delete it' \
 	'[SCHED-02] scheduled items expose the current management actions' "$message_url"
+assert_contains "$work/user-groups.html" "you'll notify everyone in the group" \
+	'[COMP-03 ACTIVITY-01] a user-group handle notifies every eligible member' "$user_group_url"
+assert_contains "$work/user-groups.html" 'unable to mention its handle' \
+	'[COMP-03] a deactivated user group is not mentionable' "$user_group_url"
+assert_contains "$work/message-formatting.html" '!subteam^' \
+	'[COMP-03] app-published user-group mentions use Slack subteam transport syntax' "$message_formatting_url"
+assert_contains "$work/mentions.html" 'receive a notification in their Activity feed' \
+	'[COMP-03 ACTIVITY-01] public-channel mentions can notify members before they join' "$mention_url"
+assert_contains "$work/user-group-object.html" 'value used to notify group members via a mention' \
+	'[COMP-03] the usergroup handle is the mentionable value' "$user_group_object_url"
+assert_contains "$work/user-group-object.html" 'is_subteam' \
+	'[COMP-03] current usergroup objects identify their subteam shape' "$user_group_object_url"
 assert_contains "$work/emoji-help.html" 'using a : colon followed by the code or emoji alias' \
 	'[COMP-03] colon codes are a documented Slack composer entry point' "$emoji_help_url"
 assert_contains "$work/emoji-help.html" 'browse categories' \

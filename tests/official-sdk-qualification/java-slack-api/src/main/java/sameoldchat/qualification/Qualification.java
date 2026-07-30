@@ -718,7 +718,8 @@ public final class Qualification {
                     com.slack.api.methods.request.usergroups.UsergroupsCreateRequest.builder()
                             .name("Qualification group").handle("qualification-group").description("SDK qualification").build());
             require(createdUsergroup.isOk() && createdUsergroup.getUsergroup() != null
-                            && createdUsergroup.getUsergroup().getId() != null,
+                            && createdUsergroup.getUsergroup().getId() != null
+                            && createdUsergroup.getUsergroup().isSubteam(),
                     "usergroups.create failed: " + createdUsergroup.getError());
             String usergroupId = createdUsergroup.getUsergroup().getId();
             require(methods.adminUsergroupsAddChannels(

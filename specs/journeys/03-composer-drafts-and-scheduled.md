@@ -74,10 +74,10 @@ the composer. Literal trigger characters remain possible.
    `emoji.list`; unknown codes remain literal message text and cannot be added
    as a reaction.
 
-Recent emoji ordering, user-group completion, skin-tone preference, and Slack's
-exact ranking algorithm remain differential requirements until captured
-against a dedicated Slack workspace. They MUST NOT be inferred from the
-alphabetical or upstream dataset order.
+Recent emoji ordering, skin-tone preference, and Slack's exact ranking algorithm
+remain differential requirements until captured against a dedicated Slack
+workspace. They MUST NOT be inferred from the alphabetical or upstream dataset
+order.
 
 ## DRAFT-01 — Preserve a conversation or thread draft
 
@@ -175,6 +175,17 @@ outcomes are not HTTP 500 responses.
   by Slack's formatting guide, with source and license checksums enforced by
   the repository updater. Workspace custom emoji remain durable store data and
   are tested through browser, memory, SQL, and Slack API paths.
+- User groups: the composer combines enabled workspace user groups with visible
+  people under the `@` trigger, filters by handle/name/description, exposes
+  identity-disambiguating type and member-count detail, and accepts the same
+  keyboard controls as person mentions. Selection stores Slack's
+  `<!subteam^ID>` transport form; timelines and Activity resolve the durable ID
+  back to the current handle without rewriting message history. Shared
+  memory/SQLite/dqlite/PostgreSQL qualification proves enabled-group expansion,
+  disabled-group suppression, public-channel non-member delivery, and private
+  conversation fencing. Current official Node, Python, and Java SDK
+  qualification continues to create/list/update group membership through
+  Slack's published user-group methods.
 - Boundary: the first-party Drafts & sent RPCs are covered by
   local-versus-gRPC differential and converter-property tests, while the
   official Node, Python, and Java SDKs continue to exercise only Slack's
@@ -188,7 +199,7 @@ outcomes are not HTTP 500 responses.
 | --- | --- | --- |
 | COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips. |
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
-| COMP-03 | [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions) | Colon-code entry plus picker, search, category, skin-tone, message, and reaction behavior; the checked developer sources below establish the shared data/API representation. |
+| COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
 | DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack preserves and exposes drafts associated with their destination. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
 | SCHED-01 | [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages) | Slack schedules from the send control using suggested or custom local times. |
@@ -199,6 +210,10 @@ Sources checked 2026-07-30:
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
 - [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages)
 - [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions)
+- [Use mentions in Slack](https://slack.com/help/articles/205240127-Use-mentions-in-Slack)
+- [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups)
+- [Usergroup object](https://docs.slack.dev/reference/objects/usergroup-object)
+- [Formatting message text](https://docs.slack.dev/messaging/formatting-message-text/)
 - [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages)
 - [Send and read messages: manage draft, scheduled, and sent messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
 - [Slack developer guide: sending and scheduling messages](https://docs.slack.dev/messaging/sending-and-scheduling-messages/)

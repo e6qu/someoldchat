@@ -42,6 +42,7 @@ func runQualification(t *testing.T, open opener) {
 		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
 		{"search folds Unicode identically", searchFoldsUnicodeIdentically},
 		{"recent searches are private ordered and deduplicated", recentSearchesArePrivateOrderedAndDeduplicated},
+		{"user group mentions create visibility safe activity", userGroupMentionsCreateVisibilitySafeActivity},
 		{"messages page in both directions", messagesPageInBothDirections},
 		{"referential failures are sentinels", referentialFailuresAreSentinels},
 		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
@@ -63,6 +64,111 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
+	}
+}
+
+func userGroupMentionsCreateVisibilitySafeActivity(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspace := domain.WorkspaceID("T-group-mention-" + suffix)
+	author := domain.UserID("U-group-author-" + suffix)
+	inside := domain.UserID("U-group-inside-" + suffix)
+	outside := domain.UserID("U-group-outside-" + suffix)
+	public := domain.ConversationID("C-group-public-" + suffix)
+	private := domain.ConversationID("C-group-private-" + suffix)
+	groupID := domain.UserGroupID("SQUAL" + suffix)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	for _, seed := range []func() error{
+		func() error {
+			return repository.SeedWorkspace(ctx, domain.Workspace{ID: workspace, Name: "Group mention qualification"})
+		},
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: author, WorkspaceID: workspace, Name: "author"})
+		},
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: inside, WorkspaceID: workspace, Name: "inside"})
+		},
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: outside, WorkspaceID: workspace, Name: "outside"})
+		},
+		func() error {
+			return repository.SeedConversation(ctx, domain.Conversation{ID: public, WorkspaceID: workspace, Name: "public"})
+		},
+		func() error {
+			return repository.SeedConversation(ctx, domain.Conversation{ID: private, WorkspaceID: workspace, Name: "private", IsPrivate: true})
+		},
+		func() error { return repository.SeedConversationMember(ctx, public, author) },
+		func() error { return repository.SeedConversationMember(ctx, public, inside) },
+		func() error { return repository.SeedConversationMember(ctx, private, author) },
+		func() error { return repository.SeedConversationMember(ctx, private, inside) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := func(id, topic string, at time.Time) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspace, Topic: topic, CreatedAt: at}
+	}
+	group := domain.UserGroup{
+		ID: groupID, WorkspaceID: workspace, Name: "Support rotation", Handle: "support",
+		Creator: author, UpdatedBy: author, CreatedAt: now, UpdatedAt: now, Enabled: true,
+	}
+	if err := repository.CreateUserGroup(ctx, group, event("group", "usergroup.created", now)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetUserGroupUsers(ctx, workspace, groupID, []domain.UserID{inside, outside}, author, event("group-users", "usergroup.users_changed", now)); err != nil {
+		t.Fatal(err)
+	}
+	create := func(id string, channel domain.ConversationID, at time.Time) {
+		t.Helper()
+		message := domain.Message{
+			ID: domain.MessageID(id + "-" + suffix), WorkspaceID: workspace, Conversation: channel, AuthorID: author,
+			Text: "please review <!subteam^" + string(groupID) + ">", CreatedAt: at,
+		}
+		if err := repository.CreateMessage(ctx, message, event("event-"+id, "message.created", at), ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mentions := func(user domain.UserID) domain.ActivityPage {
+		t.Helper()
+		page, err := repository.ListActivity(ctx, workspace, user, domain.ActivityQuery{
+			Kinds: []domain.ActivityKind{domain.ActivityMention}, Page: domain.PageRequest{Limit: 10},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return page
+	}
+
+	create("public-group-mention", public, now.Add(time.Second))
+	for _, user := range []domain.UserID{inside, outside} {
+		page := mentions(user)
+		if len(page.Items) != 1 || !page.Items[0].SourceAvailable || page.Items[0].Conversation != public {
+			t.Fatalf("public group mention for %s = %+v", user, page)
+		}
+	}
+
+	if err := repository.SetUserGroupEnabled(ctx, workspace, groupID, false, author, event("group-disable", "usergroup.enabled_changed", now.Add(2*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	create("disabled-group-mention", public, now.Add(3*time.Second))
+	if page := mentions(inside); len(page.Items) != 1 {
+		t.Fatalf("disabled group created activity: %+v", page)
+	}
+
+	if err := repository.SetUserGroupEnabled(ctx, workspace, groupID, true, author, event("group-enable", "usergroup.enabled_changed", now.Add(4*time.Second))); err != nil {
+		t.Fatal(err)
+	}
+	create("private-group-mention", private, now.Add(5*time.Second))
+	if page := mentions(inside); len(page.Items) != 2 || !page.Items[0].SourceAvailable || page.Items[0].Conversation != private {
+		t.Fatalf("private group member activity = %+v", page)
+	}
+	if page := mentions(outside); len(page.Items) != 1 {
+		t.Fatalf("private group mention leaked to non-member: %+v", page)
 	}
 }
 

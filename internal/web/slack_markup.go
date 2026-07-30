@@ -499,6 +499,14 @@ func renderRichTextElement(output *strings.Builder, element map[string]any, bloc
 		output.WriteString(`<span class="slack-mention">@`)
 		output.WriteString(html.EscapeString(stringValue(element["user_id"])))
 		output.WriteString("</span>")
+	case "usergroup":
+		handle := strings.TrimSpace(stringValue(element["display_handle"]))
+		if handle == "" {
+			handle = stringValue(element["usergroup_id"])
+		}
+		output.WriteString(`<span class="slack-mention">@`)
+		output.WriteString(html.EscapeString(handle))
+		output.WriteString("</span>")
 	case "channel":
 		output.WriteString(`<span class="slack-mention">#`)
 		output.WriteString(html.EscapeString(stringValue(element["channel_id"])))

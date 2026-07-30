@@ -1061,6 +1061,23 @@ func (s *Store) SeedWorkspace(ctx context.Context, value domain.Workspace) error
 // before it was set. Filling a blank is not overwriting a decision; replacing a
 // stored address would be.
 func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
+	return s.seedUser(ctx, value, domain.WorkspaceRoleMember, false)
+}
+
+// SeedBootstrapAdministrator creates the configured initial administrator as
+// one transaction. The role and e-mail must not be separate startup writes: a
+// process failure between them would leave an addressed bootstrap identity that
+// could never be promoted on retry without also overriding a later deliberate
+// demotion. An existing addressed identity keeps its operator-managed role; a
+// legacy blank identity is promoted once when its e-mail is first filled.
+func (s *Store) SeedBootstrapAdministrator(ctx context.Context, value domain.User) error {
+	if domain.NormalizeEmail(value.Email) == "" {
+		return store.InvalidArgument("bootstrap administrator email is required")
+	}
+	return s.seedUser(ctx, value, domain.WorkspaceRoleAdmin, true)
+}
+
+func (s *Store) seedUser(ctx context.Context, value domain.User, initialRole domain.WorkspaceRole, promoteBlankIdentity bool) error {
 	deleted := 0
 	if value.Deleted {
 		deleted = 1
@@ -1079,11 +1096,27 @@ func (s *Store) SeedUser(ctx context.Context, value domain.User) error {
 		return err
 	}
 	defer tx.Rollback()
+	promoteExisting := false
+	if promoteBlankIdentity {
+		var previousEmail string
+		switch err := tx.QueryRowContext(ctx, `SELECT email FROM users WHERE id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID).Scan(&previousEmail); {
+		case err == nil:
+			promoteExisting = domain.NormalizeEmail(previousEmail) == ""
+		case errors.Is(err, sql.ErrNoRows):
+		default:
+			return err
+		}
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users(id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET email = CASE WHEN users.email = '' THEN excluded.email ELSE users.email END`, value.ID, value.WorkspaceID, domain.NormalizeEmail(value.Email), value.Name, value.RealName, value.Profile.DisplayName, value.Profile.StatusText, value.Profile.StatusEmoji, unixSeconds(value.Profile.StatusExpiration), value.Profile.Image24, value.Profile.Image32, value.Profile.Image48, value.Profile.Image72, value.Profile.Image192, value.Profile.Image512, value.Profile.Image1024, deleted, presence); err != nil {
 		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, 'member', 1) ON CONFLICT(workspace_id, user_id) DO NOTHING`, value.WorkspaceID, value.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members(workspace_id, user_id, role, active) VALUES (?, ?, ?, 1) ON CONFLICT(workspace_id, user_id) DO NOTHING`, value.WorkspaceID, value.ID, initialRole); err != nil {
 		return err
+	}
+	if promoteExisting {
+		if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role = ?, active = 1 WHERE workspace_id = ? AND user_id = ?`, domain.WorkspaceRoleAdmin, value.WorkspaceID, value.ID); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -7234,11 +7267,11 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 			}
 		}
 		if item.MessageID != "" {
-			member, memberErr := s.IsConversationMember(ctx, item.Conversation, user)
-			if memberErr != nil {
-				return domain.ActivityPage{}, memberErr
+			visible, visibilityErr := s.activitySourceVisible(ctx, workspace, user, item.Conversation)
+			if visibilityErr != nil {
+				return domain.ActivityPage{}, visibilityErr
 			}
-			if member {
+			if visible {
 				if message, messageErr := s.GetMessage(ctx, item.MessageID); messageErr == nil && !message.Deleted {
 					item.Message = message
 					item.SourceAvailable = true
@@ -7249,6 +7282,46 @@ func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, 
 		}
 	}
 	return page, nil
+}
+
+func (s *Store) activitySourceVisible(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) (bool, error) {
+	var visible int
+	err := s.db.QueryRowContext(ctx, `SELECT CASE
+		WHEN c.is_private = 0 AND c.is_direct = 0 AND c.is_group_direct = 0 THEN 1
+		WHEN EXISTS (
+			SELECT 1 FROM conversation_members cm
+			WHERE cm.conversation_id = c.id AND cm.user_id = wm.user_id
+		) AND (
+			NOT EXISTS (
+				SELECT 1 FROM conversation_access_groups cag
+				WHERE cag.conversation_id = c.id
+			)
+			OR EXISTS (
+				SELECT 1
+				FROM conversation_access_groups cag
+				JOIN user_groups ug ON ug.id = cag.group_id
+					AND ug.workspace_id = c.workspace_id
+					AND ug.enabled = 1
+					AND ug.deleted_at = 0
+				JOIN user_group_users ugu ON ugu.group_id = ug.id
+					AND ugu.user_id = wm.user_id
+				WHERE cag.conversation_id = c.id
+			)
+		) THEN 1
+		ELSE 0
+	END
+	FROM conversations c
+	JOIN workspace_members wm ON wm.workspace_id = c.workspace_id
+		AND wm.user_id = ?
+		AND wm.active = 1
+	JOIN users u ON u.workspace_id = wm.workspace_id
+		AND u.id = wm.user_id
+		AND u.deleted = 0
+	WHERE c.id = ? AND c.workspace_id = ?`, user, conversation, workspace).Scan(&visible)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return visible != 0, err
 }
 
 func placeholders(count int) string {
@@ -7664,23 +7737,33 @@ func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Mess
 }
 
 func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Message) error {
-	var direct, groupDirect int
-	if err := tx.QueryRowContext(ctx, `SELECT is_direct, is_group_direct FROM conversations WHERE id = ? AND workspace_id = ?`, message.Conversation, message.WorkspaceID).Scan(&direct, &groupDirect); errors.Is(err, sql.ErrNoRows) {
+	var private, direct, groupDirect int
+	if err := tx.QueryRowContext(ctx, `SELECT is_private, is_direct, is_group_direct FROM conversations WHERE id = ? AND workspace_id = ?`, message.Conversation, message.WorkspaceID).Scan(&private, &direct, &groupDirect); errors.Is(err, sql.ErrNoRows) {
 		return store.ErrNotFound
 	} else if err != nil {
 		return err
 	}
 	recipients := make(map[domain.UserID]map[domain.ActivityKind]struct{})
-	add := func(user domain.UserID, kind domain.ActivityKind) {
+	visible := make(map[domain.UserID]struct{})
+	add := func(user domain.UserID, kind domain.ActivityKind) bool {
 		if user == "" || user == message.AuthorID {
-			return
+			return false
+		}
+		if _, ok := visible[user]; !ok {
+			return false
 		}
 		if recipients[user] == nil {
 			recipients[user] = make(map[domain.ActivityKind]struct{})
 		}
 		recipients[user][kind] = struct{}{}
+		return true
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = ? ORDER BY user_id`, message.Conversation)
+	rows, err := tx.QueryContext(ctx, `SELECT cm.user_id
+		FROM conversation_members cm
+		JOIN workspace_members wm ON wm.workspace_id = ? AND wm.user_id = cm.user_id AND wm.active = 1
+		JOIN users u ON u.workspace_id = wm.workspace_id AND u.id = wm.user_id AND u.deleted = 0
+		WHERE cm.conversation_id = ?
+		ORDER BY cm.user_id`, message.WorkspaceID, message.Conversation)
 	if err != nil {
 		return err
 	}
@@ -7692,9 +7775,107 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 			return err
 		}
 		members = append(members, user)
+		visible[user] = struct{}{}
 	}
 	if err := rows.Close(); err != nil {
 		return err
+	}
+	// Private access-group restrictions remain authoritative for notification
+	// creation. A stale association to a missing/disabled group withholds source
+	// access instead of silently becoming unrestricted.
+	if private != 0 || direct != 0 || groupDirect != 0 {
+		var restrictionCount int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_access_groups WHERE conversation_id = ?`, message.Conversation).Scan(&restrictionCount); err != nil {
+			return err
+		}
+		if restrictionCount > 0 {
+			allowed := make(map[domain.UserID]struct{})
+			groupRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ugu.user_id
+				FROM conversation_access_groups cag
+				JOIN user_groups ug ON ug.id = cag.group_id AND ug.workspace_id = ? AND ug.enabled = 1 AND ug.deleted_at = 0
+				JOIN user_group_users ugu ON ugu.group_id = ug.id
+				WHERE cag.conversation_id = ?`, message.WorkspaceID, message.Conversation)
+			if err != nil {
+				return err
+			}
+			for groupRows.Next() {
+				var user domain.UserID
+				if err := groupRows.Scan(&user); err != nil {
+					groupRows.Close()
+					return err
+				}
+				allowed[user] = struct{}{}
+			}
+			if err := groupRows.Close(); err != nil {
+				return err
+			}
+			for user := range visible {
+				if _, ok := allowed[user]; !ok {
+					delete(visible, user)
+				}
+			}
+		}
+	}
+	mentioned := make(map[domain.UserID]struct{})
+	messageMentions := domain.MentionsInMessage(message.Text, message.Blocks)
+	for _, user := range messageMentions.Users {
+		mentioned[user] = struct{}{}
+	}
+	groupIDs := messageMentions.UserGroups
+	if len(groupIDs) > 0 {
+		arguments := make([]any, 0, len(groupIDs)+1)
+		arguments = append(arguments, message.WorkspaceID)
+		for _, groupID := range groupIDs {
+			arguments = append(arguments, groupID)
+		}
+		groupRows, err := tx.QueryContext(ctx, `SELECT DISTINCT ugu.user_id
+			FROM user_groups ug
+			JOIN user_group_users ugu ON ugu.group_id = ug.id
+			WHERE ug.workspace_id = ? AND ug.enabled = 1 AND ug.deleted_at = 0
+			  AND ug.id IN (`+placeholders(len(groupIDs))+`)`, arguments...)
+		if err != nil {
+			return err
+		}
+		for groupRows.Next() {
+			var user domain.UserID
+			if err := groupRows.Scan(&user); err != nil {
+				groupRows.Close()
+				return err
+			}
+			mentioned[user] = struct{}{}
+		}
+		if err := groupRows.Close(); err != nil {
+			return err
+		}
+	}
+	// Slack exposes public channels to workspace members before they join and
+	// delivers a mention into Activity. Resolve only mentioned non-members here;
+	// ordinary messages retain the bounded conversation-member query above.
+	if private == 0 && direct == 0 && groupDirect == 0 && len(mentioned) > 0 {
+		arguments := make([]any, 0, len(mentioned)+1)
+		arguments = append(arguments, message.WorkspaceID)
+		for user := range mentioned {
+			arguments = append(arguments, user)
+		}
+		activeRows, err := tx.QueryContext(ctx, `SELECT wm.user_id
+			FROM workspace_members wm
+			JOIN users u ON u.workspace_id = wm.workspace_id AND u.id = wm.user_id AND u.deleted = 0
+			WHERE wm.workspace_id = ? AND wm.active = 1
+			  AND wm.user_id IN (`+placeholders(len(mentioned))+`)`, arguments...)
+		if err != nil {
+			return err
+		}
+		for activeRows.Next() {
+			var user domain.UserID
+			if err := activeRows.Scan(&user); err != nil {
+				activeRows.Close()
+				return err
+			}
+			visible[user] = struct{}{}
+		}
+		if err := activeRows.Close(); err != nil {
+			return err
+		}
 	}
 	root := domain.NewMessageTimestamp(message.CreatedAt)
 	if message.ThreadTimestamp != "" {
@@ -7711,19 +7892,24 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 	if err := follow(message.AuthorID); err != nil {
 		return err
 	}
+	addMention := func(user domain.UserID) error {
+		if !add(user, domain.ActivityMention) {
+			return nil
+		}
+		if message.ThreadTimestamp != "" {
+			add(user, domain.ActivityThread)
+			return follow(user)
+		}
+		return nil
+	}
+	for user := range mentioned {
+		if err := addMention(user); err != nil {
+			return err
+		}
+	}
 	for _, user := range members {
 		if direct != 0 || groupDirect != 0 {
 			add(user, domain.ActivityDM)
-		}
-		mentioned := strings.Contains(message.Text, "<@"+string(user)+">") || strings.Contains(message.Blocks, "<@"+string(user)+">")
-		if mentioned {
-			add(user, domain.ActivityMention)
-			if message.ThreadTimestamp != "" {
-				add(user, domain.ActivityThread)
-				if err := follow(user); err != nil {
-					return err
-				}
-			}
 		}
 		workspacePreferences := domain.DefaultWorkspaceNotificationPreferences(message.WorkspaceID, user)
 		var keywordsJSON string

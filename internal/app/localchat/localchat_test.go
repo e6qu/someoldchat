@@ -10,6 +10,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blob"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store/sqlstore"
 )
 
@@ -33,6 +34,12 @@ func TestBootstrapSeedsOIDCResolvableAdministrator(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer store.Close()
+	if err := store.SeedWorkspace(context.Background(), domain.Workspace{ID: "Tdev", Name: "Legacy workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SeedUser(context.Background(), domain.User{ID: "Udev", WorkspaceID: "Tdev", Name: "legacy-bootstrap"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := bootstrap(context.Background(), store, " admin@example.com "); err != nil {
 		t.Fatal(err)
 	}
@@ -42,6 +49,22 @@ func TestBootstrapSeedsOIDCResolvableAdministrator(t *testing.T) {
 	}
 	if user.ID != "Udev" || user.Email != "admin@example.com" {
 		t.Fatalf("user=%+v", user)
+	}
+	membership, err := store.GetWorkspaceMembership(context.Background(), "Tdev", "Udev")
+	if err != nil || membership.Role != domain.WorkspaceRoleAdmin {
+		t.Fatalf("bootstrap membership=%+v err=%v", membership, err)
+	}
+	if err := store.SetWorkspaceRole(context.Background(), "Tdev", "Udev", domain.WorkspaceRoleMember, events.Event{
+		ID: "operator-demotion", WorkspaceID: "Tdev", Topic: "workspace.role_changed", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap(context.Background(), store, "admin@example.com"); err != nil {
+		t.Fatal(err)
+	}
+	membership, err = store.GetWorkspaceMembership(context.Background(), "Tdev", "Udev")
+	if err != nil || membership.Role != domain.WorkspaceRoleMember {
+		t.Fatalf("restart overwrote operator demotion: membership=%+v err=%v", membership, err)
 	}
 }
 
@@ -72,7 +95,7 @@ func TestOpenSQLiteProvidesDurableAuthStores(t *testing.T) {
 
 func TestOpenMemoryProvidesAuthSeeders(t *testing.T) {
 	ctx := context.Background()
-	runtime, err := Open(ctx, Config{Backend: BackendMemory})
+	runtime, err := Open(ctx, Config{Backend: BackendMemory, BootstrapAdminEmail: "admin@example.com"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,6 +112,10 @@ func TestOpenMemoryProvidesAuthSeeders(t *testing.T) {
 	}
 	if _, err := runtime.SessionStore.LookupSession(ctx, "session-token"); err != nil {
 		t.Fatal(err)
+	}
+	membership, err := runtime.Store.GetWorkspaceMembership(ctx, "Tdev", "Udev")
+	if err != nil || membership.Role != domain.WorkspaceRoleAdmin {
+		t.Fatalf("memory bootstrap membership=%+v err=%v", membership, err)
 	}
 }
 

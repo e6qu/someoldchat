@@ -324,6 +324,7 @@ type pageData struct {
 	GlobalShortcuts  []domain.AppShortcut
 	SlashCommands    []domain.AppShortcut
 	ComposerMembers  []memberView
+	ComposerGroups   []userGroupView
 	ComposerChannels []conversationView
 	Apps             []domain.InstalledApp
 	Modal            *modalView
@@ -339,6 +340,14 @@ type memberView struct {
 	AvatarURL     string
 	AuthorInitial string
 	IsSelf        bool
+}
+
+type userGroupView struct {
+	ID          string
+	Name        string
+	Handle      string
+	Description string
+	MemberCount int
 }
 
 type membersData struct {
@@ -809,6 +818,7 @@ const pageStyle = `<style>
 .composer-menu>summary::-webkit-details-marker{display:none}
 .composer-popover{position:absolute;z-index:8;left:0;bottom:34px;min-width:210px;max-width:min(320px,80vw);max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
 .composer-popover button{display:flex;width:100%;gap:8px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
+.composer-popover button span,.mention-suggestions button span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.composer-popover button small,.mention-suggestions button small{margin-left:auto;color:var(--muted);white-space:nowrap}
 .composer-popover button:hover,.composer-popover button:focus-visible,.composer-popover button[aria-selected="true"]{background:var(--panel)}
 .emoji-grid{display:grid;grid-template-columns:repeat(6,36px);min-width:auto}
 .emoji-grid button{justify-content:center;font-size:18px;padding:5px}
@@ -1288,16 +1298,18 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
             <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
             <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Choose an emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog">☺</button>
-            {{if .ComposerMembers}}<details class="composer-menu"><summary role="button" aria-label="Mention a person" aria-controls="mention-picker">@</summary>
-              <div class="composer-popover" id="mention-picker" role="menu" aria-label="Conversation members">{{range .ComposerMembers}}
-                <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" role="menuitem">@{{.Name}}{{if .IsSelf}} (you){{end}}</button>{{end}}
+            {{if or .ComposerMembers .ComposerGroups}}<details class="composer-menu"><summary role="button" aria-label="Mention a person or user group" aria-controls="mention-picker">@</summary>
+              <div class="composer-popover" id="mention-picker" role="menu" aria-label="People and user groups">{{range .ComposerMembers}}
+                <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}" role="menuitem"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
+                <button type="button" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}" role="menuitem"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
               </div>
             </details>{{end}}
           </div>
           <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
           <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
-          {{if .ComposerMembers}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
-            <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}">@{{.Name}}{{if .IsSelf}} (you){{end}}</button>{{end}}
+          {{if or .ComposerMembers .ComposerGroups}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
+            <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
+            <button type="button" role="option" data-mention-group="{{.ID}}" data-mention-name="{{.Handle}}" data-mention-search="{{.Handle}} {{.Name}} {{.Description}}"><span>@{{.Handle}}</span><small>{{.Name}} · {{.MemberCount}} members</small></button>{{end}}
           </div>{{end}}
           {{if .ComposerChannels}}<div class="channel-suggestions" id="channel-suggestions" role="listbox" aria-label="Channel suggestions" hidden>{{range .ComposerChannels}}
             <button type="button" role="option" data-channel-id="{{.ID}}" data-channel-name="{{.Name}}">#{{.Name}}</button>{{end}}
@@ -2190,7 +2202,7 @@ var match=/(^|\s)@([^\s@<>]*)$/.exec(before);
 if(!match)return null;
 return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
 }
-function mentionOptions(){return mentionSuggestions?Array.prototype.slice.call(mentionSuggestions.querySelectorAll('[data-mention-user]')).filter(function(option){return !option.hidden}):[]}
+function mentionOptions(){return mentionSuggestions?Array.prototype.slice.call(mentionSuggestions.querySelectorAll('[data-mention-user],[data-mention-group]')).filter(function(option){return !option.hidden}):[]}
 function hideMentions(){
 mentionStart=-1;
 if(mentionSuggestions)mentionSuggestions.hidden=true;
@@ -2202,10 +2214,10 @@ var mention=currentMention();
 if(!mention){hideMentions();return false}
 mentionStart=mention.start;
 var visible=0;
-var options=mentionSuggestions.querySelectorAll('[data-mention-user]');
+var options=mentionSuggestions.querySelectorAll('[data-mention-user],[data-mention-group]');
 for(var index=0;index<options.length;index++){
-var name=(options[index].getAttribute('data-mention-name')||'').toLowerCase();
-var show=visible<8&&name.indexOf(mention.query)!==-1;
+var search=(options[index].getAttribute('data-mention-search')||options[index].getAttribute('data-mention-name')||'').toLowerCase();
+var show=visible<8&&search.indexOf(mention.query)!==-1;
 options[index].hidden=!show;
 options[index].setAttribute('aria-selected',show&&visible===0?'true':'false');
 if(show){options[index].id='mention-option-'+visible;visible++}else{options[index].removeAttribute('id')}
@@ -2220,7 +2232,9 @@ if(!text||!option)return;
 var mention=currentMention();
 var start=mention?mention.start:mentionStart;
 if(start<0)start=text.selectionStart;
-replaceComposerRange(start,text.selectionStart,'<@'+option.getAttribute('data-mention-user')+'> ',undefined,undefined);
+var group=option.getAttribute('data-mention-group');
+var reference=group?'<!subteam^'+group+'>':'<@'+option.getAttribute('data-mention-user')+'>';
+replaceComposerRange(start,text.selectionStart,reference+' ',undefined,undefined);
 hideMentions();
 var details=option.closest('details');
 if(details)details.open=false;
@@ -2528,11 +2542,11 @@ if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
 document.addEventListener('click',function(event){
-var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
+var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-mention-group],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
 if(control&&control.hasAttribute('data-open-emoji-picker')){if(openEmojiPicker(control))event.preventDefault();return}
 if(control&&control.hasAttribute('data-emoji-name')){chooseEmoji(control,!!(emojiSuggestions&&emojiSuggestions.contains(control)));return}
 if(!control||!composer||!composer.contains(control)||!text)return;
-if(control.hasAttribute('data-mention-user')){chooseMention(control);return}
+if(control.hasAttribute('data-mention-user')||control.hasAttribute('data-mention-group')){chooseMention(control);return}
 if(control.hasAttribute('data-channel-id')){chooseChannel(control);return}
 if(control.hasAttribute('data-slash-command')){chooseSlash(control);return}
 var start=text.selectionStart;
@@ -3309,6 +3323,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	canJoin := !isMember && !conversation.Archived && !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect && principal.HasScope(auth.ScopeChannelsManage)
 	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
 	var composerMembers []memberView
+	var composerGroups []userGroupView
 	var composerChannels []conversationView
 	if canPost {
 		memberPage, memberErr := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: memberWindow})
@@ -3330,6 +3345,38 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 				notices = append(notices, "Mention suggestions show the first 100 conversation members.")
 			}
 		}
+		groupCursor := domain.Cursor("")
+		seenGroupCursors := make(map[domain.Cursor]struct{})
+		for {
+			if _, repeated := seenGroupCursors[groupCursor]; repeated {
+				notices = append(notices, "User group suggestions stopped at an invalid page boundary.")
+				composerGroups = nil
+				break
+			}
+			seenGroupCursors[groupCursor] = struct{}{}
+			groupPage, groupErr := h.Messages.ListUserGroups(r.Context(), principal.WorkspaceID, principal.UserID, false, domain.PageRequest{Limit: memberWindow, Cursor: groupCursor})
+			if groupErr != nil {
+				notices = append(notices, "User group suggestions are temporarily unavailable.")
+				composerGroups = nil
+				break
+			}
+			for _, group := range groupPage.Groups {
+				if !group.Enabled || !group.DeletedAt.IsZero() {
+					continue
+				}
+				composerGroups = append(composerGroups, userGroupView{
+					ID: string(group.ID), Name: group.Name, Handle: group.Handle,
+					Description: group.Description, MemberCount: len(group.Users),
+				})
+			}
+			if !groupPage.HasMore || groupPage.NextCursor == "" {
+				break
+			}
+			groupCursor = groupPage.NextCursor
+		}
+		sort.Slice(composerGroups, func(left, right int) bool {
+			return strings.ToLower(composerGroups[left].Handle) < strings.ToLower(composerGroups[right].Handle)
+		})
 		composerChannels, err = h.visibleChannelOptions(r.Context(), principal)
 		if err != nil {
 			notices = append(notices, "Channel suggestions are temporarily unavailable.")
@@ -3445,6 +3492,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 		GlobalShortcuts:  globalShortcuts,
 		SlashCommands:    slashCommands,
 		ComposerMembers:  composerMembers,
+		ComposerGroups:   composerGroups,
 		ComposerChannels: composerChannels,
 		Apps:             workspaceApps,
 		Modal:            modal,
@@ -3722,6 +3770,8 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		}
 		displayMessage := message
 		displayMessage.Text = resolveSlackReferences(message.Text, names)
+		displayMessage.Blocks = resolveSlackReferenceJSON(message.Blocks, names)
+		displayMessage.Attachments = resolveSlackReferenceJSON(message.Attachments, names)
 		content := newRichMessageContent(displayMessage, emojiImages)
 		actionCatalog.enrich(ctx, h, principal, content.Blocks)
 		ownsMessage := !ephemeral && request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite)
@@ -8040,17 +8090,19 @@ func (h Handler) writeAuthError(w http.ResponseWriter, err error) {
 // people, and the timeline shows their names; a raw user identifier is only the
 // last resort for a record that carries no name at all.
 type userNames struct {
-	handler   Handler
-	ctx       context.Context
-	principal auth.Principal
-	cache     map[domain.UserID]string
-	channels  map[domain.ConversationID]string
+	handler      Handler
+	ctx          context.Context
+	principal    auth.Principal
+	cache        map[domain.UserID]string
+	channels     map[domain.ConversationID]string
+	groups       map[domain.UserGroupID]string
+	groupsLoaded bool
 }
 
 func (h Handler) newUserNames(ctx context.Context, principal auth.Principal) *userNames {
 	return &userNames{
 		handler: h, ctx: ctx, principal: principal,
-		cache: map[domain.UserID]string{}, channels: map[domain.ConversationID]string{},
+		cache: map[domain.UserID]string{}, channels: map[domain.ConversationID]string{}, groups: map[domain.UserGroupID]string{},
 	}
 }
 
@@ -8081,6 +8133,32 @@ func (n *userNames) name(id domain.UserID) string {
 	return resolved
 }
 
+func (n *userNames) groupHandle(id domain.UserGroupID) string {
+	if !n.groupsLoaded {
+		cursor := domain.Cursor("")
+		seen := make(map[domain.Cursor]struct{})
+		for {
+			if _, repeated := seen[cursor]; repeated {
+				break
+			}
+			seen[cursor] = struct{}{}
+			page, err := n.handler.Messages.ListUserGroups(n.ctx, n.principal.WorkspaceID, n.principal.UserID, true, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
+			if err != nil {
+				break
+			}
+			for _, group := range page.Groups {
+				n.groups[group.ID] = strings.TrimSpace(group.Handle)
+			}
+			if !page.HasMore || page.NextCursor == "" || page.NextCursor == cursor {
+				break
+			}
+			cursor = page.NextCursor
+		}
+		n.groupsLoaded = true
+	}
+	return n.groups[id]
+}
+
 // resolveSlackUserMentions adds a human label to bare Slack user references for
 // first-party presentation without changing the stored message. References
 // inside code spans and fenced code blocks stay literal, as Slack rendering
@@ -8090,7 +8168,7 @@ func resolveSlackUserMentions(text string, names *userNames) string {
 }
 
 func resolveSlackReferences(text string, names *userNames) string {
-	if (!strings.Contains(text, "<@") && !strings.Contains(text, "<#")) || names == nil {
+	if (!strings.Contains(text, "<@") && !strings.Contains(text, "<#") && !strings.Contains(text, "<!subteam^")) || names == nil {
 		return text
 	}
 	var output strings.Builder
@@ -8137,6 +8215,26 @@ func resolveSlackReferences(text string, names *userNames) string {
 				}
 			}
 		}
+		if strings.HasPrefix(text[offset:], "<!subteam^") {
+			end := strings.IndexByte(text[offset+len("<!subteam^"):], '>')
+			if end >= 0 {
+				end += offset + len("<!subteam^")
+				raw := text[offset+len("<!subteam^") : end]
+				id, _, _ := strings.Cut(raw, "|")
+				if id != "" && !strings.ContainsAny(id, " \t\r\n<>") {
+					handle := strings.Join(strings.Fields(strings.NewReplacer("|", " ", "<", " ", ">", " ").Replace(names.groupHandle(domain.UserGroupID(id)))), " ")
+					if handle != "" {
+						output.WriteString("<!subteam^")
+						output.WriteString(id)
+						output.WriteString("|@")
+						output.WriteString(handle)
+						output.WriteByte('>')
+						offset = end + 1
+						continue
+					}
+				}
+			}
+		}
 		if strings.HasPrefix(text[offset:], "<#") {
 			end := strings.IndexByte(text[offset+2:], '>')
 			if end >= 0 {
@@ -8160,6 +8258,56 @@ func resolveSlackReferences(text string, names *userNames) string {
 		offset++
 	}
 	return output.String()
+}
+
+// resolveSlackReferenceJSON decorates only Slack text-bearing JSON fields. It
+// leaves identifiers, action values and URLs byte-for-byte equivalent after
+// decoding so a mention-like substring in an opaque value cannot change an
+// interaction target. Rich-text usergroup elements carry their resolved handle
+// separately for the renderer.
+func resolveSlackReferenceJSON(raw string, names *userNames) string {
+	if names == nil || (!strings.Contains(raw, "<@") && !strings.Contains(raw, "<#") && !strings.Contains(raw, "<!subteam^") && !strings.Contains(raw, `"usergroup"`)) {
+		return raw
+	}
+	var value any
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return raw
+	}
+	var resolve func(any) any
+	resolve = func(current any) any {
+		switch typed := current.(type) {
+		case []any:
+			for index := range typed {
+				typed[index] = resolve(typed[index])
+			}
+		case map[string]any:
+			kind, _ := typed["type"].(string)
+			if kind == "usergroup" {
+				if id, ok := typed["usergroup_id"].(string); ok {
+					typed["display_handle"] = names.groupHandle(domain.UserGroupID(id))
+				}
+			}
+			_, hasAttachmentFieldTitle := typed["title"]
+			_, hasAttachmentFieldShort := typed["short"]
+			attachmentField := kind == "" && (hasAttachmentFieldTitle || hasAttachmentFieldShort)
+			for key, child := range typed {
+				text, textValue := child.(string)
+				mrkdwnText := textValue && key == "text" && (kind == "mrkdwn" || kind == "markdown")
+				legacyAttachmentText := textValue && kind == "" && (key == "text" || key == "pretext" || (key == "value" && attachmentField))
+				if mrkdwnText || legacyAttachmentText {
+					typed[key] = resolveSlackReferences(text, names)
+					continue
+				}
+				typed[key] = resolve(child)
+			}
+		}
+		return current
+	}
+	encoded, err := json.Marshal(resolve(value))
+	if err != nil {
+		return raw
+	}
+	return string(encoded)
 }
 
 func displayName(user domain.User) string {

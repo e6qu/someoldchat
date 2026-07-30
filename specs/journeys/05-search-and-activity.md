@@ -141,6 +141,11 @@ Implemented evidence:
   matches, reactions to the member's messages, applicable app-authored
   notifications, and delivered personal reminders create one idempotent item
   per recipient. Overlapping filters share one triage record.
+- Direct and enabled user-group mentions use Slack's stable user/subteam
+  transport references. An enabled group expands atomically to its current
+  members; a public-channel mention can reach an active workspace member who
+  has not joined, while private channels and DMs remain membership- and
+  access-group-fenced. Disabled groups do not create mention Activity.
 - Browser qualification creates and OAuth-installs a real app, exchanges its
   authorization code, joins the public channel with Slack's current bot
   `channels:join` scope, and posts overlapping app/mention notifications. It
