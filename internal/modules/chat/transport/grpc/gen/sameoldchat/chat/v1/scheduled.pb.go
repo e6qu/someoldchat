@@ -485,6 +485,234 @@ func (x *DeleteScheduledMessageRequest) GetCredentialHash() string {
 	return ""
 }
 
+type ScheduledMessageHistoryRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId      string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId           string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit            int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor           string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending       bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	IncludeDelivered bool                   `protobuf:"varint,6,opt,name=include_delivered,json=includeDelivered,proto3" json:"include_delivered,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ScheduledMessageHistoryRequest) Reset() {
+	*x = ScheduledMessageHistoryRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ScheduledMessageHistoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ScheduledMessageHistoryRequest) ProtoMessage() {}
+
+func (x *ScheduledMessageHistoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ScheduledMessageHistoryRequest.ProtoReflect.Descriptor instead.
+func (*ScheduledMessageHistoryRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *ScheduledMessageHistoryRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ScheduledMessageHistoryRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *ScheduledMessageHistoryRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ScheduledMessageHistoryRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *ScheduledMessageHistoryRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
+}
+
+func (x *ScheduledMessageHistoryRequest) GetIncludeDelivered() bool {
+	if x != nil {
+		return x.IncludeDelivered
+	}
+	return false
+}
+
+type UpdateScheduledMessageRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId             string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ScheduledMessageId string                 `protobuf:"bytes,3,opt,name=scheduled_message_id,json=scheduledMessageId,proto3" json:"scheduled_message_id,omitempty"`
+	ChannelId          string                 `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Text               string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	PostAt             int64                  `protobuf:"varint,6,opt,name=post_at,json=postAt,proto3" json:"post_at,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *UpdateScheduledMessageRequest) Reset() {
+	*x = UpdateScheduledMessageRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpdateScheduledMessageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpdateScheduledMessageRequest) ProtoMessage() {}
+
+func (x *UpdateScheduledMessageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpdateScheduledMessageRequest.ProtoReflect.Descriptor instead.
+func (*UpdateScheduledMessageRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *UpdateScheduledMessageRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *UpdateScheduledMessageRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *UpdateScheduledMessageRequest) GetScheduledMessageId() string {
+	if x != nil {
+		return x.ScheduledMessageId
+	}
+	return ""
+}
+
+func (x *UpdateScheduledMessageRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *UpdateScheduledMessageRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *UpdateScheduledMessageRequest) GetPostAt() int64 {
+	if x != nil {
+		return x.PostAt
+	}
+	return 0
+}
+
+type SendScheduledMessageNowRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId             string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ScheduledMessageId string                 `protobuf:"bytes,3,opt,name=scheduled_message_id,json=scheduledMessageId,proto3" json:"scheduled_message_id,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *SendScheduledMessageNowRequest) Reset() {
+	*x = SendScheduledMessageNowRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SendScheduledMessageNowRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SendScheduledMessageNowRequest) ProtoMessage() {}
+
+func (x *SendScheduledMessageNowRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SendScheduledMessageNowRequest.ProtoReflect.Descriptor instead.
+func (*SendScheduledMessageNowRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *SendScheduledMessageNowRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SendScheduledMessageNowRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SendScheduledMessageNowRequest) GetScheduledMessageId() string {
+	if x != nil {
+		return x.ScheduledMessageId
+	}
+	return ""
+}
+
 type ScheduledMessagePage struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ScheduledMessages []*ScheduledMessage    `protobuf:"bytes,1,rep,name=scheduled_messages,json=scheduledMessages,proto3" json:"scheduled_messages,omitempty"`
@@ -496,7 +724,7 @@ type ScheduledMessagePage struct {
 
 func (x *ScheduledMessagePage) Reset() {
 	*x = ScheduledMessagePage{}
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +736,7 @@ func (x *ScheduledMessagePage) String() string {
 func (*ScheduledMessagePage) ProtoMessage() {}
 
 func (x *ScheduledMessagePage) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +749,7 @@ func (x *ScheduledMessagePage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ScheduledMessagePage.ProtoReflect.Descriptor instead.
 func (*ScheduledMessagePage) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ScheduledMessagePage) GetScheduledMessages() []*ScheduledMessage {
@@ -545,11 +773,383 @@ func (x *ScheduledMessagePage) GetHasMore() bool {
 	return false
 }
 
+type Draft struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId       string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId            string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId    string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	ThreadTs          string                 `protobuf:"bytes,4,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	Text              string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	UpdatedAtUnixNano int64                  `protobuf:"varint,6,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *Draft) Reset() {
+	*x = Draft{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Draft) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Draft) ProtoMessage() {}
+
+func (x *Draft) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Draft.ProtoReflect.Descriptor instead.
+func (*Draft) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *Draft) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *Draft) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *Draft) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *Draft) GetThreadTs() string {
+	if x != nil {
+		return x.ThreadTs
+	}
+	return ""
+}
+
+func (x *Draft) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *Draft) GetUpdatedAtUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedAtUnixNano
+	}
+	return 0
+}
+
+type DraftRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ConversationId string                 `protobuf:"bytes,3,opt,name=conversation_id,json=conversationId,proto3" json:"conversation_id,omitempty"`
+	ThreadTs       string                 `protobuf:"bytes,4,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	Text           string                 `protobuf:"bytes,5,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *DraftRequest) Reset() {
+	*x = DraftRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DraftRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DraftRequest) ProtoMessage() {}
+
+func (x *DraftRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DraftRequest.ProtoReflect.Descriptor instead.
+func (*DraftRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *DraftRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DraftRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *DraftRequest) GetConversationId() string {
+	if x != nil {
+		return x.ConversationId
+	}
+	return ""
+}
+
+func (x *DraftRequest) GetThreadTs() string {
+	if x != nil {
+		return x.ThreadTs
+	}
+	return ""
+}
+
+func (x *DraftRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type DraftsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending    bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DraftsRequest) Reset() {
+	*x = DraftsRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DraftsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DraftsRequest) ProtoMessage() {}
+
+func (x *DraftsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DraftsRequest.ProtoReflect.Descriptor instead.
+func (*DraftsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *DraftsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *DraftsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *DraftsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *DraftsRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *DraftsRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
+}
+
+type DraftPage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Drafts        []*Draft               `protobuf:"bytes,1,rep,name=drafts,proto3" json:"drafts,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DraftPage) Reset() {
+	*x = DraftPage{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DraftPage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DraftPage) ProtoMessage() {}
+
+func (x *DraftPage) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DraftPage.ProtoReflect.Descriptor instead.
+func (*DraftPage) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *DraftPage) GetDrafts() []*Draft {
+	if x != nil {
+		return x.Drafts
+	}
+	return nil
+}
+
+func (x *DraftPage) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *DraftPage) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+type SentMessagesRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending    bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SentMessagesRequest) Reset() {
+	*x = SentMessagesRequest{}
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SentMessagesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SentMessagesRequest) ProtoMessage() {}
+
+func (x *SentMessagesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_scheduled_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SentMessagesRequest.ProtoReflect.Descriptor instead.
+func (*SentMessagesRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *SentMessagesRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *SentMessagesRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *SentMessagesRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *SentMessagesRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *SentMessagesRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_scheduled_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
-	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\"\xde\x03\n" +
+	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\"\xde\x03\n" +
 	"\x10ScheduledMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
@@ -600,16 +1200,79 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
 	"channel_id\x18\x03 \x01(\tR\tchannelId\x120\n" +
 	"\x14scheduled_message_id\x18\x04 \x01(\tR\x12scheduledMessageId\x12'\n" +
-	"\x0fcredential_hash\x18\x05 \x01(\tR\x0ecredentialHash\"\xa8\x01\n" +
+	"\x0fcredential_hash\x18\x05 \x01(\tR\x0ecredentialHash\"\xd7\x01\n" +
+	"\x1eScheduledMessageHistoryRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\n" +
+	"descending\x18\x05 \x01(\bR\n" +
+	"descending\x12+\n" +
+	"\x11include_delivered\x18\x06 \x01(\bR\x10includeDelivered\"\xd9\x01\n" +
+	"\x1dUpdateScheduledMessageRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x120\n" +
+	"\x14scheduled_message_id\x18\x03 \x01(\tR\x12scheduledMessageId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12\x17\n" +
+	"\apost_at\x18\x06 \x01(\x03R\x06postAt\"\x8e\x01\n" +
+	"\x1eSendScheduledMessageNowRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x120\n" +
+	"\x14scheduled_message_id\x18\x03 \x01(\tR\x12scheduledMessageId\"\xa8\x01\n" +
 	"\x14ScheduledMessagePage\x12T\n" +
 	"\x12scheduled_messages\x18\x01 \x03(\v2%.sameoldchat.chat.v1.ScheduledMessageR\x11scheduledMessages\x12\x1f\n" +
 	"\vnext_cursor\x18\x02 \x01(\tR\n" +
 	"nextCursor\x12\x19\n" +
-	"\bhas_more\x18\x03 \x01(\bR\ahasMore2\xe5\x02\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\xce\x01\n" +
+	"\x05Draft\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1b\n" +
+	"\tthread_ts\x18\x04 \x01(\tR\bthreadTs\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\x12/\n" +
+	"\x14updated_at_unix_nano\x18\x06 \x01(\x03R\x11updatedAtUnixNano\"\xa4\x01\n" +
+	"\fDraftRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\x12\x1b\n" +
+	"\tthread_ts\x18\x04 \x01(\tR\bthreadTs\x12\x12\n" +
+	"\x04text\x18\x05 \x01(\tR\x04text\"\x99\x01\n" +
+	"\rDraftsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\n" +
+	"descending\x18\x05 \x01(\bR\n" +
+	"descending\"{\n" +
+	"\tDraftPage\x122\n" +
+	"\x06drafts\x18\x01 \x03(\v2\x1a.sameoldchat.chat.v1.DraftR\x06drafts\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\"\x9f\x01\n" +
+	"\x13SentMessagesRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\n" +
+	"descending\x18\x05 \x01(\bR\n" +
+	"descending2\xdd\b\n" +
 	"\x18ScheduledMessagesService\x12e\n" +
 	"\x0fScheduleMessage\x12+.sameoldchat.chat.v1.ScheduleMessageRequest\x1a%.sameoldchat.chat.v1.ScheduledMessage\x12m\n" +
-	"\x11ScheduledMessages\x12-.sameoldchat.chat.v1.ScheduledMessagesRequest\x1a).sameoldchat.chat.v1.ScheduledMessagePage\x12s\n" +
-	"\x16DeleteScheduledMessage\x122.sameoldchat.chat.v1.DeleteScheduledMessageRequest\x1a%.sameoldchat.chat.v1.MutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"\x11ScheduledMessages\x12-.sameoldchat.chat.v1.ScheduledMessagesRequest\x1a).sameoldchat.chat.v1.ScheduledMessagePage\x12y\n" +
+	"\x17ScheduledMessageHistory\x123.sameoldchat.chat.v1.ScheduledMessageHistoryRequest\x1a).sameoldchat.chat.v1.ScheduledMessagePage\x12s\n" +
+	"\x16UpdateScheduledMessage\x122.sameoldchat.chat.v1.UpdateScheduledMessageRequest\x1a%.sameoldchat.chat.v1.ScheduledMessage\x12l\n" +
+	"\x17SendScheduledMessageNow\x123.sameoldchat.chat.v1.SendScheduledMessageNowRequest\x1a\x1c.sameoldchat.chat.v1.Message\x12s\n" +
+	"\x16DeleteScheduledMessage\x122.sameoldchat.chat.v1.DeleteScheduledMessageRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12J\n" +
+	"\tSaveDraft\x12!.sameoldchat.chat.v1.DraftRequest\x1a\x1a.sameoldchat.chat.v1.Draft\x12I\n" +
+	"\bGetDraft\x12!.sameoldchat.chat.v1.DraftRequest\x1a\x1a.sameoldchat.chat.v1.Draft\x12L\n" +
+	"\x06Drafts\x12\".sameoldchat.chat.v1.DraftsRequest\x1a\x1e.sameoldchat.chat.v1.DraftPage\x12W\n" +
+	"\vDeleteDraft\x12!.sameoldchat.chat.v1.DraftRequest\x1a%.sameoldchat.chat.v1.MutationResponse\x12Z\n" +
+	"\fSentMessages\x12(.sameoldchat.chat.v1.SentMessagesRequest\x1a .sameoldchat.chat.v1.MessagePageBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_scheduled_proto_rawDescOnce sync.Once
@@ -623,28 +1286,55 @@ func file_sameoldchat_chat_v1_scheduled_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_scheduled_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_scheduled_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_sameoldchat_chat_v1_scheduled_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_sameoldchat_chat_v1_scheduled_proto_goTypes = []any{
-	(*ScheduledMessage)(nil),              // 0: sameoldchat.chat.v1.ScheduledMessage
-	(*ScheduleMessageRequest)(nil),        // 1: sameoldchat.chat.v1.ScheduleMessageRequest
-	(*ScheduledMessagesRequest)(nil),      // 2: sameoldchat.chat.v1.ScheduledMessagesRequest
-	(*DeleteScheduledMessageRequest)(nil), // 3: sameoldchat.chat.v1.DeleteScheduledMessageRequest
-	(*ScheduledMessagePage)(nil),          // 4: sameoldchat.chat.v1.ScheduledMessagePage
-	(*MutationResponse)(nil),              // 5: sameoldchat.chat.v1.MutationResponse
+	(*ScheduledMessage)(nil),               // 0: sameoldchat.chat.v1.ScheduledMessage
+	(*ScheduleMessageRequest)(nil),         // 1: sameoldchat.chat.v1.ScheduleMessageRequest
+	(*ScheduledMessagesRequest)(nil),       // 2: sameoldchat.chat.v1.ScheduledMessagesRequest
+	(*DeleteScheduledMessageRequest)(nil),  // 3: sameoldchat.chat.v1.DeleteScheduledMessageRequest
+	(*ScheduledMessageHistoryRequest)(nil), // 4: sameoldchat.chat.v1.ScheduledMessageHistoryRequest
+	(*UpdateScheduledMessageRequest)(nil),  // 5: sameoldchat.chat.v1.UpdateScheduledMessageRequest
+	(*SendScheduledMessageNowRequest)(nil), // 6: sameoldchat.chat.v1.SendScheduledMessageNowRequest
+	(*ScheduledMessagePage)(nil),           // 7: sameoldchat.chat.v1.ScheduledMessagePage
+	(*Draft)(nil),                          // 8: sameoldchat.chat.v1.Draft
+	(*DraftRequest)(nil),                   // 9: sameoldchat.chat.v1.DraftRequest
+	(*DraftsRequest)(nil),                  // 10: sameoldchat.chat.v1.DraftsRequest
+	(*DraftPage)(nil),                      // 11: sameoldchat.chat.v1.DraftPage
+	(*SentMessagesRequest)(nil),            // 12: sameoldchat.chat.v1.SentMessagesRequest
+	(*Message)(nil),                        // 13: sameoldchat.chat.v1.Message
+	(*MutationResponse)(nil),               // 14: sameoldchat.chat.v1.MutationResponse
+	(*MessagePage)(nil),                    // 15: sameoldchat.chat.v1.MessagePage
 }
 var file_sameoldchat_chat_v1_scheduled_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.ScheduledMessagePage.scheduled_messages:type_name -> sameoldchat.chat.v1.ScheduledMessage
-	1, // 1: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:input_type -> sameoldchat.chat.v1.ScheduleMessageRequest
-	2, // 2: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:input_type -> sameoldchat.chat.v1.ScheduledMessagesRequest
-	3, // 3: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:input_type -> sameoldchat.chat.v1.DeleteScheduledMessageRequest
-	0, // 4: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
-	4, // 5: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
-	5, // 6: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:output_type -> sameoldchat.chat.v1.MutationResponse
-	4, // [4:7] is the sub-list for method output_type
-	1, // [1:4] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	0,  // 0: sameoldchat.chat.v1.ScheduledMessagePage.scheduled_messages:type_name -> sameoldchat.chat.v1.ScheduledMessage
+	8,  // 1: sameoldchat.chat.v1.DraftPage.drafts:type_name -> sameoldchat.chat.v1.Draft
+	1,  // 2: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:input_type -> sameoldchat.chat.v1.ScheduleMessageRequest
+	2,  // 3: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:input_type -> sameoldchat.chat.v1.ScheduledMessagesRequest
+	4,  // 4: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessageHistory:input_type -> sameoldchat.chat.v1.ScheduledMessageHistoryRequest
+	5,  // 5: sameoldchat.chat.v1.ScheduledMessagesService.UpdateScheduledMessage:input_type -> sameoldchat.chat.v1.UpdateScheduledMessageRequest
+	6,  // 6: sameoldchat.chat.v1.ScheduledMessagesService.SendScheduledMessageNow:input_type -> sameoldchat.chat.v1.SendScheduledMessageNowRequest
+	3,  // 7: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:input_type -> sameoldchat.chat.v1.DeleteScheduledMessageRequest
+	9,  // 8: sameoldchat.chat.v1.ScheduledMessagesService.SaveDraft:input_type -> sameoldchat.chat.v1.DraftRequest
+	9,  // 9: sameoldchat.chat.v1.ScheduledMessagesService.GetDraft:input_type -> sameoldchat.chat.v1.DraftRequest
+	10, // 10: sameoldchat.chat.v1.ScheduledMessagesService.Drafts:input_type -> sameoldchat.chat.v1.DraftsRequest
+	9,  // 11: sameoldchat.chat.v1.ScheduledMessagesService.DeleteDraft:input_type -> sameoldchat.chat.v1.DraftRequest
+	12, // 12: sameoldchat.chat.v1.ScheduledMessagesService.SentMessages:input_type -> sameoldchat.chat.v1.SentMessagesRequest
+	0,  // 13: sameoldchat.chat.v1.ScheduledMessagesService.ScheduleMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
+	7,  // 14: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessages:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
+	7,  // 15: sameoldchat.chat.v1.ScheduledMessagesService.ScheduledMessageHistory:output_type -> sameoldchat.chat.v1.ScheduledMessagePage
+	0,  // 16: sameoldchat.chat.v1.ScheduledMessagesService.UpdateScheduledMessage:output_type -> sameoldchat.chat.v1.ScheduledMessage
+	13, // 17: sameoldchat.chat.v1.ScheduledMessagesService.SendScheduledMessageNow:output_type -> sameoldchat.chat.v1.Message
+	14, // 18: sameoldchat.chat.v1.ScheduledMessagesService.DeleteScheduledMessage:output_type -> sameoldchat.chat.v1.MutationResponse
+	8,  // 19: sameoldchat.chat.v1.ScheduledMessagesService.SaveDraft:output_type -> sameoldchat.chat.v1.Draft
+	8,  // 20: sameoldchat.chat.v1.ScheduledMessagesService.GetDraft:output_type -> sameoldchat.chat.v1.Draft
+	11, // 21: sameoldchat.chat.v1.ScheduledMessagesService.Drafts:output_type -> sameoldchat.chat.v1.DraftPage
+	14, // 22: sameoldchat.chat.v1.ScheduledMessagesService.DeleteDraft:output_type -> sameoldchat.chat.v1.MutationResponse
+	15, // 23: sameoldchat.chat.v1.ScheduledMessagesService.SentMessages:output_type -> sameoldchat.chat.v1.MessagePage
+	13, // [13:24] is the sub-list for method output_type
+	2,  // [2:13] is the sub-list for method input_type
+	2,  // [2:2] is the sub-list for extension type_name
+	2,  // [2:2] is the sub-list for extension extendee
+	0,  // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_scheduled_proto_init() }
@@ -653,13 +1343,14 @@ func file_sameoldchat_chat_v1_scheduled_proto_init() {
 		return
 	}
 	file_sameoldchat_chat_v1_conversation_mutations_proto_init()
+	file_sameoldchat_chat_v1_messages_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_scheduled_proto_rawDesc), len(file_sameoldchat_chat_v1_scheduled_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

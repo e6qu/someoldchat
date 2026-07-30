@@ -1727,6 +1727,101 @@ func TestScheduledMessagesFollowSlackTokenRangeThreadAndQuotaContracts(t *testin
 	}
 }
 
+func TestFirstPartyDraftAndScheduledManagementLifecycle(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+
+	root, err := messages.Post(ctx, "T1", "U1", "C1", "root", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread := domain.NewMessageTimestamp(root.CreatedAt)
+	draft, err := messages.SaveDraft(ctx, "T1", "U1", "C1", thread, "  exact draft text  ")
+	if err != nil || draft.Text != "  exact draft text  " {
+		t.Fatalf("draft=%+v err=%v", draft, err)
+	}
+	loaded, err := messages.Draft(ctx, "T1", "U1", "C1", thread)
+	if err != nil || loaded.Text != draft.Text {
+		t.Fatalf("loaded draft=%+v err=%v", loaded, err)
+	}
+	drafts, err := messages.Drafts(ctx, "T1", "U1", domain.PageRequest{Limit: 10, Descending: true})
+	if err != nil || len(drafts.Items) != 1 || drafts.Items[0].ThreadTimestamp != thread {
+		t.Fatalf("draft page=%+v err=%v", drafts, err)
+	}
+	if err := messages.DeleteDraft(ctx, "T1", "U1", "C1", thread); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.DeleteDraft(ctx, "T1", "U1", "C1", thread); err != nil {
+		t.Fatalf("draft delete retry was not idempotent: %v", err)
+	}
+
+	scheduled, err := messages.ScheduleMessage(ctx, "T1", "U1", "C1", "before edit", time.Now().UTC().Add(2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementTime := time.Now().UTC().Add(3 * time.Hour).Truncate(time.Second)
+	updated, err := messages.UpdateScheduledMessage(ctx, "T1", "U1", scheduled.ID, "C1", "after edit", replacementTime)
+	if err != nil || updated.Text != "after edit" || !updated.PostAt.Equal(replacementTime) {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	history, err := messages.ScheduledMessageHistory(ctx, "T1", "U1", false, domain.PageRequest{Limit: 10, Descending: true})
+	if err != nil || len(history.Items) != 1 || history.Items[0].ID != scheduled.ID {
+		t.Fatalf("scheduled history=%+v err=%v", history, err)
+	}
+	if _, err := s.ClaimScheduledMessageForCredential(ctx, "T1", InternalScheduledCredential("T1", "U1"), scheduled.ID, "worker", time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	failedAt := time.Now().UTC()
+	if err := s.MarkScheduledMessageFailed(ctx, "worker", scheduled.ID, "not_in_channel", failedAt, events.Event{ID: "failed-event", WorkspaceID: "T1", Topic: "message.schedule_failed"}); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := messages.SendScheduledMessageNow(ctx, "T1", "U1", scheduled.ID)
+	if err != nil || sent.Text != "after edit" {
+		t.Fatalf("sent=%+v err=%v", sent, err)
+	}
+	if _, err := messages.SendScheduledMessageNow(ctx, "T1", "U1", scheduled.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("second send-now error=%v, want not found", err)
+	}
+	pendingHistory, err := messages.ScheduledMessageHistory(ctx, "T1", "U1", false, domain.PageRequest{Limit: 10})
+	if err != nil || len(pendingHistory.Items) != 0 {
+		t.Fatalf("pending history retained a delivered item: page=%+v err=%v", pendingHistory, err)
+	}
+	sentPage, err := messages.SentMessages(ctx, "T1", "U1", domain.PageRequest{Limit: 10, Descending: true})
+	if err != nil || len(sentPage.Messages) != 2 || sentPage.Messages[0].Text != "after edit" {
+		t.Fatalf("sent page=%+v err=%v", sentPage, err)
+	}
+	history, err = messages.ScheduledMessageHistory(ctx, "T1", "U1", true, domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Items) != 1 || history.Items[0].DeliveredAt.IsZero() || !history.Items[0].FailedAt.IsZero() || history.Items[0].FailureCode != "" {
+		t.Fatalf("delivered history=%+v err=%v", history, err)
+	}
+}
+
+func TestSentMessagesHidesPrivateHistoryAfterLeaving(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "private", IsPrivate: true})
+	s.SeedConversationMember("C1", "U1")
+	messages := Messages{Store: s}
+
+	if _, err := messages.Post(ctx, "T1", "U1", "C1", "private history", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.LeaveConversation(ctx, "T1", "U1", "C1"); err != nil {
+		t.Fatal(err)
+	}
+	page, err := messages.SentMessages(ctx, "T1", "U1", domain.PageRequest{Limit: 10, Descending: true})
+	if err != nil || len(page.Messages) != 0 {
+		t.Fatalf("private history remained visible after leaving: page=%+v err=%v", page, err)
+	}
+}
+
 func TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()

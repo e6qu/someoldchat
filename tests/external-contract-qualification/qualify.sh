@@ -56,6 +56,7 @@ activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-th
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
 conversation_join_url='https://docs.slack.dev/reference/methods/conversations.join/'
+schedule_api_url='https://docs.slack.dev/messaging/sending-and-scheduling-messages/'
 
 fetch "$sign_in_url" "$work/sign-in.html"
 fetch "$keyboard_url" "$work/keyboard.html"
@@ -86,6 +87,7 @@ fetch "$activity_help_url" "$work/activity.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
 fetch "$later_api_url" "$work/later-api.html"
 fetch "$conversation_join_url" "$work/conversations-join.html"
+fetch "$schedule_api_url" "$work/scheduling-api.html"
 
 assert_contains "$work/sign-in.html" 'Sign in to your workspace' \
 	'[AUTH-01] workspace sign-in is an explicit first-party journey' "$sign_in_url"
@@ -101,10 +103,16 @@ assert_contains "$work/dm.html" 'give group DMs a name' \
 	'[DM-02] group DMs have a naming journey' "$dm_url"
 assert_contains "$work/add-dm.html" 'conversation history you choose to include is moved to a new group DM' \
 	'[DM-03] adding DM participants creates a new conversation with selected history' "$add_dm_url"
+assert_contains "$work/messages.html" 'automatically save as a draft' \
+	'[DRAFT-01] unfinished composer text is saved as a draft' "$message_url"
 assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent messages' \
 	'[DRAFT-02] Drafts and sent is the current aggregate work surface' "$message_url"
 assert_contains "$work/messages.html" 'edit, reschedule, send, cancel, or delete it' \
 	'[SCHED-02] scheduled items expose the current management actions' "$message_url"
+assert_contains "$work/scheduling-api.html" 'delete the old message and then' \
+	'[SCHED-02] the public Web API updates by delete plus schedule rather than an invented update method' "$schedule_api_url"
+assert_contains "$work/scheduling-api.html" 'Messages can only be scheduled up to 120 days in advance' \
+	'[SCHED-01] the public scheduling window is 120 days' "$schedule_api_url"
 assert_contains "$work/search.html" 'switch between result types' \
 	'[SEARCH-01] desktop search result types' "$search_url"
 assert_contains "$work/search.html" 'in:#team-marketing from:@Sara' \

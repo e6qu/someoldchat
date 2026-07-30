@@ -26,6 +26,7 @@ func runQualification(t *testing.T, open opener) {
 		run  func(*testing.T, opener)
 	}{
 		{"core repository", coreRepositoryContract},
+		{"drafts and sent repository", draftsAndSentRepositoryContract},
 		{"OpenID refresh token rotation is durable", openIDRefreshTokenRotationIsDurable},
 		{"lists repository", listsRepositoryContract},
 		{"published wave one repository", publishedWaveOneRepositoryContract},
@@ -61,6 +62,92 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
+	}
+}
+
+func draftsAndSentRepositoryContract(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspace := domain.WorkspaceID("T-drafts-" + suffix)
+	user := domain.UserID("U-drafts-" + suffix)
+	channel := domain.ConversationID("C-drafts-" + suffix)
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, seed := range []func() error{
+		func() error { return repository.SeedWorkspace(ctx, domain.Workspace{ID: workspace, Name: "Drafts"}) },
+		func() error {
+			return repository.SeedUser(ctx, domain.User{ID: user, WorkspaceID: workspace, Name: "author"})
+		},
+		func() error {
+			return repository.SeedConversation(ctx, domain.Conversation{ID: channel, WorkspaceID: workspace, Name: "general"})
+		},
+		func() error { return repository.SeedConversationMember(ctx, channel, user) },
+	} {
+		if err := seed(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	event := func(id, topic string) events.Event {
+		return events.Event{ID: domain.EventID(id + "-" + suffix), WorkspaceID: workspace, Topic: topic, CreatedAt: now}
+	}
+	draft := domain.Draft{WorkspaceID: workspace, UserID: user, ConversationID: channel, Text: "unfinished", UpdatedAt: now}
+	if _, err := repository.UpsertDraft(ctx, draft, event("draft-save", "draft.saved")); err != nil {
+		t.Fatal(err)
+	}
+	storedDraft, err := repository.GetDraft(ctx, workspace, user, channel, "")
+	if err != nil || storedDraft.Text != draft.Text {
+		t.Fatalf("draft=%+v err=%v", storedDraft, err)
+	}
+	drafts, err := repository.ListDrafts(ctx, workspace, user, domain.PageRequest{Limit: 10, Descending: true})
+	if err != nil || len(drafts.Items) != 1 {
+		t.Fatalf("drafts=%+v err=%v", drafts, err)
+	}
+	message := domain.Message{ID: domain.MessageID("M-drafts-" + suffix), WorkspaceID: workspace, Conversation: channel, AuthorID: user, Text: "sent", CreatedAt: now.Add(time.Second)}
+	if err := repository.CreateMessage(ctx, message, event("message-create", "message.created"), ""); err != nil {
+		t.Fatal(err)
+	}
+	sent, err := repository.ListAuthoredMessages(ctx, workspace, user, domain.PageRequest{Limit: 10, Descending: true})
+	if err != nil || len(sent.Messages) != 1 || sent.Messages[0].ID != message.ID {
+		t.Fatalf("sent=%+v err=%v", sent, err)
+	}
+	credential := "first-party-" + suffix
+	scheduled := domain.ScheduledMessage{
+		WorkspaceID: workspace, ID: domain.ScheduledMessageID("Q-drafts-" + suffix), Channel: channel,
+		Author: user, CredentialHash: credential, Text: "before", PostAt: now.Add(2 * time.Hour), CreatedAt: now,
+	}
+	if err := repository.CreateScheduledMessageWithinLimit(ctx, scheduled, 5*time.Minute, 30, event("schedule-create", "message.scheduled")); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := repository.UpdateScheduledMessageWithinLimit(ctx, domain.ScheduledMessageUpdate{
+		WorkspaceID: workspace, ID: scheduled.ID, Channel: channel, CredentialHash: credential,
+		Text: "after", PostAt: now.Add(3 * time.Hour),
+	}, 5*time.Minute, 30, event("schedule-update", "message.schedule_updated"))
+	if err != nil || updated.Text != "after" {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	failedClaim, err := repository.ClaimScheduledMessageForCredential(ctx, workspace, credential, scheduled.ID, "worker-"+suffix, time.Minute)
+	if err != nil || failedClaim.ID != scheduled.ID {
+		t.Fatalf("worker claim=%+v err=%v", failedClaim, err)
+	}
+	if err := repository.MarkScheduledMessageFailed(ctx, "worker-"+suffix, scheduled.ID, "not_in_channel", now.Add(time.Minute), event("schedule-failed", "message.schedule_failed")); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := repository.ClaimScheduledMessageForCredential(ctx, workspace, credential, scheduled.ID, "send-now-"+suffix, time.Minute)
+	if err != nil || claimed.ID != scheduled.ID {
+		t.Fatalf("claimed=%+v err=%v", claimed, err)
+	}
+	if err := repository.MarkScheduledMessageDelivered(ctx, "send-now-"+suffix, scheduled.ID); err != nil {
+		t.Fatal(err)
+	}
+	history, err := repository.ListScheduledMessageHistory(ctx, workspace, credential, true, domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Items) != 1 || history.Items[0].DeliveredAt.IsZero() || !history.Items[0].FailedAt.IsZero() || history.Items[0].FailureCode != "" {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	if err := repository.DeleteDraft(ctx, workspace, user, channel, "", event("draft-delete", "draft.deleted")); err != nil {
+		t.Fatal(err)
 	}
 }
 

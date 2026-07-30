@@ -312,6 +312,7 @@ func conversionCases() map[string]conversionCase {
 			through: throughInfallible(encodeProtoActivityPreferences, decodeProtoActivityPreferences),
 		},
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
+		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},
 		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
 		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
 		"Call":             {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},

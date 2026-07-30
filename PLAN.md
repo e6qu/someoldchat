@@ -254,8 +254,9 @@ order:
 4. correct Slack keyboard mappings and slash-command semantics, including
    `response_url` authorization, `should_escape`, command discovery, built-in
    commands, and realistic human/bot qualification identities;
-5. add scheduled-send, reminder execution, Drafts & sent, Later, and full
-   Activity journeys to the first-party client;
+5. continue closing remaining stateful first-party journey gaps after the
+   completed scheduled-send, reminder execution, Drafts & sent, Later, and
+   Activity slices;
 6. audit every claimed Web API method's current arguments, authorization,
    success and error schemas, pagination, rate limits, and official SDK
    behavior, beginning with `chat.postMessage` and file uploads;
@@ -264,24 +265,30 @@ order:
    developer workspace.
 
 Current sweep status (2026-07-30): the normative catalog and stable-ID mapping
-for all 28 first-party browser journeys are in place; Slack web keyboard and
+for all 31 first-party browser journeys are in place; Slack web keyboard and
 slash-command discovery/escaping semantics are corrected; and the journeys now
 qualify in Chromium, Firefox, and WebKit with representative automated WCAG
 checks. Visual baselines, manual assistive-technology evidence, complete
 API/SDK-to-journey mapping, and live-Slack differential runs remain explicit
-work rather than inferred compatibility. Scheduled send now preserves
+work rather than inferred compatibility. Scheduled send preserves
 channel/thread context and the browser's local time zone, stays out of history
-until delivery, and has a real pending
-list and cancellation journey. Current Later is now a private first-party
+until delivery, and has a real pending/failure list with edit, reschedule,
+send-now, and cancellation journeys. Durable composer drafts and authored sent
+history share Slack's current Drafts & sent surface; drafts survive reload and
+process restart, while sent history re-applies private-conversation visibility
+after membership loss. Slack exposes only schedule/list/delete Web API
+operations, so first-party edit and send-now remain on the authenticated
+application/gRPC seam instead of inventing public Slack methods. Current Later
+is now a private first-party
 saved-item model—not an alias over deprecated `stars.*`—with save/unsave,
 focused-message `A`, In progress, Archived, Completed, restore/removal,
 inaccessible-source redaction, live reconciliation, portable persistence, and
 local/distributed composition parity. Slack exposes no current Later Web API,
 so official SDK qualification remains evidence for the deliberately separate
 legacy `stars.*` and `reminders.*` contracts rather than being mislabeled as
-Later evidence. Drafts/Sent aggregation, scheduled edit, reschedule/send-now
-and failure history, reminder dates/delivery, and Later reminder filtering
-remain the next stateful client slice.
+Later evidence. Durable staged draft attachments, sidebar draft indicators,
+Slack's suggested scheduling times, reminder dates/delivery, and Later reminder
+filtering remain part of the next stateful client review.
 
 The reminder contract audit also corrected a false evidence claim. Current
 Slack Help puts personal reminder creation and management in Later and message
@@ -296,7 +303,7 @@ evidence.
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 101 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 28 Playwright scenarios cite 51 IDs. `make journey-check` rejects
+and 31 Playwright scenarios cite 58 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -313,9 +320,9 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently fails on 69 representative exact
-assertions explicitly citing 38 of the 101 journey IDs across every journey
-domain. `make journey-check` prints the other 63 as upstream-text evidence
+developer pages and currently checks 72 representative exact assertions
+explicitly citing 40 of the 101 journey IDs across every journey domain.
+`make journey-check` prints the other 61 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and

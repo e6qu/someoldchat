@@ -256,8 +256,16 @@ type Service interface {
 	ScheduleMessageAs(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageRequest) (domain.ScheduledMessage, error)
 	ScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	ScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
+	ScheduledMessageHistory(context.Context, domain.WorkspaceID, domain.UserID, bool, domain.PageRequest) (domain.ScheduledMessagePage, error)
+	UpdateScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageID, domain.ConversationID, string, time.Time) (domain.ScheduledMessage, error)
+	SendScheduledMessageNow(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledMessageID) (domain.Message, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID) error
 	DeleteScheduledMessageForCredential(context.Context, domain.WorkspaceID, domain.UserID, string, domain.ConversationID, domain.ScheduledMessageID) error
+	SaveDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) (domain.Draft, error)
+	Draft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Draft, error)
+	Drafts(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.DraftPage, error)
+	DeleteDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) error
+	SentMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MessagePage, error)
 	CreateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, string, string, string) (domain.UserGroup, error)
 	UpdateUserGroup(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, string, string, string) (domain.UserGroup, error)
 	SetUserGroupEnabled(context.Context, domain.WorkspaceID, domain.UserID, domain.UserGroupID, bool) (domain.UserGroup, error)

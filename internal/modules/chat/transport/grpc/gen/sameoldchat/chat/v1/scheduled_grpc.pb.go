@@ -19,9 +19,17 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	ScheduledMessagesService_ScheduleMessage_FullMethodName        = "/sameoldchat.chat.v1.ScheduledMessagesService/ScheduleMessage"
-	ScheduledMessagesService_ScheduledMessages_FullMethodName      = "/sameoldchat.chat.v1.ScheduledMessagesService/ScheduledMessages"
-	ScheduledMessagesService_DeleteScheduledMessage_FullMethodName = "/sameoldchat.chat.v1.ScheduledMessagesService/DeleteScheduledMessage"
+	ScheduledMessagesService_ScheduleMessage_FullMethodName         = "/sameoldchat.chat.v1.ScheduledMessagesService/ScheduleMessage"
+	ScheduledMessagesService_ScheduledMessages_FullMethodName       = "/sameoldchat.chat.v1.ScheduledMessagesService/ScheduledMessages"
+	ScheduledMessagesService_ScheduledMessageHistory_FullMethodName = "/sameoldchat.chat.v1.ScheduledMessagesService/ScheduledMessageHistory"
+	ScheduledMessagesService_UpdateScheduledMessage_FullMethodName  = "/sameoldchat.chat.v1.ScheduledMessagesService/UpdateScheduledMessage"
+	ScheduledMessagesService_SendScheduledMessageNow_FullMethodName = "/sameoldchat.chat.v1.ScheduledMessagesService/SendScheduledMessageNow"
+	ScheduledMessagesService_DeleteScheduledMessage_FullMethodName  = "/sameoldchat.chat.v1.ScheduledMessagesService/DeleteScheduledMessage"
+	ScheduledMessagesService_SaveDraft_FullMethodName               = "/sameoldchat.chat.v1.ScheduledMessagesService/SaveDraft"
+	ScheduledMessagesService_GetDraft_FullMethodName                = "/sameoldchat.chat.v1.ScheduledMessagesService/GetDraft"
+	ScheduledMessagesService_Drafts_FullMethodName                  = "/sameoldchat.chat.v1.ScheduledMessagesService/Drafts"
+	ScheduledMessagesService_DeleteDraft_FullMethodName             = "/sameoldchat.chat.v1.ScheduledMessagesService/DeleteDraft"
+	ScheduledMessagesService_SentMessages_FullMethodName            = "/sameoldchat.chat.v1.ScheduledMessagesService/SentMessages"
 )
 
 // ScheduledMessagesServiceClient is the client API for ScheduledMessagesService service.
@@ -30,7 +38,15 @@ const (
 type ScheduledMessagesServiceClient interface {
 	ScheduleMessage(ctx context.Context, in *ScheduleMessageRequest, opts ...grpc.CallOption) (*ScheduledMessage, error)
 	ScheduledMessages(ctx context.Context, in *ScheduledMessagesRequest, opts ...grpc.CallOption) (*ScheduledMessagePage, error)
+	ScheduledMessageHistory(ctx context.Context, in *ScheduledMessageHistoryRequest, opts ...grpc.CallOption) (*ScheduledMessagePage, error)
+	UpdateScheduledMessage(ctx context.Context, in *UpdateScheduledMessageRequest, opts ...grpc.CallOption) (*ScheduledMessage, error)
+	SendScheduledMessageNow(ctx context.Context, in *SendScheduledMessageNowRequest, opts ...grpc.CallOption) (*Message, error)
 	DeleteScheduledMessage(ctx context.Context, in *DeleteScheduledMessageRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SaveDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*Draft, error)
+	GetDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*Draft, error)
+	Drafts(ctx context.Context, in *DraftsRequest, opts ...grpc.CallOption) (*DraftPage, error)
+	DeleteDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*MutationResponse, error)
+	SentMessages(ctx context.Context, in *SentMessagesRequest, opts ...grpc.CallOption) (*MessagePage, error)
 }
 
 type scheduledMessagesServiceClient struct {
@@ -61,10 +77,90 @@ func (c *scheduledMessagesServiceClient) ScheduledMessages(ctx context.Context, 
 	return out, nil
 }
 
+func (c *scheduledMessagesServiceClient) ScheduledMessageHistory(ctx context.Context, in *ScheduledMessageHistoryRequest, opts ...grpc.CallOption) (*ScheduledMessagePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScheduledMessagePage)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_ScheduledMessageHistory_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) UpdateScheduledMessage(ctx context.Context, in *UpdateScheduledMessageRequest, opts ...grpc.CallOption) (*ScheduledMessage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScheduledMessage)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_UpdateScheduledMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) SendScheduledMessageNow(ctx context.Context, in *SendScheduledMessageNowRequest, opts ...grpc.CallOption) (*Message, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Message)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_SendScheduledMessageNow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *scheduledMessagesServiceClient) DeleteScheduledMessage(ctx context.Context, in *DeleteScheduledMessageRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MutationResponse)
 	err := c.cc.Invoke(ctx, ScheduledMessagesService_DeleteScheduledMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) SaveDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*Draft, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Draft)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_SaveDraft_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) GetDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*Draft, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Draft)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_GetDraft_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) Drafts(ctx context.Context, in *DraftsRequest, opts ...grpc.CallOption) (*DraftPage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DraftPage)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_Drafts_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) DeleteDraft(ctx context.Context, in *DraftRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_DeleteDraft_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *scheduledMessagesServiceClient) SentMessages(ctx context.Context, in *SentMessagesRequest, opts ...grpc.CallOption) (*MessagePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MessagePage)
+	err := c.cc.Invoke(ctx, ScheduledMessagesService_SentMessages_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +173,15 @@ func (c *scheduledMessagesServiceClient) DeleteScheduledMessage(ctx context.Cont
 type ScheduledMessagesServiceServer interface {
 	ScheduleMessage(context.Context, *ScheduleMessageRequest) (*ScheduledMessage, error)
 	ScheduledMessages(context.Context, *ScheduledMessagesRequest) (*ScheduledMessagePage, error)
+	ScheduledMessageHistory(context.Context, *ScheduledMessageHistoryRequest) (*ScheduledMessagePage, error)
+	UpdateScheduledMessage(context.Context, *UpdateScheduledMessageRequest) (*ScheduledMessage, error)
+	SendScheduledMessageNow(context.Context, *SendScheduledMessageNowRequest) (*Message, error)
 	DeleteScheduledMessage(context.Context, *DeleteScheduledMessageRequest) (*MutationResponse, error)
+	SaveDraft(context.Context, *DraftRequest) (*Draft, error)
+	GetDraft(context.Context, *DraftRequest) (*Draft, error)
+	Drafts(context.Context, *DraftsRequest) (*DraftPage, error)
+	DeleteDraft(context.Context, *DraftRequest) (*MutationResponse, error)
+	SentMessages(context.Context, *SentMessagesRequest) (*MessagePage, error)
 }
 
 // UnimplementedScheduledMessagesServiceServer should be embedded to have
@@ -93,8 +197,32 @@ func (UnimplementedScheduledMessagesServiceServer) ScheduleMessage(context.Conte
 func (UnimplementedScheduledMessagesServiceServer) ScheduledMessages(context.Context, *ScheduledMessagesRequest) (*ScheduledMessagePage, error) {
 	return nil, status.Error(codes.Unimplemented, "method ScheduledMessages not implemented")
 }
+func (UnimplementedScheduledMessagesServiceServer) ScheduledMessageHistory(context.Context, *ScheduledMessageHistoryRequest) (*ScheduledMessagePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method ScheduledMessageHistory not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) UpdateScheduledMessage(context.Context, *UpdateScheduledMessageRequest) (*ScheduledMessage, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateScheduledMessage not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) SendScheduledMessageNow(context.Context, *SendScheduledMessageNowRequest) (*Message, error) {
+	return nil, status.Error(codes.Unimplemented, "method SendScheduledMessageNow not implemented")
+}
 func (UnimplementedScheduledMessagesServiceServer) DeleteScheduledMessage(context.Context, *DeleteScheduledMessageRequest) (*MutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteScheduledMessage not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) SaveDraft(context.Context, *DraftRequest) (*Draft, error) {
+	return nil, status.Error(codes.Unimplemented, "method SaveDraft not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) GetDraft(context.Context, *DraftRequest) (*Draft, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDraft not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) Drafts(context.Context, *DraftsRequest) (*DraftPage, error) {
+	return nil, status.Error(codes.Unimplemented, "method Drafts not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) DeleteDraft(context.Context, *DraftRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteDraft not implemented")
+}
+func (UnimplementedScheduledMessagesServiceServer) SentMessages(context.Context, *SentMessagesRequest) (*MessagePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method SentMessages not implemented")
 }
 func (UnimplementedScheduledMessagesServiceServer) testEmbeddedByValue() {}
 
@@ -152,6 +280,60 @@ func _ScheduledMessagesService_ScheduledMessages_Handler(srv interface{}, ctx co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ScheduledMessagesService_ScheduledMessageHistory_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScheduledMessageHistoryRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).ScheduledMessageHistory(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_ScheduledMessageHistory_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).ScheduledMessageHistory(ctx, req.(*ScheduledMessageHistoryRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_UpdateScheduledMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateScheduledMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).UpdateScheduledMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_UpdateScheduledMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).UpdateScheduledMessage(ctx, req.(*UpdateScheduledMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_SendScheduledMessageNow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendScheduledMessageNowRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).SendScheduledMessageNow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_SendScheduledMessageNow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).SendScheduledMessageNow(ctx, req.(*SendScheduledMessageNowRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ScheduledMessagesService_DeleteScheduledMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(DeleteScheduledMessageRequest)
 	if err := dec(in); err != nil {
@@ -166,6 +348,96 @@ func _ScheduledMessagesService_DeleteScheduledMessage_Handler(srv interface{}, c
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ScheduledMessagesServiceServer).DeleteScheduledMessage(ctx, req.(*DeleteScheduledMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_SaveDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DraftRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).SaveDraft(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_SaveDraft_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).SaveDraft(ctx, req.(*DraftRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_GetDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DraftRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).GetDraft(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_GetDraft_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).GetDraft(ctx, req.(*DraftRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_Drafts_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DraftsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).Drafts(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_Drafts_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).Drafts(ctx, req.(*DraftsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_DeleteDraft_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DraftRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).DeleteDraft(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_DeleteDraft_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).DeleteDraft(ctx, req.(*DraftRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ScheduledMessagesService_SentMessages_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SentMessagesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ScheduledMessagesServiceServer).SentMessages(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ScheduledMessagesService_SentMessages_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ScheduledMessagesServiceServer).SentMessages(ctx, req.(*SentMessagesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -186,8 +458,40 @@ var ScheduledMessagesService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _ScheduledMessagesService_ScheduledMessages_Handler,
 		},
 		{
+			MethodName: "ScheduledMessageHistory",
+			Handler:    _ScheduledMessagesService_ScheduledMessageHistory_Handler,
+		},
+		{
+			MethodName: "UpdateScheduledMessage",
+			Handler:    _ScheduledMessagesService_UpdateScheduledMessage_Handler,
+		},
+		{
+			MethodName: "SendScheduledMessageNow",
+			Handler:    _ScheduledMessagesService_SendScheduledMessageNow_Handler,
+		},
+		{
 			MethodName: "DeleteScheduledMessage",
 			Handler:    _ScheduledMessagesService_DeleteScheduledMessage_Handler,
+		},
+		{
+			MethodName: "SaveDraft",
+			Handler:    _ScheduledMessagesService_SaveDraft_Handler,
+		},
+		{
+			MethodName: "GetDraft",
+			Handler:    _ScheduledMessagesService_GetDraft_Handler,
+		},
+		{
+			MethodName: "Drafts",
+			Handler:    _ScheduledMessagesService_Drafts_Handler,
+		},
+		{
+			MethodName: "DeleteDraft",
+			Handler:    _ScheduledMessagesService_DeleteDraft_Handler,
+		},
+		{
+			MethodName: "SentMessages",
+			Handler:    _ScheduledMessagesService_SentMessages_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

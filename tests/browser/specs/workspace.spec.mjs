@@ -299,7 +299,7 @@ test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences
   await expectNoSeriousAccessibilityViolations(page);
 });
 
-test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history, and can be cancelled', async ({ page, context }) => {
+test('[SCHED-01 SCHED-02 A11Y-01] scheduled work can be edited, sent now, and cancelled', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -315,7 +315,7 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history,
   await page.getByLabel('Send date and time').fill(localFuture);
 
   await Promise.all([
-    page.waitForURL(/\/app\/scheduled\?.*scheduled=1/),
+    page.waitForURL(/\/app\/drafts\?.*scheduled=1/),
     page.locator('button[formaction^="/app/message/schedule"]').click(),
   ]);
   await expect(page.getByRole('status')).toHaveText('Message scheduled.');
@@ -327,12 +327,74 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history,
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page.locator('.message-text', { hasText: message })).toHaveCount(0);
   await expect(composer).toHaveValue('');
-  await page.getByRole('link', { name: 'Scheduled messages' }).click();
+  await page.getByRole('link', { name: 'Drafts and sent' }).click();
+  await page.getByRole('link', { name: 'Scheduled', exact: true }).click();
   await expect(scheduled).toBeVisible();
-  await scheduled.getByRole('button', { name: /Cancel scheduled message/ }).click();
+  await scheduled.getByText('Edit', { exact: true }).click();
+  const edited = `${message} edited`;
+  await scheduled.locator('textarea[name="text"]').fill(edited);
+  const rescheduledFuture = await page.evaluate(() => {
+    const value = new Date(Date.now() + 3 * 60 * 60 * 1000);
+    const pad = (part) => String(part).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}`;
+  });
+  await scheduled.locator('input[name="schedule_at"]').fill(rescheduledFuture);
+  await expect(scheduled.locator('input[name="post_at"]')).not.toHaveValue('');
+  await scheduled.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('status')).toHaveText('Scheduled message updated.');
+  const updated = page.locator('.scheduled-item', { hasText: edited });
+  await updated.getByRole('button', { name: 'Send now' }).click();
+  await expect(page.getByRole('status')).toHaveText('Scheduled message sent.');
+  await expect(page.getByRole('link', { name: 'Sent', exact: true })).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('.work-item', { hasText: edited })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-text', { hasText: edited })).toBeVisible();
+  await composer.fill(`${message} cancel`);
+  await page.getByRole('button', { name: 'Schedule message' }).click();
+  await page.getByLabel('Send date and time').fill(localFuture);
+  await page.locator('button[formaction^="/app/message/schedule"]').click();
+  const cancellable = page.locator('.scheduled-item', { hasText: `${message} cancel` });
+  await cancellable.getByRole('button', { name: /Cancel scheduled message/ }).click();
   await expect(page.getByRole('status')).toHaveText('Scheduled message cancelled.');
-  await expect(page.locator('.scheduled-item', { hasText: message })).toHaveCount(0);
+  await expect(page.locator('.scheduled-item', { hasText: `${message} cancel` })).toHaveCount(0);
   await expect(page.getByText('You have no scheduled messages.')).toBeVisible();
+});
+
+test('[DRAFT-01 DRAFT-02 A11Y-01] drafts persist on the server and Drafts & sent exposes all tabs', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  const composer = page.locator('form.composer textarea[name="text"]');
+  const draft = `server draft qualification ${Date.now()}`;
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/app/draft?') && response.status() === 204),
+    composer.fill(draft),
+  ]);
+  await page.evaluate(() => localStorage.clear());
+  await page.reload();
+  await expect(composer).toHaveValue(draft);
+
+  await page.getByRole('link', { name: 'Drafts and sent' }).click();
+  await expect(page.getByRole('link', { name: 'Drafts', exact: true })).toHaveAttribute('aria-current', 'page');
+  const item = page.locator('.work-item', { hasText: draft });
+  await expect(item).toBeVisible();
+  await item.getByRole('link', { name: 'Continue' }).click();
+  await expect(composer).toHaveValue(draft);
+
+  await page.getByRole('link', { name: 'Drafts and sent' }).click();
+  await item.getByRole('button', { name: /Delete draft/ }).click();
+  await expect(page.getByRole('status')).toHaveText('Draft deleted.');
+  await expect(page.getByText('You have no drafts.')).toBeVisible();
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  const sent = `sent tab qualification ${Date.now()}`;
+  await composer.fill(sent);
+  await composer.press('Enter');
+  await expect(page.locator('.message-text', { hasText: sent })).toBeVisible();
+  await page.getByRole('link', { name: 'Drafts and sent' }).click();
+  await page.getByRole('link', { name: 'Sent', exact: true }).click();
+  await expect(page.locator('.work-item', { hasText: sent })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports every current state', async ({ page, context, request }) => {
