@@ -92,6 +92,20 @@ atomic.
 - Differential fixtures record participant/history behavior because help text
   alone does not fully specify every DM transition.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| CONV-01 | [Join a channel](https://slack.com/help/articles/205239967-Join-a-channel) | Slack lets eligible members discover, preview, and join channels. |
+| CONV-02 | [What is a channel?](https://slack.com/help/articles/360017938993-What-is-a-channel) | Slack distinguishes created public and private channel spaces. |
+| CONV-03 | [What is a channel?](https://slack.com/help/articles/360017938993-What-is-a-channel) | Channel headers and details expose membership and conversation context. |
+| CONV-04 | [Archive or delete a channel](https://slack.com/help/articles/213185307-Archive-or-delete-a-channel) | Archive, unarchive, and permanent deletion have different consequences. |
+| DM-01 | [Understand direct messages](https://slack.com/help/articles/212281468-Understand-direct-messages) | Slack provides a searchable DMs surface and canonical direct conversations. |
+| DM-02 | [Understand direct messages](https://slack.com/help/articles/212281468-Understand-direct-messages) | Group DMs support up to nine people and may have a name. |
+| DM-03 | [Add people to a direct message](https://slack.com/help/articles/1500002969782-Add-people-to-a-direct-message) | Adding people creates a new group DM with chosen history visibility. |
+| DM-04 | [Understand direct messages](https://slack.com/help/articles/212281468-Understand-direct-messages) | DMs remain discoverable from Slack's dedicated searchable surface. |
+| DM-05 | [Convert a group DM to a private channel](https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel) | Eligible group DMs can become private channels with preserved history. |
+
 Sources checked 2026-07-29:
 
 - [What is a channel?](https://slack.com/help/articles/360017938993-What-is-a-channel)

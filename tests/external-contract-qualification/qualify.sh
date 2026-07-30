@@ -23,56 +23,173 @@ assert_contains() {
 		echo "source: $4" >&2
 		exit 1
 	fi
+	assertions=$((assertions + 1))
 }
 
+assertions=0
+sign_in_url='https://slack.com/help/articles/212681477-Sign-in-to-Slack'
+keyboard_url='https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands'
+keyboard_navigation_url='https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard'
+dm_url='https://slack.com/help/articles/212281468-Understand-direct-messages'
+add_dm_url='https://slack.com/help/articles/1500002969782-Add-people-to-a-direct-message'
+message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
+search_url='https://slack.com/help/articles/202528808-Search-in-Slack'
+file_url='https://slack.com/help/articles/201330736-Add-files-to-Slack'
+slash_url='https://docs.slack.dev/interactivity/implementing-slash-commands/'
+manifest_url='https://docs.slack.dev/reference/app-manifest/'
+oauth_url='https://docs.slack.dev/authentication/installing-with-oauth/'
+status_url='https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability'
+dnd_url='https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb'
+huddle_url='https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack'
+canvas_url='https://slack.com/help/articles/203950418-Use-a-canvas-in-Slack'
+list_url='https://slack.com/help/articles/27452748828179-Use-lists-in-Slack'
+workflow_url='https://slack.com/help/articles/360035692513-Guide-to-Workflow-Builder'
+roles_url='https://slack.com/help/articles/360018112273-Roles-in-Slack'
+connect_url='https://slack.com/help/articles/360035092414-What-is-Slack-Connect'
+accessibility_url='https://slack.com/help/articles/4455747966739-Accessibility-in-Slack'
+screen_reader_url='https://slack.com/help/articles/360000411963-Use-Slack-with-a-screen-reader'
 reminder_help_url='https://slack.com/help/articles/208423427-Set-a-reminder'
 later_help_url='https://slack.com/help/articles/360042650274-Save-messages-and-files-for-later'
 activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack'
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
 
+fetch "$sign_in_url" "$work/sign-in.html"
+fetch "$keyboard_url" "$work/keyboard.html"
+fetch "$keyboard_navigation_url" "$work/keyboard-navigation.html"
+fetch "$dm_url" "$work/dm.html"
+fetch "$add_dm_url" "$work/add-dm.html"
+fetch "$message_url" "$work/messages.html"
+fetch "$search_url" "$work/search.html"
+fetch "$file_url" "$work/files.html"
+fetch "$slash_url" "$work/slash.html"
+fetch "$manifest_url" "$work/manifest.html"
+fetch "$oauth_url" "$work/oauth.html"
+fetch "$status_url" "$work/status.html"
+fetch "$dnd_url" "$work/dnd.html"
+fetch "$huddle_url" "$work/huddles.html"
+fetch "$canvas_url" "$work/canvas.html"
+fetch "$list_url" "$work/list.html"
+fetch "$workflow_url" "$work/workflow.html"
+fetch "$roles_url" "$work/roles.html"
+fetch "$connect_url" "$work/connect.html"
+fetch "$accessibility_url" "$work/accessibility.html"
+fetch "$screen_reader_url" "$work/screen-reader.html"
 fetch "$reminder_help_url" "$work/reminders.html"
 fetch "$later_help_url" "$work/later.html"
 fetch "$activity_help_url" "$work/activity.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
 fetch "$later_api_url" "$work/later-api.html"
 
+assert_contains "$work/sign-in.html" 'Sign in to your workspace' \
+	'[AUTH-01] workspace sign-in is an explicit first-party journey' "$sign_in_url"
+assert_contains "$work/keyboard.html" 'Start a search' \
+	'[SEARCH-01] global search has an official keyboard shortcut' "$keyboard_url"
+assert_contains "$work/keyboard.html" 'Search in the current conversation' \
+	'[SEARCH-03] current-conversation search has a distinct shortcut' "$keyboard_url"
+assert_contains "$work/keyboard-navigation.html" 'Type the name of a channel or person into the search field' \
+	'[NAV-03] the conversation switcher searches both channels and people' "$keyboard_navigation_url"
+assert_contains "$work/dm.html" 'up to nine people' \
+	'[DM-02] group DM participant limit' "$dm_url"
+assert_contains "$work/dm.html" 'give group DMs a name' \
+	'[DM-02] group DMs have a naming journey' "$dm_url"
+assert_contains "$work/add-dm.html" 'conversation history you choose to include is moved to a new group DM' \
+	'[DM-03] adding DM participants creates a new conversation with selected history' "$add_dm_url"
+assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent messages' \
+	'[DRAFT-02] Drafts and sent is the current aggregate work surface' "$message_url"
+assert_contains "$work/messages.html" 'edit, reschedule, send, cancel, or delete it' \
+	'[SCHED-02] scheduled items expose the current management actions' "$message_url"
+assert_contains "$work/search.html" 'switch between result types' \
+	'[SEARCH-01] desktop search result types' "$search_url"
+assert_contains "$work/search.html" 'in:#team-marketing from:@Sara' \
+	'[SEARCH-02] search modifiers can be combined' "$search_url"
+assert_contains "$work/files.html" 'files up to 1GB in size' \
+	'[FILE-03] current hosted file size limit' "$file_url"
+assert_contains "$work/files.html" 'Drag and drop up to 10 files' \
+	'[FILE-01] current composer file count and drag entry point' "$file_url"
+assert_contains "$work/slash.html" '3000 milliseconds' \
+	'[APP-05] slash commands require a three-second acknowledgement' "$slash_url"
+assert_contains "$work/manifest.html" 'features.slash_commands[].should_escape' \
+	'[APP-05] slash command entity escaping is manifest-controlled' "$manifest_url"
+assert_contains "$work/oauth.html" 'requesting scopes, waiting for a user to give their approval, and exchanging a temporary authorization code' \
+	'[APP-02] Slack OAuth installation sequence' "$oauth_url"
+assert_contains "$work/oauth.html" 'token rotation' \
+	'[APP-02] Slack OAuth supports expiring access and refresh token rotation' "$oauth_url"
+assert_contains "$work/status.html" 'Remove status after...' \
+	'[STATUS-01] status supports an explicit clear time' "$status_url"
+assert_contains "$work/status.html" 'away after 10 minutes of desktop inactivity' \
+	'[STATUS-02] automatic availability transition' "$status_url"
+assert_contains "$work/dnd.html" 'set a notification schedule' \
+	'[NOTIFY-03] notification pause schedules are first-party behavior' "$dnd_url"
+assert_contains "$work/dnd.html" 'override this setting to notify you about an urgent message once per day' \
+	'[NOTIFY-03] urgent DM notification override is bounded' "$dnd_url"
+assert_contains "$work/huddles.html" 'maximum of two participants' \
+	'[HUDDLE-03] free-plan huddle participant limit' "$huddle_url"
+assert_contains "$work/huddles.html" 'up to 50 participants' \
+	'[HUDDLE-03] paid-plan huddle participant limit' "$huddle_url"
+assert_contains "$work/huddles.html" 'Google Chrome' \
+	'[HUDDLE-01] huddle browser support is explicitly bounded' "$huddle_url"
+assert_contains "$work/canvas.html" 'Add a canvas as a tab' \
+	'[CANVAS-01] conversations add an existing or newly created canvas as a tab' "$canvas_url"
+assert_contains "$work/list.html" 'create a list' \
+	'[LIST-01] lists have a current first-party creation journey' "$list_url"
+assert_contains "$work/workflow.html" 'Workflow Builder' \
+	'[WORKFLOW-03] workflow creation is a current first-party surface' "$workflow_url"
+assert_contains "$work/roles.html" 'Workspace Primary Owner' \
+	'[ADMIN-01] workspace roles have distinct administrative authority' "$roles_url"
+assert_contains "$work/connect.html" 'work alongside people from other companies' \
+	'[CONNECT-01] Slack Connect is an external-organization journey' "$connect_url"
+assert_contains "$work/connect.html" 'up to 250 organizations, including your own' \
+	'[CONNECT-01] current Slack Connect channel organization capacity' "$connect_url"
+assert_contains "$work/accessibility.html" 'keyboard' \
+	'[A11Y-01] Slack documents keyboard accessibility as a product contract' "$accessibility_url"
+assert_contains "$work/screen-reader.html" 'screen reader' \
+	'[A11Y-02] Slack documents a dedicated screen-reader journey' "$screen_reader_url"
+
 assert_contains "$work/reminders.html" 'Later tab in your sidebar.' \
-	'personal reminder creation starts in Later' "$reminder_help_url"
+	'[REMIND-02] personal reminder creation starts in Later' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'Remind me about this' \
-	'message and file reminders use the message action' "$reminder_help_url"
+	'[REMIND-01] message and file reminders use the message action' "$reminder_help_url"
 assert_contains "$work/reminders.html" '/remind [#channel] [what] [when]' \
-	'channel reminder slash-command grammar' "$reminder_help_url"
-assert_contains "$work/reminders.html" 'Channel reminders can’t be edited' \
-	'channel reminders are delete-and-recreate' "$reminder_help_url"
+	'[REMIND-03] channel reminder slash-command grammar' "$reminder_help_url"
+assert_contains "$work/reminders.html" "Channel reminders can’t be edited" \
+	'[REMIND-03] channel reminders are delete-and-recreate' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'A message that is only visible to you will appear' \
-	'/remind list is private to the caller' "$reminder_help_url"
+	'[REMIND-03] /remind list is private to the caller' "$reminder_help_url"
 assert_contains "$work/reminders.html" '9 a.m. in your time zone' \
-	'date-only reminder default is local 9 AM' "$reminder_help_url"
+	'[REMIND-02] date-only reminder default is local 9 AM' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'guests can only set reminders for themselves' \
-	'guest reminder boundary' "$reminder_help_url"
+	'[REMIND-02] guest reminder boundary' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'see a badge on the' \
-	'due personal reminders badge Later and Activity' "$reminder_help_url"
+	'[REMIND-04] due personal reminders badge Later and Activity' "$reminder_help_url"
 assert_contains "$work/reminders.html" 'every Monday' \
-	'channel reminders accept named weekday recurrence' "$reminder_help_url"
+	'[REMIND-03] channel reminders accept named weekday recurrence' "$reminder_help_url"
 assert_contains "$work/activity.html" 'personal reminders in Activity' \
-	'current Activity includes personal reminders' "$activity_help_url"
+	'[ACTIVITY-01 REMIND-04] current Activity includes personal reminders' "$activity_help_url"
 assert_contains "$work/activity.html" 'mark them all as read' \
-	'current Activity supports bulk read acknowledgement' "$activity_help_url"
+	'[ACTIVITY-03] current Activity supports bulk read acknowledgement' "$activity_help_url"
+assert_contains "$work/keyboard-navigation.html" 'Enter to reply to a message' \
+	'[ACTIVITY-03] Activity Enter replies rather than merely opening an item' "$keyboard_navigation_url"
+assert_contains "$work/keyboard-navigation.html" 'X to select or un-select an item' \
+	'[ACTIVITY-03] Activity keyboard selection participates in bulk triage' "$keyboard_navigation_url"
+assert_contains "$work/keyboard-navigation.html" 'Ctrl 3' \
+	'[ACTIVITY-01] Slack web on macOS opens Activity with the third navigation-tab shortcut' "$keyboard_navigation_url"
+assert_contains "$work/keyboard-navigation.html" 'Ctrl Shift 3' \
+	'[ACTIVITY-01] Slack web on Windows and Linux opens Activity with the third navigation-tab shortcut' "$keyboard_navigation_url"
 
 for section in 'In progress' 'Archived' 'Completed' 'Show upcoming reminders'; do
-	assert_contains "$work/later.html" "$section" "Later exposes $section" "$later_help_url"
+	assert_contains "$work/later.html" "$section" "[LATER-02] Later exposes $section" "$later_help_url"
 done
 
 assert_contains "$work/reminders-add.html" 'natural language description (Ex. "in 15 minutes," or "every Thursday")' \
-	'reminders.add natural-language argument' "$reminder_api_url"
+	'[REMIND-API-01] reminders.add natural-language argument' "$reminder_api_url"
 assert_contains "$work/reminders-add.html" 'No longer supported - reminders cannot be set for other users.' \
-	'reminders.add user-token targeting retirement' "$reminder_api_url"
+	'[REMIND-API-01] reminders.add user-token targeting retirement' "$reminder_api_url"
 assert_contains "$work/reminders-add.html" 'Available options: daily , weekly , monthly , or yearly .' \
-	'reminders.add recurrence object' "$reminder_api_url"
+	'[REMIND-API-01] reminders.add recurrence object' "$reminder_api_url"
 assert_contains "$work/reminders-add.html" 'have become degraded or useless' \
-	'reminders API retirement state' "$reminder_api_url"
+	'[REMIND-API-01] reminders API retirement state' "$reminder_api_url"
 assert_contains "$work/later-api.html" 'There are no direct APIs for Save it for Later to integrate with.' \
-	'current Later has no direct app API' "$later_api_url"
+	'[LATER-01 REMIND-API-01] current Later has no direct app API' "$later_api_url"
 
-echo 'external Slack reminder and Later contract qualification passed'
+echo "external Slack journey contract qualification passed ($assertions assertions)"

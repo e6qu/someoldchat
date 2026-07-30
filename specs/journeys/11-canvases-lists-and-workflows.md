@@ -1,12 +1,19 @@
 # Canvases, lists, and workflows
 
-## CANVAS-01 — Create and open a canvas
+## CANVAS-01 — Create, open, and add a canvas as a tab
 
-A member can create a standalone canvas or open a conversation canvas where
-Slack and workspace policy allow. The surface identifies title, owner/location,
-sharing state, last update, and edit/view permission. Creation commits one
-durable canvas and opens the real editable/view-only object; a message or
-channel canvas link resolves to the same object.
+A member can create a canvas from Files or the mobile Canvases browser. From a
+channel or DM, the member can add an existing canvas as a tab or create a new
+canvas and then review its access before sharing it into the conversation.
+SameOldChat MUST NOT invent a second “channel canvas” object: the tab, Files
+browser, shared link, message reference, and mobile Canvases entry resolve to
+the same durable canvas and permission record.
+
+The surface identifies title, owner, sharing state, last update, and edit/view
+permission. Creation commits one durable canvas before it opens. Adding a tab
+does not silently broaden access; the access review and resulting view/edit
+rights match Slack. A missing, deleted, restored, inaccessible, or concurrently
+reshared canvas has an explicit outcome and never renders a decorative editor.
 
 ## CANVAS-02 — Edit and collaborate on a canvas
 
@@ -79,6 +86,18 @@ tokens, trigger conflicts, and concurrent publishing are explicit.
   cancellation, and app/token isolation.
 - Differential fixtures compare live Slack object schemas, supported controls,
   and run-state transitions.
+
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| CANVAS-01 | [Use a canvas in Slack](https://slack.com/help/articles/203950418-Use-a-canvas-in-Slack) | Slack creates canvases and adds an existing or new canvas as a conversation tab after access review. |
+| CANVAS-02 | [Use a canvas in Slack](https://slack.com/help/articles/203950418-Use-a-canvas-in-Slack) | Canvas content supports collaborative editing, comments, and sharing controls. |
+| LIST-01 | [Use lists in Slack](https://slack.com/help/articles/27452748828179-Use-lists-in-Slack) | Slack lists expose templates, fields, items, filters, and multiple views. |
+| LIST-02 | [Use lists in Slack](https://slack.com/help/articles/27452748828179-Use-lists-in-Slack) | List items support assignment, dates, fields, discussion, and completion. |
+| WORKFLOW-01 | [Workflow Builder](https://slack.com/help/articles/360035692513-Guide-to-Workflow-Builder) | Published workflows are discoverable from configured links, shortcuts, and triggers. |
+| WORKFLOW-02 | [Slack platform automation](https://docs.slack.dev/automation/) | Slack functions run typed workflow steps with app identity and datastore access. |
+| WORKFLOW-03 | [Workflow Builder](https://slack.com/help/articles/360035692513-Guide-to-Workflow-Builder) | Workflow Builder creates, configures, publishes, and manages workflow versions. |
 
 Sources checked 2026-07-29:
 

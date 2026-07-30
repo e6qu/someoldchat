@@ -28,6 +28,23 @@ func TestCumulativeEvidenceCountsTreatHigherEvidenceAsLowerEvidence(t *testing.T
 	}
 }
 
+func TestOperationMetadataSeparatesClaimsFromMethodLevelEvidenceAndDeviations(t *testing.T) {
+	got := operationMetadataCounts([]operation{
+		{Method: "api.test", Status: "behavior-compatible"},
+		{Method: "chat.scheduleMessage", Status: "behavior-compatible", Evidence: []string{"browser-journey:SCHED-01"}},
+		{Method: "reminders.add", Status: "sdk-compatible", Evidence: []string{"official-sdk:node"}, Deviations: []string{"recurrence is not implemented"}},
+		{Method: "chat.postMessage", Status: "schema-compatible", Deviations: []string{"unsupported arguments"}},
+		{Method: "admin.apps.uninstall", Status: "unimplemented"},
+	})
+	want := operationMetadata{
+		Implemented: 4, Unimplemented: 1, Evidenced: 2, Deviating: 2,
+		SDKClaims: 3, EvidencedSDKClaims: 2,
+	}
+	if got != want {
+		t.Fatalf("metadata=%+v, want %+v", got, want)
+	}
+}
+
 func TestUnimplementedNamespacesMakesTheRemainingProductSurfaceVisible(t *testing.T) {
 	got := unimplementedNamespaces([]operation{
 		{Method: "admin.apps.uninstall", Status: "unimplemented"},

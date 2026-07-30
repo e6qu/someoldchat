@@ -55,6 +55,11 @@ consequences, and sends one Slack Connect invitation. Approval-required,
 already-shared, wrong organization, policy, plan, expired, revoked, and
 concurrent invitation states are explicit.
 
+The current documented capacity is 250 organizations in one Slack Connect
+channel, including the host organization. Capacity is checked atomically when
+the invitation is accepted; the UI must not promise a place from a stale count.
+External people cannot be added to Slack's special general/all-company channel.
+
 The invite MUST NOT expose channel history or membership before Slack permits
 it and MUST NOT be modeled as an ordinary internal member invitation.
 
@@ -86,6 +91,18 @@ remaining channel.
 - Opt-in Slack Enterprise/sandbox evidence is required before claiming plan-
   restricted administration equivalence; unavailable live evidence remains a
   named gap.
+
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| ADMIN-01 | [Roles in Slack](https://slack.com/help/articles/360018112273-Roles-in-Slack) | Slack distinguishes owners, admins, members, guests, and role-specific authority. |
+| ADMIN-02 | [Slack Enterprise APIs](https://docs.slack.dev/enterprise/) | Workspace and organization policies govern channels, members, apps, and data. |
+| ADMIN-03 | [Slack Enterprise APIs](https://docs.slack.dev/enterprise/) | Enterprise APIs expose scoped audit and analytics administration. |
+| ADMIN-04 | [App approval settings](https://slack.com/help/articles/222386767-Guide-to-app-approval-settings) | Administrators approve, restrict, and manage workspace app installation. |
+| CONNECT-01 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | Slack Connect invites external people and supports up to 250 organizations in a channel. |
+| CONNECT-02 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | External channel invitations have approval, acceptance, decline, and revocation states. |
+| CONNECT-03 | [Use Slack Connect with other companies](https://slack.com/help/articles/360035092414-What-is-Slack-Connect) | Shared channels identify and constrain participating external organizations. |
 
 Sources checked 2026-07-29:
 

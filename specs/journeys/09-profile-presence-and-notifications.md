@@ -80,6 +80,19 @@ data.
 - Differential tests compare effective preference inheritance and event-to-
   notification routing in a dedicated Slack workspace.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| PROFILE-01 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Slack exposes status and availability anywhere member identity is shown. |
+| PROFILE-02 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Members edit their own visible profile and status information. |
+| STATUS-01 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Status text, emoji, suggestions, and a clear time are user-selectable. |
+| STATUS-02 | [Set status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability) | Slack distinguishes automatically inferred and manually selected active or away availability. |
+| NOTIFY-01 | [Configure Slack notifications](https://slack.com/help/articles/201355156-Configure-your-Slack-notifications) | Workspace notification triggers, keywords, timing, sound, and delivery are member preferences. |
+| NOTIFY-02 | [Guide to Slack notifications](https://slack.com/help/articles/360025446073-Guide-to-Slack-notifications) | Conversations may override or mute the member's notification behavior. |
+| NOTIFY-03 | [Pause Slack notifications](https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb) | Members pause, resume, schedule, and urgently override notifications under Slack's rules. |
+| NOTIFY-04 | [Guide to Slack notifications](https://slack.com/help/articles/360025446073-Guide-to-Slack-notifications) | Eligible events route to badges and configured desktop, mobile, and email notifications. |
+
 Sources checked 2026-07-29:
 
 - [Set your Slack status and availability](https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability)

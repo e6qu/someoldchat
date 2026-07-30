@@ -5,7 +5,7 @@ the Slack behavior it is intended to support. A registered handler or a
 server-rendered control is not counted as complete unless the surrounding user
 journey is usable.
 
-Measured on 2026-07-29:
+Measured on 2026-07-30:
 
 - 215 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
@@ -23,14 +23,18 @@ Measured on 2026-07-29:
   suite records its separately verified completion requests. The fail-closed
   comparison currently observes all 223 methods claimed at `sdk-compatible` or
   above (213 current and ten retained legacy methods);
-- the reminder/Later journey now has a live official-source gate: CI fetches the
-  current Slack Help and developer pages and verifies the exact entry-point,
-  organization, privacy, time-zone, recurrence, guest, editability, retirement,
-  and API-separation claims before running local SDK/browser evidence;
-- 27 Playwright scenarios cite 48 of the normative catalog's 101 stable journey
+- all 101 stable journey IDs have an individually checked source-map row. The
+  live official-source gate currently makes 56 representative assertions
+  explicitly citing 34 of those IDs across authentication, navigation,
+  conversations, messaging, search, files, apps, OAuth, presence, huddles,
+  canvases, lists, workflows, administration, Slack Connect, accessibility,
+  Activity, and reminders before local evidence runs. The remaining 67 IDs are
+  printed as upstream-text evidence gaps rather than inheriting coverage;
+- 28 Playwright scenarios cite 51 of the normative catalog's 101 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
-  `make journey-check` now rejects unknown IDs and source-less journey files.
+  `make journey-check` rejects unknown IDs, missing or duplicate per-journey
+  source rows, non-official source URLs, and empty behavioral assertions.
   Automated axe checks cover the desktop workspace, command discovery, and a
   320-pixel layout; visual-regression baselines, manual assistive-technology
   qualification, and comparison against a live Slack client remain absent.
@@ -72,9 +76,9 @@ implementation MUST NOT narrow the target.
 
 | Priority | Journey | Concrete gap |
 | --- | --- | --- |
-| P0 | Activity depth | Activity now covers joined unread conversations and explicit mentions, but it does not yet aggregate thread replies, reminders, notification-policy events, clear state, bulk read, layouts, filters, or custom tabs from Slack's current Activity model. |
+| P0 | Activity depth | Activity projects joined unread conversations, explicit mentions, and delivered personal reminders with durable reminder-badge acknowledgement. It does not yet use durable notification records for thread replies, reactions, invitations, app events, and channel activity; nor does it implement Slack's detailed/dense layouts, filters and custom views, clear/restore, per-item read state, or keyboard triage. |
 | P0 | Composer depth | Formatting, standard emoji, member mention autocomplete, file preview, draft recovery, and browser-time-zone scheduled send work. Custom-emoji browsing, channel autocomplete, pasted-file staging, voice/video clips, and Slack's full shortcuts browser remain. |
-| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, reminder dates/upcoming filters, channel `/remind`, and reminder delivery/UI remain. The five deprecated `reminders.*` methods are only SDK-compatible: natural-language parsing, recurrence, current targeting rules, delivery, and live outcomes are not falsely counted as behavior evidence. |
+| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. First-party reminders have a separate durable model, message-action presets/custom time, Later CRUD/filtering, named-weekday `/remind`, private channel-reminder listing, guest enforcement, worker recurrence/retry/failure fencing, Activity/source projection, and wake publication. Scheduled edit/reschedule/send-now and failure history, Slack's combined Drafts & sent tabs, broader natural-language reminder parsing, month-end recurrence, deterministic deployed-worker browser delivery, and live-Slack differential outcomes remain. The five deprecated app-facing `reminders.*` methods remain only SDK-compatible and are not evidence for the first-party Later model. |
 | P1 | Direct-message lifecycle | DMs can be opened from People, but there is no dedicated DM/group-DM section, participant management, or recent-DM navigation matching Slack. |
 | P1 | Notifications and presence | Basic presence/status APIs exist, but the client has no per-conversation notification preferences, status expiry, snooze/DND controls, typing indicators, or presence-aware member affordances. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
@@ -117,7 +121,10 @@ App-platform work must remain dependency-ordered:
 Official SDK qualification now proves, method by method, that genuine clients
 issued a request and parsed SameOldChat's response; a large neighboring test
 can no longer lend SDK evidence to an uncalled method. It still does not prove
-live Slack equivalence. The remaining evidence layers are:
+live Slack equivalence. The compatibility report also exposes the distinction:
+only eight of 213 current claims at `sdk-compatible` or above presently carry
+method-level evidence in the ledger; the remaining 205 must not inherit that
+evidence from the aggregate green suite. The remaining evidence layers are:
 
 1. pin per-method current argument/response/error schemas, not only the current
    method index;

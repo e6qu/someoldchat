@@ -54,7 +54,8 @@ Run `make compatibility-report` to print the current operation count and the
 number at or above each evidence level. The report separates the 310-method
 current Slack reference from retained legacy methods so compatibility aliases
 cannot inflate the current denominator. It also reports how many methods name
-method-level executable evidence and how many retain known deviations. The
+method-level executable evidence, how many `sdk-compatible`-or-better claims
+still lack that evidence, and how many retain known deviations. The
 implementation target is
 `verified-against-slack` for every operation; the report does not treat a
 schema-compatible handler as behavior verification. A higher status includes

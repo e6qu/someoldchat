@@ -36,8 +36,10 @@ the query and a route back to results.
 
 ## ACTIVITY-01 — Review notifications in Activity
 
-**Entry points:** Activity in navigation and
-`Command/Control+Shift+M`.
+**Entry points:** Activity in navigation; `Command+Shift+M` on the macOS
+desktop app or `Control+Shift+M` on Windows/Linux desktop; and Slack web's
+navigation-tab shortcut, `Control+3` on macOS or `Control+Shift+3` on
+Windows/Linux.
 
 Activity aggregates the member's current Slack notification events, including
 DMs, mentions, thread replies, channel notifications, reactions, invitations,
@@ -62,9 +64,10 @@ not independent mock lists.
 
 Slack-supported item and bulk actions include mark read/unread, clear/restore,
 reply, react, open in context, and filter-specific actions. Up/Down moves
-between items, `Enter` opens, and current Slack Activity shortcuts such as
-`C`/`R` apply only inside Activity. Clearing is not deletion: the source
-message remains and the cleared item is recoverable where Slack permits.
+between items, `Enter` replies to the focused message, `X` selects or
+unselects it for bulk actions, and `C`/`R` clear or mark read only inside
+Activity. Clearing is not deletion: the source message remains and the cleared
+item is recoverable where Slack permits.
 
 New live events update counts without stealing focus or moving the currently
 triaged item. Reconnect/replay MUST not duplicate Activity.
@@ -95,6 +98,17 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
 - search still lacks Slack's modifier parser, result-type grouping, current
   conversation scope, suggestions, and official-SDK/differential evidence;
 - controlled live-Slack comparison and visual baselines remain required.
+
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| SEARCH-01 | [Search in Slack](https://slack.com/help/articles/202528808-Search-in-Slack) | Search offers suggestions and Messages, Files, People, Channels, and Canvases result types. |
+| SEARCH-02 | [Search in Slack](https://slack.com/help/articles/202528808-Search-in-Slack) | Slack supports modifiers plus result filtering and sorting. |
+| SEARCH-03 | [Search in Slack](https://slack.com/help/articles/202528808-Search-in-Slack) | Command or Control F searches the current conversation. |
+| ACTIVITY-01 | [Get work done from Activity](https://slack.com/help/articles/19693583638803-Get-your-work-done-from-the-Activity-view) | Activity aggregates recent messages and notifications with dense and detailed layouts. |
+| ACTIVITY-02 | [Introducing the new Activity view](https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack) | Activity provides typed filters, custom views, and plan-dependent channel or section filters. |
+| ACTIVITY-03 | [Navigate Slack with your keyboard](https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard) | Activity supports Up/Down navigation, Enter to reply, X selection, C clear, and R mark-read actions. |
 
 Sources checked 2026-07-30:
 

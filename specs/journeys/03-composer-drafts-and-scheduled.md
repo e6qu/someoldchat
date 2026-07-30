@@ -110,6 +110,18 @@ and workspace isolated.
 - Differential: capture exact suggestion, draft, schedule-window, quota,
   thread, and failure behavior in a dedicated Slack workspace.
 
+## Journey-source map
+
+| Journey | Official source | Behavior established |
+| --- | --- | --- |
+| COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips. |
+| COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
+| COMP-03 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Composer entry supports attachments, emoji, mentions, formatting, and shortcuts. |
+| DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack preserves and exposes drafts associated with their destination. |
+| DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
+| SCHED-01 | [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages) | Slack schedules from the send control using suggested or custom local times. |
+| SCHED-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Scheduled items can be edited, rescheduled, sent, cancelled, or deleted. |
+
 Sources checked 2026-07-29:
 
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)

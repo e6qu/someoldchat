@@ -89,18 +89,25 @@ Each automated test SHOULD include the relevant journey ID in its title or
 metadata. A test that only asserts HTML text, a route status, or a mocked
 callback does not qualify an end-to-end journey.
 
-`make journey-check` treats the catalog and browser citations as data: stable
-IDs must be unique, each numbered journey file must retain a dated official
-Slack source, and a browser test cannot cite an ID the normative catalog does
-not define. Its browser coverage report is intentionally a gap report, not a
-compatibility score; citing an ID does not by itself satisfy the evidence table
-above.
+`make journey-check` treats the catalog, source map, and browser citations as
+data: stable IDs must be unique, every ID must have exactly one row in its
+file's `Journey-source map`, and a browser test cannot cite an ID the normative
+catalog does not define. Each source-map row must link a direct official Slack
+source and state the specific upstream behavior that supports the
+journey. A general source list for the whole file cannot lend evidence to an
+unrelated journey. The browser coverage report is intentionally a gap report,
+not a compatibility score; citing an ID does not by itself satisfy the evidence
+table above.
 
 For claims whose upstream wording is stable enough to probe,
 `make external-contract-qualification` fetches the current official pages and
-checks the exact behavioral assertions. It is deliberately additive to the
-catalog gate: a reachable link is not evidence that the page still describes
-the behavior our Markdown attributes to it.
+checks representative exact behavioral assertions across every journey domain.
+It is deliberately additive to the catalog gate: a reachable link is not
+evidence that the page still describes the behavior our Markdown attributes to
+it, and a documentation assertion is not a live Slack differential result.
+Each assertion cites its stable journey ID; `make journey-check` prints the
+IDs that still lack a live upstream-text assertion rather than letting a check
+for one journey lend external evidence to another.
 
 ## Catalog
 
