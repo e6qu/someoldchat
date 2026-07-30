@@ -399,8 +399,31 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	if err != nil || len(dueStatuses) != 1 || !dueStatuses[0].Profile.StatusExpiration.Equal(statusDue) {
 		t.Fatalf("due statuses=%+v err=%v", dueStatuses, err)
 	}
-	if changed, err := repository.ExpireUserStatus(ctx, workspaceID, userID, statusDue, statusDue, event("status-expired", "user.profile_changed", string(userID))); err != nil || !changed {
+	if changed, err := repository.ExpireUserStatus(ctx, workspaceID, userID, statusDue, "", statusDue, event("status-expired", "user.profile_changed", string(userID))); err != nil || !changed {
 		t.Fatalf("expire status changed=%t err=%v", changed, err)
+	}
+	scheduledStart := statusDue.Add(time.Hour)
+	scheduledStatus := domain.ScheduledStatus{
+		ID: domain.ScheduledStatusID("scheduled-status-" + suffix), WorkspaceID: workspaceID, UserID: userID,
+		StatusText: "Scheduled persistence", StatusEmoji: ":calendar:", StartsAt: scheduledStart,
+		EndsAt: scheduledStart.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateScheduledStatus(ctx, scheduledStatus); err != nil {
+		t.Fatal(err)
+	}
+	listedStatuses, err := repository.ListScheduledStatuses(ctx, workspaceID, userID)
+	if err != nil || len(listedStatuses) != 1 || listedStatuses[0].ID != scheduledStatus.ID {
+		t.Fatalf("scheduled statuses=%+v err=%v", listedStatuses, err)
+	}
+	if changed, err := repository.ActivateScheduledStatus(ctx, workspaceID, userID, scheduledStatus.ID, scheduledStatus.UpdatedAt, scheduledStart, event("status-started", "user.profile_changed", string(userID))); err != nil || !changed {
+		t.Fatalf("activate scheduled status changed=%t err=%v", changed, err)
+	}
+	dueStatuses, err = repository.DueUserStatuses(ctx, workspaceID, scheduledStatus.EndsAt, 10)
+	if err != nil || len(dueStatuses) != 1 || dueStatuses[0].Profile.ActiveScheduledStatusID != scheduledStatus.ID {
+		t.Fatalf("activated scheduled status=%+v err=%v", dueStatuses, err)
+	}
+	if changed, err := repository.ExpireUserStatus(ctx, workspaceID, userID, scheduledStatus.EndsAt, scheduledStatus.ID, scheduledStatus.EndsAt, event("scheduled-status-expired", "user.profile_changed", string(userID))); err != nil || !changed {
+		t.Fatalf("expire scheduled status changed=%t err=%v", changed, err)
 	}
 	dnd := domain.DoNotDisturb{WorkspaceID: workspaceID, UserID: userID, Enabled: true, SnoozeUntil: now.Add(time.Hour)}
 	if err := repository.SetDoNotDisturb(ctx, dnd, event("dnd", "user.dnd_changed", string(userID))); err != nil {

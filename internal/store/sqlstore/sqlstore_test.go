@@ -537,17 +537,113 @@ func TestSQLiteStatusExpirationIsDurableAndCompareAndSet(t *testing.T) {
 		t.Fatalf("earliest=%s err=%v", earliest, err)
 	}
 	event := events.Event{ID: "status-expired", WorkspaceID: "T1", Topic: "user.profile_changed", CreatedAt: due}
-	changed, err := s.ExpireUserStatus(ctx, "T1", "U1", due.Add(-time.Second), due, event)
+	changed, err := s.ExpireUserStatus(ctx, "T1", "U1", due.Add(-time.Second), "", due, event)
 	if err != nil || changed {
 		t.Fatalf("stale compare changed=%t err=%v", changed, err)
 	}
-	changed, err = s.ExpireUserStatus(ctx, "T1", "U1", due, due, event)
+	changed, err = s.ExpireUserStatus(ctx, "T1", "U1", due, "", due, event)
 	if err != nil || !changed {
 		t.Fatalf("matching compare changed=%t err=%v", changed, err)
 	}
 	user, err := s.GetUser(ctx, "U1")
 	if err != nil || user.Profile.StatusText != "" || !user.Profile.StatusExpiration.IsZero() {
 		t.Fatalf("expired user=%+v err=%v", user, err)
+	}
+}
+
+func TestSQLiteScheduledStatusIsDurableAndActivatesAtomically(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "scheduled-status.sqlite")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Date(2026, time.July, 30, 12, 0, 0, 0, time.UTC)
+	value := domain.ScheduledStatus{
+		ID: "scheduled_status_1", WorkspaceID: "T1", UserID: "U1", StatusText: "Lunch", StatusEmoji: ":sandwich:",
+		StartsAt: start, EndsAt: start.Add(time.Hour), CreatedAt: start.Add(-time.Hour), UpdatedAt: start.Add(-time.Hour),
+	}
+	if err := s.CreateScheduledStatus(ctx, value); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	values, err := s.ListScheduledStatuses(ctx, "T1", "U1")
+	if err != nil || len(values) != 1 || values[0].StatusText != "Lunch" {
+		t.Fatalf("persisted statuses=%+v err=%v", values, err)
+	}
+	earliest, err := s.EarliestScheduledStatusStart(ctx, "T1")
+	if err != nil || !earliest.Equal(start) {
+		t.Fatalf("earliest=%s err=%v", earliest, err)
+	}
+	event := events.Event{ID: "scheduled-started", WorkspaceID: "T1", Topic: "user.profile_changed", CreatedAt: start}
+	edited := values[0]
+	edited.StatusText = "Edited within the same second"
+	edited.UpdatedAt = edited.UpdatedAt.Add(time.Nanosecond)
+	if err := s.UpdateScheduledStatus(ctx, edited); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := s.ActivateScheduledStatus(ctx, "T1", "U1", value.ID, value.UpdatedAt, start, event)
+	if err != nil || changed {
+		t.Fatalf("stale nanosecond revision changed=%t err=%v", changed, err)
+	}
+	changed, err = s.ActivateScheduledStatus(ctx, "T1", "U1", value.ID, edited.UpdatedAt, start, event)
+	if err != nil || !changed {
+		t.Fatalf("activate changed=%t err=%v", changed, err)
+	}
+	changed, err = s.ActivateScheduledStatus(ctx, "T1", "U1", value.ID, edited.UpdatedAt, start, event)
+	if err != nil || changed {
+		t.Fatalf("repeat activate changed=%t err=%v", changed, err)
+	}
+	user, err := s.GetUser(ctx, "U1")
+	if err != nil || user.Profile.StatusText != edited.StatusText || !user.Profile.StatusExpiration.Equal(value.EndsAt) {
+		t.Fatalf("activated user=%+v err=%v", user, err)
+	}
+}
+
+func TestVersion113MigrationAddsScheduledStatusStorageAndFence(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "version-113.sqlite")
+	first, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `DROP TABLE scheduled_statuses`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `ALTER TABLE users DROP COLUMN active_scheduled_status_id`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := first.db.ExecContext(ctx, `UPDATE schema_migrations SET version = 112 WHERE version = ?`, schemaVersion); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	columns, err := migrated.tableColumns(ctx, migrated.db, "users")
+	if err != nil || !columns["active_scheduled_status_id"] {
+		t.Fatalf("users columns=%v err=%v", columns, err)
+	}
+	var table string
+	if err := migrated.db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'scheduled_statuses'`).Scan(&table); err != nil || table != "scheduled_statuses" {
+		t.Fatalf("scheduled status table=%q err=%v", table, err)
 	}
 }
 

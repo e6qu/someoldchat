@@ -22,6 +22,7 @@ type Store struct {
 	workspaces                    map[domain.WorkspaceID]domain.Workspace
 	members                       map[string]domain.WorkspaceMembership
 	users                         map[domain.UserID]domain.User
+	scheduledStatuses             map[domain.ScheduledStatusID]domain.ScheduledStatus
 	userExpirations               map[domain.UserID]time.Time
 	conversations                 map[domain.ConversationID]domain.Conversation
 	conversationPrefs             map[domain.ConversationID]domain.ConversationPrefs
@@ -905,6 +906,11 @@ func (s *Store) UpdateUserProfile(_ context.Context, workspaceID domain.Workspac
 	if !ok || !membership.Active {
 		return domain.User{}, store.ErrNotFound
 	}
+	if user.Profile.StatusText == profile.StatusText && user.Profile.StatusEmoji == profile.StatusEmoji && user.Profile.StatusExpiration.Equal(profile.StatusExpiration) {
+		profile.ActiveScheduledStatusID = user.Profile.ActiveScheduledStatusID
+	} else {
+		profile.ActiveScheduledStatusID = ""
+	}
 	user.Profile = profile
 	s.users[userID] = user
 	s.outbox = append(s.outbox, changes...)
@@ -955,7 +961,7 @@ func (s *Store) EarliestUserStatusExpiration(_ context.Context, workspaceID doma
 	return earliest, nil
 }
 
-func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected, now time.Time, event events.Event) (bool, error) {
+func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected time.Time, expectedScheduledID domain.ScheduledStatusID, now time.Time, event events.Event) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	user, ok := s.users[userID]
@@ -963,13 +969,160 @@ func (s *Store) ExpireUserStatus(_ context.Context, workspaceID domain.Workspace
 		return false, store.ErrNotFound
 	}
 	expiration := user.Profile.StatusExpiration
-	if expiration.IsZero() || !expiration.Equal(expected.UTC()) || expiration.After(now.UTC()) {
+	if expiration.IsZero() || !expiration.Equal(expected.UTC()) || user.Profile.ActiveScheduledStatusID != expectedScheduledID || expiration.After(now.UTC()) {
 		return false, nil
 	}
 	user.Profile.StatusText = ""
 	user.Profile.StatusEmoji = ""
 	user.Profile.StatusExpiration = time.Time{}
+	user.Profile.ActiveScheduledStatusID = ""
 	s.users[userID] = user
+	s.outbox = append(s.outbox, event)
+	return true, nil
+}
+
+func (s *Store) CreateScheduledStatus(_ context.Context, value domain.ScheduledStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.scheduledStatuses == nil {
+		s.scheduledStatuses = make(map[domain.ScheduledStatusID]domain.ScheduledStatus)
+	}
+	if _, exists := s.scheduledStatuses[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	user, ok := s.users[value.UserID]
+	if !ok || user.WorkspaceID != value.WorkspaceID || user.Deleted {
+		return store.ErrNotFound
+	}
+	membership, ok := s.members[string(value.WorkspaceID)+"\x00"+string(value.UserID)]
+	if !ok || !membership.Active {
+		return store.ErrNotFound
+	}
+	count := 0
+	for _, scheduled := range s.scheduledStatuses {
+		if scheduled.WorkspaceID == value.WorkspaceID && scheduled.UserID == value.UserID {
+			count++
+		}
+	}
+	if count >= 5 {
+		return store.ErrScheduledStatusLimit
+	}
+	s.scheduledStatuses[value.ID] = value
+	return nil
+}
+
+func (s *Store) GetScheduledStatus(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) (domain.ScheduledStatus, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.scheduledStatuses[id]
+	if !ok || value.WorkspaceID != workspaceID || value.UserID != userID {
+		return domain.ScheduledStatus{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ListScheduledStatuses(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.ScheduledStatus, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.ScheduledStatus, 0, 5)
+	for _, value := range s.scheduledStatuses {
+		if value.WorkspaceID == workspaceID && value.UserID == userID {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool {
+		if values[left].StartsAt.Equal(values[right].StartsAt) {
+			return values[left].ID < values[right].ID
+		}
+		return values[left].StartsAt.Before(values[right].StartsAt)
+	})
+	return values, nil
+}
+
+func (s *Store) UpdateScheduledStatus(_ context.Context, value domain.ScheduledStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.scheduledStatuses[value.ID]
+	if !ok || current.WorkspaceID != value.WorkspaceID || current.UserID != value.UserID {
+		return store.ErrNotFound
+	}
+	value.CreatedAt = current.CreatedAt
+	s.scheduledStatuses[value.ID] = value
+	return nil
+}
+
+func (s *Store) DeleteScheduledStatus(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.scheduledStatuses[id]
+	if !ok || current.WorkspaceID != workspaceID || current.UserID != userID {
+		return store.ErrNotFound
+	}
+	delete(s.scheduledStatuses, id)
+	return nil
+}
+
+func (s *Store) DueScheduledStatuses(_ context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) ([]domain.ScheduledStatus, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("scheduled status limit must be positive")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.ScheduledStatus, 0, limit)
+	for _, value := range s.scheduledStatuses {
+		if (workspaceID == "" || value.WorkspaceID == workspaceID) && !value.StartsAt.After(now.UTC()) {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool {
+		if values[left].StartsAt.Equal(values[right].StartsAt) {
+			return values[left].ID < values[right].ID
+		}
+		return values[left].StartsAt.Before(values[right].StartsAt)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
+}
+
+func (s *Store) EarliestScheduledStatusStart(_ context.Context, workspaceID domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var earliest time.Time
+	for _, value := range s.scheduledStatuses {
+		if workspaceID != "" && value.WorkspaceID != workspaceID {
+			continue
+		}
+		if earliest.IsZero() || value.StartsAt.Before(earliest) {
+			earliest = value.StartsAt
+		}
+	}
+	return earliest, nil
+}
+
+func (s *Store) ActivateScheduledStatus(_ context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID, expectedUpdatedAt, now time.Time, event events.Event) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.scheduledStatuses[id]
+	if !ok || value.WorkspaceID != workspaceID || value.UserID != userID {
+		return false, nil
+	}
+	if !value.UpdatedAt.Equal(expectedUpdatedAt.UTC()) || value.StartsAt.After(now.UTC()) {
+		return false, nil
+	}
+	user, ok := s.users[userID]
+	if !ok || user.WorkspaceID != workspaceID || user.Deleted {
+		return false, store.ErrNotFound
+	}
+	delete(s.scheduledStatuses, id)
+	if value.EndsAt.After(now.UTC()) {
+		user.Profile.StatusText = value.StatusText
+		user.Profile.StatusEmoji = value.StatusEmoji
+		user.Profile.StatusExpiration = value.EndsAt
+		user.Profile.ActiveScheduledStatusID = value.ID
+		s.users[userID] = user
+	}
 	s.outbox = append(s.outbox, event)
 	return true, nil
 }

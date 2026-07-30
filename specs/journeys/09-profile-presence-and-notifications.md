@@ -132,11 +132,16 @@ data.
   and follow-every-thread text before this behavior can remain claimed.
 - Deterministic-clock and persistence tests cover current-status and DND expiry
   through restart and hibernation.
+- Future status scheduling is a typed first-party journey across the browser,
+  service, generated gRPC seam, memory and SQL repositories, and lifecycle
+  worker. Tests cover the five-item limit, create/edit/cancel, chronological
+  reads, SQLite reopen, stale-revision rejection, competing workers, missed
+  windows, and the scheduled start wake deadline. It deliberately does not add
+  a fictional Slack Web API method.
 - Official SDK tests exercise `users.profile.*`, `users.setPresence`, and
   `dnd.*` with user tokens and permission/error variants.
-- Advance status scheduling (STATUS-03) is now a separately measured gap rather
-  than being implied by current-status expiry. Controlled live-Slack comparison
-  remains required. Browser/push/email/sound
+- Controlled live-Slack comparison for advance status scheduling remains
+  required. Browser/push/email/sound
   delivery, per-platform timing and appearance, notification schedules,
   group-DM overrides, urgent sender override, VIPs, and notification deep-link
   reconciliation are explicit gaps; the web UI does not claim those controls.

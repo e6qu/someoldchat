@@ -418,18 +418,25 @@ overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack
 behavior, and visual comparison remain named gaps rather than empty controls
 or a false full-compatibility claim.
 
-The profile/presence pass now treats status expiry as a cross-layer lifecycle,
+The profile/presence pass now treats current and future status timing as a
+cross-layer lifecycle,
 not a browser-only timer: `status_expiration` is typed through the Slack API,
 domain, generated gRPC seam, memory/SQL stores, first-party UI, and a
 compare-and-set worker whose earliest deadline participates in lifecycle wake
-publication. Current Node, Python, and Java Slack SDKs exercise the field, and
+publication. Future statuses are a separate first-party typed resource (Slack
+does not expose a scheduling Web API method): memory/SQL persistence, generated
+gRPC, the People UI, and an atomic revision-fenced worker cover creation,
+chronological listing, full pre-start editing/cancellation, the five-item
+limit, activation, missed windows, and lifecycle wake. Current Node, Python,
+and Java Slack SDKs exercise the public current-status field, and
 the browser journey covers status suggestions, expiry selection, manual
 active/away choice, and clearing. `users.profile:read` is enforced separately
 from `users:read`, while profile email in get/set/info/list responses remains
 gated by `users:read.email`. Slack's
-up-to-five future status schedule and live activity-derived automatic presence
-remain explicit STATUS-03/STATUS-02 gaps; the four profile/presence methods are
-therefore recorded as SDK-compatible rather than falsely behavior-compatible.
+Live activity-derived automatic presence remains an explicit STATUS-02 gap,
+and STATUS-03 still requires controlled live-Slack differential evidence.
+The four public profile/presence methods remain SDK-compatible rather than
+falsely behavior-compatible.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison

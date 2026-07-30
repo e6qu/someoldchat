@@ -1335,7 +1335,7 @@ test('[CONV-02 NAV-04] channel creation is reachable and conversation shortcuts 
   await expect(page).toHaveURL(createdURL);
 });
 
-test('[PROFILE-01 PROFILE-02 STATUS-01 STATUS-02] profile editing persists expiring status and manual availability', async ({ page, context }) => {
+test('[PROFILE-01 PROFILE-02 STATUS-01 STATUS-02 STATUS-03] profile editing and future statuses persist with Slack management semantics', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app/members');
 
@@ -1344,8 +1344,9 @@ test('[PROFILE-01 PROFILE-02 STATUS-01 STATUS-02] profile editing persists expir
   await expect(page.getByLabel('Profile photo URL')).toHaveCount(1);
 
   const status = `Qualifying ${Date.now()}`;
-  await page.getByLabel('Status', { exact: true }).fill(status);
-  await page.getByLabel('Status emoji').fill(':white_check_mark:');
+  const profileForm = page.locator('form[action="/app/profile"]');
+  await profileForm.getByLabel('Status', { exact: true }).fill(status);
+  await profileForm.getByLabel('Status emoji').fill(':white_check_mark:');
   const expires = new Date(Date.now() + 60 * 60 * 1000);
   const localExpires = new Date(expires.getTime() - expires.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   await page.getByLabel('Remove status after').fill(localExpires);
@@ -1363,6 +1364,28 @@ test('[PROFILE-01 PROFILE-02 STATUS-01 STATUS-02] profile editing persists expir
 
   await page.getByRole('button', { name: 'Clear status' }).click();
   await expect(page.getByText('No status set', { exact: true })).toBeVisible();
+
+  const scheduledText = `Lunch ${Date.now()}`;
+  const start = new Date(Date.now() + 2 * 60 * 60 * 1000);
+  const end = new Date(Date.now() + 3 * 60 * 60 * 1000);
+  const asLocal = (value) => new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  const createForm = page.locator('form[action="/app/status/schedule"]');
+  await createForm.getByLabel('Status', { exact: true }).fill(scheduledText);
+  await createForm.getByLabel('Emoji').fill(':sandwich:');
+  await createForm.getByLabel('Start').fill(asLocal(start));
+  await createForm.getByLabel('End').fill(asLocal(end));
+  await createForm.getByRole('button', { name: 'Save scheduled status' }).click();
+  await expect(page).toHaveURL('/app/members');
+  await expect(page.getByText('No status set', { exact: true })).toBeVisible();
+
+  const updateForm = page.locator('form[action="/app/status/scheduled/update"]');
+  await expect(updateForm).toHaveCount(1);
+  await expect(updateForm.getByLabel('Status', { exact: true })).toHaveValue(scheduledText);
+  await updateForm.getByLabel('Status', { exact: true }).fill('Deep work');
+  await updateForm.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('form[action="/app/status/scheduled/update"]').getByLabel('Status', { exact: true })).toHaveValue('Deep work');
+  await page.locator('form[action="/app/status/scheduled/update"]').getByRole('button', { name: 'Cancel status' }).click();
+  await expect(page.getByText('No scheduled statuses.', { exact: true })).toBeVisible();
 });
 
 test('[NAV-06] theme choice persists across workspace pages', async ({ page, context }) => {

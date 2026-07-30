@@ -40,12 +40,19 @@ CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, domain TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  email TEXT NOT NULL DEFAULT '', name TEXT NOT NULL, real_name TEXT NOT NULL DEFAULT '', display_name TEXT NOT NULL DEFAULT '',
- status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '', status_expiration INTEGER NOT NULL DEFAULT 0,
+ status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '', status_expiration INTEGER NOT NULL DEFAULT 0, active_scheduled_status_id TEXT NOT NULL DEFAULT '',
  image_24 TEXT NOT NULL DEFAULT '', image_32 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '',
  image_72 TEXT NOT NULL DEFAULT '', image_192 TEXT NOT NULL DEFAULT '', image_512 TEXT NOT NULL DEFAULT '', image_1024 TEXT NOT NULL DEFAULT '',
  deleted INTEGER NOT NULL DEFAULT 0, presence TEXT NOT NULL DEFAULT 'auto'
 );
 CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES users(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), expiration_ts INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS scheduled_statuses (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '',
+ starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS scheduled_statuses_owner_start ON scheduled_statuses(workspace_id, user_id, starts_at, id);
+CREATE INDEX IF NOT EXISTS scheduled_statuses_due ON scheduled_statuses(starts_at, id);
 CREATE TABLE IF NOT EXISTS workspace_members (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
@@ -389,7 +396,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 112
+const schemaVersion = 113
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2410,6 +2417,30 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			}
 		}
 	}
+	if version < 113 {
+		existing, err := s.tableColumns(ctx, db, "users")
+		if err != nil {
+			return err
+		}
+		if !existing["active_scheduled_status_id"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN active_scheduled_status_id TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate users.active_scheduled_status_id: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS scheduled_statuses (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			status_text TEXT NOT NULL DEFAULT '', status_emoji TEXT NOT NULL DEFAULT '',
+			starts_at INTEGER NOT NULL, ends_at INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate scheduled statuses: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS scheduled_statuses_owner_start ON scheduled_statuses(workspace_id, user_id, starts_at, id)`); err != nil {
+			return fmt.Errorf("index scheduled status owners: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS scheduled_statuses_due ON scheduled_statuses(starts_at, id)`); err != nil {
+			return fmt.Errorf("index scheduled statuses due: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2944,7 +2975,7 @@ func (s *Store) UpdateUserProfile(ctx context.Context, workspaceID domain.Worksp
 		return domain.User{}, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, userID, workspaceID, workspaceID, userID)
+	result, err := tx.ExecContext(ctx, `UPDATE users SET display_name = ?, active_scheduled_status_id = CASE WHEN status_text = ? AND status_emoji = ? AND status_expiration = ? THEN active_scheduled_status_id ELSE '' END, status_text = ?, status_emoji = ?, status_expiration = ?, image_24 = ?, image_32 = ?, image_48 = ?, image_72 = ?, image_192 = ?, image_512 = ?, image_1024 = ? WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1)`, profile.DisplayName, profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.StatusText, profile.StatusEmoji, unixSeconds(profile.StatusExpiration), profile.Image24, profile.Image32, profile.Image48, profile.Image72, profile.Image192, profile.Image512, profile.Image1024, userID, workspaceID, workspaceID, userID)
 	if err != nil {
 		return domain.User{}, err
 	}
@@ -2978,7 +3009,7 @@ func (s *Store) DueUserStatuses(ctx context.Context, workspaceID domain.Workspac
 	if limit <= 0 {
 		return nil, store.InvalidArgument("status expiration limit must be positive")
 	}
-	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence
+	query := `SELECT id, workspace_id, email, name, real_name, display_name, status_text, status_emoji, status_expiration, active_scheduled_status_id, image_24, image_32, image_48, image_72, image_192, image_512, image_1024, deleted, presence
 		FROM users WHERE deleted = 0 AND status_expiration > 0 AND status_expiration <= ?`
 	args := []any{now.UTC().Unix()}
 	if workspaceID != "" {
@@ -2997,7 +3028,7 @@ func (s *Store) DueUserStatuses(ctx context.Context, workspaceID domain.Workspac
 		var user domain.User
 		var deleted int
 		var statusExpiration int64
-		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
+		if err := rows.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.Name, &user.RealName, &user.Profile.DisplayName, &user.Profile.StatusText, &user.Profile.StatusEmoji, &statusExpiration, &user.Profile.ActiveScheduledStatusID, &user.Profile.Image24, &user.Profile.Image32, &user.Profile.Image48, &user.Profile.Image72, &user.Profile.Image192, &user.Profile.Image512, &user.Profile.Image1024, &deleted, &user.Presence); err != nil {
 			return nil, err
 		}
 		user.Profile.StatusExpiration = fromUnixSeconds(statusExpiration)
@@ -3024,15 +3055,15 @@ func (s *Store) EarliestUserStatusExpiration(ctx context.Context, workspaceID do
 	return fromUnixSeconds(expiration), nil
 }
 
-func (s *Store) ExpireUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected, now time.Time, event events.Event) (bool, error) {
+func (s *Store) ExpireUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, expected time.Time, expectedScheduledID domain.ScheduledStatusID, now time.Time, event events.Event) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE users SET status_text = '', status_emoji = '', status_expiration = 0
-		WHERE id = ? AND workspace_id = ? AND deleted = 0 AND status_expiration = ? AND status_expiration > 0 AND status_expiration <= ?`,
-		userID, workspaceID, expected.UTC().Unix(), now.UTC().Unix())
+	result, err := tx.ExecContext(ctx, `UPDATE users SET status_text = '', status_emoji = '', status_expiration = 0, active_scheduled_status_id = ''
+		WHERE id = ? AND workspace_id = ? AND deleted = 0 AND status_expiration = ? AND active_scheduled_status_id = ? AND status_expiration > 0 AND status_expiration <= ?`,
+		userID, workspaceID, expected.UTC().Unix(), expectedScheduledID, now.UTC().Unix())
 	if err != nil {
 		return false, err
 	}
@@ -3042,6 +3073,207 @@ func (s *Store) ExpireUserStatus(ctx context.Context, workspaceID domain.Workspa
 	}
 	if changed == 0 {
 		return false, nil
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func scanScheduledStatus(scanner interface{ Scan(...any) error }) (domain.ScheduledStatus, error) {
+	var value domain.ScheduledStatus
+	var startsAt, endsAt, createdAt, updatedAt int64
+	if err := scanner.Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.StatusText, &value.StatusEmoji, &startsAt, &endsAt, &createdAt, &updatedAt); err != nil {
+		return domain.ScheduledStatus{}, translateNotFound(err)
+	}
+	value.StartsAt = fromUnixSeconds(startsAt)
+	value.EndsAt = fromUnixSeconds(endsAt)
+	value.CreatedAt = time.Unix(0, createdAt).UTC()
+	value.UpdatedAt = time.Unix(0, updatedAt).UTC()
+	return value, nil
+}
+
+func (s *Store) CreateScheduledStatus(ctx context.Context, value domain.ScheduledStatus) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	lock, err := tx.ExecContext(ctx, `UPDATE users SET id = id WHERE id = ? AND workspace_id = ? AND deleted = 0 AND EXISTS (
+		SELECT 1 FROM workspace_members WHERE workspace_id = ? AND user_id = ? AND active = 1
+	)`, value.UserID, value.WorkspaceID, value.WorkspaceID, value.UserID)
+	if err != nil {
+		return err
+	}
+	if changed, err := lock.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM scheduled_statuses WHERE workspace_id = ? AND user_id = ?`, value.WorkspaceID, value.UserID).Scan(&count); err != nil {
+		return err
+	}
+	if count >= 5 {
+		return store.ErrScheduledStatusLimit
+	}
+	result, err := tx.ExecContext(ctx, `INSERT INTO scheduled_statuses(id, workspace_id, user_id, status_text, status_emoji, starts_at, ends_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.UserID, value.StatusText, value.StatusEmoji, value.StartsAt.UTC().Unix(), value.EndsAt.UTC().Unix(), value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+	if err != nil {
+		return classify(err)
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetScheduledStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) (domain.ScheduledStatus, error) {
+	return scanScheduledStatus(s.db.QueryRowContext(ctx, `SELECT id, workspace_id, user_id, status_text, status_emoji, starts_at, ends_at, created_at, updated_at
+		FROM scheduled_statuses WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspaceID, userID))
+}
+
+func (s *Store) ListScheduledStatuses(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.ScheduledStatus, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, workspace_id, user_id, status_text, status_emoji, starts_at, ends_at, created_at, updated_at
+		FROM scheduled_statuses WHERE workspace_id = ? AND user_id = ? ORDER BY starts_at, id`, workspaceID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.ScheduledStatus, 0, 5)
+	for rows.Next() {
+		value, err := scanScheduledStatus(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) UpdateScheduledStatus(ctx context.Context, value domain.ScheduledStatus) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE scheduled_statuses SET status_text = ?, status_emoji = ?, starts_at = ?, ends_at = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ? AND user_id = ?`, value.StatusText, value.StatusEmoji, value.StartsAt.UTC().Unix(), value.EndsAt.UTC().Unix(), value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, value.UserID)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteScheduledStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_statuses WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspaceID, userID)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DueScheduledStatuses(ctx context.Context, workspaceID domain.WorkspaceID, now time.Time, limit int) ([]domain.ScheduledStatus, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("scheduled status limit must be positive")
+	}
+	query := `SELECT id, workspace_id, user_id, status_text, status_emoji, starts_at, ends_at, created_at, updated_at
+		FROM scheduled_statuses WHERE starts_at <= ?`
+	args := []any{now.UTC().Unix()}
+	if workspaceID != "" {
+		query += ` AND workspace_id = ?`
+		args = append(args, workspaceID)
+	}
+	query += ` ORDER BY starts_at, id LIMIT ?`
+	args = append(args, limit)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.ScheduledStatus, 0, limit)
+	for rows.Next() {
+		value, err := scanScheduledStatus(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) EarliestScheduledStatusStart(ctx context.Context, workspaceID domain.WorkspaceID) (time.Time, error) {
+	query := `SELECT COALESCE(MIN(starts_at), 0) FROM scheduled_statuses`
+	args := []any{}
+	if workspaceID != "" {
+		query += ` WHERE workspace_id = ?`
+		args = append(args, workspaceID)
+	}
+	var startsAt int64
+	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&startsAt); err != nil {
+		return time.Time{}, err
+	}
+	return fromUnixSeconds(startsAt), nil
+}
+
+func (s *Store) ActivateScheduledStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID, expectedUpdatedAt, now time.Time, event events.Event) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	value, err := scanScheduledStatus(tx.QueryRowContext(ctx, `SELECT id, workspace_id, user_id, status_text, status_emoji, starts_at, ends_at, created_at, updated_at
+		FROM scheduled_statuses WHERE id = ? AND workspace_id = ? AND user_id = ?`, id, workspaceID, userID))
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !value.UpdatedAt.Equal(expectedUpdatedAt.UTC()) || value.StartsAt.After(now.UTC()) {
+		return false, nil
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_statuses WHERE id = ? AND workspace_id = ? AND user_id = ? AND updated_at = ? AND starts_at <= ?`,
+		id, workspaceID, userID, expectedUpdatedAt.UTC().UnixNano(), now.UTC().Unix())
+	if err != nil {
+		return false, err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return false, err
+	} else if changed != 1 {
+		return false, nil
+	}
+	if value.EndsAt.After(now.UTC()) {
+		result, err = tx.ExecContext(ctx, `UPDATE users SET status_text = ?, status_emoji = ?, status_expiration = ?, active_scheduled_status_id = ?
+			WHERE id = ? AND workspace_id = ? AND deleted = 0`, value.StatusText, value.StatusEmoji, value.EndsAt.UTC().Unix(), value.ID, userID, workspaceID)
+		if err != nil {
+			return false, err
+		}
+		if changed, err := result.RowsAffected(); err != nil {
+			return false, err
+		} else if changed != 1 {
+			return false, store.ErrNotFound
+		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return false, err

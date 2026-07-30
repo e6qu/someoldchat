@@ -19,14 +19,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	PresenceService_UserInfo_FullMethodName         = "/sameoldchat.chat.v1.PresenceService/UserInfo"
-	PresenceService_UserByEmail_FullMethodName      = "/sameoldchat.chat.v1.PresenceService/UserByEmail"
-	PresenceService_SetUserProfile_FullMethodName   = "/sameoldchat.chat.v1.PresenceService/SetUserProfile"
-	PresenceService_SetUserPresence_FullMethodName  = "/sameoldchat.chat.v1.PresenceService/SetUserPresence"
-	PresenceService_DoNotDisturbInfo_FullMethodName = "/sameoldchat.chat.v1.PresenceService/DoNotDisturbInfo"
-	PresenceService_SetSnooze_FullMethodName        = "/sameoldchat.chat.v1.PresenceService/SetSnooze"
-	PresenceService_EndSnooze_FullMethodName        = "/sameoldchat.chat.v1.PresenceService/EndSnooze"
-	PresenceService_EndDND_FullMethodName           = "/sameoldchat.chat.v1.PresenceService/EndDND"
+	PresenceService_UserInfo_FullMethodName                  = "/sameoldchat.chat.v1.PresenceService/UserInfo"
+	PresenceService_UserByEmail_FullMethodName               = "/sameoldchat.chat.v1.PresenceService/UserByEmail"
+	PresenceService_SetUserProfile_FullMethodName            = "/sameoldchat.chat.v1.PresenceService/SetUserProfile"
+	PresenceService_ScheduleUserStatus_FullMethodName        = "/sameoldchat.chat.v1.PresenceService/ScheduleUserStatus"
+	PresenceService_ScheduledUserStatuses_FullMethodName     = "/sameoldchat.chat.v1.PresenceService/ScheduledUserStatuses"
+	PresenceService_UpdateScheduledUserStatus_FullMethodName = "/sameoldchat.chat.v1.PresenceService/UpdateScheduledUserStatus"
+	PresenceService_DeleteScheduledUserStatus_FullMethodName = "/sameoldchat.chat.v1.PresenceService/DeleteScheduledUserStatus"
+	PresenceService_SetUserPresence_FullMethodName           = "/sameoldchat.chat.v1.PresenceService/SetUserPresence"
+	PresenceService_DoNotDisturbInfo_FullMethodName          = "/sameoldchat.chat.v1.PresenceService/DoNotDisturbInfo"
+	PresenceService_SetSnooze_FullMethodName                 = "/sameoldchat.chat.v1.PresenceService/SetSnooze"
+	PresenceService_EndSnooze_FullMethodName                 = "/sameoldchat.chat.v1.PresenceService/EndSnooze"
+	PresenceService_EndDND_FullMethodName                    = "/sameoldchat.chat.v1.PresenceService/EndDND"
 )
 
 // PresenceServiceClient is the client API for PresenceService service.
@@ -36,6 +40,10 @@ type PresenceServiceClient interface {
 	UserInfo(ctx context.Context, in *UserRequest, opts ...grpc.CallOption) (*User, error)
 	UserByEmail(ctx context.Context, in *UserByEmailRequest, opts ...grpc.CallOption) (*User, error)
 	SetUserProfile(ctx context.Context, in *SetUserProfileRequest, opts ...grpc.CallOption) (*User, error)
+	ScheduleUserStatus(ctx context.Context, in *ScheduleUserStatusRequest, opts ...grpc.CallOption) (*ScheduledStatus, error)
+	ScheduledUserStatuses(ctx context.Context, in *ScheduledUserStatusesRequest, opts ...grpc.CallOption) (*ScheduledUserStatusesResponse, error)
+	UpdateScheduledUserStatus(ctx context.Context, in *UpdateScheduledUserStatusRequest, opts ...grpc.CallOption) (*ScheduledStatus, error)
+	DeleteScheduledUserStatus(ctx context.Context, in *DeleteScheduledUserStatusRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserPresence(ctx context.Context, in *SetUserPresenceRequest, opts ...grpc.CallOption) (*User, error)
 	DoNotDisturbInfo(ctx context.Context, in *DoNotDisturbRequest, opts ...grpc.CallOption) (*DoNotDisturb, error)
 	SetSnooze(ctx context.Context, in *SetSnoozeRequest, opts ...grpc.CallOption) (*DoNotDisturb, error)
@@ -75,6 +83,46 @@ func (c *presenceServiceClient) SetUserProfile(ctx context.Context, in *SetUserP
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(User)
 	err := c.cc.Invoke(ctx, PresenceService_SetUserProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) ScheduleUserStatus(ctx context.Context, in *ScheduleUserStatusRequest, opts ...grpc.CallOption) (*ScheduledStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScheduledStatus)
+	err := c.cc.Invoke(ctx, PresenceService_ScheduleUserStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) ScheduledUserStatuses(ctx context.Context, in *ScheduledUserStatusesRequest, opts ...grpc.CallOption) (*ScheduledUserStatusesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScheduledUserStatusesResponse)
+	err := c.cc.Invoke(ctx, PresenceService_ScheduledUserStatuses_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) UpdateScheduledUserStatus(ctx context.Context, in *UpdateScheduledUserStatusRequest, opts ...grpc.CallOption) (*ScheduledStatus, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScheduledStatus)
+	err := c.cc.Invoke(ctx, PresenceService_UpdateScheduledUserStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *presenceServiceClient) DeleteScheduledUserStatus(ctx context.Context, in *DeleteScheduledUserStatusRequest, opts ...grpc.CallOption) (*MutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MutationResponse)
+	err := c.cc.Invoke(ctx, PresenceService_DeleteScheduledUserStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +186,10 @@ type PresenceServiceServer interface {
 	UserInfo(context.Context, *UserRequest) (*User, error)
 	UserByEmail(context.Context, *UserByEmailRequest) (*User, error)
 	SetUserProfile(context.Context, *SetUserProfileRequest) (*User, error)
+	ScheduleUserStatus(context.Context, *ScheduleUserStatusRequest) (*ScheduledStatus, error)
+	ScheduledUserStatuses(context.Context, *ScheduledUserStatusesRequest) (*ScheduledUserStatusesResponse, error)
+	UpdateScheduledUserStatus(context.Context, *UpdateScheduledUserStatusRequest) (*ScheduledStatus, error)
+	DeleteScheduledUserStatus(context.Context, *DeleteScheduledUserStatusRequest) (*MutationResponse, error)
 	SetUserPresence(context.Context, *SetUserPresenceRequest) (*User, error)
 	DoNotDisturbInfo(context.Context, *DoNotDisturbRequest) (*DoNotDisturb, error)
 	SetSnooze(context.Context, *SetSnoozeRequest) (*DoNotDisturb, error)
@@ -160,6 +212,18 @@ func (UnimplementedPresenceServiceServer) UserByEmail(context.Context, *UserByEm
 }
 func (UnimplementedPresenceServiceServer) SetUserProfile(context.Context, *SetUserProfileRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetUserProfile not implemented")
+}
+func (UnimplementedPresenceServiceServer) ScheduleUserStatus(context.Context, *ScheduleUserStatusRequest) (*ScheduledStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method ScheduleUserStatus not implemented")
+}
+func (UnimplementedPresenceServiceServer) ScheduledUserStatuses(context.Context, *ScheduledUserStatusesRequest) (*ScheduledUserStatusesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ScheduledUserStatuses not implemented")
+}
+func (UnimplementedPresenceServiceServer) UpdateScheduledUserStatus(context.Context, *UpdateScheduledUserStatusRequest) (*ScheduledStatus, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateScheduledUserStatus not implemented")
+}
+func (UnimplementedPresenceServiceServer) DeleteScheduledUserStatus(context.Context, *DeleteScheduledUserStatusRequest) (*MutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteScheduledUserStatus not implemented")
 }
 func (UnimplementedPresenceServiceServer) SetUserPresence(context.Context, *SetUserPresenceRequest) (*User, error) {
 	return nil, status.Error(codes.Unimplemented, "method SetUserPresence not implemented")
@@ -246,6 +310,78 @@ func _PresenceService_SetUserProfile_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PresenceServiceServer).SetUserProfile(ctx, req.(*SetUserProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_ScheduleUserStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScheduleUserStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).ScheduleUserStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_ScheduleUserStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).ScheduleUserStatus(ctx, req.(*ScheduleUserStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_ScheduledUserStatuses_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScheduledUserStatusesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).ScheduledUserStatuses(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_ScheduledUserStatuses_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).ScheduledUserStatuses(ctx, req.(*ScheduledUserStatusesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_UpdateScheduledUserStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateScheduledUserStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).UpdateScheduledUserStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_UpdateScheduledUserStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).UpdateScheduledUserStatus(ctx, req.(*UpdateScheduledUserStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _PresenceService_DeleteScheduledUserStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteScheduledUserStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PresenceServiceServer).DeleteScheduledUserStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: PresenceService_DeleteScheduledUserStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PresenceServiceServer).DeleteScheduledUserStatus(ctx, req.(*DeleteScheduledUserStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -358,6 +494,22 @@ var PresenceService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetUserProfile",
 			Handler:    _PresenceService_SetUserProfile_Handler,
+		},
+		{
+			MethodName: "ScheduleUserStatus",
+			Handler:    _PresenceService_ScheduleUserStatus_Handler,
+		},
+		{
+			MethodName: "ScheduledUserStatuses",
+			Handler:    _PresenceService_ScheduledUserStatuses_Handler,
+		},
+		{
+			MethodName: "UpdateScheduledUserStatus",
+			Handler:    _PresenceService_UpdateScheduledUserStatus_Handler,
+		},
+		{
+			MethodName: "DeleteScheduledUserStatus",
+			Handler:    _PresenceService_DeleteScheduledUserStatus_Handler,
 		},
 		{
 			MethodName: "SetUserPresence",

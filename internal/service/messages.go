@@ -37,6 +37,8 @@ var (
 	ErrInvalidFile                 = errors.New("file metadata is invalid")
 	ErrInvalidSearch               = errors.New("search query is invalid")
 	ErrInvalidProfile              = errors.New("user profile is invalid")
+	ErrInvalidScheduledStatus      = errors.New("scheduled status is invalid")
+	ErrScheduledStatusLimit        = errors.New("five statuses are already scheduled")
 	ErrInvalidPresence             = errors.New("user presence is invalid")
 	ErrInvalidSnooze               = errors.New("snooze duration must be between 1 and 1440 minutes")
 	ErrInvalidReminder             = errors.New("reminder text, user, and time are required")
@@ -2508,11 +2510,116 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	if len(profile.DisplayName) > 80 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
 		return domain.User{}, ErrInvalidProfile
 	}
+	if err := m.validateStatusEmoji(ctx, workspaceID, profile.StatusEmoji, ErrInvalidProfile); err != nil {
+		return domain.User{}, err
+	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("user.profile_changed", events.String("user_id", string(userID))), time.Now().UTC())
 	if err != nil {
 		return domain.User{}, err
 	}
 	return m.Store.UpdateUserProfile(ctx, workspaceID, userID, profile, event)
+}
+
+func (m Messages) validateStatusEmoji(ctx context.Context, workspaceID domain.WorkspaceID, value string, invalid error) error {
+	if value == "" {
+		return nil
+	}
+	if !strings.HasPrefix(value, ":") || !strings.HasSuffix(value, ":") {
+		return invalid
+	}
+	name := normalizeEmojiName(value)
+	if !validEmojiName(name) {
+		return invalid
+	}
+	if _, ok := slackemoji.Lookup(name); ok {
+		return nil
+	}
+	custom, err := m.Store.ListEmojis(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, candidate := range custom {
+		if normalizeEmojiName(candidate.Name) == name {
+			return nil
+		}
+	}
+	return invalid
+}
+
+func normalizeScheduledStatus(statusText, statusEmoji string, startsAt, endsAt time.Time, now time.Time) (string, string, time.Time, time.Time, error) {
+	statusText = strings.TrimSpace(statusText)
+	statusEmoji = strings.TrimSpace(statusEmoji)
+	startsAt = startsAt.UTC().Truncate(time.Second)
+	endsAt = endsAt.UTC().Truncate(time.Second)
+	if (statusText == "" && statusEmoji == "") || len(statusText) > 100 || len(statusEmoji) > 64 ||
+		!startsAt.After(now.UTC()) || !endsAt.After(startsAt) {
+		return "", "", time.Time{}, time.Time{}, ErrInvalidScheduledStatus
+	}
+	return statusText, statusEmoji, startsAt, endsAt, nil
+}
+
+func (m Messages) ScheduleUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, statusText, statusEmoji string, startsAt, endsAt time.Time) (domain.ScheduledStatus, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	now := time.Now().UTC()
+	statusText, statusEmoji, startsAt, endsAt, err := normalizeScheduledStatus(statusText, statusEmoji, startsAt, endsAt, now)
+	if err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	if err := m.validateStatusEmoji(ctx, workspaceID, statusEmoji, ErrInvalidScheduledStatus); err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	id, err := domain.NewScheduledStatusID()
+	if err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	value := domain.ScheduledStatus{ID: id, WorkspaceID: workspaceID, UserID: userID, StatusText: statusText, StatusEmoji: statusEmoji, StartsAt: startsAt, EndsAt: endsAt, CreatedAt: now, UpdatedAt: now}
+	if err := m.Store.CreateScheduledStatus(ctx, value); err != nil {
+		if errors.Is(err, store.ErrScheduledStatusLimit) {
+			return domain.ScheduledStatus{}, ErrScheduledStatusLimit
+		}
+		return domain.ScheduledStatus{}, err
+	}
+	return value, nil
+}
+
+func (m Messages) ScheduledUserStatuses(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.ScheduledStatus, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	return m.Store.ListScheduledStatuses(ctx, workspaceID, userID)
+}
+
+func (m Messages) UpdateScheduledUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID, statusText, statusEmoji string, startsAt, endsAt time.Time) (domain.ScheduledStatus, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	now := time.Now().UTC()
+	statusText, statusEmoji, startsAt, endsAt, err := normalizeScheduledStatus(statusText, statusEmoji, startsAt, endsAt, now)
+	if err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	if err := m.validateStatusEmoji(ctx, workspaceID, statusEmoji, ErrInvalidScheduledStatus); err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	current, err := m.Store.GetScheduledStatus(ctx, workspaceID, userID, id)
+	if err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	current.StatusText, current.StatusEmoji = statusText, statusEmoji
+	current.StartsAt, current.EndsAt, current.UpdatedAt = startsAt, endsAt, now
+	if err := m.Store.UpdateScheduledStatus(ctx, current); err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	return current, nil
+}
+
+func (m Messages) DeleteScheduledUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.DeleteScheduledStatus(ctx, workspaceID, userID, id)
 }
 
 const maxUserPhotoBytes = 10 << 20

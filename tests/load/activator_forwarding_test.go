@@ -39,7 +39,11 @@ func TestDurableActivatorForwardsConcurrentRequestsToTheirCallers(t *testing.T) 
 		mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write(body)
-	}), spool, "activator-load", 1024, time.Second, observability.NewRegistry())
+		// The race suite runs every package concurrently and can suspend this
+		// package for more than a second while SQLite race instrumentation is busy.
+		// Keep the test bounded, but do not turn host scheduling pressure into a
+		// fabricated forwarding failure.
+	}), spool, "activator-load", 1024, 5*time.Second, observability.NewRegistry())
 	if err != nil {
 		t.Fatal(err)
 	}

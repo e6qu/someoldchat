@@ -36,14 +36,41 @@ func legacyTimestampDatabaseAtVersion(t *testing.T, ctx context.Context, path st
 	}
 	seedConversationFixture(t, ctx, first)
 	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Fixture construction is outside the measured migration interval. Keep it
+	// in one transaction so the shape test measures backfill work rather than
+	// tens of thousands of unrelated filesystem syncs.
+	tx, err := first.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement, err := tx.PrepareContext(ctx, insertRawMessageSQL)
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
 	for index := 0; index < count; index++ {
 		// A microsecond apart with a trailing zero in the fraction, so every value
 		// is distinct AND every value is variable width under RFC3339Nano.
 		instant := base.Add(time.Duration(index) * 10 * time.Microsecond)
-		insertRawMessage(t, ctx, first, fmt.Sprintf("M%d", index), instant.UTC().Format(time.RFC3339Nano))
+		if _, err := statement.ExecContext(ctx, fmt.Sprintf("M%d", index), instant.UTC().Format(time.RFC3339Nano)); err != nil {
+			_ = statement.Close()
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
 	}
 	for index, value := range extra {
-		insertRawMessage(t, ctx, first, fmt.Sprintf("X%d", index), value)
+		if _, err := statement.ExecContext(ctx, fmt.Sprintf("X%d", index), value); err != nil {
+			_ = statement.Close()
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+	}
+	if err := statement.Close(); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	rewindSchema(t, ctx, first, version)
 	if err := first.Close(); err != nil {
@@ -53,10 +80,11 @@ func legacyTimestampDatabaseAtVersion(t *testing.T, ctx context.Context, path st
 
 // insertRawMessage bypasses CreateMessage on purpose: these tests are about
 // values no writer of this release can produce.
+const insertRawMessageSQL = `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, 'T1', 'C1', 'U1', 'legacy', '', '[]', '', ?, 0, '{}')`
+
 func insertRawMessage(t *testing.T, ctx context.Context, s *Store, id, createdAt string) {
 	t.Helper()
-	const insert = `INSERT INTO messages (id, workspace_id, conversation, author_id, text, blocks, attachments, thread_timestamp, created_at, deleted, unfurls) VALUES (?, 'T1', 'C1', 'U1', 'legacy', '', '[]', '', ?, 0, '{}')`
-	if _, err := s.db.ExecContext(ctx, insert, id, createdAt); err != nil {
+	if _, err := s.db.ExecContext(ctx, insertRawMessageSQL, id, createdAt); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -2936,8 +2936,8 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	}
 	// The form mirrors the limits the service enforces without exposing the
 	// seven size-specific image fields in Slack's API model.
-	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "automatic; activity unavailable", "💬 Heads down")
-	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`, `required`)
+	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "automatic; activity unavailable", "💬 Heads down", "Schedule a status", "No scheduled statuses.")
+	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`)
 	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&status_expiration=4102444800&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if updateResult.Code != http.StatusSeeOther {
 		t.Fatalf("profile update status=%d body=%s", updateResult.Code, updateResult.Body)
@@ -2962,6 +2962,36 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	if stored.Profile.StatusText != "" || stored.Profile.StatusEmoji != "" || !stored.Profile.StatusExpiration.IsZero() {
 		t.Fatalf("cleared profile=%+v", stored.Profile)
 	}
+	scheduleResult := postForm(t, mux, "/app/status/schedule", "status_text=Focus&status_emoji=%3Adart%3A&starts_at=4102448400&ends_at=4102452000", false)
+	if scheduleResult.Code != http.StatusSeeOther {
+		t.Fatalf("schedule status=%d body=%s", scheduleResult.Code, scheduleResult.Body)
+	}
+	scheduled, err := (service.Messages{Store: s}).ScheduledUserStatuses(context.Background(), "T1", "U1")
+	if err != nil || len(scheduled) != 1 {
+		t.Fatalf("scheduled=%+v err=%v", scheduled, err)
+	}
+	stored, _ = s.GetUser(context.Background(), "U1")
+	if stored.Profile.StatusText != "" {
+		t.Fatalf("future status changed current profile=%+v", stored.Profile)
+	}
+	scheduledPage := get(t, mux, "/app/members")
+	requireContains(t, "scheduled status", scheduledPage.Body.String(), `value="Focus"`, `value=":dart:"`, `value="4102448400"`, `value="4102452000"`, "Cancel status")
+	updateScheduled := postForm(t, mux, "/app/status/scheduled/update", "id="+url.QueryEscape(string(scheduled[0].ID))+"&status_text=Deep+work&status_emoji=%3Aheadphones%3A&starts_at=4102455600&ends_at=4102459200", false)
+	if updateScheduled.Code != http.StatusSeeOther {
+		t.Fatalf("update scheduled status=%d body=%s", updateScheduled.Code, updateScheduled.Body)
+	}
+	scheduled, _ = (service.Messages{Store: s}).ScheduledUserStatuses(context.Background(), "T1", "U1")
+	if len(scheduled) != 1 || scheduled[0].StatusText != "Deep work" || scheduled[0].StartsAt.Unix() != 4102455600 {
+		t.Fatalf("updated scheduled=%+v", scheduled)
+	}
+	cancelScheduled := postForm(t, mux, "/app/status/scheduled/delete", "id="+url.QueryEscape(string(scheduled[0].ID)), false)
+	if cancelScheduled.Code != http.StatusSeeOther {
+		t.Fatalf("cancel scheduled status=%d body=%s", cancelScheduled.Code, cancelScheduled.Body)
+	}
+	scheduled, _ = (service.Messages{Store: s}).ScheduledUserStatuses(context.Background(), "T1", "U1")
+	if len(scheduled) != 0 {
+		t.Fatalf("scheduled status survived cancel=%+v", scheduled)
+	}
 }
 
 // TestRejectedProfileKeepsEveryFieldAndExplainsTheLimit covers the defect where
@@ -2979,6 +3009,21 @@ func TestRejectedProfileKeepsEveryFieldAndExplainsTheLimit(t *testing.T) {
 		`value="Ready"`,
 		`value=":ok:"`,
 		`value="https://example.test/avatar.png"`,
+	)
+}
+
+func TestRejectedScheduledStatusKeepsEveryFieldAndExplainsTheContract(t *testing.T) {
+	_, mux := browserWorkspace(t, auth.AllScopes())
+	response := postForm(t, mux, "/app/status/schedule", "status_text=Focus&status_emoji=%3Anot_a_workspace_emoji%3A&starts_at=4102448400&ends_at=4102452000", false)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	requireContains(t, "rejected scheduled status", response.Body.String(),
+		"valid workspace emoji",
+		`value="Focus"`,
+		`value=":not_a_workspace_emoji:"`,
+		`value="4102448400"`,
+		`value="4102452000"`,
 	)
 }
 

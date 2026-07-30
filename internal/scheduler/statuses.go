@@ -16,7 +16,7 @@ import (
 type StatusSource interface {
 	DueUserStatuses(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.User, error)
 	EarliestUserStatusExpiration(context.Context, domain.WorkspaceID) (time.Time, error)
-	ExpireUserStatus(context.Context, domain.WorkspaceID, domain.UserID, time.Time, time.Time, events.Event) (bool, error)
+	ExpireUserStatus(context.Context, domain.WorkspaceID, domain.UserID, time.Time, domain.ScheduledStatusID, time.Time, events.Event) (bool, error)
 }
 
 type StatusWorker struct {
@@ -52,7 +52,7 @@ func (w StatusWorker) RunOnceAt(ctx context.Context, workspaceID domain.Workspac
 			failures = errors.Join(failures, err)
 			continue
 		}
-		changed, err := w.Source.ExpireUserStatus(ctx, user.WorkspaceID, user.ID, user.Profile.StatusExpiration, now, event)
+		changed, err := w.Source.ExpireUserStatus(ctx, user.WorkspaceID, user.ID, user.Profile.StatusExpiration, user.Profile.ActiveScheduledStatusID, now, event)
 		if err != nil {
 			failures = errors.Join(failures, err)
 			continue
