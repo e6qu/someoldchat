@@ -646,8 +646,9 @@ func TestRemoteUsesSameChatContract(t *testing.T) {
 	if err != nil || user.ID != "U1" || user.Email != "alice@example.com" {
 		t.Fatalf("user by email=%+v err=%v", user, err)
 	}
-	user, err = remote.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: "remote-alice", StatusText: "Ready", StatusEmoji: ":white_check_mark:"})
-	if err != nil || user.Profile.DisplayName != "remote-alice" || user.Profile.StatusText != "Ready" {
+	statusExpiration := time.Unix(4102444800, 0).UTC()
+	user, err = remote.SetUserProfile(ctx, "T1", "U1", domain.UserProfile{DisplayName: "remote-alice", StatusText: "Ready", StatusEmoji: ":white_check_mark:", StatusExpiration: statusExpiration})
+	if err != nil || user.Profile.DisplayName != "remote-alice" || user.Profile.StatusText != "Ready" || !user.Profile.StatusExpiration.Equal(statusExpiration) {
 		t.Fatalf("updated user=%+v err=%v", user, err)
 	}
 	user, err = remote.SetUserPresence(ctx, "T1", "U1", domain.PresenceAway)

@@ -47,6 +47,8 @@ slash_url='https://docs.slack.dev/interactivity/implementing-slash-commands/'
 manifest_url='https://docs.slack.dev/reference/app-manifest/'
 oauth_url='https://docs.slack.dev/authentication/installing-with-oauth/'
 status_url='https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability'
+profile_set_url='https://docs.slack.dev/reference/methods/users.profile.set/'
+presence_url='https://docs.slack.dev/reference/methods/users.setPresence/'
 notification_url='https://slack.com/help/articles/201355156-Configure-your-Slack-notifications'
 conversation_notification_url='https://slack.com/help/articles/360056534254-Manage-notifications-for-specific-channels-and-direct-messages'
 dnd_url='https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb'
@@ -86,6 +88,8 @@ fetch "$slash_url" "$work/slash.html"
 fetch "$manifest_url" "$work/manifest.html"
 fetch "$oauth_url" "$work/oauth.html"
 fetch "$status_url" "$work/status.html"
+fetch "$profile_set_url" "$work/users-profile-set.html"
+fetch "$presence_url" "$work/user-presence.html"
 fetch "$notification_url" "$work/notifications.html"
 fetch "$conversation_notification_url" "$work/conversation-notifications.html"
 fetch "$dnd_url" "$work/dnd.html"
@@ -213,6 +217,12 @@ assert_contains "$work/status.html" 'Remove status after...' \
 	'[STATUS-01] status supports an explicit clear time' "$status_url"
 assert_contains "$work/status.html" 'away after 10 minutes of desktop inactivity' \
 	'[STATUS-02] automatic availability transition' "$status_url"
+assert_contains "$work/status.html" 'schedule up to five statuses at a time' \
+	'[STATUS-03] future statuses have a five-item first-party limit' "$status_url"
+assert_contains "$work/users-profile-set.html" 'status_expiration' \
+	'[STATUS-01] users.profile.set carries the Unix status expiration' "$profile_set_url"
+assert_contains "$work/user-presence.html" 'Either auto or away' \
+	'[STATUS-02] users.setPresence stores manual auto or away rather than active' "$presence_url"
 assert_contains "$work/notifications.html" 'Everything or Mentions and direct messages' \
 	'[NOTIFY-01] workspace notification trigger choices' "$notification_url"
 assert_contains "$work/notifications.html" 'only exact matches will trigger notifications' \

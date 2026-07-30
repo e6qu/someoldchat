@@ -2494,6 +2494,17 @@ func (m Messages) SetUserProfile(ctx context.Context, workspaceID domain.Workspa
 	profile.Image192 = strings.TrimSpace(profile.Image192)
 	profile.Image512 = strings.TrimSpace(profile.Image512)
 	profile.Image1024 = strings.TrimSpace(profile.Image1024)
+	if profile.StatusText == "" && profile.StatusEmoji == "" {
+		// Slack clears a custom status only when both fields are empty. Keeping a
+		// deadline attached to an already-cleared status would later publish a
+		// second, invented profile change.
+		profile.StatusExpiration = time.Time{}
+	} else if !profile.StatusExpiration.IsZero() {
+		profile.StatusExpiration = profile.StatusExpiration.UTC().Truncate(time.Second)
+		if !profile.StatusExpiration.After(time.Now().UTC()) {
+			return domain.User{}, ErrInvalidProfile
+		}
+	}
 	if len(profile.DisplayName) > 80 || len(profile.StatusText) > 100 || len(profile.StatusEmoji) > 64 || len(profile.Image24) > 2048 || len(profile.Image32) > 2048 || len(profile.Image48) > 2048 || len(profile.Image72) > 2048 || len(profile.Image192) > 2048 || len(profile.Image512) > 2048 || len(profile.Image1024) > 2048 {
 		return domain.User{}, ErrInvalidProfile
 	}

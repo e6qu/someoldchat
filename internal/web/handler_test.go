@@ -2915,7 +2915,8 @@ func TestSignOutTreatsAnAbsentSessionRecordAsSuccess(t *testing.T) {
 func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})
-	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", RealName: "Alice Example", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:"}})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", RealName: "Alice Example", Profile: domain.UserProfile{DisplayName: "alice", StatusText: "Available", StatusEmoji: ":wave:", StatusExpiration: time.Unix(4102444800, 0).UTC()}})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", Profile: domain.UserProfile{StatusText: "Heads down"}})
 	if err := s.SeedSession(context.Background(), "session", domain.SessionRecord{WorkspaceID: "T1", UserID: "U1", Scopes: []string{string(auth.ScopeUsersRead), string(auth.ScopeUsersWrite)}, ExpiresAt: time.Now().UTC().Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -2935,15 +2936,31 @@ func TestMembersPageRendersDurableProfiles(t *testing.T) {
 	}
 	// The form mirrors the limits the service enforces without exposing the
 	// seven size-specific image fields in Slack's API model.
-	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`)
+	requireContains(t, "profile form", res.Body.String(), `maxlength="80"`, `maxlength="100"`, `name="avatar_url"`, `type="url" maxlength="2048"`, `name="status_expiration" value="4102444800"`, `action="/app/presence"`, "Active (automatic)", "automatic; activity unavailable", "💬 Heads down")
 	requireMissing(t, "profile form", res.Body.String(), `name="image_24"`, `name="image_1024"`, `required`)
-	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
+	updateResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&status_expiration=4102444800&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
 	if updateResult.Code != http.StatusSeeOther {
 		t.Fatalf("profile update status=%d body=%s", updateResult.Code, updateResult.Body)
 	}
 	stored, err := s.GetUser(context.Background(), "U1")
-	if err != nil || stored.Profile.DisplayName != "updated" || stored.Profile.StatusText != "Ready" || stored.Profile.Image24 != "https://example.test/avatar.png" || stored.Profile.Image1024 != "https://example.test/avatar.png" {
+	if err != nil || stored.Profile.DisplayName != "updated" || stored.Profile.StatusText != "Ready" || stored.Profile.StatusExpiration.Unix() != 4102444800 || stored.Profile.Image24 != "https://example.test/avatar.png" || stored.Profile.Image1024 != "https://example.test/avatar.png" {
 		t.Fatalf("updated profile=%+v err=%v", stored.Profile, err)
+	}
+	presenceResult := postForm(t, mux, "/app/presence", "presence=away", false)
+	if presenceResult.Code != http.StatusSeeOther {
+		t.Fatalf("presence update status=%d body=%s", presenceResult.Code, presenceResult.Body)
+	}
+	stored, _ = s.GetUser(context.Background(), "U1")
+	if stored.Presence != domain.PresenceAway {
+		t.Fatalf("updated presence=%q", stored.Presence)
+	}
+	clearResult := postForm(t, mux, "/app/profile", "display_name=updated&status_text=Ready&status_emoji=%3Aok%3A&status_expiration=4102444800&clear_status=true&avatar_url=https%3A%2F%2Fexample.test%2Favatar.png", false)
+	if clearResult.Code != http.StatusSeeOther {
+		t.Fatalf("clear status=%d body=%s", clearResult.Code, clearResult.Body)
+	}
+	stored, _ = s.GetUser(context.Background(), "U1")
+	if stored.Profile.StatusText != "" || stored.Profile.StatusEmoji != "" || !stored.Profile.StatusExpiration.IsZero() {
+		t.Fatalf("cleared profile=%+v", stored.Profile)
 	}
 }
 

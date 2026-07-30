@@ -1335,7 +1335,7 @@ test('[CONV-02 NAV-04] channel creation is reachable and conversation shortcuts 
   await expect(page).toHaveURL(createdURL);
 });
 
-test('[PROFILE-02 STATUS-01] profile editing presents one human-facing photo field and saves status', async ({ page, context }) => {
+test('[PROFILE-01 PROFILE-02 STATUS-01 STATUS-02] profile editing persists expiring status and manual availability', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app/members');
 
@@ -1346,9 +1346,23 @@ test('[PROFILE-02 STATUS-01] profile editing presents one human-facing photo fie
   const status = `Qualifying ${Date.now()}`;
   await page.getByLabel('Status', { exact: true }).fill(status);
   await page.getByLabel('Status emoji').fill(':white_check_mark:');
+  const expires = new Date(Date.now() + 60 * 60 * 1000);
+  const localExpires = new Date(expires.getTime() - expires.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  await page.getByLabel('Remove status after').fill(localExpires);
   await page.getByRole('button', { name: 'Save changes' }).click();
   await expect(page).toHaveURL('/app/members');
   await expect(page.getByText(status, { exact: false }).first()).toBeVisible();
+  await expect(page.locator('time[data-status-expires]')).toHaveAttribute('datetime', /T/);
+
+  await page.getByLabel('Availability').selectOption('away');
+  await page.getByRole('button', { name: 'Update availability' }).click();
+  await expect(page.getByText('Away', { exact: true }).first()).toBeVisible();
+  await page.getByLabel('Availability').selectOption('auto');
+  await page.getByRole('button', { name: 'Update availability' }).click();
+  await expect(page.getByText('Active', { exact: true }).first()).toBeVisible();
+
+  await page.getByRole('button', { name: 'Clear status' }).click();
+  await expect(page.getByText('No status set', { exact: true })).toBeVisible();
 });
 
 test('[NAV-06] theme choice persists across workspace pages', async ({ page, context }) => {

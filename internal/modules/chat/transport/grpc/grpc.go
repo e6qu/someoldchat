@@ -5793,6 +5793,9 @@ func (s *Server) setUserProfileProto(ctx context.Context, input *chatv1.SetUserP
 		Image24: p.GetImage_24(), Image32: p.GetImage_32(), Image48: p.GetImage_48(), Image72: p.GetImage_72(),
 		Image192: p.GetImage_192(), Image512: p.GetImage_512(), Image1024: p.GetImage_1024(),
 	}
+	if p.GetStatusExpiration() != 0 {
+		profile.StatusExpiration = time.Unix(p.GetStatusExpiration(), 0).UTC()
+	}
 	result, err := s.implementation.SetUserProfile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), profile)
 	if err != nil {
 		return nil, mapError(err)
@@ -6351,7 +6354,7 @@ func decodeProtoInviteRequest(value *chatv1.InviteRequest) domain.InviteRequest 
 }
 
 func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
-	return &chatv1.UserProfile{
+	result := &chatv1.UserProfile{
 		DisplayName: value.DisplayName,
 		StatusText:  value.StatusText,
 		StatusEmoji: value.StatusEmoji,
@@ -6363,6 +6366,10 @@ func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
 		Image_512:   value.Image512,
 		Image_1024:  value.Image1024,
 	}
+	if !value.StatusExpiration.IsZero() {
+		result.StatusExpiration = value.StatusExpiration.UTC().Unix()
+	}
+	return result
 }
 
 // maxSeamPage bounds what one request may make the server allocate on the
@@ -7506,7 +7513,7 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 	// value in the other. The invariant belongs to the store, not to a decoder.
 	presence := domain.Presence(value.GetPresence())
 	profile := value.GetProfile()
-	return domain.User{
+	result := domain.User{
 		ID:          domain.UserID(value.GetId()),
 		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		Email:       value.GetEmail(),
@@ -7526,7 +7533,11 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		},
 		Presence: presence,
 		Deleted:  value.GetDeleted(),
-	}, nil
+	}
+	if profile.GetStatusExpiration() != 0 {
+		result.Profile.StatusExpiration = time.Unix(profile.GetStatusExpiration(), 0).UTC()
+	}
+	return result, nil
 }
 
 func encodeProtoDoNotDisturb(value domain.DoNotDisturb) *chatv1.DoNotDisturb {

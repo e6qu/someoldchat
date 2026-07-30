@@ -280,6 +280,12 @@ type Store interface {
 	// a leak with no reconciler behind it. A domain change and the events that
 	// describe it are one unit of work.
 	UpdateUserProfile(context.Context, domain.WorkspaceID, domain.UserID, domain.UserProfile, ...events.Event) (domain.User, error)
+	// DueUserStatuses and ExpireUserStatus form a compare-and-set queue. More
+	// than one worker may observe the same due profile, but only the worker whose
+	// expected deadline still matches may clear it and publish the event.
+	DueUserStatuses(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.User, error)
+	EarliestUserStatusExpiration(context.Context, domain.WorkspaceID) (time.Time, error)
+	ExpireUserStatus(context.Context, domain.WorkspaceID, domain.UserID, time.Time, time.Time, events.Event) (bool, error)
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence, events.Event) (domain.User, error)
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error

@@ -316,17 +316,81 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: users.getPresence
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/users.getPresence/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - specs/journeys/09-profile-presence-and-notifications.md
+    deviations:
+      - Automatic presence is stored as a mode but is not yet derived from live client activity, Slack's ten-minute inactivity rule, or websocket connectivity.
+      - The optional presence detail fields and current rate-limit behavior have not been qualified against Slack.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The previous claim proved response decoding but treated automatic mode as effective active presence without live activity evidence.
+      evidence:
+        - internal/api/slack/handler.go
+        - internal/domain/models.go
+        - https://docs.slack.dev/apis/web-api/user-presence-and-status/
   - method: users.setPresence
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/users.setPresence/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - specs/journeys/09-profile-presence-and-notifications.md
+    deviations:
+      - The documented `auto` and `away` values persist and round-trip, but automatic presence does not yet incorporate client activity or connection state.
+      - Current Slack rate-limit and token-type behavior has not been differentially qualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: Local mode persistence and official SDK calls do not establish Slack's effective-presence lifecycle.
+      evidence:
+        - internal/api/slack/handler.go
+        - internal/service/messages.go
+        - https://docs.slack.dev/reference/methods/users.setPresence/
   - method: users.profile.get
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/users.profile.get/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - specs/journeys/09-profile-presence-and-notifications.md
+    deviations:
+      - Core identity, image, status, and expiration fields are returned, but custom profile fields, labels, and the full paid-plan profile schema are not implemented.
+      - Current rate limits and every user-token/bot-token visibility variation have not been differentially qualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The previous claim covered a fixed profile subset and SDK decoding, not Slack's complete profile schema and visibility contract.
+      evidence:
+        - internal/api/slack/handler.go
+        - internal/api/slack/handler_test.go
+        - https://docs.slack.dev/reference/methods/users.profile.get/
   - method: users.profile.set
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/users.profile.set/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - specs/journeys/09-profile-presence-and-notifications.md
+    deviations:
+      - Display name, status, expiration, and image URL fields are supported, but Slack's complete editable profile and custom-field surface is not.
+      - Admin editing of another user, paid-plan restrictions, method-specific rate limits, and all token-type rules remain unqualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The previous claim promoted a durable profile subset and official SDK calls to full Slack behavioral compatibility.
+      evidence:
+        - internal/api/slack/handler.go
+        - internal/service/messages.go
+        - https://docs.slack.dev/reference/methods/users.profile.set/
 
   - method: admin.apps.approve
     status: behavior-compatible

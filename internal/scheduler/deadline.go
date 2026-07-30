@@ -117,6 +117,44 @@ func PublishEarliestProductWakeDeadline(ctx context.Context, scheduled Source, r
 	return publisher.SetWakeDeadline(fence, earliest)
 }
 
+// PublishEarliestProductWakeDeadlineWithStatuses includes expiring custom
+// statuses in the lifecycle wake hint. Keeping the original two-source helper
+// preserves its small public contract for callers that do not execute status
+// work, while the production worker must use this complete product queue.
+func PublishEarliestProductWakeDeadlineWithStatuses(ctx context.Context, scheduled Source, reminders ReminderSource, statuses StatusSource, publisher FencedDeadlinePublisher, workspaces ...domain.WorkspaceID) error {
+	if scheduled == nil || reminders == nil || statuses == nil || publisher == nil {
+		return errors.New("product wake deadline requires scheduled, reminder, and status sources and a publisher")
+	}
+	fence, err := publisher.Fence(ctx)
+	if err != nil {
+		return err
+	}
+	if len(workspaces) == 0 {
+		workspaces = []domain.WorkspaceID{""}
+	}
+	var earliest time.Time
+	for _, workspace := range workspaces {
+		scheduledAt, scheduledErr := scheduled.EarliestScheduledMessage(ctx, workspace)
+		if scheduledErr != nil {
+			return scheduledErr
+		}
+		reminderAt, reminderErr := reminders.EarliestLaterReminder(ctx, workspace)
+		if reminderErr != nil {
+			return reminderErr
+		}
+		statusAt, statusErr := statuses.EarliestUserStatusExpiration(ctx, workspace)
+		if statusErr != nil {
+			return statusErr
+		}
+		for _, candidate := range []time.Time{scheduledAt, reminderAt, statusAt} {
+			if !candidate.IsZero() && (earliest.IsZero() || candidate.Before(earliest)) {
+				earliest = candidate
+			}
+		}
+	}
+	return publisher.SetWakeDeadline(fence, earliest)
+}
+
 // ActivatorDeadlinePublisher publishes the wake hint to the lifecycle activator
 // over its authenticated control API.
 //

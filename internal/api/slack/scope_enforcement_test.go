@@ -31,10 +31,6 @@ import (
 //     current Slack grants bot tokens channels:join and user tokens
 //     channels:write;
 //   - files.* writes use files:write where the snapshot says files:write:user;
-//   - users.profile.get and team.profile.get use users:read where the snapshot
-//     says users.profile:read, because internal/auth declares no
-//     users.profile:read scope. That one is a gap, not a modernisation — see the
-//     follow-up recorded for internal/auth.
 //
 // Routes this repository adds and the snapshot does not describe at all
 // (/internal/…, emoji.list, slackLists.*) carry the scope this system defines.
@@ -58,7 +54,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodGet, "/api/bots.info", auth.ScopeUsersRead},
 		{http.MethodGet, "/api/migration.exchange", auth.ScopeTokensBasic},
 		{http.MethodGet, "/api/team.billableInfo", auth.ScopeAdmin},
-		{http.MethodGet, "/api/team.profile.get", auth.ScopeUsersRead},
+		{http.MethodGet, "/api/team.profile.get", auth.ScopeUsersProfileRead},
 		{http.MethodGet, "/api/team.accessLogs", auth.ScopeAdmin},
 		{http.MethodGet, "/api/team.integrationLogs", auth.ScopeAdmin},
 		{http.MethodGet, "/api/admin.users.list", auth.ScopeAdminUsersRead},
@@ -137,7 +133,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/dnd.endSnooze", auth.ScopeDNDWrite},
 		{http.MethodPost, "/api/dnd.setSnooze", auth.ScopeDNDWrite},
 		{http.MethodGet, "/api/dnd.teamInfo", auth.ScopeDNDRead},
-		{http.MethodGet, "/api/users.profile.get", auth.ScopeUsersRead},
+		{http.MethodGet, "/api/users.profile.get", auth.ScopeUsersProfileRead},
 		{http.MethodGet, "/api/users.list", auth.ScopeUsersRead},
 		{http.MethodPost, "/api/users.profile.set", auth.ScopeUsersProfileWrite},
 		{http.MethodPost, "/api/users.deletePhoto", auth.ScopeUsersProfileWrite},

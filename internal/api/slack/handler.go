@@ -1923,10 +1923,7 @@ func (h Handler) rtmConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) teamProfileGet(w http.ResponseWriter, r *http.Request) {
-	// Pinned /team.profile.get token parameter: "Requires scope:
-	// `users.profile:read`". This repository maps that scope onto
-	// auth.ScopeUsersRead, which is what /users.profile.get already requires.
-	if _, err := h.authenticate(r, auth.ScopeUsersRead); err != nil {
+	if _, err := h.authenticate(r, auth.ScopeUsersProfileRead); err != nil {
 		writeAuthError(w, err)
 		return
 	}
@@ -3144,8 +3141,7 @@ func (h Handler) conversationInfo(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 	// Pinned /users.info token parameter: "Requires scope: `users:read`".
-	// Enforcing no scope let any token read every user's profile, including the
-	// email address userResponse emits.
+	// Email is independently omitted below unless users:read.email is present.
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
 	if err != nil {
 		writeAuthError(w, err)
@@ -3165,7 +3161,7 @@ func (h Handler) userInfo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail))})
 }
 
 func (h Handler) usersIdentity(w http.ResponseWriter, r *http.Request) {
@@ -3207,7 +3203,7 @@ func (h Handler) lookupUserByEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "users_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user)})
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "user": userResponse(user, true)})
 }
 
 func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
@@ -3239,7 +3235,7 @@ func (h Handler) usersList(w http.ResponseWriter, r *http.Request) {
 	}
 	members := make([]map[string]any, 0, len(page.Users))
 	for _, user := range page.Users {
-		members = append(members, userResponse(user))
+		members = append(members, userResponse(user, principal.HasScope(auth.ScopeUsersReadEmail)))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "members": members, "cache_ts": time.Now().Unix(), "response_metadata": map[string]any{"next_cursor": page.NextCursor}, "has_more": page.HasMore})
 }
@@ -3272,7 +3268,7 @@ func decodeConversationListFields(fields map[string]string) (domain.Conversation
 }
 
 func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeUsersRead)
+	principal, err := h.authenticate(r, auth.ScopeUsersProfileRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -3291,7 +3287,11 @@ func (h Handler) getUserProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profileResponse(user)})
+	profile := profileResponse(user)
+	if !principal.HasScope(auth.ScopeUsersReadEmail) {
+		delete(profile, "email")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": profile})
 }
 
 func (h Handler) getPresence(w http.ResponseWriter, r *http.Request) {
@@ -3543,7 +3543,7 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	profile := current.Profile
-	for name, value := range profileFields {
+	for name, value := range profileFields.Strings {
 		switch name {
 		case "display_name":
 			profile.DisplayName = value
@@ -3567,12 +3567,27 @@ func (h Handler) setUserProfile(w http.ResponseWriter, r *http.Request) {
 			profile.Image1024 = value
 		}
 	}
+	if profileFields.StatusExpiration != nil {
+		if *profileFields.StatusExpiration == 0 {
+			profile.StatusExpiration = time.Time{}
+		} else {
+			profile.StatusExpiration = time.Unix(*profileFields.StatusExpiration, 0).UTC()
+		}
+	}
 	user, err := h.Messages.SetUserProfile(r.Context(), principal.WorkspaceID, principal.UserID, profile)
 	if err != nil {
+		if errors.Is(err, service.ErrInvalidProfile) {
+			writeError(w, "invalid_profile")
+			return
+		}
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": userResponse(user)["profile"]})
+	responseProfile := profileResponse(user)
+	if !principal.HasScope(auth.ScopeUsersReadEmail) {
+		delete(responseProfile, "email")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "profile": responseProfile})
 }
 
 func (h Handler) deleteUserPhoto(w http.ResponseWriter, r *http.Request) {
@@ -3669,7 +3684,7 @@ func (h Handler) usersSetActive(w http.ResponseWriter, r *http.Request) {
 // admin.users.list 200 example carries the role and restriction flags below; the
 // plain userResponse omits all of them.
 func adminUserResponse(value domain.AdminUser) map[string]any {
-	result := userResponse(value.User)
+	result := userResponse(value.User, true)
 	result["is_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
 	result["is_primary_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
 	result["is_admin"] = value.Membership.Role == domain.WorkspaceRoleAdmin || value.Membership.Role == domain.WorkspaceRoleOwner
@@ -3680,9 +3695,13 @@ func adminUserResponse(value domain.AdminUser) map[string]any {
 	return result
 }
 
-func userResponse(user domain.User) map[string]any {
+func userResponse(user domain.User, includeEmail bool) map[string]any {
+	profile := profileResponse(user)
+	if !includeEmail {
+		delete(profile, "email")
+	}
 	return map[string]any{
-		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profileResponse(user),
+		"id": user.ID, "team_id": user.WorkspaceID, "name": user.Name, "real_name": user.RealName, "deleted": user.Deleted, "profile": profile,
 	}
 }
 
@@ -3690,7 +3709,7 @@ func profileResponse(user domain.User) map[string]any {
 	return map[string]any{
 		"display_name": user.Profile.DisplayName, "display_name_normalized": user.Profile.DisplayName, "email": user.Email,
 		"real_name": user.RealName, "real_name_normalized": user.RealName,
-		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji,
+		"status_text": user.Profile.StatusText, "status_emoji": user.Profile.StatusEmoji, "status_expiration": unixSeconds(user.Profile.StatusExpiration),
 		"image_24": user.Profile.Image24, "image_32": user.Profile.Image32, "image_48": user.Profile.Image48, "image_72": user.Profile.Image72,
 		"image_192": user.Profile.Image192, "image_512": user.Profile.Image512, "image_1024": user.Profile.Image1024,
 		"team": user.WorkspaceID, "user_id": user.ID,
@@ -7849,21 +7868,33 @@ func parseBoolFields(fields map[string]string, names ...string) ([]bool, error) 
 
 const maxRequestBody = 4 << 20
 
-func decodeProfileJSON(raw string) (map[string]string, error) {
+type decodedProfile struct {
+	Strings          map[string]string
+	StatusExpiration *int64
+}
+
+func decodeProfileJSON(raw string) (decodedProfile, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &fields); err != nil || fields == nil {
-		return nil, errors.New("profile must be a JSON object")
+		return decodedProfile{}, errors.New("profile must be a JSON object")
 	}
 	values := make(map[string]string, len(fields))
+	result := decodedProfile{Strings: values}
 	acknowledged := 0
 	for name, value := range fields {
 		switch name {
 		case "display_name", "status_text", "status_emoji", "image_24", "image_32", "image_48", "image_72", "image_192", "image_512", "image_1024":
 			var text string
 			if err := json.Unmarshal(value, &text); err != nil {
-				return nil, fmt.Errorf("profile field %s must be a string", name)
+				return decodedProfile{}, fmt.Errorf("profile field %s must be a string", name)
 			}
 			values[name] = text
+		case "status_expiration":
+			var expiration int64
+			if err := json.Unmarshal(value, &expiration); err != nil || expiration < 0 {
+				return decodedProfile{}, errors.New("profile field status_expiration must be a non-negative integer")
+			}
+			result.StatusExpiration = &expiration
 		case "always_active", "is_custom_image":
 			// Parsed for validation only: neither is settable through this API. They
 			// used to be dropped from `values`, so `profile={"always_active":true}`
@@ -7871,17 +7902,17 @@ func decodeProfileJSON(raw string) (map[string]string, error) {
 			// request was rejected as if the field were unknown.
 			var boolean bool
 			if err := json.Unmarshal(value, &boolean); err != nil {
-				return nil, fmt.Errorf("profile field %s must be a boolean", name)
+				return decodedProfile{}, fmt.Errorf("profile field %s must be a boolean", name)
 			}
 			acknowledged++
 		default:
-			return nil, fmt.Errorf("unsupported profile field %s", name)
+			return decodedProfile{}, fmt.Errorf("unsupported profile field %s", name)
 		}
 	}
-	if len(values) == 0 && acknowledged == 0 {
-		return nil, errors.New("profile must contain at least one supported field")
+	if len(values) == 0 && result.StatusExpiration == nil && acknowledged == 0 {
+		return decodedProfile{}, errors.New("profile must contain at least one supported field")
 	}
-	return values, nil
+	return result, nil
 }
 
 // decodeError carries the Slack error code the pinned contract declares for a
