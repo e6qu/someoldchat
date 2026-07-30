@@ -999,6 +999,19 @@ public final class Qualification {
             require(reopenedDirect.isOk() && reopenedDirect.getChannel() != null
                             && direct.getChannel().getId().equals(reopenedDirect.getChannel().getId()),
                     "conversations.open did not reopen the canonical DM");
+            ConversationsOpenResponse groupDirect = methods.conversationsOpen(
+                    com.slack.api.methods.request.conversations.ConversationsOpenRequest.builder()
+                            .users(List.of("U2", "U3"))
+                            .build());
+            require(groupDirect.isOk() && groupDirect.getChannel() != null,
+                    "conversations.open did not create a group DM");
+            ConversationsOpenResponse canonicalGroupDirect = methods.conversationsOpen(
+                    com.slack.api.methods.request.conversations.ConversationsOpenRequest.builder()
+                            .users(List.of("U3", "U2"))
+                            .build());
+            require(canonicalGroupDirect.isOk() && canonicalGroupDirect.getChannel() != null
+                            && groupDirect.getChannel().getId().equals(canonicalGroupDirect.getChannel().getId()),
+                    "conversations.open did not preserve canonical group-DM membership");
             ConversationsMarkResponse marked = methods.conversationsMark(
                     com.slack.api.methods.request.conversations.ConversationsMarkRequest.builder()
                             .channel("C1")
@@ -1025,7 +1038,7 @@ public final class Qualification {
             UsersListResponse users = methods.usersList(
                     com.slack.api.methods.request.users.UsersListRequest.builder().limit(10).build());
             require(users.isOk(), "users.list failed: " + users.getError());
-            require(users.getMembers() != null && users.getMembers().size() == 2, "users page mismatch");
+            require(users.getMembers() != null && users.getMembers().size() == 3, "users page mismatch");
             require(users.getResponseMetadata() != null
                             && (users.getResponseMetadata().getNextCursor() == null
                                     || users.getResponseMetadata().getNextCursor().isBlank()),

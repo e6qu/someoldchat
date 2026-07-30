@@ -1295,6 +1295,202 @@ func (s *Store) CreateDirectConversation(_ context.Context, conversation domain.
 	return nil
 }
 
+func (s *Store) ExpandDirectConversation(_ context.Context, expansion domain.DirectConversationExpansion, emitted []events.Event) error {
+	if !expansion.History.Valid() || len(emitted) != 3 {
+		return store.InvalidArgument("invalid direct conversation expansion")
+	}
+	sourceNotice, err := normalizeMessage(expansion.SourceNotice)
+	if err != nil {
+		return err
+	}
+	targetNotice, err := normalizeMessage(expansion.TargetNotice)
+	if err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	source, exists := s.conversations[expansion.Source]
+	if !exists || source.WorkspaceID != expansion.Target.WorkspaceID || (!source.IsDirect && !source.IsGroupDirect) {
+		return store.ErrNotFound
+	}
+	if !expansion.Target.IsPrivate || expansion.Target.IsDirect || !expansion.Target.IsGroupDirect || len(expansion.Members) < 3 || len(expansion.Members) > 9 {
+		return store.InvalidArgument("expanded conversation must be a group DM")
+	}
+	if _, exists := s.conversations[expansion.Target.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	memberSet := make(map[domain.UserID]struct{}, len(expansion.Members))
+	for _, member := range expansion.Members {
+		if _, duplicate := memberSet[member]; duplicate {
+			return store.InvalidArgument("expanded conversation contains duplicate members")
+		}
+		user, exists := s.users[member]
+		if !exists || user.WorkspaceID != expansion.Target.WorkspaceID || user.Deleted {
+			return store.ErrNotFound
+		}
+		memberSet[member] = struct{}{}
+	}
+	for member := range s.memberships[expansion.Source] {
+		if _, retained := memberSet[member]; !retained {
+			return store.InvalidArgument("expanded conversation removed a source member")
+		}
+	}
+	if len(memberSet) <= len(s.memberships[expansion.Source]) {
+		return store.InvalidArgument("expanded conversation adds no members")
+	}
+	wantedKey := domain.DirectConversationKey(expansion.Target.WorkspaceID, expansion.Members)
+	for id, existing := range s.conversations {
+		if existing.WorkspaceID != expansion.Target.WorkspaceID || (!existing.IsDirect && !existing.IsGroupDirect) {
+			continue
+		}
+		current := make([]domain.UserID, 0, len(s.memberships[id]))
+		for member := range s.memberships[id] {
+			current = append(current, member)
+		}
+		if domain.DirectConversationKey(existing.WorkspaceID, current) == wantedKey {
+			return store.ErrAlreadyExists
+		}
+	}
+	if sourceNotice.Conversation != expansion.Source || targetNotice.Conversation != expansion.Target.ID ||
+		sourceNotice.WorkspaceID != expansion.Target.WorkspaceID || targetNotice.WorkspaceID != expansion.Target.WorkspaceID ||
+		sourceNotice.ID == "" || targetNotice.ID == "" || sourceNotice.AuthorID == "" || targetNotice.AuthorID == "" {
+		return store.InvalidArgument("invalid direct conversation notices")
+	}
+	for _, messages := range s.messages {
+		for _, message := range messages {
+			if message.ID == sourceNotice.ID || message.ID == targetNotice.ID {
+				return store.ErrAlreadyExists
+			}
+		}
+	}
+	if messageInstantExists(s.messages[expansion.Source], sourceNotice.CreatedAt) {
+		return store.ErrMessageTimestampTaken
+	}
+
+	history := make([]domain.Message, 0)
+	if expansion.History == domain.DirectHistoryAll {
+		history = make([]domain.Message, 0, len(s.messages[expansion.Source]))
+		for _, original := range s.messages[expansion.Source] {
+			if original.Deleted {
+				continue
+			}
+			copy := cloneMessage(original)
+			copy.ID, err = domain.NewMessageID()
+			if err != nil {
+				return err
+			}
+			copy.Conversation = expansion.Target.ID
+			history = append(history, copy)
+		}
+	}
+	if messageInstantExists(history, targetNotice.CreatedAt) {
+		return store.ErrMessageTimestampTaken
+	}
+
+	s.conversations[expansion.Target.ID] = expansion.Target
+	s.memberships[expansion.Target.ID] = memberSet
+	s.conversationTeams[expansion.Target.ID] = map[domain.WorkspaceID]struct{}{expansion.Target.WorkspaceID: {}}
+	s.conversationOrg[expansion.Target.ID] = false
+	s.messages[expansion.Target.ID] = history
+	for _, message := range history {
+		for _, file := range message.Files {
+			if !slices.Contains(s.fileShares[file.ID], expansion.Target.ID) {
+				s.fileShares[file.ID] = append(s.fileShares[file.ID], expansion.Target.ID)
+				slices.Sort(s.fileShares[file.ID])
+			}
+		}
+	}
+	s.insertCommittedMessageLocked(sourceNotice)
+	s.insertCommittedMessageLocked(targetNotice)
+	s.outbox = append(s.outbox, emitted...)
+	return nil
+}
+
+func (s *Store) ConvertGroupDirectToPrivate(_ context.Context, conversion domain.GroupDirectConversion, emitted []events.Event) (domain.Conversation, error) {
+	if len(emitted) != 2 {
+		return domain.Conversation{}, store.InvalidArgument("invalid group DM conversion")
+	}
+	notice, err := normalizeMessage(conversion.Notice)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.conversations[conversion.Conversation]
+	if !exists {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	if !value.IsPrivate || value.IsDirect || !value.IsGroupDirect || strings.TrimSpace(conversion.Name) == "" {
+		return domain.Conversation{}, store.ErrInvalidConversationType
+	}
+	for id, existing := range s.conversations {
+		if id != value.ID && existing.WorkspaceID == value.WorkspaceID && !existing.IsDirect && !existing.IsGroupDirect && existing.Name == conversion.Name {
+			return domain.Conversation{}, store.ErrAlreadyExists
+		}
+	}
+	if notice.Conversation != value.ID || notice.WorkspaceID != value.WorkspaceID || notice.ID == "" || notice.AuthorID == "" {
+		return domain.Conversation{}, store.InvalidArgument("invalid group DM conversion notice")
+	}
+	for _, messages := range s.messages {
+		for _, message := range messages {
+			if message.ID == notice.ID {
+				return domain.Conversation{}, store.ErrAlreadyExists
+			}
+		}
+	}
+	if messageInstantExists(s.messages[value.ID], notice.CreatedAt) {
+		return domain.Conversation{}, store.ErrMessageTimestampTaken
+	}
+	value.Name = conversion.Name
+	value.IsDirect = false
+	value.IsGroupDirect = false
+	value.IsPrivate = true
+	s.conversations[value.ID] = value
+	for key := range s.closedDirects {
+		if strings.HasSuffix(key, "\x00"+string(value.ID)) {
+			delete(s.closedDirects, key)
+		}
+	}
+	s.insertCommittedMessageLocked(notice)
+	s.outbox = append(s.outbox, emitted...)
+	return value, nil
+}
+
+func messageInstantExists(messages []domain.Message, instant time.Time) bool {
+	instant = domain.MessageInstant(instant)
+	for _, message := range messages {
+		if message.CreatedAt.Equal(instant) {
+			return true
+		}
+	}
+	return false
+}
+
+// insertCommittedMessageLocked is used only after a compound mutation has
+// validated every failure point. It preserves the same ordering, activity, and
+// DM-reopen semantics as createMessageLocked without introducing a second lock
+// or a partial rollback problem.
+func (s *Store) insertCommittedMessageLocked(message domain.Message) {
+	values := s.messages[message.Conversation]
+	index := sort.Search(len(values), func(index int) bool {
+		current := values[index]
+		return message.CreatedAt.Before(current.CreatedAt) || (message.CreatedAt.Equal(current.CreatedAt) && string(message.ID) < string(current.ID))
+	})
+	values = append(values, domain.Message{})
+	copy(values[index+1:], values[index:])
+	values[index] = message
+	s.messages[message.Conversation] = values
+	conversation := s.conversations[message.Conversation]
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		for member := range s.memberships[message.Conversation] {
+			delete(s.closedDirects, directOpenKey(message.WorkspaceID, member, message.Conversation))
+		}
+	}
+	s.createMessageActivityLocked(message)
+}
+
 func directOpenKey(workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID) string {
 	return string(workspace) + "\x00" + string(user) + "\x00" + string(conversation)
 }

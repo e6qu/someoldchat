@@ -42,6 +42,7 @@ func main() {
 	store.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	store.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice", Email: "alice@example.com", Profile: domain.UserProfile{DisplayName: "alice"}})
 	store.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", Email: "bob@example.com"})
+	store.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", Email: "carol@example.com"})
 	now := time.Now().UTC()
 	newQualificationEvent := func(id domain.EventID, actorID domain.UserID, payload events.Payload) events.Event {
 		event, eventErr := events.New(id, "T1", actorID, payload, now)

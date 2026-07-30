@@ -113,7 +113,7 @@ async function installActivityBot(page, request) {
   });
   const joined = await join.json();
   expect(joined.ok, JSON.stringify(joined)).toBe(true);
-  return { appID, token: installed.access_token };
+  return { appID, token: installed.access_token, botUserID: installed.bot_user_id, name };
 }
 
 async function expectNoSeriousAccessibilityViolations(page) {
@@ -195,6 +195,63 @@ test('[DM-01 DM-02 DM-04] direct messages have a searchable, accessible first-pa
   const body = await page.locator('main').boundingBox();
   expect(body.x).toBeGreaterThanOrEqual(0);
   expect(body.x + body.width).toBeLessThanOrEqual(320);
+});
+
+test('[DM-03 DM-05 A11Y-01] adding people reviews history and group DMs convert in place', async ({ page, context, request }) => {
+  await signIn(context);
+  const installedApps = [];
+  try {
+    const first = await installActivityBot(page, request);
+    installedApps.push(first.appID);
+    const second = await installActivityBot(page, request);
+    installedApps.push(second.appID);
+
+    await page.goto('/app/dms');
+    await page.locator(`input[name="user_${first.botUserID}"]`).check();
+    await page.getByRole('button', { name: 'Start conversation' }).click();
+    await expect(page).toHaveURL(/\/app\?channel=/);
+
+    const retained = `history retained in expanded DM ${Date.now()}`;
+    const composer = page.locator('form.composer textarea[name="text"]');
+    await composer.fill(retained);
+    await composer.press('Enter');
+    await expect(page.locator('.message-text', { hasText: retained })).toBeVisible();
+
+    await page.getByRole('link', { name: 'Open conversation details' }).click();
+    await page.getByText('Add people', { exact: true }).click();
+    await page.locator(`input[name="user_${second.botUserID}"]`).check();
+    await page.getByRole('button', { name: 'Next' }).click();
+
+    await expect(page.getByRole('heading', { name: 'Include conversation history' })).toBeVisible();
+    await page.getByLabel('Include all conversation history and files').check();
+    await page.getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByRole('heading', { name: 'Review new group DM' })).toBeVisible();
+    await expect(page.getByText(second.name)).toBeVisible();
+    await expect(page.getByText('All existing messages and shared files')).toBeVisible();
+    await expect(page.getByText('Slack posts an automatic participant notice')).toBeVisible();
+    await expectNoSeriousAccessibilityViolations(page);
+    await page.getByRole('button', { name: 'Confirm and create group DM' }).click();
+    await expect(page).toHaveURL(/\/app\?channel=/);
+    await expect(page.locator('.message-text', { hasText: retained })).toBeVisible();
+
+    await page.getByRole('link', { name: 'Open conversation details' }).click();
+    await expect(page.getByRole('link', { name: 'Settings' })).toBeVisible();
+    await page.getByText('Change to a private channel', { exact: true }).click();
+    await expect(page.getByText('Messages and files from this group DM will stay')).toBeVisible();
+    const channelName = `converted-${Date.now()}`;
+    await page.getByLabel('Private channel name').fill(channelName);
+    await page.getByRole('button', { name: 'Change to Private' }).click();
+    await expect(page.locator('.channel-title')).toHaveText(`# ${channelName}`);
+    await expect(page.locator('.message-text', { hasText: retained })).toBeVisible();
+  } finally {
+    for (const appID of installedApps.reverse()) {
+      await page.goto(`/app/developer/apps?app=${encodeURIComponent(appID)}`);
+      const remove = page.getByRole('button', { name: 'Delete app' });
+      if (await remove.isVisible()) {
+        await remove.click();
+      }
+    }
+  }
 });
 
 test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app mentions and supports keyboard triage', async ({ page, context, request }) => {

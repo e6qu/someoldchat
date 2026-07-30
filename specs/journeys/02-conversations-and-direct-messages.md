@@ -91,16 +91,35 @@ to include; the UI states that a new conversation will be created. Only the
 selected eligible history is visible to new participants. Cancellation leaves
 both conversations unchanged.
 
+**Preconditions and entry points:** The actor is an active member of the source
+DM. The conversation header opens details, the Members section exposes **Add
+people**, and the control is absent when no eligible member can be added or the
+nine-person total has been reached. A deactivated user, existing participant,
+foreign-workspace identifier, or selection that would exceed nine people is
+refused without creating or modifying a conversation.
+
 Acceptance sequence:
 
 1. Open a one-to-one or group DM, open its member details, and choose **Add
    people**.
-2. Select eligible members and choose one of Slack's offered **Include
-   conversation history** options.
-3. Preview and confirm the consequence that Slack will create a new group DM.
-4. The old DM retains its participant set. The new canonical participant set
+2. Select eligible members, then choose **Next**. No state changes.
+3. Choose one of Slack's offered **Include conversation history** options, then
+   choose **Done**.
+4. A keyboard- and screen-reader-readable confirmation names the new
+   participants, the selected history consequence, and both-conversation
+   notification behavior. No state changes on this step. **Cancel** returns to
+   the source DM with both conversations unchanged.
+5. Select **Confirm** to create the new group DM.
+6. The old DM retains its participant set. The new canonical participant set
    receives only the selected history range, and both relevant conversations
    receive Slack's participant notification.
+
+The public Slack help source requires a selectable history choice but does not
+enumerate every option label or range. Those exact choices MUST be captured by
+a controlled live-Slack differential fixture before SameOldChat claims its
+two current choices—no history and all history—are the complete Slack option
+set. The absence of a public `conversations.*` method for this client journey
+MUST NOT be filled by inventing one.
 
 ## DM-04 — Close and reopen a DM
 
@@ -130,6 +149,12 @@ according to Slack policy; the result is private. Permission, guest, Slack
 Connect, name-conflict, and concurrent-conversion failures are explicit and
 atomic.
 
+**Preconditions and entry points:** From the group-DM header, open details and
+the Settings section. Slack permits all members and Multi-Channel Guests by
+default; workspace owners/admins may restrict private-channel creation and
+conversion involving external people. A one-to-one DM and a Single-Channel
+Guest never receive a usable conversion action.
+
 Acceptance sequence:
 
 1. From a group DM's Settings, choose **Change to a private channel**.
@@ -142,17 +167,27 @@ Acceptance sequence:
    conflicting name, and concurrent second conversion fail without a
    half-renamed or half-converted conversation.
 
+The successful transition preserves the conversation identifier, current
+membership, message timestamps and authors, file visibility, drafts, and read
+state. It clears DM-only open/closed navigation state, becomes discoverable as
+a private channel, and cannot be converted a second time.
+
 ## Evidence
 
 - Browser journeys cover browse/join/create/details/leave/archive plus the
   dedicated DM surface at desktop and narrow widths. Handler/service/store/API
-  journeys cover one-to-one/group open, naming, close, idempotent close, and
-  canonical reopen. Add-people history selection and group-DM conversion
-  remain normative targets, not claimed browser coverage.
+  journeys cover one-to-one/group open, naming, close, idempotent close,
+  canonical reopen, reviewed add-people with no/all-history choices, automatic
+  notices, and in-place private-channel conversion. The exact live Slack
+  history-option inventory plus Slack Connect and workspace-policy variants
+  remain explicit differential gaps.
 - API and event tests prove that `conversations.*`, membership, history, and
   emitted events agree with the UI.
-- Differential fixtures record participant/history behavior because help text
-  alone does not fully specify every DM transition.
+- Current official Node, Python, and Java SDKs prove canonical exact-member
+  group-DM opening. Add-history and conversion are first-party Slack journeys,
+  not invented Web API methods. Controlled live differential fixtures still
+  need to record participant/history presentation because help text does not
+  fully specify every option and transition.
 
 ## Journey-source map
 

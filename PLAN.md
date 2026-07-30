@@ -295,14 +295,21 @@ multi-recipient composition up to Slack's nine-person total, optional and
 later group-DM naming, durable per-member close state, canonical reopen by
 exact participant set, and automatic reopen when a participant posts. Closing
 no longer abuses channel membership: history, files, drafts, read state, and
-other participants remain intact. The Slack HTTP boundary returns the
-documented `no_op` and `already_closed` fields on a repeated
-`conversations.close`, rejects `conversations.leave` and
-`conversations.rename` for IM/MPIM types, and is exercised by the pinned Node,
-Python, and Java SDK clients. DM-03 history-selecting add-people and DM-05
-atomic conversion to a private channel remain the next cohesive direct-message
-slice; this plan does not count the newly completed close/open work as evidence
-for those journeys.
+other participants remain intact. DM-03 now reviews additions and the history
+choice before one atomic commit creates the canonical expanded group DM,
+copies only the selected history/files, leaves the source membership intact,
+and posts both participant notices. DM-05 converts an MPIM in place to a
+private channel, retaining its identity, members, messages, files, drafts, and
+read state, with name-conflict rollback and the conversion notice in the new
+channel. The Slack HTTP boundary returns the documented `no_op` and
+`already_closed` fields on a repeated `conversations.close`, rejects
+`conversations.leave` and `conversations.rename` for IM/MPIM types, and is
+exercised by the pinned Node, Python, and Java SDK clients, including canonical
+multi-person opening. Slack exposes no public method for add-history or
+conversion, so those remain first-party application/gRPC operations instead
+of invented Slack APIs. Slack's exact live history-option inventory,
+workspace-configurable conversion restrictions, and Slack Connect/external
+variants remain differential gaps.
 
 The reminder contract audit also corrected a false evidence claim. Current
 Slack Help puts personal reminder creation and management in Later and message
@@ -317,7 +324,7 @@ evidence.
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 101 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 32 Playwright scenarios cite 61 IDs. `make journey-check` rejects
+and 33 Playwright scenarios cite 63 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -334,7 +341,7 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 77 representative exact assertions
+developer pages and currently checks 87 representative exact assertions
 explicitly citing 43 of the 101 journey IDs across every journey domain.
 `make journey-check` prints the other 58 as upstream-text evidence
 gaps. This pass corrected two local targets

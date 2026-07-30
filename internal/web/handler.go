@@ -252,6 +252,8 @@ type conversationDetailsView struct {
 	CloseURL          string
 	CanEdit           bool
 	CanInvite         bool
+	CanAddPeople      bool
+	CanConvert        bool
 	CanLeave          bool
 	CanClose          bool
 	CanArchive        bool
@@ -344,6 +346,16 @@ type directMessagesData struct {
 	CSRFToken  string
 	Error      string
 	CanMessage bool
+}
+
+type directExpansionReviewData struct {
+	SourceID       string
+	SourceName     string
+	Additions      []memberView
+	History        string
+	IncludeHistory bool
+	ChooseHistory  bool
+	CSRFToken      string
 }
 
 type searchData struct {
@@ -816,6 +828,7 @@ const workspaceRefinements = `<style>
 .conversation-details-head h2{margin:0;font-size:21px}.conversation-details-head p{margin:3px 0 0;color:var(--muted);font-size:13px}
 .conversation-details-close{margin-left:auto;border-radius:6px;padding:5px 9px;color:var(--muted);font-size:22px;line-height:1;text-decoration:none}.conversation-details-close:hover{background:var(--hover);color:var(--text)}
 .conversation-details-body{display:grid;gap:20px;padding:18px 20px}
+.conversation-details-tabs{display:flex;gap:16px;border-bottom:1px solid var(--line);padding-bottom:10px}.conversation-details-tabs a{color:var(--text);font-weight:800;text-decoration:none}.conversation-details-tabs a:hover{text-decoration:underline}
 .conversation-details-section{display:grid;gap:10px}.conversation-details-section h3{margin:0;font-size:15px}
 .conversation-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0}
 .conversation-facts div{padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--panel)}.conversation-facts dt{color:var(--muted);font-size:12px;font-weight:700}.conversation-facts dd{margin:3px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
@@ -1251,6 +1264,11 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <a class="conversation-details-close" href="{{.Details.CloseURL}}" aria-label="Close conversation details">×</a>
     </header>
     <div class="conversation-details-body">
+      <nav class="conversation-details-tabs" aria-label="Conversation details sections">
+        <a href="#conversation-about-heading">About</a>
+        <a href="#conversation-members-heading">Members</a>
+        {{if or .Details.CanEdit .Details.CanConvert}}<a href="#conversation-settings-heading">Settings</a>{{end}}
+      </nav>
       <section class="conversation-details-section" aria-labelledby="conversation-about-heading">
         <h3 id="conversation-about-heading">About</h3>
         <dl class="conversation-facts">
@@ -1308,7 +1326,37 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
           </form>
           {{else}}<p class="conversation-details-note">Every available workspace member is already in this channel.</p>{{end}}
         {{end}}
+        {{if .Details.CanAddPeople}}
+        <details class="conversation-setting">
+          <summary>Add people</summary>
+          <form method="post" action="/app/conversation/add-people?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <fieldset>
+              <legend>Choose people to add</legend>
+              {{range .Details.Invitees}}<label class="privacy"><input type="checkbox" name="user_{{.ID}}" value="1"> {{.Name}}</label>{{end}}
+            </fieldset>
+            <p class="conversation-details-note">Slack creates a new group DM. This conversation and its members stay unchanged.</p>
+            <button type="submit">Next</button>
+          </form>
+        </details>
+        {{end}}
       </section>
+      {{if or .Details.CanEdit .Details.CanConvert}}
+      <section class="conversation-details-section" aria-labelledby="conversation-settings-heading">
+        <h3 id="conversation-settings-heading">Settings</h3>
+        {{if .Details.CanConvert}}
+        <details class="conversation-setting">
+          <summary>Change to a private channel</summary>
+          <form method="post" action="/app/conversation/convert-to-private?channel={{.Details.ID}}">
+            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+            <label for="converted-channel-name">Private channel name<input id="converted-channel-name" name="name" maxlength="80" required pattern="[A-Za-z0-9_-]+"></label>
+            <p class="conversation-details-note">Messages and files from this group DM will stay in the new private channel and will be visible to members added later. Everyone in this group DM will be notified.</p>
+            <button type="submit">Change to Private</button>
+          </form>
+        </details>
+        {{end}}
+      </section>
+      {{end}}
       {{if or .Details.CanArchive .Details.CanLeave .Details.CanClose}}
       <section class="conversation-danger" aria-label="Conversation actions">
         {{if .Details.CanArchive}}<form method="post" action="/app/conversation/archive?channel={{.Details.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Details.Archived}}false{{else}}true{{end}}"><button type="submit">{{.Details.ArchiveVerb}} channel</button></form>{{end}}
@@ -1465,6 +1513,55 @@ const directMessagesMarkup = `{{define "title"}}Direct messages · SameOldChat{{
 {{end}}`
 
 var directMessagesTemplate = mustPage(directMessagesMarkup)
+
+const directExpansionReviewMarkup = `{{define "title"}}Add people to a DM · SameOldChat{{end}}
+{{define "styles"}}<style>
+.review-shell{min-height:100vh;display:grid;place-items:center;padding:24px;background:var(--panel)}
+.review-card{width:min(620px,100%);background:var(--panel-strong);border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:var(--shadow)}
+.review-card h1{margin-top:0}.review-card ul{padding-left:22px}.review-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:24px}.review-actions a,.review-actions button{border-radius:7px;padding:10px 14px;font-weight:800}.review-actions a{border:1px solid var(--line);color:var(--text);text-decoration:none}.review-actions button{border:0;background:var(--action);color:var(--on-strong)}
+</style>{{end}}
+{{define "content"}}
+<main class="review-shell">
+  {{if .ChooseHistory}}
+  <section class="review-card" aria-labelledby="history-dm-heading">
+    <h1 id="history-dm-heading">Include conversation history</h1>
+    <p>Choose what existing messages and files the people joining <strong>{{.SourceName}}</strong> can see.</p>
+    <h2>People being added</h2>
+    <ul>{{range .Additions}}<li>{{.Name}}</li>{{end}}</ul>
+    <form method="post" action="/app/conversation/add-people?channel={{.SourceID}}">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+      <input type="hidden" name="stage" value="review">
+      {{range .Additions}}<input type="hidden" name="user_{{.ID}}" value="1">{{end}}
+      <fieldset>
+        <legend>Include conversation history</legend>
+        <label class="privacy"><input type="radio" name="history" value="none" checked> Don’t include conversation history</label>
+        <label class="privacy"><input type="radio" name="history" value="all"> Include all conversation history and files</label>
+      </fieldset>
+      <div class="review-actions"><a href="/app?channel={{.SourceID}}&amp;details=1">Cancel</a><button type="submit">Done</button></div>
+    </form>
+  </section>
+  {{else}}
+  <section class="review-card" aria-labelledby="review-dm-heading">
+    <h1 id="review-dm-heading">Review new group DM</h1>
+    <p>Adding these people creates a new group DM. <strong>{{.SourceName}}</strong> keeps its current members and history.</p>
+    <h2>People being added</h2>
+    <ul>{{range .Additions}}<li>{{.Name}}</li>{{end}}</ul>
+    <h2>Conversation history</h2>
+    <p>{{if .IncludeHistory}}All existing messages and shared files will also be visible in the new group DM.{{else}}The new group DM will start without existing messages or files.{{end}}</p>
+    <p>Slack posts an automatic participant notice in both conversations.</p>
+    <form method="post" action="/app/conversation/add-people?channel={{.SourceID}}">
+      <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+      <input type="hidden" name="confirm" value="true">
+      <input type="hidden" name="history" value="{{.History}}">
+      {{range .Additions}}<input type="hidden" name="user_{{.ID}}" value="1">{{end}}
+      <div class="review-actions"><a href="/app?channel={{.SourceID}}&amp;details=1">Cancel</a><button type="submit">Confirm and create group DM</button></div>
+    </form>
+  </section>
+  {{end}}
+</main>
+{{end}}`
+
+var directExpansionReviewTemplate = mustPage(directExpansionReviewMarkup)
 
 const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -2317,6 +2414,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/message/delete", h.deleteMessage)
 	mux.HandleFunc("POST /app/conversation/create", h.createConversation)
 	mux.HandleFunc("POST /app/conversation/open", h.openConversation)
+	mux.HandleFunc("POST /app/conversation/add-people", h.addPeopleToDirectConversation)
+	mux.HandleFunc("POST /app/conversation/convert-to-private", h.convertGroupDirectToPrivate)
 	mux.HandleFunc("POST /app/conversation/invite", h.inviteConversationMember)
 	mux.HandleFunc("POST /app/conversation/rename", h.renameConversation)
 	mux.HandleFunc("POST /app/conversation/topic", h.setConversationTopic)
@@ -3430,7 +3529,7 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 	canManage := isMember && principal.HasScope(auth.ScopeChannelsManage)
 	isChannel := !conversation.IsDirect && !conversation.IsGroupDirect
 	invitees := make([]memberView, 0)
-	if canManage && isChannel && !conversation.Archived {
+	if canManage && !conversation.Archived && (isChannel || len(members) < 9) {
 		cursor = ""
 		for pageNumber := 0; pageNumber < maxDirectoryPages; pageNumber++ {
 			page, err := h.Messages.Users(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
@@ -3497,6 +3596,14 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 			return nil, err
 		}
 	}
+	canConvert := false
+	if canManage && conversation.IsGroupDirect {
+		membership, err := h.Messages.WorkspaceMembership(ctx, principal.WorkspaceID, principal.UserID, principal.UserID)
+		if err != nil {
+			return nil, err
+		}
+		canConvert = !membership.UltraRestricted
+	}
 	return &conversationDetailsView{
 		ID:                string(conversation.ID),
 		Name:              name,
@@ -3511,6 +3618,8 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		CloseURL:          appURL(string(conversation.ID), "", "", "", ""),
 		CanEdit:           canManage && isChannel && !conversation.Archived,
 		CanInvite:         canManage && isChannel && !conversation.Archived,
+		CanAddPeople:      canManage && !isChannel && len(members) < 9 && len(invitees) > 0,
+		CanConvert:        canConvert,
 		CanLeave:          canManage && isChannel && !conversation.Archived && !required,
 		CanClose:          canManage && !isChannel,
 		CanArchive:        canManage && isChannel && !required,
@@ -6169,6 +6278,119 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 			h.writeMutationError(w, r, http.StatusBadRequest, "The group DM was opened but could not be named", "Use a name between one and 80 characters. You can name it from Direct messages.")
 			return
 		}
+	}
+	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
+}
+
+func (h Handler) addPeopleToDirectConversation(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The people and history choice could not be read. Open the DM details and try again.")
+	if !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	selected := make([]domain.UserID, 0)
+	for field, value := range fields {
+		if strings.HasPrefix(field, "user_") && value == "1" {
+			selected = append(selected, domain.UserID(strings.TrimPrefix(field, "user_")))
+		}
+	}
+	sort.Slice(selected, func(left, right int) bool { return selected[left] < selected[right] })
+	history := domain.DirectHistorySelection(strings.TrimSpace(fields["history"]))
+	if len(selected) == 0 {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Choose who to add", "No new group DM was created. Return to the conversation details and choose at least one person.")
+		return
+	}
+	if fields["confirm"] != "true" {
+		conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+		if err != nil || (!conversation.IsDirect && !conversation.IsGroupDirect) {
+			h.writeMutationError(w, r, http.StatusNotFound, "That direct message is no longer available", "Nothing was changed.")
+			return
+		}
+		additions := make([]memberView, 0, len(selected))
+		for _, id := range selected {
+			user, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, id)
+			if err != nil || user.Deleted {
+				h.writeMutationError(w, r, http.StatusNotFound, "One of those people is no longer available", "No new group DM was created. Return to the conversation and choose active workspace members.")
+				return
+			}
+			additions = append(additions, memberView{ID: string(id), Name: displayName(user)})
+		}
+		sessionCookie, err := r.Cookie(auth.SessionCookieName)
+		if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+			h.writeAuthError(w, auth.ErrNotAuthenticated)
+			return
+		}
+		sourceName := conversationName(conversation)
+		if conversation.Name == "" || conversation.Name == "direct" {
+			sourceName = h.participantNames(r.Context(), principal, channel)
+		}
+		chooseHistory := fields["stage"] != "review"
+		if !chooseHistory && !history.Valid() {
+			h.writeMutationError(w, r, http.StatusBadRequest, "Choose what conversation history to include", "No new group DM was created. Return to the conversation details and try again.")
+			return
+		}
+		h.writeHTML(w, directExpansionReviewTemplate, directExpansionReviewData{
+			SourceID: string(channel), SourceName: sourceName, Additions: additions,
+			History: string(history), IncludeHistory: history == domain.DirectHistoryAll,
+			ChooseHistory: chooseHistory,
+			CSRFToken:     auth.CSRFToken(sessionCookie.Value),
+		}, http.StatusOK, "the new group DM review is temporarily unavailable")
+		return
+	}
+	if !history.Valid() {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Choose what conversation history to include", "No new group DM was created. Return to the conversation details and try again.")
+		return
+	}
+	conversation, err := h.Messages.AddPeopleToDirectConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, selected, history)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this direct message", "No new group DM was created.")
+		case errors.Is(err, service.ErrInvalidConversation):
+			h.writeMutationError(w, r, http.StatusBadRequest, "Those people cannot be added", "A group DM can contain no more than nine people, and at least one selected person must be new.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That direct message or member is no longer available", "No history, membership, or files were changed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The new group DM was not created", "The workspace store is temporarily unavailable. No partial conversation was created.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
+}
+
+func (h Handler) convertGroupDirectToPrivate(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The private channel name could not be read. Open the group DM settings and try again.")
+	if !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	conversation, err := h.Messages.ConvertGroupDirectToPrivate(r.Context(), principal.WorkspaceID, principal.UserID, channel, fields["name"])
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this group DM", "Nothing was converted.")
+		case errors.Is(err, service.ErrNotWorkspaceAdmin):
+			h.writeMutationError(w, r, http.StatusForbidden, "Your guest role cannot create this private channel", "Ask a full member or multi-channel guest in the group DM to convert it.")
+		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, store.ErrInvalidConversationType):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That group DM cannot be converted", "Only a group direct message can become a private channel, and it needs a valid channel name.")
+		case errors.Is(err, store.ErrAlreadyExists):
+			h.writeMutationError(w, r, http.StatusConflict, "That channel name is already in use", "Choose another private channel name. The group DM was not changed.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That group DM is no longer available", "Nothing was converted.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The group DM was not converted", "The workspace store is temporarily unavailable. Messages, files, membership, and the conversation type remain unchanged.")
+		}
+		return
 	}
 	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
 }

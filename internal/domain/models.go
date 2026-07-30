@@ -586,6 +586,42 @@ type Conversation struct {
 	UnreadCount   int
 }
 
+// DirectHistorySelection is the first-party choice Slack presents when people
+// are added to a DM. Slack's public Web API does not expose this transition;
+// the browser journey deliberately uses a typed application seam instead of
+// inventing a conversations.* method.
+type DirectHistorySelection string
+
+const (
+	DirectHistoryNone DirectHistorySelection = "none"
+	DirectHistoryAll  DirectHistorySelection = "all"
+)
+
+func (selection DirectHistorySelection) Valid() bool {
+	return selection == DirectHistoryNone || selection == DirectHistoryAll
+}
+
+// DirectConversationExpansion is the atomic store command behind adding people
+// to a DM. The original conversation is never mutated. Target contains the new
+// canonical participant set, while the two notices make Slack's visible
+// participant notification part of the same commit as history and membership.
+type DirectConversationExpansion struct {
+	Source       ConversationID
+	Target       Conversation
+	Members      []UserID
+	History      DirectHistorySelection
+	SourceNotice Message
+	TargetNotice Message
+}
+
+// GroupDirectConversion is the atomic store command behind Slack's
+// "Change to a private channel" journey.
+type GroupDirectConversion struct {
+	Conversation ConversationID
+	Name         string
+	Notice       Message
+}
+
 type ConversationPreferenceList struct {
 	Types []ConversationPreferenceType
 	Users []UserID

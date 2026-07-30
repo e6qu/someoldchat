@@ -20,6 +20,8 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	ConversationMutationsService_OpenConversation_FullMethodName                   = "/sameoldchat.chat.v1.ConversationMutationsService/OpenConversation"
+	ConversationMutationsService_AddPeopleToDirectConversation_FullMethodName      = "/sameoldchat.chat.v1.ConversationMutationsService/AddPeopleToDirectConversation"
+	ConversationMutationsService_ConvertGroupDirectToPrivate_FullMethodName        = "/sameoldchat.chat.v1.ConversationMutationsService/ConvertGroupDirectToPrivate"
 	ConversationMutationsService_CreateConversation_FullMethodName                 = "/sameoldchat.chat.v1.ConversationMutationsService/CreateConversation"
 	ConversationMutationsService_JoinConversation_FullMethodName                   = "/sameoldchat.chat.v1.ConversationMutationsService/JoinConversation"
 	ConversationMutationsService_InviteConversationMembers_FullMethodName          = "/sameoldchat.chat.v1.ConversationMutationsService/InviteConversationMembers"
@@ -46,6 +48,8 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ConversationMutationsServiceClient interface {
 	OpenConversation(ctx context.Context, in *OpenConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
+	AddPeopleToDirectConversation(ctx context.Context, in *AddPeopleToDirectConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
+	ConvertGroupDirectToPrivate(ctx context.Context, in *ConvertGroupDirectToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error)
 	CreateConversation(ctx context.Context, in *CreateConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	JoinConversation(ctx context.Context, in *ConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	InviteConversationMembers(ctx context.Context, in *InviteConversationMembersRequest, opts ...grpc.CallOption) (*Conversation, error)
@@ -79,6 +83,26 @@ func (c *conversationMutationsServiceClient) OpenConversation(ctx context.Contex
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Conversation)
 	err := c.cc.Invoke(ctx, ConversationMutationsService_OpenConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) AddPeopleToDirectConversation(ctx context.Context, in *AddPeopleToDirectConversationRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_AddPeopleToDirectConversation_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *conversationMutationsServiceClient) ConvertGroupDirectToPrivate(ctx context.Context, in *ConvertGroupDirectToPrivateRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, ConversationMutationsService_ConvertGroupDirectToPrivate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -280,6 +304,8 @@ func (c *conversationMutationsServiceClient) AdminSetConversationTeams(ctx conte
 // for forward compatibility.
 type ConversationMutationsServiceServer interface {
 	OpenConversation(context.Context, *OpenConversationRequest) (*Conversation, error)
+	AddPeopleToDirectConversation(context.Context, *AddPeopleToDirectConversationRequest) (*Conversation, error)
+	ConvertGroupDirectToPrivate(context.Context, *ConvertGroupDirectToPrivateRequest) (*Conversation, error)
 	CreateConversation(context.Context, *CreateConversationRequest) (*Conversation, error)
 	JoinConversation(context.Context, *ConversationRequest) (*Conversation, error)
 	InviteConversationMembers(context.Context, *InviteConversationMembersRequest) (*Conversation, error)
@@ -310,6 +336,12 @@ type UnimplementedConversationMutationsServiceServer struct{}
 
 func (UnimplementedConversationMutationsServiceServer) OpenConversation(context.Context, *OpenConversationRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method OpenConversation not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) AddPeopleToDirectConversation(context.Context, *AddPeopleToDirectConversationRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddPeopleToDirectConversation not implemented")
+}
+func (UnimplementedConversationMutationsServiceServer) ConvertGroupDirectToPrivate(context.Context, *ConvertGroupDirectToPrivateRequest) (*Conversation, error) {
+	return nil, status.Error(codes.Unimplemented, "method ConvertGroupDirectToPrivate not implemented")
 }
 func (UnimplementedConversationMutationsServiceServer) CreateConversation(context.Context, *CreateConversationRequest) (*Conversation, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateConversation not implemented")
@@ -402,6 +434,42 @@ func _ConversationMutationsService_OpenConversation_Handler(srv interface{}, ctx
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ConversationMutationsServiceServer).OpenConversation(ctx, req.(*OpenConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_AddPeopleToDirectConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddPeopleToDirectConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).AddPeopleToDirectConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_AddPeopleToDirectConversation_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).AddPeopleToDirectConversation(ctx, req.(*AddPeopleToDirectConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _ConversationMutationsService_ConvertGroupDirectToPrivate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConvertGroupDirectToPrivateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ConversationMutationsServiceServer).ConvertGroupDirectToPrivate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ConversationMutationsService_ConvertGroupDirectToPrivate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ConversationMutationsServiceServer).ConvertGroupDirectToPrivate(ctx, req.(*ConvertGroupDirectToPrivateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -758,6 +826,14 @@ var ConversationMutationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "OpenConversation",
 			Handler:    _ConversationMutationsService_OpenConversation_Handler,
+		},
+		{
+			MethodName: "AddPeopleToDirectConversation",
+			Handler:    _ConversationMutationsService_AddPeopleToDirectConversation_Handler,
+		},
+		{
+			MethodName: "ConvertGroupDirectToPrivate",
+			Handler:    _ConversationMutationsService_ConvertGroupDirectToPrivate_Handler,
 		},
 		{
 			MethodName: "CreateConversation",

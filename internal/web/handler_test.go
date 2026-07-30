@@ -3032,6 +3032,93 @@ func TestDirectMessagesSurfaceCreatesNamesClosesAndReopensCanonicalGroup(t *test
 	}
 }
 
+func TestDirectMessageDetailsReviewHistoryExpansionAndConvertInPlace(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", RealName: "Carol Creator"})
+	messages := service.Messages{Store: s}
+	source, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U1", source.ID, "context before adding Carol", "", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	details := get(t, mux, "/app?channel="+string(source.ID)+"&details=1")
+	if details.Code != http.StatusOK {
+		t.Fatalf("details status=%d body=%s", details.Code, details.Body)
+	}
+	requireContains(t, "DM add-people details", details.Body.String(),
+		"Add people",
+		`action="/app/conversation/add-people?channel=`+string(source.ID)+`"`,
+		"Slack creates a new group DM",
+	)
+	requireMissing(t, "one-to-one conversion", details.Body.String(), "Change to Private")
+
+	historyChoice := postForm(t, mux, "/app/conversation/add-people?channel="+string(source.ID), "user_U3=1", false)
+	if historyChoice.Code != http.StatusOK {
+		t.Fatalf("history choice status=%d body=%s", historyChoice.Code, historyChoice.Body)
+	}
+	requireContains(t, "DM expansion history choice", historyChoice.Body.String(),
+		"Include conversation history",
+		"Don’t include conversation history",
+		"Include all conversation history and files",
+		">Done</button>",
+	)
+	if existing, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", "U2", "U3"}); !errors.Is(err, store.ErrNotFound) || existing.ID != "" {
+		t.Fatalf("history choice mutated state: existing=%+v err=%v", existing, err)
+	}
+
+	review := postForm(t, mux, "/app/conversation/add-people?channel="+string(source.ID), "user_U3=1&history=all&stage=review", false)
+	if review.Code != http.StatusOK {
+		t.Fatalf("review status=%d body=%s", review.Code, review.Body)
+	}
+	requireContains(t, "DM expansion review", review.Body.String(),
+		"Review new group DM",
+		"Carol Creator",
+		"All existing messages and shared files",
+		"Confirm and create group DM",
+	)
+	if existing, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", "U2", "U3"}); !errors.Is(err, store.ErrNotFound) || existing.ID != "" {
+		t.Fatalf("review mutated state: existing=%+v err=%v", existing, err)
+	}
+
+	confirmed := postForm(t, mux, "/app/conversation/add-people?channel="+string(source.ID), "user_U3=1&history=all&confirm=true", false)
+	if confirmed.Code != http.StatusSeeOther {
+		t.Fatalf("confirm status=%d body=%s", confirmed.Code, confirmed.Body)
+	}
+	group, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", "U2", "U3"})
+	if err != nil || !group.IsGroupDirect {
+		t.Fatalf("expanded group=%+v err=%v", group, err)
+	}
+	if !strings.Contains(confirmed.Header().Get("Location"), "channel="+string(group.ID)) {
+		t.Fatalf("confirm location=%q, want group %s", confirmed.Header().Get("Location"), group.ID)
+	}
+	groupDetails := get(t, mux, "/app?channel="+string(group.ID)+"&details=1")
+	requireContains(t, "group conversion settings", groupDetails.Body.String(),
+		"Settings",
+		`action="/app/conversation/convert-to-private?channel=`+string(group.ID)+`"`,
+		"Change to a private channel",
+		"Messages and files from this group DM will stay",
+		"Change to Private",
+	)
+
+	convertedResponse := postForm(t, mux, "/app/conversation/convert-to-private?channel="+string(group.ID), "name=Project+Room", false)
+	if convertedResponse.Code != http.StatusSeeOther || !strings.Contains(convertedResponse.Header().Get("Location"), "channel="+string(group.ID)) {
+		t.Fatalf("conversion status=%d location=%q body=%s", convertedResponse.Code, convertedResponse.Header().Get("Location"), convertedResponse.Body)
+	}
+	converted, err := s.GetConversation(ctx, group.ID)
+	if err != nil || converted.Name != "project-room" || !converted.IsPrivate || converted.IsGroupDirect || converted.IsDirect {
+		t.Fatalf("converted=%+v err=%v", converted, err)
+	}
+	history, err := messages.History(ctx, "T1", "U1", group.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 3 || history.Messages[0].Text != "context before adding Carol" {
+		t.Fatalf("converted history=%+v err=%v", history, err)
+	}
+}
+
 // TestReadCursorFailureStillRendersTheConversation covers the defect where a
 // failure to persist unread bookkeeping made the channel unreadable.
 func TestReadCursorFailureStillRendersTheConversation(t *testing.T) {

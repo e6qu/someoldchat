@@ -2721,6 +2721,181 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 	return conversation, nil
 }
 
+// AddPeopleToDirectConversation implements Slack's first-party DM transition.
+// It is intentionally not exposed as a conversations.* Web API method: Slack
+// documents this as a client journey, while conversations.open only opens the
+// canonical exact participant set and has no history-selection argument.
+func (m Messages) AddPeopleToDirectConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, sourceID domain.ConversationID, additions []domain.UserID, history domain.DirectHistorySelection) (domain.Conversation, error) {
+	if !history.Valid() || len(additions) == 0 {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, sourceID); err != nil {
+		return domain.Conversation{}, err
+	}
+	source, err := m.Store.GetConversation(ctx, sourceID)
+	if err != nil || source.WorkspaceID != workspaceID {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	if !source.IsDirect && !source.IsGroupDirect {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	page, err := m.Store.ListConversationMembers(ctx, sourceID, domain.PageRequest{Limit: 20})
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if page.HasMore {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	members := make(map[domain.UserID]struct{}, len(page.Users)+len(additions))
+	for _, member := range page.Users {
+		members[member.ID] = struct{}{}
+	}
+	added := make([]domain.UserID, 0, len(additions))
+	for _, candidate := range additions {
+		candidate = domain.UserID(strings.TrimSpace(string(candidate)))
+		if candidate == "" {
+			return domain.Conversation{}, ErrInvalidConversation
+		}
+		if _, exists := members[candidate]; exists {
+			continue
+		}
+		user, err := m.Store.GetUser(ctx, candidate)
+		if err != nil || user.WorkspaceID != workspaceID || user.Deleted {
+			return domain.Conversation{}, store.ErrNotFound
+		}
+		if _, err := m.activeWorkspaceMembership(ctx, workspaceID, candidate); err != nil {
+			return domain.Conversation{}, store.ErrNotFound
+		}
+		members[candidate] = struct{}{}
+		added = append(added, candidate)
+	}
+	if len(added) == 0 || len(members) > 9 {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	memberIDs := make([]domain.UserID, 0, len(members))
+	for member := range members {
+		memberIDs = append(memberIDs, member)
+	}
+	sort.Slice(memberIDs, func(left, right int) bool { return memberIDs[left] < memberIDs[right] })
+	sort.Slice(added, func(left, right int) bool { return added[left] < added[right] })
+	if existing, err := m.Store.FindDirectConversation(ctx, workspaceID, memberIDs); err == nil {
+		openEvent, eventErr := newEvent(workspaceID, userID, events.NewPayload("conversation.direct_opened", events.String("channel_id", string(existing.ID))), time.Now().UTC())
+		if eventErr != nil {
+			return domain.Conversation{}, eventErr
+		}
+		if _, eventErr = m.Store.SetDirectConversationOpen(ctx, workspaceID, userID, existing.ID, true, openEvent); eventErr != nil {
+			return domain.Conversation{}, eventErr
+		}
+		return existing, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return domain.Conversation{}, err
+	}
+	targetID, err := domain.NewConversationID()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	target := domain.Conversation{ID: targetID, WorkspaceID: workspaceID, Name: "direct", IsPrivate: true, IsGroupDirect: true}
+	now := time.Now().UTC()
+	sourceNoticeID, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	targetNoticeID, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	addedMentions := make([]string, len(added))
+	for index, member := range added {
+		addedMentions[index] = "<@" + string(member) + ">"
+	}
+	names := strings.Join(addedMentions, ", ")
+	sourceNotice := domain.Message{ID: sourceNoticeID, WorkspaceID: workspaceID, Conversation: sourceID, AuthorID: userID, Text: "<@" + string(userID) + "> added " + names + " to a new conversation.", CreatedAt: now}
+	targetNotice := domain.Message{ID: targetNoticeID, WorkspaceID: workspaceID, Conversation: targetID, AuthorID: userID, Text: "<@" + string(userID) + "> added " + names + " to this conversation.", CreatedAt: now}
+	createdEvent, err := newEvent(workspaceID, userID, events.NewPayload(
+		"conversation.direct_members_added",
+		events.String("channel_id", string(targetID)),
+		events.String("source_channel_id", string(sourceID)),
+	), now)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	sourceEvent, err := messageEvent(workspaceID, "message.created", sourceNotice)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	targetEvent, err := messageEvent(workspaceID, "message.created", targetNotice)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	expansion := domain.DirectConversationExpansion{
+		Source:       sourceID,
+		Target:       target,
+		Members:      memberIDs,
+		History:      history,
+		SourceNotice: sourceNotice,
+		TargetNotice: targetNotice,
+	}
+	if err := m.Store.ExpandDirectConversation(ctx, expansion, []events.Event{createdEvent, sourceEvent, targetEvent}); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			return m.Store.FindDirectConversation(ctx, workspaceID, memberIDs)
+		}
+		return domain.Conversation{}, err
+	}
+	return target, nil
+}
+
+func (m Messages) ConvertGroupDirectToPrivate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, name string) (domain.Conversation, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.Conversation{}, err
+	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return domain.Conversation{}, store.ErrNotFound
+	}
+	if !conversation.IsGroupDirect || conversation.IsDirect {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	// Slack allows members and multi-channel guests by default, but not
+	// single-channel guests.
+	if membership.UltraRestricted {
+		return domain.Conversation{}, ErrNotWorkspaceAdmin
+	}
+	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
+	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
+		return domain.Conversation{}, ErrInvalidConversation
+	}
+	now := time.Now().UTC()
+	noticeID, err := domain.NewMessageID()
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	notice := domain.Message{
+		ID:           noticeID,
+		WorkspaceID:  workspaceID,
+		Conversation: conversationID,
+		AuthorID:     userID,
+		Text:         "<@" + string(userID) + "> changed this group DM to the private channel #" + name + ".",
+		CreatedAt:    now,
+	}
+	convertedEvent, err := newEvent(workspaceID, userID, events.NewPayload(
+		"conversation.group_direct_converted",
+		events.String("channel_id", string(conversationID)),
+		events.String("name", name),
+	), now)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	noticeEvent, err := messageEvent(workspaceID, "message.created", notice)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	return m.Store.ConvertGroupDirectToPrivate(ctx, domain.GroupDirectConversion{Conversation: conversationID, Name: name, Notice: notice}, []events.Event{convertedEvent, noticeEvent})
+}
+
 func (m Messages) CreateConversation(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name string, private bool) (domain.Conversation, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
