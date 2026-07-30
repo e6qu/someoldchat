@@ -52,6 +52,17 @@ DMs, and open one canonical one-to-one conversation. Opening an existing DM
 MUST not create duplicates. Deactivated, external, bot, self, restricted, and
 unavailable users are represented according to Slack's behavior.
 
+Acceptance sequence:
+
+1. Open **DMs** from workspace navigation.
+2. Search by a member's display or real name.
+3. Select that member and start the conversation.
+4. The canonical DM opens; repeating the sequence opens the same conversation
+   identifier and history.
+5. The conversation appears in Recent until the viewer closes it. Empty
+   search results retain the new-message affordance and do not imply that the
+   workspace has no members.
+
 ## DM-02 — Start and name a group DM
 
 A member can select multiple people, with Slack's current participant limit,
@@ -59,6 +70,18 @@ review the chosen recipients, and start one conversation. Validation prevents
 duplicates and unauthorized recipients. Slack's named group-DM affordance is
 available where supported and the name is visible consistently to
 participants.
+
+Acceptance sequence:
+
+1. Open **DMs** and select between two and eight other active members. The
+   signed-in member counts toward Slack's nine-person total.
+2. Duplicate selections collapse to one recipient; a tenth total participant,
+   a deactivated member, a foreign-workspace identifier, or an empty
+   selection is rejected without creating a conversation.
+3. Optionally enter a group-DM name, then start the conversation.
+4. Every participant sees one canonical conversation. A later rename updates
+   that group DM without applying channel-name lowercasing or creating a new
+   conversation.
 
 ## DM-03 — Add people to a DM
 
@@ -68,12 +91,36 @@ to include; the UI states that a new conversation will be created. Only the
 selected eligible history is visible to new participants. Cancellation leaves
 both conversations unchanged.
 
+Acceptance sequence:
+
+1. Open a one-to-one or group DM, open its member details, and choose **Add
+   people**.
+2. Select eligible members and choose one of Slack's offered **Include
+   conversation history** options.
+3. Preview and confirm the consequence that Slack will create a new group DM.
+4. The old DM retains its participant set. The new canonical participant set
+   receives only the selected history range, and both relevant conversations
+   receive Slack's participant notification.
+
 ## DM-04 — Close and reopen a DM
 
 Closing removes the DM from the member's current sidebar/recent view without
 deleting its history or removing it for other participants. Search, a new
 message, or a participant action can reopen the same conversation. Unread and
 draft state follow Slack's observed rules.
+
+Acceptance sequence:
+
+1. Close a one-to-one or group DM from conversation details.
+2. The DM disappears only from that member's current navigation. Membership,
+   history, files, read state, drafts, and every other participant's
+   navigation remain intact.
+3. A second Web API `conversations.close` returns `ok`, `no_op`, and
+   `already_closed`; `conversations.leave` remains unsupported for IM/MPIM
+   channel types.
+4. Selecting the same one-to-one member or exact group participant set reopens
+   the original identifier. A new message from a participant also restores it
+   to current navigation.
 
 ## DM-05 — Convert a group DM to a private channel
 
@@ -83,10 +130,25 @@ according to Slack policy; the result is private. Permission, guest, Slack
 Connect, name-conflict, and concurrent-conversion failures are explicit and
 atomic.
 
+Acceptance sequence:
+
+1. From a group DM's Settings, choose **Change to a private channel**.
+2. Review that existing messages and files will be visible to members added
+   after conversion, enter a valid unique channel name, and confirm.
+3. One atomic mutation retains history, files, and current eligible members;
+   changes the conversation to a private channel; and posts the conversion
+   notification.
+4. A one-to-one DM, disallowed guest/external conversion, invalid or
+   conflicting name, and concurrent second conversion fail without a
+   half-renamed or half-converted conversation.
+
 ## Evidence
 
-- Browser journeys cover browse/join/create/details/leave/archive and
-  one-to-one/group/add/close/convert DM paths at desktop and narrow widths.
+- Browser journeys cover browse/join/create/details/leave/archive plus the
+  dedicated DM surface at desktop and narrow widths. Handler/service/store/API
+  journeys cover one-to-one/group open, naming, close, idempotent close, and
+  canonical reopen. Add-people history selection and group-DM conversion
+  remain normative targets, not claimed browser coverage.
 - API and event tests prove that `conversations.*`, membership, history, and
   emitted events agree with the UI.
 - Differential fixtures record participant/history behavior because help text
@@ -106,7 +168,7 @@ atomic.
 | DM-04 | [Understand direct messages](https://slack.com/help/articles/212281468-Understand-direct-messages) | DMs remain discoverable from Slack's dedicated searchable surface. |
 | DM-05 | [Convert a group DM to a private channel](https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel) | Eligible group DMs can become private channels with preserved history. |
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-30:
 
 - [What is a channel?](https://slack.com/help/articles/360017938993-What-is-a-channel)
 - [Join a channel](https://slack.com/help/articles/205239967-Join-a-channel)
@@ -114,3 +176,4 @@ Sources checked 2026-07-29:
 - [Understand direct messages](https://slack.com/help/articles/212281468-Understand-direct-messages)
 - [Add people to a direct message](https://slack.com/help/articles/1500002969782-Add-people-to-a-direct-message)
 - [Convert a group direct message to a private channel](https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel)
+- [`conversations.close`](https://docs.slack.dev/reference/methods/conversations.close/)

@@ -24,13 +24,13 @@ Measured on 2026-07-30:
   comparison currently observes all 223 methods claimed at `sdk-compatible` or
   above (213 current and ten retained legacy methods);
 - all 101 stable journey IDs have an individually checked source-map row. The
-  live official-source gate currently makes 56 representative assertions
-  explicitly citing 34 of those IDs across authentication, navigation,
+  live official-source gate currently makes 77 representative assertions
+  explicitly citing 43 of those IDs across authentication, navigation,
   conversations, messaging, search, files, apps, OAuth, presence, huddles,
   canvases, lists, workflows, administration, Slack Connect, accessibility,
   Activity, and reminders before local evidence runs. The remaining 67 IDs are
   printed as upstream-text evidence gaps rather than inheriting coverage;
-- 28 Playwright scenarios cite 51 of the normative catalog's 101 stable journey
+- 32 Playwright scenarios cite 61 of the normative catalog's 101 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
   `make journey-check` rejects unknown IDs, missing or duplicate per-journey
@@ -52,9 +52,13 @@ implementation MUST NOT narrow the target.
 - Activity navigation with Slack web's `Control+3` on macOS and
   `Control+Shift+3` on Windows/Linux, joined-conversation unread aggregation,
   and explicit mention results;
-- public channels, joining, DMs, channel creation, message send/edit/delete,
+- public channels, joining, channel creation, message send/edit/delete,
   threads, reactions, pins, read state, message search, hosted-file upload,
   first-class file messages, authenticated downloads, and live timeline delivery;
+- a dedicated searchable DMs surface, one-to-one and group recipient
+  selection, Slack's nine-person total, human-readable group-DM names,
+  per-member close without membership/history loss, idempotent API close,
+  exact-participant canonical reopen, and participant-message reopen;
 - channel details with named membership, real member selection, rename,
   topic/purpose editing, archive/unarchive, leave, and direct-conversation
   close behavior;
@@ -78,9 +82,9 @@ implementation MUST NOT narrow the target.
 | --- | --- | --- |
 | P0 | Activity depth | Activity now uses durable per-recipient records for DMs/MPIMs, mentions, authored-thread replies, reactions, applicable app messages, and delivered reminders, with shared memory/SQL/gRPC pagination, typed filters, dense/detailed layout, read/clear/restore, source authorization, bulk actions, and keyboard triage. Remaining depth is invitation/VIP/all-new-post channel notifications, followed-thread preferences, custom views, mark-unread/react UI, focus-preserving live updates, and pre-v107 history backfill. |
 | P0 | Composer depth | Formatting, standard emoji, member mention autocomplete, file preview, draft recovery, and browser-time-zone scheduled send work. Custom-emoji browsing, channel autocomplete, pasted-file staging, voice/video clips, and Slack's full shortcuts browser remain. |
-| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. First-party reminders have a separate durable model, message-action presets/custom time, Later CRUD/filtering, named-weekday `/remind`, private channel-reminder listing, guest enforcement, worker recurrence/retry/failure fencing, Activity/source projection, and wake publication. Scheduled edit/reschedule/send-now and failure history, Slack's combined Drafts & sent tabs, broader natural-language reminder parsing, month-end recurrence, deterministic deployed-worker browser delivery, and live-Slack differential outcomes remain. The five deprecated app-facing `reminders.*` methods remain only SDK-compatible and are not evidence for the first-party Later model. |
-| P1 | Direct-message lifecycle | DMs can be opened from People, but there is no dedicated DM/group-DM section, participant management, or recent-DM navigation matching Slack. |
-| P1 | Notifications and presence | Basic presence/status APIs exist, but the client has no per-conversation notification preferences, status expiry, snooze/DND controls, typing indicators, or presence-aware member affordances. |
+| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers; list pending, failed, and sent work in Drafts & sent; edit/reschedule; send now; and cancel without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. First-party reminders have a separate durable model, message-action presets/custom time, Later CRUD/filtering, named-weekday `/remind`, private channel-reminder listing, guest enforcement, worker recurrence/retry/failure fencing, Activity/source projection, and wake publication. Broader natural-language reminder parsing, month-end recurrence, deterministic deployed-worker browser delivery, and live-Slack differential outcomes remain. The five deprecated app-facing `reminders.*` methods remain only SDK-compatible and are not evidence for the first-party Later model. |
+| P1 | Direct-message lifecycle | Dedicated DMs navigation/search, one-to-one/group creation, naming, Slack's nine-person limit, durable per-member close, exact API no-op fields, canonical reopen, and message-triggered reopen now work across memory/SQL/gRPC/browser paths. Adding people with selectable history (DM-03) and atomic group-DM-to-private-channel conversion (DM-05) remain absent, as do Slack Connect/guest policy variants. |
+| P1 | Notifications and presence | Workspace and per-conversation notification preferences plus snooze/DND controls exist in the client and API. Status expiry, typing indicators, presence-aware member affordances, and deeper Activity/VIP/invitation policy remain. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
 | P1 | App administration | Manifest JSON editing is real, but install-time incoming-webhook selection, event-delivery health/retries, scope explanation, token inventory/revocation, distribution, external-auth providers, and hosted-datastore browsing are absent. |
 | P2 | Canvases, lists, and workflows | API slices exist, but these are not first-class workspace surfaces and workflow creation/execution is incomplete. |

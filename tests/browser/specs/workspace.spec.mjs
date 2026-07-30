@@ -176,6 +176,27 @@ test('[AUTH-01 MSG-01 COMP-01 SEARCH-01] workspace supports the core browser jou
   await expect(page.locator('.channel-title')).toHaveText('# general');
 });
 
+test('[DM-01 DM-02 DM-04] direct messages have a searchable, accessible first-party surface', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Direct messages', exact: true }).click();
+  await expect(page).toHaveURL('/app/dms');
+  await expect(page.getByRole('heading', { name: 'Direct messages' })).toBeVisible();
+  await expect(page.getByRole('searchbox', { name: 'Search direct messages and people' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'New message' })).toBeVisible();
+  await expect(page.getByText('up to nine people total')).toBeVisible();
+  await expect(page.getByLabel('Group DM name (optional)')).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.setViewportSize({ width: 320, height: 780 });
+  const response = await page.reload();
+  expect(response.status()).toBe(200);
+  const body = await page.locator('main').boundingBox();
+  expect(body.x).toBeGreaterThanOrEqual(0);
+  expect(body.x + body.width).toBeLessThanOrEqual(320);
+});
+
 test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app mentions and supports keyboard triage', async ({ page, context, request }) => {
   await signIn(context);
   let activityAppID;

@@ -3882,6 +3882,15 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conversation := domain.ConversationID(strings.TrimSpace(fields["channel"]))
+	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, conversation)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	if info.IsDirect || info.IsGroupDirect {
+		writeError(w, "method_not_supported_for_channel_type")
+		return
+	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation); err != nil {
 		if errors.Is(err, service.ErrCannotLeaveDefault) {
 			writeError(w, "cant_leave_general")
@@ -3944,6 +3953,15 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(name) == "" {
 		writeError(w, "invalid_name_required")
+		return
+	}
+	info, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	if info.IsDirect || info.IsGroupDirect {
+		writeError(w, "method_not_supported_for_channel_type")
 		return
 	}
 	conversation, err := h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel, name)
@@ -4072,6 +4090,10 @@ func (h Handler) closeConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
+		if errors.Is(err, store.ErrAlreadyExists) {
+			writeJSON(w, http.StatusOK, map[string]any{"ok": true, "no_op": true, "already_closed": true})
+			return
+		}
 		writeError(w, mapServiceError(err, "channel_not_found"))
 		return
 	}

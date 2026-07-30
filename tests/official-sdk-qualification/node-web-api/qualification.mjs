@@ -970,6 +970,13 @@ const direct = await client.conversations.open({ users: "U2" });
 assert.equal(direct.ok, true);
 const closed = await client.conversations.close({ channel: direct.channel.id });
 assert.equal(closed.ok, true);
+const alreadyClosed = await client.conversations.close({ channel: direct.channel.id });
+assert.equal(alreadyClosed.ok, true);
+assert.equal(alreadyClosed.no_op, true);
+assert.equal(alreadyClosed.already_closed, true);
+const reopenedDirect = await client.conversations.open({ users: "U2" });
+assert.equal(reopenedDirect.ok, true);
+assert.equal(reopenedDirect.channel.id, direct.channel.id);
 const marked = await client.conversations.mark({ channel: "C1", ts: root.ts });
 assert.equal(marked.ok, true);
 

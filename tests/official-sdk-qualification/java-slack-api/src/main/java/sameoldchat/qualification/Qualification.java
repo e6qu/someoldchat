@@ -985,6 +985,20 @@ public final class Qualification {
                             .channel(direct.getChannel().getId())
                             .build());
             require(closed.isOk(), "conversations.close failed: " + closed.getError());
+            ConversationsCloseResponse alreadyClosed = methods.conversationsClose(
+                    com.slack.api.methods.request.conversations.ConversationsCloseRequest.builder()
+                            .channel(direct.getChannel().getId())
+                            .build());
+            require(alreadyClosed.isOk() && Boolean.TRUE.equals(alreadyClosed.getNoOp())
+                            && Boolean.TRUE.equals(alreadyClosed.getAlreadyClosed()),
+                    "second conversations.close did not report Slack no-op semantics");
+            ConversationsOpenResponse reopenedDirect = methods.conversationsOpen(
+                    com.slack.api.methods.request.conversations.ConversationsOpenRequest.builder()
+                            .users(List.of("U2"))
+                            .build());
+            require(reopenedDirect.isOk() && reopenedDirect.getChannel() != null
+                            && direct.getChannel().getId().equals(reopenedDirect.getChannel().getId()),
+                    "conversations.open did not reopen the canonical DM");
             ConversationsMarkResponse marked = methods.conversationsMark(
                     com.slack.api.methods.request.conversations.ConversationsMarkRequest.builder()
                             .channel("C1")

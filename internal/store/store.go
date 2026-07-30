@@ -290,6 +290,10 @@ type Store interface {
 	GetConversation(context.Context, domain.ConversationID) (domain.Conversation, error)
 	FindDirectConversation(context.Context, domain.WorkspaceID, []domain.UserID) (domain.Conversation, error)
 	CreateDirectConversation(context.Context, domain.Conversation, []domain.UserID, events.Event) error
+	// SetDirectConversationOpen changes only one member's navigation state.
+	// Closing a DM must never remove conversation membership or history.
+	// The bool reports whether durable state changed.
+	SetDirectConversationOpen(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, bool, events.Event) (bool, error)
 	CreateConversation(context.Context, domain.Conversation, domain.UserID, events.Event) error
 	RenameConversation(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)
 	SetConversationTopic(context.Context, domain.ConversationID, string, events.Event) (domain.Conversation, error)

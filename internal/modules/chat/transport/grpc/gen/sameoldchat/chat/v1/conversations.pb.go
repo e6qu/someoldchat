@@ -258,16 +258,17 @@ func (x *ConversationInfoRequest) GetConversationId() string {
 }
 
 type ConversationsRequest struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	Limit           int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
-	Cursor          string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
-	Types           []string               `protobuf:"bytes,5,rep,name=types,proto3" json:"types,omitempty"`
-	ExcludeArchived bool                   `protobuf:"varint,6,opt,name=exclude_archived,json=excludeArchived,proto3" json:"exclude_archived,omitempty"`
-	MemberUserId    string                 `protobuf:"bytes,7,opt,name=member_user_id,json=memberUserId,proto3" json:"member_user_id,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId          string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId               string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit                int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor               string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Types                []string               `protobuf:"bytes,5,rep,name=types,proto3" json:"types,omitempty"`
+	ExcludeArchived      bool                   `protobuf:"varint,6,opt,name=exclude_archived,json=excludeArchived,proto3" json:"exclude_archived,omitempty"`
+	MemberUserId         string                 `protobuf:"bytes,7,opt,name=member_user_id,json=memberUserId,proto3" json:"member_user_id,omitempty"`
+	IncludeClosedDirects bool                   `protobuf:"varint,8,opt,name=include_closed_directs,json=includeClosedDirects,proto3" json:"include_closed_directs,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ConversationsRequest) Reset() {
@@ -349,6 +350,13 @@ func (x *ConversationsRequest) GetMemberUserId() string {
 	return ""
 }
 
+func (x *ConversationsRequest) GetIncludeClosedDirects() bool {
+	if x != nil {
+		return x.IncludeClosedDirects
+	}
+	return false
+}
+
 var File_sameoldchat_chat_v1_conversations_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
@@ -375,7 +383,7 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x17ConversationInfoRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12'\n" +
-	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\"\xe7\x01\n" +
+	"\x0fconversation_id\x18\x03 \x01(\tR\x0econversationId\"\x9d\x02\n" +
 	"\x14ConversationsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
@@ -383,7 +391,8 @@ const file_sameoldchat_chat_v1_conversations_proto_rawDesc = "" +
 	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x14\n" +
 	"\x05types\x18\x05 \x03(\tR\x05types\x12)\n" +
 	"\x10exclude_archived\x18\x06 \x01(\bR\x0fexcludeArchived\x12$\n" +
-	"\x0emember_user_id\x18\a \x01(\tR\fmemberUserId2\xde\x01\n" +
+	"\x0emember_user_id\x18\a \x01(\tR\fmemberUserId\x124\n" +
+	"\x16include_closed_directs\x18\b \x01(\bR\x14includeClosedDirects2\xde\x01\n" +
 	"\x14ConversationsService\x12c\n" +
 	"\x10ConversationInfo\x12,.sameoldchat.chat.v1.ConversationInfoRequest\x1a!.sameoldchat.chat.v1.Conversation\x12a\n" +
 	"\rConversations\x12).sameoldchat.chat.v1.ConversationsRequest\x1a%.sameoldchat.chat.v1.ConversationPageBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
