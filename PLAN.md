@@ -329,17 +329,21 @@ generated gRPC compositions. Message and hosted-file search apply viewer
 visibility before totals and pagination across memory and shared SQL storage;
 file browse, search, metadata, and download share one public/private access
 rule. The first-party UI exposes real Messages, Files, People, and Channels
-types, URL-backed filters/order, authenticated file results, and explicit
-current-conversation `Command/Control+F` scope. The pinned Node, Python, and
-Java SDKs now invoke the user-token-only `search.messages`, `search.files`, and
-legacy `search.all` methods. Canvases, suggestions/history, semantic ranking
-and highlighting, the complete modifier inventory, exact thread entry scope,
-visual baselines, and live-Slack differential results remain named gaps.
+types, private durable recent searches, visibility-aware people/channel/file
+typeahead, URL-backed filters/order, authenticated file results, and explicit
+current-conversation `Command/Control+F` scope. Recent-search ordering,
+deduplication, privacy, SQL migration/reopen, local/generated-gRPC parity, and
+keyboard selection are covered by shared persistence, transport, web, and
+three-engine browser qualification. The pinned Node, Python, and Java SDKs now
+invoke the user-token-only `search.messages`, `search.files`, and legacy
+`search.all` methods. Canvases, semantic ranking and highlighting, the complete
+modifier inventory, exact thread entry scope, visual baselines, and live-Slack
+differential results remain named gaps.
 
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 102 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 34 Playwright scenarios cite 68 IDs. `make journey-check` rejects
+and 34 Playwright scenarios cite 69 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted

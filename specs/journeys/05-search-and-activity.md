@@ -168,11 +168,16 @@ Implemented evidence:
   count/page/order inputs, and are invoked and decoded by the pinned official
   Node, Python, and Java SDKs.
 - The first-party search surface provides real Messages, Files, People, and
-  Channels results, URL-backed sender/conversation/date/content/order filters,
-  authenticated file links, explicit current-conversation scope, and
-  `Command/Control+F`. Three-engine browser qualification covers the shortcut,
-  typed tabs, persisted order, real hosted-file search, accessibility
-  automation, and real-object navigation.
+  Channels results, durable per-member recent searches, and visibility-aware
+  typeahead links to real people, channels, and hosted files. It also provides
+  URL-backed sender/conversation/date/content/order filters, authenticated file
+  links, explicit current-conversation scope, and `Command/Control+F`.
+  Three-engine browser qualification covers the shortcut, recent-search and
+  keyboard typeahead selection, typed tabs, persisted order, real hosted-file
+  search, accessibility automation, and real-object navigation. The shared
+  persistence qualification runs recent-search privacy, ordering, and
+  deduplication against memory, SQLite, dqlite, and PostgreSQL; migration/reopen
+  and local/generated-gRPC tests cover the remaining boundaries.
 
 Known gaps, which MUST NOT be reported as full Activity compatibility:
 
@@ -185,12 +190,12 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with
   notification-producing mutations committed after the upgrade;
-- search does not yet provide recent/typeahead suggestions, Canvases results,
-  Slack's semantic relevance scoring or highlighting, every `to:`/link/specific
-  emoji/`hasmy:` modifier, prefix `*`, section-valued `in:`, Slack's natural
-  month/year date forms, participant-accurate `with:` thread semantics,
-  complete People/Channels pagination, thread-specific entry scope, or a
-  highlighted exact-hit return from the result;
+- search does not yet provide Canvases results, Slack's semantic relevance
+  scoring or highlighting, every `to:`/link/specific emoji/`hasmy:` modifier,
+  prefix `*`, section-valued `in:`, Slack's natural month/year date forms,
+  participant-accurate `with:` thread semantics, complete People/Channels
+  pagination, thread-specific entry scope, or a highlighted exact-hit return
+  from the result;
 - the Slack APIs retain documented compatibility deviations for relevance
   scoring, highlight markers, cursor pagination on file/combined legacy
   results, match projection detail, and full tier rate limiting;
@@ -210,6 +215,7 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
 Sources checked 2026-07-30:
 
 - [Search in Slack](https://slack.com/help/articles/202528808-Search-in-Slack)
+- [Slack updates and changes](https://slack.com/help/articles/115004846068-Slack-updates-and-changes/)
 - [`search.all` method](https://docs.slack.dev/reference/methods/search.all/)
 - [`search.files` method](https://docs.slack.dev/reference/methods/search.files/)
 - [`search.messages` method](https://docs.slack.dev/reference/methods/search.messages/)

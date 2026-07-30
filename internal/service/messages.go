@@ -931,6 +931,32 @@ func (m Messages) SearchFiles(ctx context.Context, workspaceID domain.WorkspaceI
 	return m.Store.SearchFiles(ctx, workspaceID, userID, search)
 }
 
+func (m Messages) RecordSearch(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	query = strings.TrimSpace(query)
+	if query == "" || utf8.RuneCountInString(query) > 500 {
+		return ErrInvalidSearch
+	}
+	return m.Store.RecordSearchHistory(ctx, domain.SearchHistoryEntry{
+		WorkspaceID: workspaceID,
+		UserID:      userID,
+		Query:       query,
+		SearchedAt:  time.Now().UTC(),
+	})
+}
+
+func (m Messages) RecentSearches(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, limit int) ([]domain.SearchHistoryEntry, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	if limit <= 0 || limit > store.MaxSearchHistoryEntries {
+		return nil, ErrInvalidSearch
+	}
+	return m.Store.ListSearchHistory(ctx, workspaceID, userID, limit)
+}
+
 type parsedSearchQuery struct {
 	terms, excludedTerms                 []string
 	conversation, excludedConversation   string

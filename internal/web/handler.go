@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -119,10 +120,11 @@ const (
 	conversationWindow = 50
 	// directNameWindow bounds how many direct conversations resolve participant
 	// names, so a large sidebar cannot turn into an unbounded member lookup.
-	directNameWindow = 20
-	searchWindow     = 25
-	memberWindow     = 100
-	scheduledWindow  = 50
+	directNameWindow   = 20
+	searchWindow       = 25
+	recentSearchWindow = 10
+	memberWindow       = 100
+	scheduledWindow    = 50
 	// reactionWindow bounds the reactions rendered for one message.
 	reactionWindow = 50
 	// pinWindow bounds the pins loaded for one conversation view.
@@ -404,7 +406,14 @@ type searchData struct {
 	ResultCount          int
 	Error                string
 	MoreURL              string
+	Warning              string
+	Recent               []searchHistoryView
 	Searched             bool
+}
+
+type searchHistoryView struct {
+	Query string
+	URL   string
 }
 
 type searchTabView struct {
@@ -423,6 +432,17 @@ type searchFileView struct {
 	DisplayTime string
 	MachineTime string
 	DownloadURL string
+}
+
+type searchSuggestion struct {
+	Kind        string `json:"kind"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
+}
+
+type searchSuggestionsResponse struct {
+	Items []searchSuggestion `json:"items"`
 }
 
 type activityData struct {
@@ -681,10 +701,12 @@ const pageStyle = `<style>
 .shell{height:100vh;display:grid;grid-template-rows:52px minmax(0,1fr)}
 .topbar{background:var(--accent);color:var(--on-accent);display:flex;align-items:center;gap:12px;padding:0 16px;box-shadow:var(--shadow)}
 .brand{font-weight:800;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.search{flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
+.search{position:relative;flex:1 1 auto;min-width:0;max-width:560px;margin:auto;display:flex;align-items:center;gap:8px;background:#ffffff2b;border:1px solid #ffffff8a;border-radius:7px;padding:4px 10px}
 .search input[name=q]{flex:1 1 auto;min-width:0;border:0;outline:0;background:transparent;color:var(--on-accent)}
 .search input[name=q]::placeholder{color:#ffffffd6}
 .search-submit{border:0;background:transparent;color:var(--on-accent);font-weight:700;padding:2px 2px}
+.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
+.search-suggestions[hidden]{display:none}.search-suggestion{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none}.search-suggestion:hover,.search-suggestion[aria-selected=true]{background:var(--hover)}.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.search-suggestion-kind{color:var(--muted);font-size:12px;text-transform:capitalize}
 .top-actions{display:flex;align-items:center;gap:8px;margin-left:auto;flex:0 0 auto}
 .icon-button{border:0;background:transparent;color:var(--on-accent);border-radius:6px;padding:7px 9px;text-decoration:none}
 .icon-button:hover{background:#ffffff2b}
@@ -1113,7 +1135,7 @@ const messagesPartial = `{{define "messages"}}
 
 var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.ChannelName}} · {{.WorkspaceName}}{{end}}
 {{define "styles"}}` + pageStyle + workspaceRefinements + `{{end}}
-{{define "scripts"}}` + progressiveEnhancementScript + appOptionsScript + `{{end}}
+{{define "scripts"}}` + progressiveEnhancementScript + searchSuggestionsScript + appOptionsScript + `{{end}}
 {{define "content"}}
 <a class="skip-link" href="#timeline">Skip to the messages</a>
 <div class="shell">
@@ -1123,7 +1145,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     <form class="search" method="get" action="/app/search" role="search" aria-label="Search {{.WorkspaceName}}">
       <svg class="search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
       <label class="visually-hidden" for="workspace-search">Search {{.WorkspaceName}}</label>
-      <input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search {{.WorkspaceName}}" aria-keyshortcuts="Control+G Meta+G" required>
+      <input id="workspace-search" type="search" name="q" maxlength="500" placeholder="Search {{.WorkspaceName}}" role="combobox" aria-keyshortcuts="Control+G Meta+G" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required>
       <span class="search-shortcut" aria-hidden="true">⌘/Ctrl G</span>
       <button class="search-submit" type="submit">Search</button>
       <input type="hidden" name="channel" value="{{.Channel}}">
@@ -1689,10 +1711,12 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}
 .bar a{color:var(--on-accent);text-decoration:none;font-weight:700}
-.bar form{display:flex;flex:1 1 auto;min-width:0;max-width:600px;margin:auto;gap:8px}
+.bar form{position:relative;display:flex;flex:1 1 auto;min-width:0;max-width:600px;margin:auto;gap:8px}
 .bar input{flex:1 1 auto;min-width:0;border:1px solid #ffffff8a;border-radius:5px;padding:8px 10px;background:#ffffff2b;color:var(--on-accent)}
 .bar input::placeholder{color:#ffffffd6}
 .bar button{border:1px solid #ffffff6b;background:transparent;color:var(--on-accent);border-radius:5px;padding:6px 10px}
+.search-suggestions{position:absolute;z-index:30;top:calc(100% + 6px);left:0;right:0;max-height:min(420px,70vh);overflow:auto;padding:6px;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow)}
+.search-suggestions[hidden]{display:none}.search-suggestion{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 12px;padding:8px 10px;border-radius:6px;color:var(--text);text-decoration:none}.search-suggestion:hover,.search-suggestion[aria-selected=true]{background:var(--hover)}.search-suggestion-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}.search-suggestion-kind{color:var(--muted);font-size:12px;text-transform:capitalize}
 .layout{max-width:980px;margin:0 auto;padding:28px 22px}
 .heading{border-bottom:1px solid var(--line);padding-bottom:18px;margin-bottom:22px}
 .heading h1{margin:0 0 4px;font-size:26px}
@@ -1708,12 +1732,14 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 .text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .file-result{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.file-result .text{color:var(--muted)}.result-kind{color:var(--muted);font-size:12px;font-weight:700}
 .empty{color:var(--muted);padding:22px;text-align:center}
+.recent-searches{margin-top:24px}.recent-searches h2{font-size:16px}.recent-searches ul{display:grid;gap:6px;margin:0;padding:0;list-style:none}.recent-searches a{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.recent-searches a:hover{background:var(--hover);border-color:var(--action)}
 .pager{text-align:center;margin-top:18px}.pager a{color:var(--action);font-weight:800}
 @media(max-width:820px){.filters{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:720px){.layout{padding:20px 14px}.bar{padding:0 12px;gap:10px}.filters{grid-template-columns:1fr}.file-result{grid-template-columns:1fr}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages, files, people, and channels" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">{{.ResultCount}} results in {{.Type}} for “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term to search this workspace.</p>{{end}}</div>
+{{define "scripts"}}` + localTimeScript + searchSuggestionsScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><form method="get" action="/app/search" role="search" aria-label="Search the workspace"><label class="visually-hidden" for="search-query">Search the workspace</label><input id="search-query" type="search" name="q" maxlength="500" value="{{.Query}}" placeholder="Search messages, files, people, and channels" role="combobox" autocomplete="off" aria-autocomplete="list" aria-haspopup="listbox" aria-expanded="false" required autofocus><button type="submit">Search</button><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">{{if .CurrentOnly}}<input type="hidden" name="scope" value="channel">{{end}}</form><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout"><div class="heading"><h1>Search results</h1>{{if .Error}}<p class="form-error" role="alert">{{.Error}}</p>{{else if .Searched}}<p class="muted">{{.ResultCount}} results in {{.Type}} for “{{.Query}}”</p>{{else}}<p class="muted">Enter a search term or choose a recent search.</p>{{end}}{{if .Warning}}<p class="notice" role="status">{{.Warning}}</p>{{end}}</div>
+{{if and (not .Searched) .Recent}}<section class="recent-searches" aria-labelledby="recent-searches-title"><h2 id="recent-searches-title">Recent searches</h2><ul>{{range .Recent}}<li><a href="{{.URL}}">{{.Query}}</a></li>{{end}}</ul></section>{{end}}
 {{if .CurrentOnly}}<p class="scope-note">Searching only this conversation. <a href="/app/search?q={{.Query}}&amp;channel={{.Channel}}&amp;type={{.Type}}">Search the whole workspace</a></p>{{end}}
 {{if .Searched}}<nav class="search-tabs" aria-label="Search result types">{{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
 {{if or (eq .Type "messages") (eq .Type "files")}}<form class="filters" method="get" action="/app/search" aria-label="Search filters"><input type="hidden" name="q" value="{{.Query}}"><input type="hidden" name="channel" value="{{.Channel}}"><input type="hidden" name="type" value="{{.Type}}">
@@ -1918,6 +1944,118 @@ var errorTemplate = mustPage(errorMarkup)
 // zone. The server keeps the machine value in datetime= so the page is still
 // readable without JavaScript.
 const localTimeScript = `<script>(function(){window.sameoldchatLocalTimes=function(root){if(!root||!window.Intl)return;var nodes=root.querySelectorAll('time[datetime]');for(var index=0;index<nodes.length;index++){var value=new Date(nodes[index].getAttribute('datetime'));if(isNaN(value.getTime()))continue;nodes[index].textContent=value.toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}};window.sameoldchatLocalTimes(document)})();</script>`
+
+// searchSuggestionsScript progressively enhances both workspace search inputs
+// with the same accessible listbox. The anchors remain real destinations, and
+// the form remains a complete non-JavaScript fallback.
+const searchSuggestionsScript = `<script>(function(){
+function bind(input){
+if(input.getAttribute('data-search-suggestions-bound')==='true'||!input.form)return;
+input.setAttribute('data-search-suggestions-bound','true');
+var form=input.form;
+var list=document.createElement('div');
+list.className='search-suggestions';
+list.id=input.id+'-suggestions';
+list.setAttribute('role','listbox');
+list.setAttribute('aria-label','Search suggestions');
+list.hidden=true;
+form.appendChild(list);
+input.setAttribute('autocomplete','off');
+input.setAttribute('aria-autocomplete','list');
+input.setAttribute('aria-controls',list.id);
+input.setAttribute('aria-expanded','false');
+var items=[];
+var active=-1;
+var timer=0;
+var request=null;
+function close(){
+active=-1;
+list.hidden=true;
+input.setAttribute('aria-expanded','false');
+input.removeAttribute('aria-activedescendant');
+}
+function activate(index){
+if(!items.length){close();return}
+active=(index+items.length)%items.length;
+for(var itemIndex=0;itemIndex<items.length;itemIndex++)items[itemIndex].setAttribute('aria-selected',itemIndex===active?'true':'false');
+input.setAttribute('aria-activedescendant',items[active].id);
+items[active].scrollIntoView({block:'nearest'});
+}
+function render(payload){
+list.replaceChildren();
+items=[];
+active=-1;
+var values=payload&&Array.isArray(payload.items)?payload.items:[];
+for(var index=0;index<values.length;index++){
+var value=values[index];
+if(!value||typeof value.url!=='string'||value.url.charAt(0)!=='/'||value.url.charAt(1)==='/'||typeof value.label!=='string')continue;
+var link=document.createElement('a');
+link.className='search-suggestion';
+link.id=list.id+'-'+items.length;
+link.href=value.url;
+link.setAttribute('role','option');
+link.setAttribute('aria-selected','false');
+var label=document.createElement('span');
+label.className='search-suggestion-label';
+label.textContent=value.label;
+var kind=document.createElement('span');
+kind.className='search-suggestion-kind';
+kind.textContent=value.description||value.kind||'Result';
+link.appendChild(label);
+link.appendChild(kind);
+link.addEventListener('pointermove',function(event){activate(items.indexOf(event.currentTarget))});
+list.appendChild(link);
+items.push(link);
+}
+if(items.length){
+list.hidden=false;
+input.setAttribute('aria-expanded','true');
+}else close();
+}
+function load(){
+if(request)request.abort();
+request=new AbortController();
+var parameters=new URLSearchParams();
+parameters.set('q',input.value);
+var channel=form.querySelector('input[name=channel]');
+if(channel&&channel.value)parameters.set('channel',channel.value);
+fetch('/app/search/suggestions?'+parameters.toString(),{headers:{Accept:'application/json'},credentials:'same-origin',signal:request.signal}).then(function(response){
+if(!response.ok)throw new Error('suggestions unavailable');
+return response.json();
+}).then(render).catch(function(error){if(error.name!=='AbortError')close()});
+}
+input.addEventListener('focus',load);
+input.addEventListener('input',function(){
+clearTimeout(timer);
+if(request)request.abort();
+items=[];
+list.replaceChildren();
+close();
+timer=window.setTimeout(load,120);
+});
+input.addEventListener('keydown',function(event){
+if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+if(!items.length){load();return}
+event.preventDefault();
+activate(active+(event.key==='ArrowDown'?1:-1));
+return;
+}
+if(event.key==='Enter'&&active>=0){
+event.preventDefault();
+window.location.assign(items[active].href);
+return;
+}
+if(event.key==='Escape'&&!list.hidden){
+if(input.id!=='workspace-search')event.preventDefault();
+close();
+}
+});
+form.addEventListener('submit',close);
+document.addEventListener('pointerdown',function(event){if(!form.contains(event.target))close()});
+}
+var inputs=document.querySelectorAll('form.search input[name=q],#search-query');
+for(var index=0;index<inputs.length;index++)bind(inputs[index]);
+})();</script>`
 
 // progressiveEnhancementScript is the whole client budget for the workspace
 // page: submit forms without losing the page, keep the composer usable, keep
@@ -2722,6 +2860,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
+	mux.HandleFunc("GET /app/search/suggestions", h.searchSuggestions)
 	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)
 	mux.HandleFunc("GET /app/activity", h.activity)
 	mux.HandleFunc("POST /app/activity/mutate", h.mutateActivity)
@@ -4868,6 +5007,12 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		CurrentOnly:          r.URL.Query().Get("scope") == "channel",
 	}
 	if query == "" {
+		recent, recentErr := h.Messages.RecentSearches(r.Context(), principal.WorkspaceID, principal.UserID, recentSearchWindow)
+		if recentErr != nil {
+			h.writeStoreError(w, recentErr, "Recent searches are temporarily unavailable.")
+			return
+		}
+		data.Recent = searchHistoryViews(recent, channel)
 		h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
 		return
 	}
@@ -4960,7 +5105,125 @@ func (h Handler) search(w http.ResponseWriter, r *http.Request) {
 		}
 		data.ResultCount = len(data.Conversations)
 	}
+	if err := h.Messages.RecordSearch(r.Context(), principal.WorkspaceID, principal.UserID, query); err != nil {
+		data.Warning = "Search completed, but it could not be added to recent searches."
+	}
 	h.writeHTML(w, searchTemplate, data, http.StatusOK, "search rendering unavailable")
+}
+
+func searchHistoryViews(values []domain.SearchHistoryEntry, channel string) []searchHistoryView {
+	views := make([]searchHistoryView, 0, len(values))
+	for _, value := range values {
+		query := strings.TrimSpace(value.Query)
+		if query == "" {
+			continue
+		}
+		parameters := url.Values{"q": {query}, "channel": {channel}, "type": {"messages"}}
+		views = append(views, searchHistoryView{Query: query, URL: "/app/search?" + parameters.Encode()})
+	}
+	return views
+}
+
+func (h Handler) searchSuggestions(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if utf8.RuneCountInString(query) > 500 {
+		h.writeSearchSuggestions(w, http.StatusBadRequest, nil)
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	recent, err := h.Messages.RecentSearches(r.Context(), principal.WorkspaceID, principal.UserID, recentSearchWindow)
+	if err != nil {
+		h.writeSearchSuggestions(w, http.StatusServiceUnavailable, nil)
+		return
+	}
+	folded := domain.FoldSearchText(query)
+	items := make([]searchSuggestion, 0, 20)
+	for _, view := range searchHistoryViews(recent, channel) {
+		if folded != "" && !strings.Contains(domain.FoldSearchText(view.Query), folded) {
+			continue
+		}
+		items = append(items, searchSuggestion{Kind: "recent", Label: view.Query, Description: "Recent search", URL: view.URL})
+	}
+	if query == "" {
+		h.writeSearchSuggestions(w, http.StatusOK, items)
+		return
+	}
+	members, conversations, err := h.searchFilterOptions(r.Context(), principal)
+	if err != nil {
+		h.writeSearchSuggestions(w, http.StatusServiceUnavailable, nil)
+		return
+	}
+	for _, member := range members {
+		if len(items) >= 20 {
+			break
+		}
+		if !strings.Contains(domain.FoldSearchText(member.Name+" "+member.RealName), folded) {
+			continue
+		}
+		items = append(items, searchSuggestion{
+			Kind: "person", Label: member.Name, Description: "Person",
+			URL: "/app/members?user=" + url.QueryEscape(member.ID),
+		})
+	}
+	for _, conversation := range conversations {
+		if len(items) >= 20 {
+			break
+		}
+		if !strings.Contains(domain.FoldSearchText(conversation.Name), folded) {
+			continue
+		}
+		items = append(items, searchSuggestion{
+			Kind: "channel", Label: "# " + conversation.Name, Description: "Channel",
+			URL: "/app?channel=" + url.QueryEscape(conversation.ID),
+		})
+	}
+	fileRequest := domain.PageRequest{Limit: 100}
+	for pageNumber := 0; pageNumber < 5 && len(items) < 20; pageNumber++ {
+		page, fileErr := h.Messages.Files(r.Context(), principal.WorkspaceID, principal.UserID, fileRequest)
+		if fileErr != nil {
+			h.writeSearchSuggestions(w, http.StatusServiceUnavailable, nil)
+			return
+		}
+		for _, file := range page.Files {
+			label := file.Title
+			if label == "" {
+				label = file.Name
+			}
+			if !strings.Contains(domain.FoldSearchText(file.Name+" "+file.Title), folded) {
+				continue
+			}
+			items = append(items, searchSuggestion{
+				Kind: "file", Label: label, Description: "File",
+				URL: "/api/files/" + url.PathEscape(string(file.ID)),
+			})
+			if len(items) >= 20 {
+				break
+			}
+		}
+		if !page.HasMore || page.NextCursor == "" || page.NextCursor == fileRequest.Cursor {
+			break
+		}
+		fileRequest.Cursor = page.NextCursor
+	}
+	h.writeSearchSuggestions(w, http.StatusOK, items)
+}
+
+func (h Handler) writeSearchSuggestions(w http.ResponseWriter, status int, items []searchSuggestion) {
+	if items == nil {
+		items = []searchSuggestion{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(searchSuggestionsResponse{Items: items})
 }
 
 func (h Handler) writeSearchError(w http.ResponseWriter, data searchData, err error) {
@@ -7611,7 +7874,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

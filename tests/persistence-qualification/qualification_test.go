@@ -41,6 +41,7 @@ func runQualification(t *testing.T, open opener) {
 		{"email identity is case folded", emailIdentityIsCaseFolded},
 		{"conversation search treats metacharacters literally", conversationSearchTreatsMetacharactersLiterally},
 		{"search folds Unicode identically", searchFoldsUnicodeIdentically},
+		{"recent searches are private ordered and deduplicated", recentSearchesArePrivateOrderedAndDeduplicated},
 		{"messages page in both directions", messagesPageInBothDirections},
 		{"referential failures are sentinels", referentialFailuresAreSentinels},
 		{"expired Socket Mode connection is not revived", expiredSocketModeConnectionIsNotRevived},
@@ -62,6 +63,45 @@ func runQualification(t *testing.T, open opener) {
 		{"an unconfigured auth method is enabled", authMethodDefaultsToEnabled},
 	} {
 		t.Run(contract.name, func(t *testing.T) { contract.run(t, open) })
+	}
+}
+
+func recentSearchesArePrivateOrderedAndDeduplicated(t *testing.T, open opener) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	repository, closeRepository := open(t, ctx)
+	defer closeRepository()
+
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+	workspaceID := domain.WorkspaceID("T-recent-search-" + suffix)
+	aliceID := domain.UserID("U-recent-search-alice-" + suffix)
+	bobID := domain.UserID("U-recent-search-bob-" + suffix)
+	if err := repository.SeedWorkspace(ctx, domain.Workspace{ID: workspaceID, Name: "Recent search qualification"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: aliceID, WorkspaceID: workspaceID, Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedUser(ctx, domain.User{ID: bobID, WorkspaceID: workspaceID, Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
+	for _, value := range []domain.SearchHistoryEntry{
+		{WorkspaceID: workspaceID, UserID: aliceID, Query: "first", SearchedAt: base},
+		{WorkspaceID: workspaceID, UserID: aliceID, Query: "second", SearchedAt: base.Add(time.Minute)},
+		{WorkspaceID: workspaceID, UserID: aliceID, Query: "first", SearchedAt: base.Add(2 * time.Minute)},
+		{WorkspaceID: workspaceID, UserID: bobID, Query: "private-to-bob", SearchedAt: base.Add(3 * time.Minute)},
+	} {
+		if err := repository.RecordSearchHistory(ctx, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	values, err := repository.ListSearchHistory(ctx, workspaceID, aliceID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 2 || values[0].Query != "first" || values[1].Query != "second" {
+		t.Fatalf("recent searches=%+v, want refreshed first then second", values)
 	}
 }
 

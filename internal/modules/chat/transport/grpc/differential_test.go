@@ -477,6 +477,29 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "recent searches remain private and ordered across the composition seam",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if err := chat.RecordSearch(ctx, "T1", "U1", "first query"); err != nil {
+					return nil, err
+				}
+				if err := chat.RecordSearch(ctx, "T1", "U1", "second query"); err != nil {
+					return nil, err
+				}
+				if err := chat.RecordSearch(ctx, "T1", "U1", "first query"); err != nil {
+					return nil, err
+				}
+				values, err := chat.RecentSearches(ctx, "T1", "U1", 10)
+				if err != nil {
+					return nil, err
+				}
+				queries := make([]string, len(values))
+				for index, value := range values {
+					queries[index] = value.Query
+				}
+				return queries, nil
+			},
+		},
+		{
 			name:  "typed message and file search preserve filters and totals",
 			blobs: true,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {

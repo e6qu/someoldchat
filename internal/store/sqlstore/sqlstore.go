@@ -289,6 +289,12 @@ CREATE TABLE IF NOT EXISTS activity_preferences (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  layout TEXT NOT NULL, PRIMARY KEY (workspace_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS recent_searches (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ query TEXT NOT NULL, searched_at INTEGER NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, query)
+);
+CREATE INDEX IF NOT EXISTS recent_searches_user_time ON recent_searches(workspace_id, user_id, searched_at DESC, query);
 CREATE TABLE IF NOT EXISTS do_not_disturb (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  enabled INTEGER NOT NULL DEFAULT 0, snooze_until INTEGER NOT NULL DEFAULT 0,
@@ -396,7 +402,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 113
+const schemaVersion = 114
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2441,6 +2447,18 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index scheduled statuses due: %w", err)
 		}
 	}
+	if version < 114 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS recent_searches (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			query TEXT NOT NULL, searched_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, user_id, query)
+		)`); err != nil {
+			return fmt.Errorf("migrate recent searches: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS recent_searches_user_time ON recent_searches(workspace_id, user_id, searched_at DESC, query)`); err != nil {
+			return fmt.Errorf("index recent searches: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2711,7 +2729,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -10994,6 +11012,56 @@ func (s *Store) SearchFiles(ctx context.Context, workspace domain.WorkspaceID, u
 		return domain.FilePage{}, err
 	}
 	return domain.FilePage{Files: values, HasMore: search.Page*search.Count < total, Total: total}, nil
+}
+
+func (s *Store) RecordSearchHistory(ctx context.Context, value domain.SearchHistoryEntry) error {
+	value.Query = strings.TrimSpace(value.Query)
+	if value.WorkspaceID == "" || value.UserID == "" || value.Query == "" || utf8.RuneCountInString(value.Query) > 500 || value.SearchedAt.IsZero() {
+		return store.InvalidArgument("search history entry is invalid")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO recent_searches(workspace_id, user_id, query, searched_at) VALUES (?, ?, ?, ?)
+		ON CONFLICT(workspace_id, user_id, query) DO UPDATE SET searched_at = excluded.searched_at`,
+		value.WorkspaceID, value.UserID, value.Query, value.SearchedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM recent_searches
+		WHERE workspace_id = ? AND user_id = ? AND query NOT IN (
+			SELECT query FROM recent_searches WHERE workspace_id = ? AND user_id = ?
+			ORDER BY searched_at DESC, query LIMIT ?
+		)`, value.WorkspaceID, value.UserID, value.WorkspaceID, value.UserID, store.MaxSearchHistoryEntries); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListSearchHistory(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, limit int) ([]domain.SearchHistoryEntry, error) {
+	if workspace == "" || user == "" || limit <= 0 || limit > store.MaxSearchHistoryEntries {
+		return nil, store.InvalidArgument("search history request is invalid")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT query, searched_at FROM recent_searches
+		WHERE workspace_id = ? AND user_id = ? ORDER BY searched_at DESC, query LIMIT ?`, workspace, user, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.SearchHistoryEntry, 0, limit)
+	for rows.Next() {
+		var value domain.SearchHistoryEntry
+		var searchedAt int64
+		if err := rows.Scan(&value.Query, &searchedAt); err != nil {
+			return nil, err
+		}
+		value.WorkspaceID = workspace
+		value.UserID = user
+		value.SearchedAt = time.Unix(0, searchedAt).UTC()
+		values = append(values, value)
+	}
+	return values, rows.Err()
 }
 
 func visibleFilePredicate(alias string) string {

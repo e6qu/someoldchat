@@ -7,6 +7,8 @@ advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
 Slack-style message focus, chronological arrow/Home/End navigation, and
 keyboard thread, edit, delete, pin, and searchable reaction-picker actions,
 typed workspace/current-conversation message, file, people, and channel search,
+durable recent-search selection and visibility-aware people/channel/file
+typeahead with keyboard navigation,
 theme switching, reactions, pins, and navigation to workspace
 members. It also exercises message editing and deletion, standard/custom emoji
 and channel autocomplete, custom emoji message/reaction rendering, private channel
