@@ -277,6 +277,26 @@ func conversionCases() map[string]conversionCase {
 			},
 			through: through(encodeProtoLaterReminder, decodeProtoLaterReminder),
 		},
+		"ActivityItem": {
+			sample:  &domain.ActivityItem{},
+			omitted: map[string]string{"BlobKey": "storage-internal file location"},
+			prepare: func(filled any) {
+				item := filled.(*domain.ActivityItem)
+				item.Kinds = []domain.ActivityKind{domain.ActivityDM, domain.ActivityMention}
+				item.SourceAvailable = true
+				item.Reminder.Target = domain.LaterReminderPersonal
+				item.Reminder.Channel = ""
+				item.Reminder.Recurrence = domain.ReminderMonthly
+			},
+			through: through(encodeProtoActivityItem, decodeProtoActivityItem),
+		},
+		"ActivityPreferences": {
+			sample: &domain.ActivityPreferences{},
+			prepare: func(filled any) {
+				filled.(*domain.ActivityPreferences).Layout = domain.ActivityDense
+			},
+			through: throughInfallible(encodeProtoActivityPreferences, decodeProtoActivityPreferences),
+		},
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
 		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},

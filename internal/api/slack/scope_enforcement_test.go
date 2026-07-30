@@ -27,7 +27,9 @@ import (
 //     chat:write:user, which Slack replaced with the single chat:write;
 //   - conversations.* mutators use channels:manage where the snapshot says
 //     channels:write / groups:write / im:write / mpim:write, which Slack
-//     replaced with channels:manage;
+//     replaced with channels:manage. conversations.join is the exception:
+//     current Slack grants bot tokens channels:join and user tokens
+//     channels:write;
 //   - files.* writes use files:write where the snapshot says files:write:user;
 //   - users.profile.get and team.profile.get use users:read where the snapshot
 //     says users.profile:read, because internal/auth declares no
@@ -145,7 +147,7 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodGet, "/api/users.conversations", auth.ScopeChannelsRead},
 		{http.MethodGet, "/api/conversations.members", auth.ScopeChannelsRead},
 		{http.MethodPost, "/api/conversations.create", auth.ScopeChannelsManage},
-		{http.MethodPost, "/api/conversations.join", auth.ScopeChannelsManage},
+		{http.MethodPost, "/api/conversations.join", auth.ScopeChannelsJoin},
 		{http.MethodPost, "/api/conversations.invite", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.leave", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.kick", auth.ScopeChannelsManage},

@@ -77,24 +77,41 @@ triaged item. Reconnect/replay MUST not duplicate Activity.
 Implemented evidence:
 
 - `make external-contract-qualification` checks the current 2026 Activity
-  source for personal reminders and bulk read acknowledgement rather than
-  relying on the legacy Activity article.
-- Browser qualification covers authenticated Activity entry, unread
-  conversation navigation, mentions, reminder source navigation, and the
-  documented navigation shortcut in Chromium, Firefox, and WebKit.
-- Delivered reminders have durable unread acknowledgement state shared by the
-  Activity and Later badges; service, memory, SQL, gRPC, and web tests cover
-  delivery, badge projection, CSRF-protected bulk acknowledgement, and source
-  navigation.
+  source for typed filters, dense/detailed layouts, read-versus-clear
+  semantics, recoverable cleared items, bulk actions, and keyboard triage
+  rather than relying on the legacy Activity article.
+- Activity items and per-member presentation state are durable in memory,
+  SQLite, dqlite, and PostgreSQL through the shared SQL implementation. The
+  local and gRPC compositions expose the same typed, paginated contract.
+- New DMs and MPIM messages, explicit mentions, replies to a thread root
+  authored by the member, reactions to the member's messages, applicable
+  app-authored notifications, and delivered personal reminders create one
+  idempotent item per recipient. Overlapping filters share one triage record.
+- Browser qualification creates and OAuth-installs a real app, exchanges its
+  authorization code, joins the public channel with Slack's current bot
+  `channels:join` scope, and posts overlapping app/mention notifications. It
+  covers typed/cleared/unread filters, persisted layout, empty states,
+  accessibility, source-thread navigation, read-cursor reconciliation, and
+  the documented navigation shortcut in Chromium, Firefox, and WebKit. Web,
+  repository, migration, converter-property, and differential tests cover
+  item hydration, filter overlap, pagination, read/clear/restore, reaction
+  removal, source authorization, and persistence.
+- Activity-local Up/Down, Enter, `X`, `C`, and `R` are exercised against those
+  real items; Enter opens the correct thread reply composer. Clearing marks
+  read and hides the item, while restore preserves that read state.
 
 Known gaps, which MUST NOT be reported as full Activity compatibility:
 
-- the feed does not yet model thread replies, reactions, invitations, apps,
-  VIP activity, or all-new-post channel notifications as durable notification
-  records;
-- dense/detailed layouts, filter tabs, custom views, per-item read/unread,
-  clear/restore, reply/react actions, and Activity-local Up/Down, Enter, `C`,
-  and `R` triage are not implemented;
+- invitation, VIP, all-new-post channel/section notifications, following a
+  thread the member did not author, and custom saved views depend on notification
+  preferences or product models not yet implemented; those filters are not
+  rendered as empty fake controls;
+- the first-party UI does not yet expose mark-unread or inline react actions,
+  and Activity does not yet merge live SSE updates while preserving focus;
+- schema version 107 creates the durable Activity store but does not backfill
+  notification history created by an older release. Existing source messages
+  remain available through conversation/search history; Activity begins with
+  notification-producing mutations committed after the upgrade;
 - search still lacks Slack's modifier parser, result-type grouping, current
   conversation scope, suggestions, and official-SDK/differential evidence;
 - controlled live-Slack comparison and visual baselines remain required.

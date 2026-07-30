@@ -3781,7 +3781,7 @@ func (h Handler) createConversation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) joinConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticateConversationJoin(r, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -3802,6 +3802,25 @@ func (h Handler) joinConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+}
+
+func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userScope auth.Scope) (auth.Principal, error) {
+	principal, err := h.authenticate(r, "")
+	if err != nil {
+		return auth.Principal{}, err
+	}
+	// Slack grants this method differently by credential type: bot tokens use
+	// channels:join, while user tokens use channels:write. Treating it like the
+	// other conversation mutators and requiring channels:manage made an
+	// official bot installation unable to join any public channel.
+	needed := userScope
+	if principal.TokenType == "bot" || principal.BotID != "" {
+		needed = botScope
+	}
+	if !principal.HasScope(needed) {
+		return auth.Principal{}, missingScopeError{needed: needed, provided: permissionScopes(principal)}
+	}
+	return principal, nil
 }
 
 func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {

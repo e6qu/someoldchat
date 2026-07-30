@@ -628,6 +628,108 @@ type Reaction struct {
 	CreatedAt time.Time
 }
 
+// ActivityKind is one filter in Slack's Activity view. One item may carry more
+// than one kind: a direct message that mentions the recipient must appear under
+// both DMs and Mentions without creating two independently triageable rows.
+type ActivityKind string
+
+const (
+	ActivityDM       ActivityKind = "dm"
+	ActivityMention  ActivityKind = "mention"
+	ActivityThread   ActivityKind = "thread"
+	ActivityChannel  ActivityKind = "channel"
+	ActivityReaction ActivityKind = "reaction"
+	ActivityApp      ActivityKind = "app"
+	ActivityReminder ActivityKind = "reminder"
+)
+
+func (kind ActivityKind) Valid() bool {
+	switch kind {
+	case ActivityDM, ActivityMention, ActivityThread, ActivityChannel, ActivityReaction, ActivityApp, ActivityReminder:
+		return true
+	default:
+		return false
+	}
+}
+
+type ActivityLayout string
+
+const (
+	ActivityDetailed ActivityLayout = "detailed"
+	ActivityDense    ActivityLayout = "dense"
+)
+
+func (layout ActivityLayout) Valid() bool {
+	return layout == ActivityDetailed || layout == ActivityDense
+}
+
+// ActivityItem is the durable per-recipient notification state. Source content
+// is hydrated only after authorization; SourceAvailable distinguishes a
+// deleted/inaccessible source from a malformed empty message.
+type ActivityItem struct {
+	ID              ActivityID
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	Kinds           []ActivityKind
+	ActorID         UserID
+	Conversation    ConversationID
+	MessageID       MessageID
+	ReminderID      LaterReminderID
+	ReactionName    string
+	OccurredAt      time.Time
+	ReadAt          time.Time
+	ClearedAt       time.Time
+	Message         Message
+	Reminder        LaterReminder
+	SourceAvailable bool
+}
+
+type ActivityQuery struct {
+	Kinds       []ActivityKind
+	UnreadOnly  bool
+	ClearedOnly bool
+	Page        PageRequest
+}
+
+func (query ActivityQuery) Valid() bool {
+	for _, kind := range query.Kinds {
+		if !kind.Valid() {
+			return false
+		}
+	}
+	return true
+}
+
+type ActivityPage struct {
+	Items      []ActivityItem
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type ActivityPreferences struct {
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Layout      ActivityLayout
+}
+
+type ActivityMutation string
+
+const (
+	ActivityMarkRead   ActivityMutation = "read"
+	ActivityMarkUnread ActivityMutation = "unread"
+	ActivityClear      ActivityMutation = "clear"
+	ActivityRestore    ActivityMutation = "restore"
+)
+
+func (mutation ActivityMutation) Valid() bool {
+	switch mutation {
+	case ActivityMarkRead, ActivityMarkUnread, ActivityClear, ActivityRestore:
+		return true
+	default:
+		return false
+	}
+}
+
 type UserReaction struct {
 	Conversation ConversationID
 	Message      Message

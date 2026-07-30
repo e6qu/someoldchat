@@ -387,6 +387,10 @@ type Store interface {
 	RemoveConversationMember(context.Context, domain.ConversationID, domain.UserID, events.Event) error
 	GetReadCursor(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.ReadCursor, error)
 	SetReadCursor(context.Context, domain.ReadCursor, events.Event) error
+	ListActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
+	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation, time.Time) error
+	GetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)
+	SetActivityPreferences(context.Context, domain.ActivityPreferences) error
 	ListUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.UserPage, error)
 	ListAdminUsers(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.AdminUserPage, error)
 	ListUsersByRole(context.Context, domain.WorkspaceID, domain.WorkspaceRole, domain.PageRequest) (domain.UserPage, error)

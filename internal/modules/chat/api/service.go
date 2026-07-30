@@ -208,6 +208,10 @@ type Service interface {
 	LeaveConversation(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) error
 	KickConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID) error
 	MarkRead(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.ReadCursor, error)
+	Activity(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityQuery) (domain.ActivityPage, error)
+	MutateActivity(context.Context, domain.WorkspaceID, domain.UserID, []domain.ActivityID, domain.ActivityMutation) error
+	ActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID) (domain.ActivityPreferences, error)
+	SetActivityPreferences(context.Context, domain.WorkspaceID, domain.UserID, domain.ActivityLayout) (domain.ActivityPreferences, error)
 	AddReaction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
 	RemoveReaction(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, string) error
 	Reactions(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) ([]domain.Reaction, domain.Cursor, bool, error)

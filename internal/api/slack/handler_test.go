@@ -164,7 +164,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -2850,6 +2850,45 @@ func TestJoinPublicConversation(t *testing.T) {
 	handler.ServeHTTP(res, req)
 	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"id":"C1"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+}
+
+func TestJoinPublicConversationUsesCurrentTokenTypeScopes(t *testing.T) {
+	_, repository := testHandlerWithStore()
+	call := func(tokenType string, botID domain.BotID, scopes ...auth.Scope) string {
+		granted := make(map[auth.Scope]struct{}, len(scopes))
+		for _, scope := range scopes {
+			granted[scope] = struct{}{}
+		}
+		authenticator, err := auth.NewStatic("join-token", auth.Principal{
+			WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: botID,
+			TokenType: tokenType, Scopes: granted,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		handler, err := NewHandler(service.Messages{Store: repository}, authenticator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		handler.Register(mux)
+		request := httptest.NewRequest(http.MethodPost, "/api/conversations.join", strings.NewReader("channel=C1"))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer join-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response.Body.String()
+	}
+
+	if body := call("bot", "B1", auth.ScopeChannelsJoin); !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("bot channels:join response=%s", body)
+	}
+	if body := call("bot", "B1", auth.ScopeChannelsManage); !strings.Contains(body, `"error":"missing_scope"`) || !strings.Contains(body, `"needed":"channels:join"`) {
+		t.Fatalf("bot channels:manage response=%s", body)
+	}
+	if body := call("user", "", auth.ScopeChannelsWrite); !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("user channels:write response=%s", body)
 	}
 }
 

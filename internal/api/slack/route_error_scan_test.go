@@ -275,9 +275,10 @@ func codeArguments(t *testing.T) map[string][]int {
 // authenticating on a weaker one. A handler that authenticated weakly and named a
 // strong scope anywhere satisfied the table.
 var scopeArguments = map[string][]int{
-	"authenticate":             {1},
-	"listEmoji":                {2},
-	"deleteListItemsWithScope": {2},
+	"authenticate":                 {1},
+	"authenticateConversationJoin": {1, 2},
+	"listEmoji":                    {2},
+	"deleteListItemsWithScope":     {2},
 }
 
 // codeReturningFunctions return a code rather than writing one, so every string

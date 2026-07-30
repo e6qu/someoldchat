@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"sort"
@@ -67,6 +68,8 @@ type Store struct {
 	idempotency                   map[string]domain.MessageID
 	nextAttempt                   map[uint64]time.Time
 	readCursors                   map[string]domain.ReadCursor
+	activityItems                 map[domain.ActivityID]domain.ActivityItem
+	activityPreferences           map[string]domain.ActivityPreferences
 	reactions                     map[domain.MessageID]map[string]domain.Reaction
 	pins                          map[domain.MessageID]map[domain.UserID]domain.Pin
 	files                         map[domain.FileID]domain.File
@@ -167,7 +170,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -1634,7 +1637,9 @@ func (s *Store) UninstallApp(_ context.Context, workspaceID domain.WorkspaceID, 
 	for key, bot := range s.bots {
 		if bot.WorkspaceID == workspaceID && bot.AppID == appID {
 			bot.Deleted = true
+			bot.UpdatedAt = time.Now().UTC()
 			s.bots[key] = bot
+			s.deactivateBotUserLocked(bot)
 		}
 	}
 	for key, item := range s.appDatastoreItems {
@@ -2953,10 +2958,148 @@ func (s *Store) GetReadCursor(_ context.Context, workspace domain.WorkspaceID, u
 }
 
 func (s *Store) SetReadCursor(_ context.Context, cursor domain.ReadCursor, event events.Event) error {
+	readAt, err := domain.ParseMessageTimestamp(cursor.LastRead)
+	if err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.readCursors[readCursorKey(cursor.WorkspaceID, cursor.UserID, cursor.Conversation)] = cursor
+	for id, item := range s.activityItems {
+		if item.WorkspaceID == cursor.WorkspaceID && item.UserID == cursor.UserID && item.Conversation == cursor.Conversation &&
+			!item.OccurredAt.After(readAt) && item.ReadAt.IsZero() {
+			item.ReadAt = cursor.UpdatedAt.UTC()
+			s.activityItems[id] = item
+		}
+	}
 	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func activityPreferencesKey(workspace domain.WorkspaceID, user domain.UserID) string {
+	return string(workspace) + "\x00" + string(user)
+}
+
+func activityCursorKey(item domain.ActivityItem) string {
+	return fmt.Sprintf("%020d:%s", item.OccurredAt.UTC().UnixNano(), item.ID)
+}
+
+func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, query domain.ActivityQuery) (domain.ActivityPage, error) {
+	if err := store.CheckPage(query.Page); err != nil {
+		return domain.ActivityPage{}, err
+	}
+	if !query.Valid() {
+		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
+	}
+	after, err := domain.DecodeListCursor(query.Page.Cursor)
+	if err != nil {
+		return domain.ActivityPage{}, err
+	}
+	wantedKinds := make(map[domain.ActivityKind]struct{}, len(query.Kinds))
+	for _, kind := range query.Kinds {
+		wantedKinds[kind] = struct{}{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.ActivityItem, 0, query.Page.Limit+1)
+	for _, stored := range s.activityItems {
+		if stored.WorkspaceID != workspace || stored.UserID != user {
+			continue
+		}
+		if query.ClearedOnly != !stored.ClearedAt.IsZero() || (query.UnreadOnly && !stored.ReadAt.IsZero()) {
+			continue
+		}
+		key := activityCursorKey(stored)
+		if after != "" && key >= after {
+			continue
+		}
+		if len(wantedKinds) > 0 {
+			matches := false
+			for _, kind := range stored.Kinds {
+				if _, ok := wantedKinds[kind]; ok {
+					matches = true
+					break
+				}
+			}
+			if !matches {
+				continue
+			}
+		}
+		item := stored
+		item.Kinds = append([]domain.ActivityKind(nil), stored.Kinds...)
+		if item.ReminderID != "" {
+			if reminder, ok := s.laterReminders[item.ReminderID]; ok && laterReminderOwnedBy(reminder, workspace, user) {
+				item.Reminder = reminder
+				item.SourceAvailable = true
+			}
+		}
+		if item.MessageID != "" {
+			message, messageErr := s.messageLocked(item.MessageID)
+			_, member := s.memberships[item.Conversation][user]
+			if messageErr == nil && !message.Deleted && member {
+				item.Message = cloneMessage(message)
+				item.SourceAvailable = true
+			}
+		}
+		values = appendSorted(values, item, query.Page.Limit+1, func(left, right domain.ActivityItem) bool {
+			return activityCursorKey(left) > activityCursorKey(right)
+		})
+	}
+	page := domain.ActivityPage{Items: values, HasMore: len(values) > query.Page.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:query.Page.Limit]
+		page.NextCursor, err = domain.NewListCursor(activityCursorKey(page.Items[len(page.Items)-1]))
+	}
+	return page, err
+}
+
+func (s *Store) MutateActivity(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, ids []domain.ActivityID, mutation domain.ActivityMutation, changedAt time.Time) error {
+	if workspace == "" || user == "" || len(ids) == 0 || !mutation.Valid() || changedAt.IsZero() {
+		return store.InvalidArgument("activity mutation is incomplete")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range ids {
+		item, ok := s.activityItems[id]
+		if !ok || item.WorkspaceID != workspace || item.UserID != user {
+			return store.ErrNotFound
+		}
+	}
+	changedAt = changedAt.UTC()
+	for _, id := range ids {
+		item := s.activityItems[id]
+		switch mutation {
+		case domain.ActivityMarkRead:
+			item.ReadAt = changedAt
+		case domain.ActivityMarkUnread:
+			item.ReadAt = time.Time{}
+		case domain.ActivityClear:
+			item.ReadAt = changedAt
+			item.ClearedAt = changedAt
+		case domain.ActivityRestore:
+			item.ClearedAt = time.Time{}
+		}
+		s.activityItems[id] = item
+	}
+	return nil
+}
+
+func (s *Store) GetActivityPreferences(_ context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.ActivityPreferences, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if preferences, ok := s.activityPreferences[activityPreferencesKey(workspace, user)]; ok {
+		return preferences, nil
+	}
+	return domain.ActivityPreferences{WorkspaceID: workspace, UserID: user, Layout: domain.ActivityDetailed}, nil
+}
+
+func (s *Store) SetActivityPreferences(_ context.Context, preferences domain.ActivityPreferences) error {
+	if preferences.WorkspaceID == "" || preferences.UserID == "" || !preferences.Layout.Valid() {
+		return store.InvalidArgument("activity preferences are invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.activityPreferences[activityPreferencesKey(preferences.WorkspaceID, preferences.UserID)] = preferences
 	return nil
 }
 
@@ -3177,11 +3320,63 @@ func (s *Store) createMessageLocked(message domain.Message, event events.Event, 
 	copy(values[index+1:], values[index:])
 	values[index] = message
 	s.messages[message.Conversation] = values
+	s.createMessageActivityLocked(message)
 	s.outbox = append(s.outbox, event)
 	if idempotencyKey != "" {
 		s.idempotency[key] = message.ID
 	}
 	return nil
+}
+
+func (s *Store) createMessageActivityLocked(message domain.Message) {
+	conversation := s.conversations[message.Conversation]
+	recipients := make(map[domain.UserID]map[domain.ActivityKind]struct{})
+	add := func(user domain.UserID, kind domain.ActivityKind) {
+		if user == "" || user == message.AuthorID {
+			return
+		}
+		if _, member := s.memberships[message.Conversation][user]; !member {
+			return
+		}
+		if recipients[user] == nil {
+			recipients[user] = make(map[domain.ActivityKind]struct{})
+		}
+		recipients[user][kind] = struct{}{}
+	}
+	for user := range s.memberships[message.Conversation] {
+		if conversation.IsDirect || conversation.IsGroupDirect {
+			add(user, domain.ActivityDM)
+		}
+		if strings.Contains(message.Text, "<@"+string(user)+">") || strings.Contains(message.Blocks, "<@"+string(user)+">") {
+			add(user, domain.ActivityMention)
+		}
+	}
+	if message.ThreadTimestamp != "" {
+		if rootAt, err := domain.ParseMessageTimestamp(message.ThreadTimestamp); err == nil {
+			for _, candidate := range s.messages[message.Conversation] {
+				if candidate.CreatedAt.Equal(rootAt) {
+					add(candidate.AuthorID, domain.ActivityThread)
+					break
+				}
+			}
+		}
+	}
+	for user, kindSet := range recipients {
+		kinds := make([]domain.ActivityKind, 0, len(kindSet)+1)
+		for kind := range kindSet {
+			kinds = append(kinds, kind)
+		}
+		if message.AppID != "" {
+			kinds = append(kinds, domain.ActivityApp)
+		}
+		slices.Sort(kinds)
+		id := domain.ActivityIDFor(user, "message:"+string(message.ID))
+		s.activityItems[id] = domain.ActivityItem{
+			ID: id, WorkspaceID: message.WorkspaceID, UserID: user, Kinds: kinds,
+			ActorID: message.AuthorID, Conversation: message.Conversation,
+			MessageID: message.ID, OccurredAt: message.CreatedAt.UTC(),
+		}
+	}
 }
 
 func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
@@ -3363,7 +3558,8 @@ func reactionKey(name string, user domain.UserID) string { return name + "\x00" 
 func (s *Store) AddReaction(_ context.Context, reaction domain.Reaction, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, err := s.messageLocked(reaction.Message); err != nil {
+	message, err := s.messageLocked(reaction.Message)
+	if err != nil {
 		return err
 	}
 	if s.reactions[reaction.Message] == nil {
@@ -3374,6 +3570,17 @@ func (s *Store) AddReaction(_ context.Context, reaction domain.Reaction, event e
 		return store.ErrAlreadyExists
 	}
 	s.reactions[reaction.Message][key] = reaction
+	if message.AuthorID != reaction.UserID {
+		if _, member := s.memberships[message.Conversation][message.AuthorID]; member {
+			id := domain.ActivityIDFor(message.AuthorID, "reaction:"+string(reaction.Message)+":"+reaction.Name+":"+string(reaction.UserID))
+			s.activityItems[id] = domain.ActivityItem{
+				ID: id, WorkspaceID: message.WorkspaceID, UserID: message.AuthorID,
+				Kinds: []domain.ActivityKind{domain.ActivityReaction}, ActorID: reaction.UserID,
+				Conversation: message.Conversation, MessageID: message.ID,
+				ReactionName: reaction.Name, OccurredAt: reaction.CreatedAt.UTC(),
+			}
+		}
+	}
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -3389,6 +3596,9 @@ func (s *Store) RemoveReaction(_ context.Context, reaction domain.Reaction, even
 		return store.ErrNotFound
 	}
 	delete(s.reactions[reaction.Message], key)
+	if message, err := s.messageLocked(reaction.Message); err == nil {
+		delete(s.activityItems, domain.ActivityIDFor(message.AuthorID, "reaction:"+string(reaction.Message)+":"+reaction.Name+":"+string(reaction.UserID)))
+	}
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -4023,6 +4233,11 @@ func (s *Store) AcknowledgeLaterReminders(_ context.Context, workspace domain.Wo
 		reminder.AcknowledgedAt = reminder.LastDeliveredAt
 		reminder.UpdatedAt = acknowledged.UTC()
 		s.laterReminders[id] = reminder
+		activityID := domain.ActivityIDFor(user, "reminder:"+string(id)+":"+string(domain.NewStoredTime(reminder.LastDeliveredAt)))
+		if item, ok := s.activityItems[activityID]; ok && item.ReadAt.IsZero() {
+			item.ReadAt = acknowledged.UTC()
+			s.activityItems[activityID] = item
+		}
 		found = true
 	}
 	if found {
@@ -4058,6 +4273,11 @@ func (s *Store) DeleteLaterReminder(_ context.Context, workspace domain.Workspac
 		return store.ErrNotFound
 	}
 	delete(s.laterReminders, id)
+	for activityID, item := range s.activityItems {
+		if item.ReminderID == id {
+			delete(s.activityItems, activityID)
+		}
+	}
 	delete(s.laterReminderLeases, id)
 	delete(s.laterReminderNextAttempt, id)
 	s.outbox = append(s.outbox, event)
@@ -4150,6 +4370,15 @@ func (s *Store) MarkLaterReminderDelivered(_ context.Context, owner string, id d
 	reminder.LastDeliveredAt = deliveredAt
 	reminder.UpdatedAt = deliveredAt
 	s.laterReminders[id] = reminder
+	if reminder.Target == domain.LaterReminderPersonal && reminder.UserID != "" {
+		activityID := domain.ActivityIDFor(reminder.UserID, "reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
+		s.activityItems[activityID] = domain.ActivityItem{
+			ID: activityID, WorkspaceID: reminder.WorkspaceID, UserID: reminder.UserID,
+			Kinds: []domain.ActivityKind{domain.ActivityReminder}, ReminderID: id,
+			Conversation: reminder.SourceConversation, MessageID: reminder.SourceMessageID,
+			OccurredAt: deliveredAt,
+		}
+	}
 	delete(s.laterReminderLeases, id)
 	delete(s.laterReminderNextAttempt, id)
 	s.outbox = append(s.outbox, event)

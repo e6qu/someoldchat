@@ -4105,6 +4105,41 @@ func (m Messages) AcknowledgeLaterReminders(ctx context.Context, workspaceID dom
 	return m.Store.AcknowledgeLaterReminders(ctx, workspaceID, userID, now, event)
 }
 
+func (m Messages) Activity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query domain.ActivityQuery) (domain.ActivityPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ActivityPage{}, err
+	}
+	if !query.Valid() {
+		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
+	}
+	return m.Store.ListActivity(ctx, workspaceID, userID, query)
+}
+
+func (m Messages) MutateActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ActivityID, mutation domain.ActivityMutation) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	return m.Store.MutateActivity(ctx, workspaceID, userID, ids, mutation, time.Now().UTC())
+}
+
+func (m Messages) ActivityPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.ActivityPreferences, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ActivityPreferences{}, err
+	}
+	return m.Store.GetActivityPreferences(ctx, workspaceID, userID)
+}
+
+func (m Messages) SetActivityPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, layout domain.ActivityLayout) (domain.ActivityPreferences, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ActivityPreferences{}, err
+	}
+	preferences := domain.ActivityPreferences{WorkspaceID: workspaceID, UserID: userID, Layout: layout}
+	if err := m.Store.SetActivityPreferences(ctx, preferences); err != nil {
+		return domain.ActivityPreferences{}, err
+	}
+	return preferences, nil
+}
+
 func (m Messages) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return err

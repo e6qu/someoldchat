@@ -53,6 +53,7 @@ later_help_url='https://slack.com/help/articles/360042650274-Save-messages-and-f
 activity_help_url='https://slack.com/help/articles/46751260742035-Introducing-the-new-Activity-view-in-Slack'
 reminder_api_url='https://docs.slack.dev/reference/methods/reminders.add/'
 later_api_url='https://docs.slack.dev/changelog/2023-07-its-later-already-for-stars-and-reminders/'
+conversation_join_url='https://docs.slack.dev/reference/methods/conversations.join/'
 
 fetch "$sign_in_url" "$work/sign-in.html"
 fetch "$keyboard_url" "$work/keyboard.html"
@@ -80,6 +81,7 @@ fetch "$later_help_url" "$work/later.html"
 fetch "$activity_help_url" "$work/activity.html"
 fetch "$reminder_api_url" "$work/reminders-add.html"
 fetch "$later_api_url" "$work/later-api.html"
+fetch "$conversation_join_url" "$work/conversations-join.html"
 
 assert_contains "$work/sign-in.html" 'Sign in to your workspace' \
 	'[AUTH-01] workspace sign-in is an explicit first-party journey' "$sign_in_url"
@@ -115,6 +117,8 @@ assert_contains "$work/oauth.html" 'requesting scopes, waiting for a user to giv
 	'[APP-02] Slack OAuth installation sequence' "$oauth_url"
 assert_contains "$work/oauth.html" 'token rotation' \
 	'[APP-02] Slack OAuth supports expiring access and refresh token rotation' "$oauth_url"
+assert_contains "$work/conversations-join.html" 'channels:join' \
+	'[APP-02 CONV-01] installed bot tokens join public channels with channels:join' "$conversation_join_url"
 assert_contains "$work/status.html" 'Remove status after...' \
 	'[STATUS-01] status supports an explicit clear time' "$status_url"
 assert_contains "$work/status.html" 'away after 10 minutes of desktop inactivity' \
@@ -168,6 +172,14 @@ assert_contains "$work/activity.html" 'personal reminders in Activity' \
 	'[ACTIVITY-01 REMIND-04] current Activity includes personal reminders' "$activity_help_url"
 assert_contains "$work/activity.html" 'mark them all as read' \
 	'[ACTIVITY-03] current Activity supports bulk read acknowledgement' "$activity_help_url"
+assert_contains "$work/activity.html" 'Detailed layout with full previews of messages' \
+	'[ACTIVITY-01] detailed and dense layouts are one feed presentation' "$activity_help_url"
+assert_contains "$work/activity.html" 'Clearing notifications hides them from Activity and automatically marks any unread notifications as read' \
+	'[ACTIVITY-03] clear hides and marks read atomically' "$activity_help_url"
+assert_contains "$work/activity.html" 'there’ll always be a record in the Cleared notifications filter' \
+	'[ACTIVITY-03] cleared notifications remain recoverable' "$activity_help_url"
+assert_contains "$work/activity.html" 'DMs Mentions Threads Channels Reactions Invitations Apps Reminders VIP' \
+	'[ACTIVITY-02] current Activity notification-type filters' "$activity_help_url"
 assert_contains "$work/keyboard-navigation.html" 'Enter to reply to a message' \
 	'[ACTIVITY-03] Activity Enter replies rather than merely opening an item' "$keyboard_navigation_url"
 assert_contains "$work/keyboard-navigation.html" 'X to select or un-select an item' \

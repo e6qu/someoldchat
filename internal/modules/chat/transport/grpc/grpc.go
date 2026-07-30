@@ -38,6 +38,7 @@ type Remote struct {
 	reactions     chatv1.ReactionsServiceClient
 	savedItems    chatv1.SavedItemsServiceClient
 	reminders     chatv1.RemindersServiceClient
+	activity      chatv1.ActivityServiceClient
 	scheduled     chatv1.ScheduledMessagesServiceClient
 	usergroups    chatv1.UserGroupsServiceClient
 	calls         chatv1.CallsServiceClient
@@ -116,6 +117,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		reactions:     chatv1.NewReactionsServiceClient(conn),
 		savedItems:    chatv1.NewSavedItemsServiceClient(conn),
 		reminders:     chatv1.NewRemindersServiceClient(conn),
+		activity:      chatv1.NewActivityServiceClient(conn),
 		scheduled:     chatv1.NewScheduledMessagesServiceClient(conn),
 		usergroups:    chatv1.NewUserGroupsServiceClient(conn),
 		calls:         chatv1.NewCallsServiceClient(conn),
@@ -2761,6 +2763,58 @@ func (r Remote) AcknowledgeLaterReminders(ctx context.Context, workspaceID domai
 	return requireAcknowledgement(out.GetOk(), "Later reminder acknowledgement")
 }
 
+func (r Remote) Activity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query domain.ActivityQuery) (domain.ActivityPage, error) {
+	kinds := make([]string, 0, len(query.Kinds))
+	for _, kind := range query.Kinds {
+		kinds = append(kinds, string(kind))
+	}
+	out, err := r.activity.ListActivity(ctx, &chatv1.ActivityRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Kinds: kinds,
+		UnreadOnly: query.UnreadOnly, ClearedOnly: query.ClearedOnly,
+		Limit: int32(query.Page.Limit), Cursor: string(query.Page.Cursor),
+	})
+	if err != nil {
+		return domain.ActivityPage{}, err
+	}
+	items := make([]domain.ActivityItem, 0, len(out.GetItems()))
+	for _, encoded := range out.GetItems() {
+		item, err := decodeProtoActivityItem(encoded)
+		if err != nil {
+			return domain.ActivityPage{}, err
+		}
+		items = append(items, item)
+	}
+	return domain.ActivityPage{Items: items, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) MutateActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, ids []domain.ActivityID, mutation domain.ActivityMutation) error {
+	encodedIDs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		encodedIDs = append(encodedIDs, string(id))
+	}
+	out, err := r.activity.MutateActivity(ctx, &chatv1.MutateActivityRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ActivityIds: encodedIDs, Mutation: string(mutation)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "activity mutation")
+}
+
+func (r Remote) ActivityPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.ActivityPreferences, error) {
+	out, err := r.activity.GetActivityPreferences(ctx, &chatv1.ActivityPreferencesRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.ActivityPreferences{}, err
+	}
+	return decodeProtoActivityPreferences(out), nil
+}
+
+func (r Remote) SetActivityPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, layout domain.ActivityLayout) (domain.ActivityPreferences, error) {
+	out, err := r.activity.SetActivityPreferences(ctx, &chatv1.SetActivityPreferencesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Layout: string(layout)})
+	if err != nil {
+		return domain.ActivityPreferences{}, err
+	}
+	return decodeProtoActivityPreferences(out), nil
+}
+
 func (r Remote) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
 	out, err := r.reminders.CompleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
 	if err != nil {
@@ -2904,6 +2958,7 @@ var (
 	_ chatv1.PresenceServiceServer                = (*Server)(nil)
 	_ chatv1.ReactionsServiceServer               = (*Server)(nil)
 	_ chatv1.SavedItemsServiceServer              = (*Server)(nil)
+	_ chatv1.ActivityServiceServer                = (*Server)(nil)
 	_ chatv1.BookmarksServiceServer               = (*Server)(nil)
 	_ chatv1.UserGroupsServiceServer              = (*Server)(nil)
 	_ chatv1.CallsServiceServer                   = (*Server)(nil)
@@ -2961,6 +3016,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterEventsServiceServer(registrar, server)
 	chatv1.RegisterReactionsServiceServer(registrar, server)
 	chatv1.RegisterSavedItemsServiceServer(registrar, server)
+	chatv1.RegisterActivityServiceServer(registrar, server)
 	chatv1.RegisterBookmarksServiceServer(registrar, server)
 	chatv1.RegisterMessagesServiceServer(registrar, server)
 	chatv1.RegisterRemindersServiceServer(registrar, server)
@@ -4853,6 +4909,52 @@ func (s *Server) CompleteLaterReminder(ctx context.Context, input *chatv1.LaterR
 
 func (s *Server) DeleteLaterReminder(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
 	return s.deleteLaterReminderProto(ctx, input)
+}
+
+func (s *Server) ListActivity(ctx context.Context, input *chatv1.ActivityRequest) (*chatv1.ActivityPage, error) {
+	kinds := make([]domain.ActivityKind, 0, len(input.GetKinds()))
+	for _, kind := range input.GetKinds() {
+		kinds = append(kinds, domain.ActivityKind(kind))
+	}
+	page, err := s.implementation.Activity(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ActivityQuery{
+		Kinds: kinds, UnreadOnly: input.GetUnreadOnly(), ClearedOnly: input.GetClearedOnly(),
+		Page: domain.PageRequest{Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor())},
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	items := make([]*chatv1.ActivityItem, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, encodeProtoActivityItem(item))
+	}
+	return &chatv1.ActivityPage{Items: items, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) MutateActivity(ctx context.Context, input *chatv1.MutateActivityRequest) (*chatv1.MutationResponse, error) {
+	ids := make([]domain.ActivityID, 0, len(input.GetActivityIds()))
+	for _, id := range input.GetActivityIds() {
+		ids = append(ids, domain.ActivityID(id))
+	}
+	if err := s.implementation.MutateActivity(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids, domain.ActivityMutation(input.GetMutation())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) GetActivityPreferences(ctx context.Context, input *chatv1.ActivityPreferencesRequest) (*chatv1.ActivityPreferences, error) {
+	preferences, err := s.implementation.ActivityPreferences(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoActivityPreferences(preferences), nil
+}
+
+func (s *Server) SetActivityPreferences(ctx context.Context, input *chatv1.SetActivityPreferencesRequest) (*chatv1.ActivityPreferences, error) {
+	preferences, err := s.implementation.SetActivityPreferences(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ActivityLayout(input.GetLayout()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoActivityPreferences(preferences), nil
 }
 
 func (s *Server) ScheduleMessage(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
@@ -6822,6 +6924,84 @@ func decodeProtoLaterReminder(value *chatv1.LaterReminder) (domain.LaterReminder
 		CompletedAt: timeFromUnix(value.GetCompletedAt()), LastDeliveredAt: timeFromUnix(value.GetLastDeliveredAt()),
 		AcknowledgedAt: timeFromUnix(value.GetAcknowledgedAt()), FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
 	}, nil
+}
+
+func encodeProtoActivityItem(value domain.ActivityItem) *chatv1.ActivityItem {
+	kinds := make([]string, 0, len(value.Kinds))
+	for _, kind := range value.Kinds {
+		kinds = append(kinds, string(kind))
+	}
+	result := &chatv1.ActivityItem{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		Kinds: kinds, ActorId: string(value.ActorID), ConversationId: string(value.Conversation),
+		MessageId: string(value.MessageID), ReminderId: string(value.ReminderID),
+		ReactionName: value.ReactionName, OccurredAt: value.OccurredAt.UTC().UnixNano(),
+		SourceAvailable: value.SourceAvailable,
+	}
+	if !value.ReadAt.IsZero() {
+		result.ReadAt = value.ReadAt.UTC().UnixNano()
+	}
+	if !value.ClearedAt.IsZero() {
+		result.ClearedAt = value.ClearedAt.UTC().UnixNano()
+	}
+	if value.SourceAvailable && value.Message.ID != "" {
+		result.Message = encodeProtoMessage(value.Message)
+	}
+	if value.SourceAvailable && value.Reminder.ID != "" {
+		result.Reminder = encodeProtoLaterReminder(value.Reminder)
+	}
+	return result
+}
+
+func decodeProtoActivityItem(value *chatv1.ActivityItem) (domain.ActivityItem, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetOccurredAt() == 0 || len(value.GetKinds()) == 0 {
+		return domain.ActivityItem{}, errors.New("typed activity item is incomplete")
+	}
+	item := domain.ActivityItem{
+		ID: domain.ActivityID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID: domain.UserID(value.GetUserId()), ActorID: domain.UserID(value.GetActorId()),
+		Conversation: domain.ConversationID(value.GetConversationId()), MessageID: domain.MessageID(value.GetMessageId()),
+		ReminderID: domain.LaterReminderID(value.GetReminderId()), ReactionName: value.GetReactionName(),
+		OccurredAt: time.Unix(0, value.GetOccurredAt()).UTC(), SourceAvailable: value.GetSourceAvailable(),
+	}
+	for _, encoded := range value.GetKinds() {
+		kind := domain.ActivityKind(encoded)
+		if !kind.Valid() {
+			return domain.ActivityItem{}, errors.New("typed activity item has an invalid kind")
+		}
+		item.Kinds = append(item.Kinds, kind)
+	}
+	if value.GetReadAt() != 0 {
+		item.ReadAt = time.Unix(0, value.GetReadAt()).UTC()
+	}
+	if value.GetClearedAt() != 0 {
+		item.ClearedAt = time.Unix(0, value.GetClearedAt()).UTC()
+	}
+	var err error
+	if value.GetMessage() != nil {
+		item.Message, err = decodeProtoMessage(value.GetMessage())
+		if err != nil {
+			return domain.ActivityItem{}, err
+		}
+	}
+	if value.GetReminder() != nil {
+		item.Reminder, err = decodeProtoLaterReminder(value.GetReminder())
+		if err != nil {
+			return domain.ActivityItem{}, err
+		}
+	}
+	return item, nil
+}
+
+func encodeProtoActivityPreferences(value domain.ActivityPreferences) *chatv1.ActivityPreferences {
+	return &chatv1.ActivityPreferences{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Layout: string(value.Layout)}
+}
+
+func decodeProtoActivityPreferences(value *chatv1.ActivityPreferences) domain.ActivityPreferences {
+	if value == nil {
+		return domain.ActivityPreferences{}
+	}
+	return domain.ActivityPreferences{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Layout: domain.ActivityLayout(value.GetLayout())}
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {

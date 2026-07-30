@@ -358,6 +358,7 @@ func (s *Store) DeleteApp(_ context.Context, appID domain.AppID, ownerID domain.
 			bot.Deleted = true
 			bot.UpdatedAt = deletedAt.UTC()
 			s.bots[id] = bot
+			s.deactivateBotUserLocked(bot)
 		}
 	}
 	for key, item := range s.appDatastoreItems {
@@ -372,4 +373,22 @@ func (s *Store) DeleteApp(_ context.Context, appID domain.AppID, ownerID domain.
 	}
 	delete(s.oauthClients, app.ClientID)
 	return nil
+}
+
+// deactivateBotUserLocked removes an uninstalled app identity from every live
+// membership surface while retaining the user record for historical message
+// authorship. Callers hold s.mu.
+func (s *Store) deactivateBotUserLocked(bot domain.Bot) {
+	if user, ok := s.users[bot.UserID]; ok && user.WorkspaceID == bot.WorkspaceID {
+		user.Deleted = true
+		s.users[bot.UserID] = user
+	}
+	membershipKey := string(bot.WorkspaceID) + "\x00" + string(bot.UserID)
+	if membership, ok := s.members[membershipKey]; ok {
+		membership.Active = false
+		s.members[membershipKey] = membership
+	}
+	for _, members := range s.memberships {
+		delete(members, bot.UserID)
+	}
 }
