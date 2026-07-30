@@ -32,6 +32,8 @@ keyboard_url='https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts
 keyboard_navigation_url='https://slack.com/help/articles/115003340723-Navigate-Slack-with-your-keyboard'
 dm_url='https://slack.com/help/articles/212281468-Understand-direct-messages'
 add_dm_url='https://slack.com/help/articles/1500002969782-Add-people-to-a-direct-message'
+convert_dm_url='https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel'
+close_dm_api_url='https://docs.slack.dev/reference/methods/conversations.close/'
 message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
 search_url='https://slack.com/help/articles/202528808-Search-in-Slack'
 file_url='https://slack.com/help/articles/201330736-Add-files-to-Slack'
@@ -63,6 +65,8 @@ fetch "$keyboard_url" "$work/keyboard.html"
 fetch "$keyboard_navigation_url" "$work/keyboard-navigation.html"
 fetch "$dm_url" "$work/dm.html"
 fetch "$add_dm_url" "$work/add-dm.html"
+fetch "$convert_dm_url" "$work/convert-dm.html"
+fetch "$close_dm_api_url" "$work/conversations-close.html"
 fetch "$message_url" "$work/messages.html"
 fetch "$search_url" "$work/search.html"
 fetch "$file_url" "$work/files.html"
@@ -101,8 +105,18 @@ assert_contains "$work/dm.html" 'up to nine people' \
 	'[DM-02] group DM participant limit' "$dm_url"
 assert_contains "$work/dm.html" 'give group DMs a name' \
 	'[DM-02] group DMs have a naming journey' "$dm_url"
+assert_contains "$work/dm.html" 'see a list of your direct messages' \
+	'[DM-01] DMs have a dedicated first-party surface' "$dm_url"
+assert_contains "$work/dm.html" 'search for a specific conversation' \
+	'[DM-01 DM-04] direct conversations remain searchable' "$dm_url"
 assert_contains "$work/add-dm.html" 'conversation history you choose to include is moved to a new group DM' \
 	'[DM-03] adding DM participants creates a new conversation with selected history' "$add_dm_url"
+assert_contains "$work/convert-dm.html" 'messages and files from the DM will be visible to any new members' \
+	'[DM-05] converting a group DM preserves its content for future members' "$convert_dm_url"
+assert_contains "$work/conversations-close.html" 'channel was already closed the response will include' \
+	'[DM-04] a repeated conversations.close is an explicit no-op' "$close_dm_api_url"
+assert_contains "$work/conversations-close.html" 'already_closed properties' \
+	'[DM-04] a repeated conversations.close reports already_closed' "$close_dm_api_url"
 assert_contains "$work/messages.html" 'automatically save as a draft' \
 	'[DRAFT-01] unfinished composer text is saved as a draft' "$message_url"
 assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent messages' \

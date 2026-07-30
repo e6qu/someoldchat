@@ -64,11 +64,12 @@ const (
 )
 
 type ConversationListRequest struct {
-	Limit           int
-	Cursor          Cursor
-	ExcludeArchived bool
-	Types           []ConversationType
-	MemberUserID    UserID
+	Limit                int
+	Cursor               Cursor
+	ExcludeArchived      bool
+	Types                []ConversationType
+	MemberUserID         UserID
+	IncludeClosedDirects bool
 }
 
 func NormalizeConversationTypes(values []string) ([]ConversationType, error) {

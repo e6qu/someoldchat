@@ -2802,6 +2802,38 @@ func TestConversationsOpenReusesDirectConversation(t *testing.T) {
 	if closed.Code != http.StatusOK || closed.Body.String() != "{\"ok\":true}\n" {
 		t.Fatalf("close status=%d body=%s", closed.Code, closed.Body)
 	}
+	alreadyClosedRequest := httptest.NewRequest(http.MethodPost, "/api/conversations.close", strings.NewReader("channel="+firstBody.Channel.ID))
+	alreadyClosedRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	alreadyClosedRequest.Header.Set("Authorization", "Bearer token")
+	alreadyClosed := httptest.NewRecorder()
+	handler.ServeHTTP(alreadyClosed, alreadyClosedRequest)
+	if alreadyClosed.Code != http.StatusOK || !strings.Contains(alreadyClosed.Body.String(), `"no_op":true`) || !strings.Contains(alreadyClosed.Body.String(), `"already_closed":true`) {
+		t.Fatalf("second close status=%d body=%s", alreadyClosed.Code, alreadyClosed.Body)
+	}
+	reopenRequest := httptest.NewRequest(http.MethodPost, "/api/conversations.open", strings.NewReader("users=U2"))
+	reopenRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	reopenRequest.Header.Set("Authorization", "Bearer token")
+	reopened := httptest.NewRecorder()
+	handler.ServeHTTP(reopened, reopenRequest)
+	var reopenedBody struct {
+		Channel struct {
+			ID string `json:"id"`
+		} `json:"channel"`
+	}
+	if err := json.Unmarshal(reopened.Body.Bytes(), &reopenedBody); err != nil {
+		t.Fatal(err)
+	}
+	if reopened.Code != http.StatusOK || reopenedBody.Channel.ID != firstBody.Channel.ID {
+		t.Fatalf("reopen status=%d id=%q body=%s", reopened.Code, reopenedBody.Channel.ID, reopened.Body)
+	}
+	directLeave := httptest.NewRequest(http.MethodPost, "/api/conversations.leave", strings.NewReader("channel="+firstBody.Channel.ID))
+	directLeave.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	directLeave.Header.Set("Authorization", "Bearer token")
+	directLeaveResult := httptest.NewRecorder()
+	handler.ServeHTTP(directLeaveResult, directLeave)
+	if directLeaveResult.Code != http.StatusOK || !strings.Contains(directLeaveResult.Body.String(), `"error":"method_not_supported_for_channel_type"`) {
+		t.Fatalf("direct leave status=%d body=%s", directLeaveResult.Code, directLeaveResult.Body)
+	}
 
 	publicClose := httptest.NewRequest(http.MethodPost, "/api/conversations.close", strings.NewReader("channel=C1"))
 	publicClose.Header.Set("Content-Type", "application/x-www-form-urlencoded")

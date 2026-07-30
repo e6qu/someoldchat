@@ -2686,10 +2686,19 @@ func (m Messages) OpenConversation(ctx context.Context, workspaceID domain.Works
 		members = append(members, candidate)
 	}
 	sort.Slice(members, func(left, right int) bool { return members[left] < members[right] })
-	if len(members) < 2 || len(members) > 8 {
+	// Slack's current product contract allows a DM to contain up to nine
+	// people total, including the caller.
+	if len(members) < 2 || len(members) > 9 {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
 	if existing, err := m.Store.FindDirectConversation(ctx, workspaceID, members); err == nil {
+		event, eventErr := newEvent(workspaceID, userID, events.NewPayload("conversation.direct_opened", events.String("channel_id", string(existing.ID))), time.Now().UTC())
+		if eventErr != nil {
+			return domain.Conversation{}, eventErr
+		}
+		if _, openErr := m.Store.SetDirectConversationOpen(ctx, workspaceID, userID, existing.ID, true, event); openErr != nil {
+			return domain.Conversation{}, openErr
+		}
 		return existing, nil
 	} else if !errors.Is(err, store.ErrNotFound) {
 		return domain.Conversation{}, err
@@ -2743,10 +2752,14 @@ func (m Messages) RenameConversation(ctx context.Context, workspaceID domain.Wor
 	if err != nil {
 		return domain.Conversation{}, err
 	}
-	if conversation.IsDirect || conversation.IsGroupDirect {
+	if conversation.IsDirect {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
-	name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
+	if conversation.IsGroupDirect {
+		name = strings.Join(strings.Fields(strings.TrimSpace(name)), " ")
+	} else {
+		name = strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(name)), "-"))
+	}
 	if name == "" || len(name) > 80 || strings.ContainsAny(name, "\r\n") {
 		return domain.Conversation{}, ErrInvalidConversation
 	}
@@ -3505,6 +3518,20 @@ func (m Messages) LeaveConversation(ctx context.Context, workspaceID domain.Work
 	}
 	if conversation.Archived {
 		return ErrInvalidConversation
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.direct_closed", events.String("channel_id", string(conversationID))), time.Now().UTC())
+		if err != nil {
+			return err
+		}
+		changed, err := m.Store.SetDirectConversationOpen(ctx, workspaceID, userID, conversationID, false, event)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return store.ErrAlreadyExists
+		}
+		return nil
 	}
 	if !conversation.IsDirect && !conversation.IsGroupDirect {
 		required, err := m.isDefaultConversation(ctx, workspaceID, conversationID)

@@ -37,6 +37,7 @@ message ConversationsRequest {
   repeated string types = 5;
   bool exclude_archived = 6;
   string member_user_id = 7;
+  bool include_closed_directs = 8;
 }
 
 service ConversationsService {

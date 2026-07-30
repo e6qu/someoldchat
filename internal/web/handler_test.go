@@ -2982,6 +2982,56 @@ func TestWebOpensNormalizedDirectConversation(t *testing.T) {
 	}
 }
 
+func TestDirectMessagesSurfaceCreatesNamesClosesAndReopensCanonicalGroup(t *testing.T) {
+	ctx := context.Background()
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol", RealName: "Carol Creator"})
+
+	page := get(t, mux, "/app/dms")
+	if page.Code != http.StatusOK {
+		t.Fatalf("DM surface status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "DM surface", page.Body.String(),
+		"Direct messages",
+		"up to nine people total",
+		`name="user_U2"`,
+		`name="user_U3"`,
+		"Group DM name (optional)",
+	)
+
+	opened := postForm(t, mux, "/app/conversation/open", "user_U2=1&user_U3=1&name=Design+launch&return=dms", false)
+	if opened.Code != http.StatusSeeOther {
+		t.Fatalf("open group status=%d body=%s", opened.Code, opened.Body)
+	}
+	group, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U1", "U2", "U3"})
+	if err != nil || group.Name != "Design launch" || !group.IsGroupDirect {
+		t.Fatalf("group=%+v err=%v", group, err)
+	}
+	recent := get(t, mux, "/app/dms")
+	requireContains(t, "recent group DM", recent.Body.String(), "Design launch", "Save name")
+
+	closed := postForm(t, mux, "/app/conversation/leave?channel="+string(group.ID), "", false)
+	if closed.Code != http.StatusSeeOther || closed.Header().Get("Location") != "/app/dms" {
+		t.Fatalf("close status=%d location=%q body=%s", closed.Code, closed.Header().Get("Location"), closed.Body)
+	}
+	if member, err := s.IsConversationMember(ctx, group.ID, "U1"); err != nil || !member {
+		t.Fatalf("close removed membership: member=%v err=%v", member, err)
+	}
+	requireMissing(t, "closed DM surface", get(t, mux, "/app/dms").Body.String(), `href="/app?channel=`+string(group.ID)+`"`)
+	search := get(t, mux, "/app/dms?q=Design")
+	requireContains(t, "closed DM search", search.Body.String(), "Open Design launch", `name="users" value="U2,U3"`)
+
+	reopened := postForm(t, mux, "/app/conversation/open", "user_U2=1&user_U3=1", false)
+	if reopened.Code != http.StatusSeeOther || !strings.Contains(reopened.Header().Get("Location"), "channel="+string(group.ID)) {
+		t.Fatalf("reopen status=%d location=%q body=%s", reopened.Code, reopened.Header().Get("Location"), reopened.Body)
+	}
+	same, err := s.FindDirectConversation(ctx, "T1", []domain.UserID{"U3", "U1", "U2"})
+	if err != nil || same.ID != group.ID {
+		t.Fatalf("reopen created a duplicate: same=%+v original=%+v err=%v", same, group, err)
+	}
+}
+
 // TestReadCursorFailureStillRendersTheConversation covers the defect where a
 // failure to persist unread bookkeeping made the channel unreadable.
 func TestReadCursorFailureStillRendersTheConversation(t *testing.T) {

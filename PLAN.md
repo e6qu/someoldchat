@@ -290,6 +290,20 @@ Later evidence. Durable staged draft attachments, sidebar draft indicators,
 Slack's suggested scheduling times, reminder dates/delivery, and Later reminder
 filtering remain part of the next stateful client review.
 
+The direct-message lifecycle now has a dedicated searchable DMs surface,
+multi-recipient composition up to Slack's nine-person total, optional and
+later group-DM naming, durable per-member close state, canonical reopen by
+exact participant set, and automatic reopen when a participant posts. Closing
+no longer abuses channel membership: history, files, drafts, read state, and
+other participants remain intact. The Slack HTTP boundary returns the
+documented `no_op` and `already_closed` fields on a repeated
+`conversations.close`, rejects `conversations.leave` and
+`conversations.rename` for IM/MPIM types, and is exercised by the pinned Node,
+Python, and Java SDK clients. DM-03 history-selecting add-people and DM-05
+atomic conversion to a private channel remain the next cohesive direct-message
+slice; this plan does not count the newly completed close/open work as evidence
+for those journeys.
+
 The reminder contract audit also corrected a false evidence claim. Current
 Slack Help puts personal reminder creation and management in Later and message
 actions; current `/remind` documentation covers channel reminders and a private
@@ -303,7 +317,7 @@ evidence.
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 101 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 31 Playwright scenarios cite 58 IDs. `make journey-check` rejects
+and 32 Playwright scenarios cite 61 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -320,9 +334,9 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 72 representative exact assertions
-explicitly citing 40 of the 101 journey IDs across every journey domain.
-`make journey-check` prints the other 61 as upstream-text evidence
+developer pages and currently checks 77 representative exact assertions
+explicitly citing 43 of the 101 journey IDs across every journey domain.
+`make journey-check` prints the other 58 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and

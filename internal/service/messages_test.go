@@ -1822,6 +1822,72 @@ func TestSentMessagesHidesPrivateHistoryAfterLeaving(t *testing.T) {
 	}
 }
 
+func TestDirectConversationCloseKeepsMembershipHistoryAndCanonicalReopen(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	for index := 1; index <= 10; index++ {
+		s.SeedUser(domain.User{ID: domain.UserID(fmt.Sprintf("U%d", index)), WorkspaceID: "T1"})
+	}
+	messages := Messages{Store: s}
+	direct, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted, err := messages.Post(ctx, "T1", "U1", direct.ID, "history survives close", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.LeaveConversation(ctx, "T1", "U1", direct.ID); err != nil {
+		t.Fatal(err)
+	}
+	if member, err := s.IsConversationMember(ctx, direct.ID, "U1"); err != nil || !member {
+		t.Fatalf("close removed membership: member=%v err=%v", member, err)
+	}
+	page, err := messages.Conversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range page.Conversations {
+		if conversation.ID == direct.ID {
+			t.Fatalf("closed DM remained in current navigation: %+v", page)
+		}
+	}
+	history, err := messages.History(ctx, "T1", "U1", direct.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].ID != posted.ID {
+		t.Fatalf("closed history=%+v err=%v", history, err)
+	}
+	if err := messages.LeaveConversation(ctx, "T1", "U1", direct.ID); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("second close error=%v, want already closed", err)
+	}
+	reopened, err := messages.OpenConversation(ctx, "T1", "U1", []domain.UserID{"U2"})
+	if err != nil || reopened.ID != direct.ID {
+		t.Fatalf("reopened=%+v err=%v, want %s", reopened, err, direct.ID)
+	}
+	page, err = messages.Conversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].ID != direct.ID {
+		t.Fatalf("reopened navigation=%+v err=%v", page, err)
+	}
+	if err := messages.LeaveConversation(ctx, "T1", "U1", direct.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.Post(ctx, "T1", "U2", direct.ID, "participant reopens it", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	page, err = messages.Conversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil || len(page.Conversations) != 1 || page.Conversations[0].ID != direct.ID {
+		t.Fatalf("participant message did not reopen navigation: page=%+v err=%v", page, err)
+	}
+
+	eightOthers := []domain.UserID{"U2", "U3", "U4", "U5", "U6", "U7", "U8", "U9"}
+	if _, err := messages.OpenConversation(ctx, "T1", "U1", eightOthers); err != nil {
+		t.Fatalf("nine-person DM rejected: %v", err)
+	}
+	if _, err := messages.OpenConversation(ctx, "T1", "U1", append(eightOthers, "U10")); !errors.Is(err, ErrInvalidConversation) {
+		t.Fatalf("ten-person DM error=%v, want invalid conversation", err)
+	}
+}
+
 func TestScheduledMessageOwnerCanCancelAfterLeavingPrivateConversation(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()

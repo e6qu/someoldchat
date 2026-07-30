@@ -2167,7 +2167,7 @@ func (r Remote) TeamBillableInfo(ctx context.Context, workspaceID domain.Workspa
 }
 
 func (r Remote) Conversations(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.ConversationListRequest) (domain.ConversationPage, error) {
-	in := &chatv1.ConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Types: conversationTypeStrings(request.Types), ExcludeArchived: request.ExcludeArchived, MemberUserId: string(request.MemberUserID)}
+	in := &chatv1.ConversationsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Types: conversationTypeStrings(request.Types), ExcludeArchived: request.ExcludeArchived, MemberUserId: string(request.MemberUserID), IncludeClosedDirects: request.IncludeClosedDirects}
 	out, err := r.conversations.Conversations(ctx, in)
 	if err != nil {
 		return domain.ConversationPage{}, err
@@ -5827,7 +5827,7 @@ func protoConversationListRequest(input *chatv1.ConversationsRequest) (domain.Co
 	if err != nil {
 		return domain.ConversationListRequest{}, err
 	}
-	return domain.ConversationListRequest{Limit: page.Limit, Cursor: page.Cursor, ExcludeArchived: input.GetExcludeArchived(), Types: types, MemberUserID: domain.UserID(strings.TrimSpace(input.GetMemberUserId()))}, nil
+	return domain.ConversationListRequest{Limit: page.Limit, Cursor: page.Cursor, ExcludeArchived: input.GetExcludeArchived(), Types: types, MemberUserID: domain.UserID(strings.TrimSpace(input.GetMemberUserId())), IncludeClosedDirects: input.GetIncludeClosedDirects()}, nil
 }
 
 func (s *Server) openConversationProto(ctx context.Context, input *chatv1.OpenConversationRequest) (*chatv1.Conversation, error) {

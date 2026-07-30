@@ -229,10 +229,13 @@ type reactionView struct {
 }
 
 type conversationView struct {
-	ID          string
-	Name        string
-	Current     bool
-	UnreadCount int
+	ID            string
+	Name          string
+	Current       bool
+	UnreadCount   int
+	IsGroupDirect bool
+	RecentAt      time.Time
+	OpenUsers     string
 }
 
 type conversationDetailsView struct {
@@ -332,6 +335,15 @@ type membersData struct {
 	CanEditProfile bool
 	CanMessage     bool
 	MoreMembersURL string
+}
+
+type directMessagesData struct {
+	Query      string
+	Recent     []conversationView
+	Members    []memberView
+	CSRFToken  string
+	Error      string
+	CanMessage bool
 }
 
 type searchData struct {
@@ -1068,6 +1080,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         <a class="side-link" href="/app/notifications?channel={{.Channel}}" aria-label="Notification preferences"><span class="side-icon" aria-hidden="true">◌</span><span class="side-text">Notifications</span></a>
         <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}"><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
         {{if .CanSchedule}}<a class="side-link" href="/app/drafts?channel={{.Channel}}" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
+        <a class="side-link" href="/app/dms" aria-label="Direct messages"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
         <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
@@ -1426,6 +1439,32 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 {{end}}`
 
 var membersTemplate = mustPage(membersMarkup)
+
+const directMessagesMarkup = `{{define "title"}}Direct messages · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar .theme-toggle{margin-left:auto}
+.layout{width:min(920px,calc(100% - 32px));margin:28px auto 52px}.heading{display:flex;justify-content:space-between;gap:18px;align-items:end;border-bottom:1px solid var(--line);padding-bottom:18px}.heading h1{margin:0 0 4px;font-size:28px}.muted{color:var(--muted)}
+.search{display:flex;gap:8px;margin:20px 0}.search input{flex:1;min-width:0;padding:10px 12px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:1px solid var(--field-line);border-radius:7px;background:var(--panel-strong);color:var(--text);padding:9px 13px;font-weight:800}
+.panel{margin-top:22px;padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.panel h2{margin:0 0 6px}.recent,.people{display:grid;gap:8px;margin:14px 0 0;padding:0;list-style:none}.recent-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:11px;border:1px solid var(--line);border-radius:8px}.recent-row>a{color:var(--text);font-weight:800;text-decoration:none}.rename{display:flex;gap:6px}.rename input,.group-name{min-width:0;padding:7px 9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}
+.person-choice{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:8px}.person-choice strong{display:block}.compose-actions{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;margin-top:14px}.primary{border:0;background:var(--action);color:var(--on-strong)}.error{color:var(--danger);font-weight:700}
+@media(max-width:620px){.layout{width:min(100% - 20px,920px);margin-top:18px}.heading{display:block}.recent-row,.compose-actions{grid-template-columns:minmax(0,1fr)}.rename{display:grid}.search{align-items:stretch}}
+</style>{{end}}
+{{define "content"}}
+<header class="bar"><a href="/app">← Back to chat</a><span>Direct messages</span><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+<main class="layout">
+  <div class="heading"><div><h1>Direct messages</h1><p class="muted">Find a conversation or start a DM with up to nine people total.</p></div></div>
+  <form class="search" method="get" action="/app/dms"><label class="visually-hidden" for="dm-search">Search direct messages and people</label><input id="dm-search" type="search" name="q" value="{{.Query}}" placeholder="Search direct messages and people"><button type="submit">Search</button></form>
+  {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+  <section class="panel" aria-labelledby="recent-dms"><h2 id="recent-dms">Recent</h2><p class="muted">Closing a DM removes it from this list without deleting its history.</p>
+    <ul class="recent">{{range .Recent}}<li class="recent-row">{{if $.Query}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="users" value="{{.OpenUsers}}"><button type="submit">Open {{.Name}}{{if .UnreadCount}} ({{.UnreadCount}} unread){{end}}</button></form>{{else}}<a href="/app?channel={{.ID}}">@ {{.Name}}{{if .UnreadCount}} <span aria-label="{{.UnreadCount}} unread">({{.UnreadCount}})</span>{{end}}</a>{{end}}{{if .IsGroupDirect}}<form class="rename" method="post" action="/app/conversation/rename?channel={{.ID}}&return=dms"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><label class="visually-hidden" for="name-{{.ID}}">Group DM name</label><input id="name-{{.ID}}" name="name" maxlength="80" value="{{.Name}}" required><button type="submit">Save name</button></form>{{end}}</li>{{else}}<li class="muted">No recent DMs. Start one below.</li>{{end}}</ul>
+  </section>
+  <section class="panel" aria-labelledby="new-dm"><h2 id="new-dm">New message</h2><p class="muted">Select one person for a one-to-one DM, or several people for a group DM.</p>
+    {{if .CanMessage}}<form method="post" action="/app/conversation/open"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="return" value="dms"><div class="people">{{range .Members}}<label class="person-choice"><input type="checkbox" name="user_{{.ID}}" value="1"><span><strong>{{.Name}}</strong>{{if and .RealName (ne .RealName .Name)}}<span class="muted">{{.RealName}}</span>{{end}}</span></label>{{else}}<p class="muted">No matching active members.</p>{{end}}</div><div class="compose-actions"><label>Group DM name (optional)<input class="group-name" name="name" maxlength="80" placeholder="Design launch"></label><button class="primary" type="submit">Start conversation</button></div></form>{{else}}<p class="muted">Your current permissions do not allow starting direct messages.</p>{{end}}
+  </section>
+</main>
+{{end}}`
+
+var directMessagesTemplate = mustPage(directMessagesMarkup)
 
 const oauthConsentMarkup = `{{define "title"}}Authorize {{.AppName}} · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -2244,6 +2283,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/drafts", h.draftsAndSent)
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
+	mux.HandleFunc("GET /app/dms", h.directMessages)
 	mux.HandleFunc("GET /app/members", h.members)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
@@ -3307,7 +3347,7 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 		if conversation.ID == channel {
 			view.CurrentUnread = conversation.UnreadCount
 		}
-		item := conversationView{ID: string(conversation.ID), Name: conversationName(conversation), Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount}
+		item := conversationView{ID: string(conversation.ID), Name: conversationName(conversation), Current: conversation.ID == channel, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.IsGroupDirect}
 		if item.Current && atLatest {
 			// The page just rendered every message in this conversation; showing
 			// its own unread badge tells the reader to read what they are reading.
@@ -3317,7 +3357,7 @@ func (h Handler) sidebar(ctx context.Context, principal auth.Principal, channel 
 			view.Channels = append(view.Channels, item)
 			continue
 		}
-		if resolved < directNameWindow {
+		if resolved < directNameWindow && (!conversation.IsGroupDirect || conversation.Name == "" || conversation.Name == "direct") {
 			resolved++
 			if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
 				item.Name = participants
@@ -3436,8 +3476,10 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 		}
 	case conversation.IsGroupDirect:
 		conversationType = "Group direct message"
-		if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
-			name = participants
+		if conversation.Name == "" || conversation.Name == "direct" {
+			if participants := h.participantNames(ctx, principal, conversation.ID); participants != "" {
+				name = participants
+			}
 		}
 	case conversation.IsPrivate:
 		conversationType = "Private channel"
@@ -4395,6 +4437,89 @@ func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.renderMembers(w, r, principal, nil, "", http.StatusOK)
+}
+
+func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	foldedQuery := domain.FoldSearchText(query)
+	users, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 100})
+	if err != nil {
+		h.writeStoreError(w, err, "Direct messages are temporarily unavailable.")
+		return
+	}
+	members := make([]memberView, 0, len(users.Users))
+	for _, user := range users.Users {
+		if user.Deleted || user.ID == principal.UserID {
+			continue
+		}
+		name := displayName(user)
+		if foldedQuery != "" && !strings.Contains(domain.FoldSearchText(name+" "+user.RealName+" "+user.Email), foldedQuery) {
+			continue
+		}
+		members = append(members, memberView{ID: string(user.ID), Name: name, RealName: user.RealName, AuthorInitial: initial(name)})
+	}
+	sort.Slice(members, func(i, j int) bool { return members[i].Name < members[j].Name })
+
+	recentPage, err := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
+		Limit:                100,
+		Types:                []domain.ConversationType{domain.ConversationTypeIM, domain.ConversationTypeMPIM},
+		IncludeClosedDirects: foldedQuery != "",
+	})
+	if err != nil {
+		h.writeStoreError(w, err, "Recent direct messages are temporarily unavailable.")
+		return
+	}
+	recent := make([]conversationView, 0, len(recentPage.Conversations))
+	for _, conversation := range recentPage.Conversations {
+		name := conversation.Name
+		memberPage, memberErr := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 10})
+		if memberErr != nil {
+			continue
+		}
+		names := make([]string, 0, len(memberPage.Users))
+		ids := make([]string, 0, len(memberPage.Users))
+		for _, user := range memberPage.Users {
+			if user.ID == principal.UserID {
+				continue
+			}
+			names = append(names, displayName(user))
+			ids = append(ids, string(user.ID))
+		}
+		sort.Strings(names)
+		sort.Strings(ids)
+		if name == "" || name == "direct" {
+			name = strings.Join(names, ", ")
+		}
+		if foldedQuery != "" && !strings.Contains(domain.FoldSearchText(name), foldedQuery) {
+			continue
+		}
+		item := conversationView{ID: string(conversation.ID), Name: name, UnreadCount: conversation.UnreadCount, IsGroupDirect: conversation.IsGroupDirect, OpenUsers: strings.Join(ids, ",")}
+		if history, historyErr := h.Messages.History(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: 1, Descending: true}); historyErr == nil && len(history.Messages) == 1 {
+			item.RecentAt = history.Messages[0].CreatedAt
+		}
+		recent = append(recent, item)
+	}
+	sort.Slice(recent, func(i, j int) bool {
+		if !recent[i].RecentAt.Equal(recent[j].RecentAt) {
+			return recent[i].RecentAt.After(recent[j].RecentAt)
+		}
+		return recent[i].Name < recent[j].Name
+	})
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	h.writeHTML(w, directMessagesTemplate, directMessagesData{
+		Query: query, Recent: recent, Members: members,
+		CSRFToken:  auth.CSRFToken(sessionCookie.Value),
+		CanMessage: principal.HasScope(auth.ScopeChannelsManage),
+	}, http.StatusOK, "direct message rendering unavailable")
 }
 
 func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal auth.Principal, submitted *domain.UserProfile, message string, status int) {
@@ -6005,7 +6130,18 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	users, err := normalizeUserIDs(fields["users"])
+	rawUsers := strings.TrimSpace(fields["users"])
+	if rawUsers == "" {
+		selected := make([]string, 0)
+		for field, value := range fields {
+			if strings.HasPrefix(field, "user_") && value == "1" {
+				selected = append(selected, strings.TrimPrefix(field, "user_"))
+			}
+		}
+		sort.Strings(selected)
+		rawUsers = strings.Join(selected, ",")
+	}
+	users, err := normalizeUserIDs(rawUsers)
 	if err != nil {
 		h.writeMutationError(w, r, http.StatusBadRequest, "That conversation has no members", "A direct conversation needs at least one member. Nothing was changed.")
 		return
@@ -6026,6 +6162,13 @@ func (h Handler) openConversation(w http.ResponseWriter, r *http.Request) {
 		}
 		h.writeMutationError(w, r, status, heading, reason)
 		return
+	}
+	if name := strings.TrimSpace(fields["name"]); name != "" && conversation.IsGroupDirect {
+		conversation, err = h.Messages.RenameConversation(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, name)
+		if err != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "The group DM was opened but could not be named", "Use a name between one and 80 characters. You can name it from Direct messages.")
+			return
+		}
 	}
 	h.redirectMutation(w, r, appURL(string(conversation.ID), "", "", "", ""))
 }
@@ -6116,6 +6259,10 @@ func (h Handler) renameConversation(w http.ResponseWriter, r *http.Request) {
 		default:
 			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The channel was not renamed", "The workspace store is temporarily unavailable. Nothing was changed.")
 		}
+		return
+	}
+	if r.URL.Query().Get("return") == "dms" {
+		h.redirectMutation(w, r, "/app/dms")
 		return
 	}
 	h.redirectMutation(w, r, conversationDetailsURL(channel))
@@ -6272,8 +6419,15 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	channel := h.requestChannel(r)
+	conversation, infoErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if infoErr != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "That conversation is no longer available", "Nothing was changed.")
+		return
+	}
 	if err := h.Messages.LeaveConversation(r.Context(), principal.WorkspaceID, principal.UserID, channel); err != nil {
 		switch {
+		case errors.Is(err, store.ErrAlreadyExists) && (conversation.IsDirect || conversation.IsGroupDirect):
+			h.redirectMutation(w, r, "/app/dms")
 		case errors.Is(err, service.ErrNotInConversation):
 			h.writeMutationError(w, r, http.StatusConflict, "You have already left this conversation", "No membership was changed.")
 		case errors.Is(err, service.ErrInvalidConversation), errors.Is(err, service.ErrCannotLeaveDefault):
@@ -6283,6 +6437,10 @@ func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
 		default:
 			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The conversation was not left", "The workspace store is temporarily unavailable. Your membership was not changed.")
 		}
+		return
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		h.redirectMutation(w, r, "/app/dms")
 		return
 	}
 	h.redirectMutation(w, r, appURL(string(channel), "", "", "", ""))

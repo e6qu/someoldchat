@@ -166,6 +166,12 @@ CREATE TABLE IF NOT EXISTS conversation_members (
  user_id TEXT NOT NULL REFERENCES users(id),
  PRIMARY KEY (conversation_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS closed_direct_conversations (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ conversation_id TEXT NOT NULL REFERENCES conversations(id), closed_at TEXT NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, conversation_id)
+);
+CREATE INDEX IF NOT EXISTS closed_direct_conversations_conversation ON closed_direct_conversations(conversation_id, user_id);
 CREATE TABLE IF NOT EXISTS messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
 	conversation TEXT NOT NULL REFERENCES conversations(id), author_id TEXT NOT NULL REFERENCES users(id),
@@ -382,7 +388,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 109
+const schemaVersion = 110
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2355,6 +2361,18 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index drafts: %w", err)
 		}
 	}
+	if version < 110 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS closed_direct_conversations (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			conversation_id TEXT NOT NULL REFERENCES conversations(id), closed_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, user_id, conversation_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate closed direct conversations: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS closed_direct_conversations_conversation ON closed_direct_conversations(conversation_id, user_id)`); err != nil {
+			return fmt.Errorf("index closed direct conversations: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -3741,6 +3759,50 @@ func (s *Store) CreateDirectConversation(ctx context.Context, conversation domai
 	return tx.Commit()
 }
 
+func (s *Store) SetDirectConversationOpen(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, open bool, event events.Event) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var direct, groupDirect int
+	if err := tx.QueryRowContext(ctx, `SELECT c.is_direct, c.is_group_direct
+		FROM conversations c
+		JOIN conversation_members m ON m.conversation_id = c.id AND m.user_id = ?
+		WHERE c.id = ? AND c.workspace_id = ?`, user, conversation, workspace).Scan(&direct, &groupDirect); errors.Is(err, sql.ErrNoRows) {
+		return false, store.ErrNotFound
+	} else if err != nil {
+		return false, err
+	}
+	if direct == 0 && groupDirect == 0 {
+		return false, store.ErrNotFound
+	}
+	var result sql.Result
+	if open {
+		result, err = tx.ExecContext(ctx, `DELETE FROM closed_direct_conversations WHERE workspace_id = ? AND user_id = ? AND conversation_id = ?`, workspace, user, conversation)
+	} else {
+		result, err = tx.ExecContext(ctx, `INSERT INTO closed_direct_conversations(workspace_id, user_id, conversation_id, closed_at)
+			VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO NOTHING`, workspace, user, conversation, domain.NewStoredTime(time.Now()))
+	}
+	if err != nil {
+		return false, classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if err := insertOutboxForConversation(ctx, tx, event, conversation); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *Store) CreateConversation(ctx context.Context, conversation domain.Conversation, creator domain.UserID, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -3928,6 +3990,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM conversation_prefs WHERE conversation_id = ?`,
 		`DELETE FROM read_cursors WHERE conversation_id = ?`,
 		`DELETE FROM drafts WHERE conversation_id = ?`,
+		`DELETE FROM closed_direct_conversations WHERE conversation_id = ?`,
 		`DELETE FROM scheduled_messages WHERE channel_id = ?`,
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
@@ -6685,6 +6748,10 @@ func (s *Store) ListConversations(ctx context.Context, workspace domain.Workspac
 	}
 	query := `SELECT c.id, c.workspace_id, c.name, c.topic, c.purpose, c.archived, c.is_private, c.is_direct, c.is_group_direct FROM conversations c WHERE c.workspace_id = ? AND ((c.is_private = 0 AND c.is_direct = 0 AND c.is_group_direct = 0) OR (EXISTS (SELECT 1 FROM conversation_members subject_member WHERE subject_member.conversation_id = c.id AND subject_member.user_id = ?) AND EXISTS (SELECT 1 FROM conversation_members viewer_member WHERE viewer_member.conversation_id = c.id AND viewer_member.user_id = ?)))`
 	args := []any{workspace, memberUser, user}
+	if !request.IncludeClosedDirects {
+		query += ` AND ((c.is_direct = 0 AND c.is_group_direct = 0) OR NOT EXISTS (SELECT 1 FROM closed_direct_conversations closed WHERE closed.workspace_id = c.workspace_id AND closed.user_id = ? AND closed.conversation_id = c.id))`
+		args = append(args, user)
+	}
 	if request.ExcludeArchived {
 		query += ` AND c.archived = 0`
 	}
@@ -6906,6 +6973,9 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 		}
 		return classified
 	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM closed_direct_conversations WHERE conversation_id = ?`, message.Conversation); err != nil {
+		return err
+	}
 	if err := insertMessageFiles(ctx, tx, message); err != nil {
 		return err
 	}
@@ -6984,6 +7054,9 @@ func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Mess
 	if _, err := tx.ExecContext(ctx, `INSERT INTO messages (id, workspace_id, conversation, author_id, app_id, text, blocks, attachments, metadata, stream_state, thread_timestamp, created_at, deleted, unfurls, text_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 		message.ID, message.WorkspaceID, message.Conversation, message.AuthorID, message.AppID, message.Text, blocks, attachments, message.Metadata, message.StreamState, message.ThreadTimestamp, stored, unfurls, domain.FoldSearchText(message.Text)); err != nil {
 		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM closed_direct_conversations WHERE conversation_id = ?`, message.Conversation); err != nil {
+		return err
 	}
 	if err := insertMessageFiles(ctx, tx, message); err != nil {
 		return err

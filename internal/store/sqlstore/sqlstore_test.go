@@ -1133,6 +1133,40 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if err != nil || found.ID != "D1" || !found.IsDirect {
 		t.Fatalf("found direct=%+v err=%v", found, err)
 	}
+	closedEvent := events.Event{ID: "evt_direct_closed", WorkspaceID: "T1", Topic: "conversation.direct_closed", Payload: "D1", CreatedAt: time.Now().UTC()}
+	changed, err := s.SetDirectConversationOpen(context.Background(), "T1", "U1", "D1", false, closedEvent)
+	if err != nil || !changed {
+		t.Fatalf("close direct changed=%v err=%v", changed, err)
+	}
+	conversations, err = s.ListConversations(context.Background(), "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, conversation := range conversations.Conversations {
+		if conversation.ID == "D1" {
+			t.Fatalf("closed direct remained in navigation: %+v", conversations)
+		}
+	}
+	changed, err = s.SetDirectConversationOpen(context.Background(), "T1", "U1", "D1", false, closedEvent)
+	if err != nil || changed {
+		t.Fatalf("second close changed=%v err=%v", changed, err)
+	}
+	openedEvent := events.Event{ID: "evt_direct_opened", WorkspaceID: "T1", Topic: "conversation.direct_opened", Payload: "D1", CreatedAt: time.Now().UTC()}
+	changed, err = s.SetDirectConversationOpen(context.Background(), "T1", "U1", "D1", true, openedEvent)
+	if err != nil || !changed {
+		t.Fatalf("reopen direct changed=%v err=%v", changed, err)
+	}
+	conversations, err = s.ListConversations(context.Background(), "T1", "U1", domain.ConversationListRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundOpen := false
+	for _, conversation := range conversations.Conversations {
+		foundOpen = foundOpen || conversation.ID == "D1"
+	}
+	if !foundOpen {
+		t.Fatalf("reopened direct missing from navigation: %+v", conversations)
+	}
 	var plaintextCount int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM tokens WHERE token_hash = 'secret-token'`).Scan(&plaintextCount); err != nil {
 		t.Fatal(err)

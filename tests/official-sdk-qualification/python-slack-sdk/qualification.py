@@ -724,6 +724,13 @@ direct = client.conversations_open(users="U2")
 assert direct["ok"] is True
 closed = client.conversations_close(channel=direct["channel"]["id"])
 assert closed["ok"] is True
+already_closed = client.conversations_close(channel=direct["channel"]["id"])
+assert already_closed["ok"] is True
+assert already_closed["no_op"] is True
+assert already_closed["already_closed"] is True
+reopened_direct = client.conversations_open(users="U2")
+assert reopened_direct["ok"] is True
+assert reopened_direct["channel"]["id"] == direct["channel"]["id"]
 marked = client.conversations_mark(channel="C1", ts=root["ts"])
 assert marked["ok"] is True
 
