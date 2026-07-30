@@ -3197,6 +3197,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/developer/apps/datastore", h.developerDatastore)
 	mux.HandleFunc("POST /app/developer/apps/datastore/put", h.putDeveloperDatastoreItem)
 	mux.HandleFunc("POST /app/developer/apps/datastore/delete", h.deleteDeveloperDatastoreItem)
+	mux.HandleFunc("GET /app/developer/apps/delivery", h.developerAppDelivery)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/presence", h.setPresence)
 	mux.HandleFunc("POST /app/status/schedule", h.scheduleStatus)

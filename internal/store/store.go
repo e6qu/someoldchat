@@ -449,6 +449,7 @@ type Store interface {
 	ClaimAppEvent(context.Context, domain.AppID, string, string, time.Duration) (events.Record, int, string, bool, error)
 	AckAppEvent(context.Context, domain.AppID, string, string, uint64) error
 	ReleaseAppEvent(context.Context, domain.AppID, string, string, uint64, string, time.Time) error
+	GetAppEventCursor(context.Context, domain.AppID, string) (domain.AppEventCursor, error)
 	ClaimEvents(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]events.Record, error)
 	ClaimEventsForTopic(context.Context, domain.WorkspaceID, string, string, int, time.Duration) ([]events.Record, error)
 	RenewEvents(context.Context, string, []uint64, time.Duration) error

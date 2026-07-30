@@ -12,6 +12,7 @@ import (
 
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -169,4 +170,49 @@ func TestDeveloperDatastoreConsoleUsesHostedAppPersistenceAndSlackQuerySemantics
 	}
 	empty := get(t, mux, deleted.Header().Get("Location"))
 	requireContains(t, "deleted item", empty.Body.String(), "Item deleted", "No items matched this page", "0 matching items")
+}
+
+func TestDeveloperAppDeliveryHealthShowsDurableRetryWithoutExposingPayload(t *testing.T) {
+	repository, mux := browserWorkspace(t, auth.AllScopes())
+	ctx := context.Background()
+	now := time.Now().UTC()
+	manifest := `{"display_information":{"name":"Event receiver"},"settings":{"socket_mode_enabled":true,"event_subscriptions":{"bot_events":["message.channels"]}}}`
+	if err := repository.CreateApp(ctx, domain.App{
+		ID: "Aevents", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Event receiver", ClientID: "events-client",
+		SigningSecretHash: "signing-hash", SigningSecretCiphertext: "ciphertext",
+		VerificationTokenHash: "verification-hash", VerificationTokenCiphertext: "ciphertext",
+		ManifestVersion: 1, Distribution: "private", SocketModeEnabled: true, CreatedAt: now, UpdatedAt: now,
+	}, domain.AppManifestRevision{
+		AppID: "Aevents", Version: 1, Manifest: manifest, CreatedBy: "U1", CreatedAt: now,
+	}, domain.OAuthClient{ID: "events-client", SecretHash: "client-hash", AppID: "Aevents"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "Aevents", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	const privatePayload = `{"secret":"must-not-render"}`
+	if err := repository.AppendEvent(ctx, events.Event{
+		ID: "Edelivery", WorkspaceID: "T1", ActorID: "U1", Topic: "message.created", Payload: privatePayload, CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "Aevents", "socket", "test-worker", time.Minute)
+	if err != nil || !found {
+		t.Fatalf("claim=%+v found=%v err=%v", claimed, found, err)
+	}
+	if err := repository.ReleaseAppEvent(ctx, "Aevents", "socket", "test-worker", claimed.Sequence, "connection_closed", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	appPage := get(t, mux, "/app/developer/apps?app=Aevents")
+	requireContains(t, "delivery link", appPage.Body.String(), "View event delivery health", "/app/developer/apps/delivery?app=Aevents")
+	page := get(t, mux, "/app/developer/apps/delivery?app=Aevents")
+	if page.Code != http.StatusOK {
+		t.Fatalf("delivery status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "durable retry", page.Body.String(),
+		"Event delivery health", "Retry scheduled", "Socket Mode", "connection_closed",
+		"Next journal record awaiting evaluation", "message.created",
+	)
+	requireMissing(t, "delivery payload redaction", page.Body.String(), privatePayload, "must-not-render", "test-worker")
 }

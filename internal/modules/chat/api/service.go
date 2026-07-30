@@ -34,6 +34,7 @@ type Service interface {
 	AppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
 	OpenAppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
 	GetDeveloperApp(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.App, string, error)
+	GetDeveloperAppDeliveryHealth(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.AppDeliveryHealth, error)
 	IssueDeveloperAppToken(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, []string) (domain.AppTokenCredentials, error)
 	InspectOAuthAuthorization(context.Context, domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error)
 	AuthorizeOAuth(context.Context, domain.OAuthAuthorizationRequest) (domain.OAuthAuthorization, error)

@@ -58,6 +58,7 @@ type developerAppsData struct {
 	StarterManifest string
 	InstallURL      string
 	DatastoreURL    string
+	DeliveryURL     string
 }
 
 const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{end}}
@@ -96,7 +97,7 @@ const developerAppsMarkup = `{{define "title"}}Developer apps · SameOldChat{{en
       <form method="post" action="{{if .Selected}}/app/developer/apps/update{{else}}/app/developer/apps/create{{end}}">
         <input type="hidden" name="_csrf" value="{{.CSRFToken}}">{{if .Selected}}<input type="hidden" name="app_id" value="{{.Selected.ID}}">{{end}}
         <label class="field" for="manifest">App manifest (JSON)<textarea id="manifest" name="manifest" maxlength="1048576" spellcheck="false" required>{{.Manifest}}</textarea></label>
-        <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}{{if .DatastoreURL}}<a href="{{.DatastoreURL}}">Manage hosted datastores</a>{{end}}</div>
+        <div class="actions"><button class="button" type="submit">{{if .Selected}}Save manifest{{else}}Create app{{end}}</button>{{if .InstallURL}}<a href="{{.InstallURL}}">Open install flow</a>{{end}}{{if .DatastoreURL}}<a href="{{.DatastoreURL}}">Manage hosted datastores</a>{{end}}{{if .DeliveryURL}}<a href="{{.DeliveryURL}}">View event delivery health</a>{{end}}</div>
       </form>
       {{if .Selected}}<hr>{{if .Selected.SocketModeEnabled}}<form method="post" action="/app/developer/apps/app-token"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button secondary" type="submit">Generate app-level token</button></form>{{end}}<form method="post" action="/app/developer/apps/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="app_id" value="{{.Selected.ID}}"><button class="button danger" type="submit">Delete app</button></form>{{end}}
     </section>
@@ -303,6 +304,7 @@ func (h Handler) renderDeveloperApps(w http.ResponseWriter, r *http.Request, pri
 }
 
 func setDeveloperAppLinks(data *developerAppsData, app domain.App, manifest string) {
+	data.DeliveryURL = "/app/developer/apps/delivery?app=" + url.QueryEscape(string(app.ID))
 	parsed, problems := appmanifest.Parse(manifest)
 	if len(problems) != 0 {
 		return

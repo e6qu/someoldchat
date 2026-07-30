@@ -1587,6 +1587,10 @@ func parityCases() []parityCase {
 				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
 					return nil, err
 				}
+				health, err := chat.GetDeveloperAppDeliveryHealth(ctx, "T1", "U1", "A1")
+				if err != nil {
+					return nil, err
+				}
 				second, secondAttempt, secondReason, found, err := chat.ClaimAppEvent(ctx, "A1", "socket", "connection-2", time.Minute)
 				if err != nil {
 					return nil, err
@@ -1599,7 +1603,11 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					first.Sequence, first.Event.ID, first.Event.WorkspaceID, first.Event.ActorID, first.Event.Topic, first.Event.Payload,
-					firstAttempt, firstReason, second.Sequence, secondAttempt, secondReason,
+					firstAttempt, firstReason,
+					health.AppID, health.Surface, health.Endpoint, health.Configured, health.Installed,
+					health.AcknowledgedSequence, health.InFlightSequence, health.RetryCount, health.RetryReason,
+					health.PendingEvaluation, health.NextEventTopic, health.NextEventAt,
+					second.Sequence, secondAttempt, secondReason,
 				}, nil
 			},
 		},

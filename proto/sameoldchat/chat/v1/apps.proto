@@ -95,6 +95,23 @@ message AppTokenCredentials {
   repeated string scopes = 3;
 }
 
+message AppDeliveryHealth {
+  string app_id = 1;
+  string surface = 2;
+  string endpoint = 3;
+  bool configured = 4;
+  bool installed = 5;
+  uint64 acknowledged_sequence = 6;
+  uint64 in_flight_sequence = 7;
+  string in_flight_until = 8;
+  string retry_at = 9;
+  int32 retry_count = 10;
+  string retry_reason = 11;
+  bool pending_evaluation = 12;
+  string next_event_topic = 13;
+  string next_event_at = 14;
+}
+
 message AppListResponse {
   repeated DeveloperApp apps = 1;
 }
@@ -186,6 +203,7 @@ service AppsService {
   rpc CountAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc DeleteAppDatastoreItems(AppDatastoreRequest) returns (AppMutationResponse);
   rpc GetDeveloperApp(AppGetRequest) returns (AppExportResponse);
+  rpc GetDeveloperAppDeliveryHealth(AppGetRequest) returns (AppDeliveryHealth);
   rpc IssueDeveloperAppToken(AppTokenIssueRequest) returns (AppTokenCredentials);
   rpc InspectOAuthAuthorization(OAuthAuthorizationRequest) returns (OAuthAuthorization);
   rpc AuthorizeOAuth(OAuthAuthorizationRequest) returns (OAuthAuthorization);

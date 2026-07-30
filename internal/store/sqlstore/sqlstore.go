@@ -12217,6 +12217,26 @@ func (s *Store) ReleaseAppEvent(ctx context.Context, appID domain.AppID, surface
 	return s.appEventLeaseError(ctx, appID, surface, owner, sequence, now)
 }
 
+func (s *Store) GetAppEventCursor(ctx context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
+	if appID == "" || !validAppEventSurface(surface) {
+		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
+	}
+	value := domain.AppEventCursor{AppID: appID, Surface: surface}
+	var inFlightUntil, retryAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT sequence, leased_sequence, lease_until, retry_at, retry_count, retry_reason FROM app_event_cursors WHERE app_id = ? AND surface = ?`, appID, surface).
+		Scan(&value.AcknowledgedSequence, &value.InFlightSequence, &inFlightUntil, &retryAt, &value.RetryCount, &value.RetryReason)
+	if err := translateNotFound(err); err != nil {
+		return domain.AppEventCursor{}, err
+	}
+	if inFlightUntil > 0 {
+		value.InFlightUntil = time.Unix(0, inFlightUntil).UTC()
+	}
+	if retryAt > 0 {
+		value.RetryAt = time.Unix(0, retryAt).UTC()
+	}
+	return value, nil
+}
+
 func (s *Store) appEventLeaseError(ctx context.Context, appID domain.AppID, surface, owner string, sequence uint64, now int64) error {
 	var leasedSequence uint64
 	var leaseOwner string

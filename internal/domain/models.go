@@ -1310,6 +1310,41 @@ type AppInstallation struct {
 	CreatedAt   time.Time
 }
 
+// AppEventCursor is the durable delivery position for one app transport. It is
+// intentionally payload-free: administration can explain queue progress and
+// retry state without exposing event bodies from installed workspaces.
+type AppEventCursor struct {
+	AppID                AppID
+	Surface              string
+	AcknowledgedSequence uint64
+	InFlightSequence     uint64
+	InFlightUntil        time.Time
+	RetryAt              time.Time
+	RetryCount           int
+	RetryReason          string
+}
+
+// AppDeliveryHealth is the developer-facing projection of an app's configured
+// event transport and its durable cursor. PendingEvaluation means at least one
+// journal record still needs subscription and visibility evaluation; it does
+// not incorrectly claim that every pending record will become a callback.
+type AppDeliveryHealth struct {
+	AppID                AppID
+	Surface              string
+	Endpoint             string
+	Configured           bool
+	Installed            bool
+	AcknowledgedSequence uint64
+	InFlightSequence     uint64
+	InFlightUntil        time.Time
+	RetryAt              time.Time
+	RetryCount           int
+	RetryReason          string
+	PendingEvaluation    bool
+	NextEventTopic       string
+	NextEventAt          time.Time
+}
+
 // App is the durable developer-owned Slack application. Installation records
 // deliberately reference this aggregate rather than acting as the app model
 // themselves: an uninstalled app still has credentials, configuration,

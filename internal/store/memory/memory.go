@@ -6569,6 +6569,23 @@ func (s *Store) ReleaseAppEvent(_ context.Context, appID domain.AppID, surface, 
 	return nil
 }
 
+func (s *Store) GetAppEventCursor(_ context.Context, appID domain.AppID, surface string) (domain.AppEventCursor, error) {
+	if appID == "" || !validAppEventSurface(surface) {
+		return domain.AppEventCursor{}, store.InvalidArgument("app ID and event surface are required")
+	}
+	s.mu.RLock()
+	cursor, exists := s.appEventCursors[appEventCursorKey(appID, surface)]
+	s.mu.RUnlock()
+	if !exists {
+		return domain.AppEventCursor{}, store.ErrNotFound
+	}
+	return domain.AppEventCursor{
+		AppID: appID, Surface: surface, AcknowledgedSequence: cursor.Sequence,
+		InFlightSequence: cursor.LeasedSequence, InFlightUntil: cursor.LeaseUntil,
+		RetryAt: cursor.RetryAt, RetryCount: cursor.RetryCount, RetryReason: cursor.RetryReason,
+	}, nil
+}
+
 func (s *Store) ClaimEvents(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration) ([]events.Record, error) {
 	return s.claimEvents(ctx, workspace, "", owner, limit, lease)
 }

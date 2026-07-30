@@ -315,18 +315,27 @@ func conversionCases() map[string]conversionCase {
 		"ScheduledMessage": {sample: &domain.ScheduledMessage{}, through: through(encodeProtoScheduledMessage, decodeProtoScheduledMessage)},
 		"ScheduledStatus":  {sample: &domain.ScheduledStatus{}, through: through(encodeProtoScheduledStatus, decodeProtoScheduledStatus)},
 		"Draft":            {sample: &domain.Draft{}, through: through(encodeProtoDraft, decodeProtoDraft)},
-		"DoNotDisturb":     {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
-		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
-		"Call":             {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
-		"Canvas":           {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
-		"CanvasPage":       {sample: &domain.CanvasPage{}, through: through(encodeProtoCanvasPage, decodeProtoCanvasPage)},
-		"List":             {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
-		"ListPage":         {sample: &domain.ListPage{}, through: through(encodeProtoListPage, decodeProtoListPage)},
-		"ListItem":         {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
-		"ListItemPage":     {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
-		"ListDownload":     {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
-		"AccessLog":        {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
-		"View":             {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
+		"AppDeliveryHealth": {
+			sample: &domain.AppDeliveryHealth{},
+			prepare: func(filled any) {
+				health := filled.(*domain.AppDeliveryHealth)
+				health.Surface = "http"
+				health.Configured = true
+			},
+			through: through(encodeProtoAppDeliveryHealth, decodeProtoAppDeliveryHealth),
+		},
+		"DoNotDisturb": {sample: &domain.DoNotDisturb{}, through: through(encodeProtoDoNotDisturb, decodeProtoDoNotDisturb)},
+		"UserGroup":    {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
+		"Call":         {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
+		"Canvas":       {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
+		"CanvasPage":   {sample: &domain.CanvasPage{}, through: through(encodeProtoCanvasPage, decodeProtoCanvasPage)},
+		"List":         {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
+		"ListPage":     {sample: &domain.ListPage{}, through: through(encodeProtoListPage, decodeProtoListPage)},
+		"ListItem":     {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
+		"ListItemPage": {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
+		"ListDownload": {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},
+		"AccessLog":    {sample: &domain.AccessLog{}, through: through(encodeProtoAccessLog, decodeProtoAccessLog)},
+		"View":         {sample: &domain.View{}, through: through(encodeProtoView, decodeProtoView)},
 		"AppHome": {
 			sample: &appHomeRoundTrip{},
 			through: through(

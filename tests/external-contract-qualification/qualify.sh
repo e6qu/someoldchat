@@ -61,6 +61,7 @@ huddle_url='https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack'
 canvas_url='https://slack.com/help/articles/203950418-Use-a-canvas-in-Slack'
 conversation_canvas_api_url='https://docs.slack.dev/reference/methods/conversations.canvases.create/'
 datastore_query_url='https://docs.slack.dev/tools/deno-slack-sdk/guides/retrieving-items-from-a-datastore/'
+events_api_url='https://docs.slack.dev/apis/events-api/'
 list_url='https://slack.com/help/articles/27452748828179-Use-lists-in-Slack'
 workflow_url='https://slack.com/help/articles/360035692513-Guide-to-Workflow-Builder'
 roles_url='https://slack.com/help/articles/360018112273-Roles-in-Slack'
@@ -112,6 +113,7 @@ fetch "$huddle_url" "$work/huddles.html"
 fetch "$canvas_url" "$work/canvas.html"
 fetch "$conversation_canvas_api_url" "$work/conversation-canvas-api.html"
 fetch "$datastore_query_url" "$work/datastore-query.html"
+fetch "$events_api_url" "$work/events-api.html"
 fetch "$list_url" "$work/list.html"
 fetch "$workflow_url" "$work/workflow.html"
 fetch "$roles_url" "$work/roles.html"
@@ -321,6 +323,12 @@ assert_contains "$work/datastore-query.html" 'paginate through your datastore an
 	'[WORKFLOW-02] hosted datastore count spans every scan page' "$datastore_query_url"
 assert_contains "$work/datastore-query.html" 'filters are applied post-hoc' \
 	'[ADMIN-04] app administration exposes persisted hosted data without changing Slack query semantics' "$datastore_query_url"
+assert_contains "$work/events-api.html" 'retrying a failed request up to 3 times' \
+	'[APP-08] Events API delivery has a bounded retry lifecycle' "$events_api_url"
+assert_contains "$work/events-api.html" 'second retry will be attempted after 1 minute' \
+	'[APP-08] Events API retry state records the one-minute backoff' "$events_api_url"
+assert_contains "$work/events-api.html" 'third and final retry will be sent after 5 minutes' \
+	'[APP-08] Events API retry state records the five-minute final backoff' "$events_api_url"
 assert_contains "$work/list.html" 'create a list' \
 	'[LIST-01] lists have a current first-party creation journey' "$list_url"
 assert_contains "$work/workflow.html" 'Workflow Builder' \

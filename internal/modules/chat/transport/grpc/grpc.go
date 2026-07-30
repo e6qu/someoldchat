@@ -8794,6 +8794,14 @@ func (r Remote) GetDeveloperApp(ctx context.Context, workspaceID domain.Workspac
 	return app, out.GetManifest(), nil
 }
 
+func (r Remote) GetDeveloperAppDeliveryHealth(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.AppDeliveryHealth, error) {
+	out, err := r.apps.GetDeveloperAppDeliveryHealth(ctx, &chatv1.AppGetRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID)})
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	return decodeProtoAppDeliveryHealth(out)
+}
+
 func (r Remote) IssueDeveloperAppToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, scopes []string) (domain.AppTokenCredentials, error) {
 	out, err := r.apps.IssueDeveloperAppToken(ctx, &chatv1.AppTokenIssueRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), Scopes: append([]string(nil), scopes...)})
 	if err != nil {
@@ -8971,6 +8979,14 @@ func (s *Server) GetDeveloperApp(ctx context.Context, input *chatv1.AppGetReques
 	return &chatv1.AppExportResponse{App: encodeProtoDeveloperApp(app), Manifest: manifest}, nil
 }
 
+func (s *Server) GetDeveloperAppDeliveryHealth(ctx context.Context, input *chatv1.AppGetRequest) (*chatv1.AppDeliveryHealth, error) {
+	health, err := s.implementation.GetDeveloperAppDeliveryHealth(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoAppDeliveryHealth(health), nil
+}
+
 func (s *Server) IssueDeveloperAppToken(ctx context.Context, input *chatv1.AppTokenIssueRequest) (*chatv1.AppTokenCredentials, error) {
 	value, err := s.implementation.IssueDeveloperAppToken(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()), input.GetScopes())
 	if err != nil {
@@ -9039,6 +9055,51 @@ func decodeProtoDeveloperApp(value *chatv1.DeveloperApp) (domain.App, error) {
 		return domain.App{}, err
 	}
 	return domain.App{ID: domain.AppID(value.GetId()), DevelopmentWorkspaceID: domain.WorkspaceID(value.GetDevelopmentWorkspaceId()), OwnerID: domain.UserID(value.GetOwnerId()), Name: value.GetName(), Description: value.GetDescription(), ClientID: value.GetClientId(), ManifestVersion: value.GetManifestVersion(), Distribution: value.GetDistribution(), SocketModeEnabled: value.GetSocketModeEnabled(), TokenRotationEnabled: value.GetTokenRotationEnabled(), Deleted: value.GetDeleted(), CreatedAt: createdAt.UTC(), UpdatedAt: updatedAt.UTC()}, nil
+}
+
+func encodeProtoAppDeliveryHealth(value domain.AppDeliveryHealth) *chatv1.AppDeliveryHealth {
+	result := &chatv1.AppDeliveryHealth{
+		AppId: string(value.AppID), Surface: value.Surface, Endpoint: value.Endpoint,
+		Configured: value.Configured, Installed: value.Installed,
+		AcknowledgedSequence: value.AcknowledgedSequence, InFlightSequence: value.InFlightSequence,
+		RetryCount: int32(value.RetryCount), RetryReason: value.RetryReason,
+		PendingEvaluation: value.PendingEvaluation, NextEventTopic: value.NextEventTopic,
+	}
+	if !value.InFlightUntil.IsZero() {
+		result.InFlightUntil = value.InFlightUntil.UTC().Format(time.RFC3339Nano)
+	}
+	if !value.RetryAt.IsZero() {
+		result.RetryAt = value.RetryAt.UTC().Format(time.RFC3339Nano)
+	}
+	if !value.NextEventAt.IsZero() {
+		result.NextEventAt = value.NextEventAt.UTC().Format(time.RFC3339Nano)
+	}
+	return result
+}
+
+func decodeProtoAppDeliveryHealth(value *chatv1.AppDeliveryHealth) (domain.AppDeliveryHealth, error) {
+	if value == nil || value.GetAppId() == "" || (value.GetConfigured() && value.GetSurface() != "http" && value.GetSurface() != "socket") || value.GetRetryCount() < 0 {
+		return domain.AppDeliveryHealth{}, errors.New("typed app delivery health is invalid")
+	}
+	inFlightUntil, err := decodeOptionalProtoTime(value.GetInFlightUntil())
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	retryAt, err := decodeOptionalProtoTime(value.GetRetryAt())
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	nextEventAt, err := decodeOptionalProtoTime(value.GetNextEventAt())
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	return domain.AppDeliveryHealth{
+		AppID: domain.AppID(value.GetAppId()), Surface: value.GetSurface(), Endpoint: value.GetEndpoint(),
+		Configured: value.GetConfigured(), Installed: value.GetInstalled(),
+		AcknowledgedSequence: value.GetAcknowledgedSequence(), InFlightSequence: value.GetInFlightSequence(),
+		InFlightUntil: inFlightUntil, RetryAt: retryAt, RetryCount: int(value.GetRetryCount()), RetryReason: value.GetRetryReason(),
+		PendingEvaluation: value.GetPendingEvaluation(), NextEventTopic: value.GetNextEventTopic(), NextEventAt: nextEventAt,
+	}, nil
 }
 
 func encodeProtoInstalledApp(value domain.InstalledApp) *chatv1.InstalledApp {

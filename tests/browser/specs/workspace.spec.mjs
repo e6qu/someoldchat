@@ -779,7 +779,7 @@ test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, an
   await expect(page.getByText('You have not created an app yet.')).toBeVisible();
 });
 
-test('[ADMIN-04 APP-09 WORKFLOW-02] hosted app datastores are browsable and editable from app administration', async ({ page, context, request }) => {
+test('[ADMIN-04 APP-08 APP-09 WORKFLOW-02] hosted app datastores and event delivery state are inspectable from app administration', async ({ page, context, request }) => {
   await signIn(context);
   const redirectURI = 'https://client.example/hosted-datastore-callback';
   const name = `Hosted data ${Date.now()}`;
@@ -789,7 +789,7 @@ test('[ADMIN-04 APP-09 WORKFLOW-02] hosted app datastores are browsable and edit
       redirect_urls: [redirectURI],
       scopes: { bot: ['datastore:read', 'datastore:write'] },
     },
-    settings: { is_hosted: true, function_runtime: 'slack' },
+    settings: { is_hosted: true, function_runtime: 'slack', socket_mode_enabled: true },
     datastores: {
       incidents: {
         primary_key: 'id',
@@ -833,6 +833,19 @@ test('[ADMIN-04 APP-09 WORKFLOW-02] hosted app datastores are browsable and edit
   await page.getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByRole('status')).toContainText('Item deleted');
   await expect(page.getByText('No items matched this page.')).toBeVisible();
+
+  await page.goto(`/app/developer/apps?app=${installed.appID}`);
+  await page.getByRole('link', { name: 'View event delivery health' }).click();
+  await expect(page.getByRole('heading', { name: 'Event delivery health' })).toBeVisible();
+  await expect(page.getByText('Queued', { exact: true })).toBeVisible();
+  await expect(page.getByText('Socket Mode', { exact: true })).toBeVisible();
+  await expect(page.getByText('Yes', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Next journal record awaiting evaluation' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.goto(`/app/developer/apps?app=${installed.appID}`);
+  await page.getByRole('button', { name: 'Delete app' }).click();
+  await expect(page).toHaveURL(/\/app\/developer\/apps$/);
 });
 
 test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {

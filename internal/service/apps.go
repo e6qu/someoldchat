@@ -505,6 +505,62 @@ func (m Messages) GetDeveloperApp(ctx context.Context, workspaceID domain.Worksp
 	return app, revision.Manifest, nil
 }
 
+func (m Messages) GetDeveloperAppDeliveryHealth(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID) (domain.AppDeliveryHealth, error) {
+	app, manifest, err := m.GetDeveloperApp(ctx, workspaceID, userID, appID)
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	parsed, problems := appmanifest.Parse(manifest)
+	if len(problems) != 0 {
+		return domain.AppDeliveryHealth{}, store.ErrConflict
+	}
+	health := domain.AppDeliveryHealth{AppID: app.ID}
+	if parsed.SocketModeEnabled {
+		health.Surface = "socket"
+		health.Endpoint = "Socket Mode"
+		health.Configured = true
+	} else if parsed.EventRequestURL != "" {
+		health.Surface = "http"
+		health.Endpoint = parsed.EventRequestURL
+		health.Configured = true
+	}
+	installations, err := m.Store.ListAppInstallations(ctx, app.ID)
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	for _, installation := range installations {
+		if installation.Enabled {
+			health.Installed = true
+			break
+		}
+	}
+	if !health.Configured || !health.Installed {
+		return health, nil
+	}
+	cursor, err := m.Store.GetAppEventCursor(ctx, app.ID, health.Surface)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return domain.AppDeliveryHealth{}, err
+	}
+	if err == nil {
+		health.AcknowledgedSequence = cursor.AcknowledgedSequence
+		health.InFlightSequence = cursor.InFlightSequence
+		health.InFlightUntil = cursor.InFlightUntil
+		health.RetryAt = cursor.RetryAt
+		health.RetryCount = cursor.RetryCount
+		health.RetryReason = cursor.RetryReason
+	}
+	pending, err := m.Store.ListAppEventsAfter(ctx, app.ID, health.AcknowledgedSequence, 1)
+	if err != nil {
+		return domain.AppDeliveryHealth{}, err
+	}
+	if len(pending) != 0 {
+		health.PendingEvaluation = true
+		health.NextEventTopic = pending[0].Event.Topic
+		health.NextEventAt = pending[0].Event.CreatedAt
+	}
+	return health, nil
+}
+
 func (m Messages) IssueDeveloperAppToken(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, scopes []string) (domain.AppTokenCredentials, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
 		return domain.AppTokenCredentials{}, err
