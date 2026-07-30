@@ -1283,6 +1283,52 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "notification preferences and thread following",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				initialWorkspace, err := chat.WorkspaceNotificationPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				workspace, err := chat.SetWorkspaceNotificationPreferences(
+					ctx, "T1", "U1", domain.NotificationAll, []string{"release", "customer escalation"}, false, true,
+				)
+				if err != nil {
+					return nil, err
+				}
+				initialConversation, err := chat.ConversationNotificationPreferences(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				conversation, err := chat.SetConversationNotificationPreferences(ctx, "T1", "U1", "C1", domain.NotificationMentions, true)
+				if err != nil {
+					return nil, err
+				}
+				root, err := chat.Post(ctx, "T1", "U1", "C1", "follow this root", "", "")
+				if err != nil {
+					return nil, err
+				}
+				rootTimestamp := timestampOf(root)
+				followedInitially, err := chat.ThreadFollowed(ctx, "T1", "U1", "C1", rootTimestamp)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.SetThreadFollowed(ctx, "T1", "U1", "C1", rootTimestamp, false); err != nil {
+					return nil, err
+				}
+				followedFinally, err := chat.ThreadFollowed(ctx, "T1", "U1", "C1", rootTimestamp)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					initialWorkspace.Level, initialWorkspace.ActivityChannels, initialWorkspace.ActivityReminders,
+					workspace.Level, workspace.Keywords, workspace.ActivityChannels, workspace.ActivityReminders,
+					initialConversation.Level, initialConversation.FollowEveryThread,
+					conversation.Level, conversation.FollowEveryThread,
+					followedInitially, followedFinally,
+				}, nil
+			},
+		},
+		{
 			name: "application event leases survive the composition seam",
 			seed: func(t *testing.T, target *memory.Store) {
 				seedBaseline(t, target)

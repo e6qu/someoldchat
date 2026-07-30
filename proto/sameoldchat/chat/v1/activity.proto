@@ -66,9 +66,79 @@ message ActivityPreferences {
   string layout = 3;
 }
 
+message NotificationPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message WorkspaceNotificationPreferences {
+  string workspace_id = 1;
+  string user_id = 2;
+  string level = 3;
+  repeated string keywords = 4;
+  bool activity_channels = 5;
+  bool activity_reminders = 6;
+}
+
+message SetWorkspaceNotificationPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string level = 3;
+  repeated string keywords = 4;
+  bool activity_channels = 5;
+  bool activity_reminders = 6;
+}
+
+message ConversationNotificationPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+}
+
+message ConversationNotificationPreferences {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string level = 4;
+  bool follow_every_thread = 5;
+}
+
+message SetConversationNotificationPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string level = 4;
+  bool follow_every_thread = 5;
+}
+
+message ThreadFollowRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string thread_timestamp = 4;
+}
+
+message SetThreadFollowRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string thread_timestamp = 4;
+  bool followed = 5;
+}
+
+message ThreadFollow {
+  bool followed = 1;
+}
+
 service ActivityService {
   rpc ListActivity(ActivityRequest) returns (ActivityPage);
   rpc MutateActivity(MutateActivityRequest) returns (MutationResponse);
   rpc GetActivityPreferences(ActivityPreferencesRequest) returns (ActivityPreferences);
   rpc SetActivityPreferences(SetActivityPreferencesRequest) returns (ActivityPreferences);
+  rpc GetWorkspaceNotificationPreferences(NotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
+  rpc SetWorkspaceNotificationPreferences(SetWorkspaceNotificationPreferencesRequest) returns (WorkspaceNotificationPreferences);
+  rpc GetConversationNotificationPreferences(ConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
+  rpc SetConversationNotificationPreferences(SetConversationNotificationPreferencesRequest) returns (ConversationNotificationPreferences);
+  rpc GetThreadFollow(ThreadFollowRequest) returns (ThreadFollow);
+  rpc SetThreadFollow(SetThreadFollowRequest) returns (ThreadFollow);
 }

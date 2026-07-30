@@ -3569,6 +3569,117 @@ func (m Messages) MarkRead(ctx context.Context, workspaceID domain.WorkspaceID, 
 	return cursor, nil
 }
 
+func (m Messages) WorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	return m.Store.GetWorkspaceNotificationPreferences(ctx, workspaceID, userID)
+}
+
+func (m Messages) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders bool) (domain.WorkspaceNotificationPreferences, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	preferences := domain.WorkspaceNotificationPreferences{
+		WorkspaceID: workspaceID, UserID: userID, Level: level,
+		Keywords:         domain.NormalizeNotificationKeywords(keywords),
+		ActivityChannels: activityChannels, ActivityReminders: activityReminders,
+	}
+	if !preferences.Valid() {
+		return domain.WorkspaceNotificationPreferences{}, store.InvalidArgument("workspace notification preferences are invalid")
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"notification.preferences_changed",
+		events.String("user_id", string(userID)),
+	), now)
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	if err := m.Store.SetWorkspaceNotificationPreferences(ctx, preferences, event); err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	return preferences, nil
+}
+
+func (m Messages) ConversationNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationNotificationPreferences, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	return m.Store.GetConversationNotificationPreferences(ctx, workspaceID, userID, conversationID)
+}
+
+func (m Messages) SetConversationNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, level domain.NotificationLevel, followEveryThread bool) (domain.ConversationNotificationPreferences, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	preferences := domain.ConversationNotificationPreferences{
+		WorkspaceID: workspaceID, UserID: userID, Conversation: conversationID,
+		Level: level, FollowEveryThread: followEveryThread,
+	}
+	if !preferences.Valid() {
+		return domain.ConversationNotificationPreferences{}, store.InvalidArgument("conversation notification preferences are invalid")
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"conversation.notification_preferences_changed",
+		events.String("channel_id", string(conversationID)),
+		events.String("user_id", string(userID)),
+	), now)
+	if err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	if err := m.Store.SetConversationNotificationPreferences(ctx, preferences, event); err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	return preferences, nil
+}
+
+func (m Messages) ThreadFollowed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, root domain.MessageTimestamp) (bool, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return false, err
+	}
+	if err := m.requireThreadRoot(ctx, workspaceID, conversationID, root); err != nil {
+		return false, err
+	}
+	return m.Store.IsThreadFollowed(ctx, workspaceID, userID, conversationID, root)
+}
+
+func (m Messages) requireThreadRoot(ctx context.Context, workspaceID domain.WorkspaceID, conversationID domain.ConversationID, root domain.MessageTimestamp) error {
+	createdAt, err := domain.ParseMessageTimestamp(root)
+	if err != nil {
+		return ErrInvalidTimestamp
+	}
+	message, err := m.Store.GetMessageByCreatedAt(ctx, conversationID, createdAt)
+	if err != nil {
+		return err
+	}
+	if message.WorkspaceID != workspaceID || message.Deleted || message.ThreadTimestamp != "" {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (m Messages) SetThreadFollowed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, root domain.MessageTimestamp, followed bool) error {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return err
+	}
+	if err := m.requireThreadRoot(ctx, workspaceID, conversationID, root); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"thread.follow_changed",
+		events.String("channel_id", string(conversationID)),
+		events.String("user_id", string(userID)),
+		events.String("thread_ts", string(root)),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.SetThreadFollowed(ctx, workspaceID, userID, conversationID, root, followed, event)
+}
+
 func (m Messages) AddReaction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp, name string) error {
 	reaction, err := m.reactionFor(ctx, workspaceID, userID, conversationID, timestamp, name)
 	if err != nil {

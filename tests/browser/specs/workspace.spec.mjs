@@ -247,6 +247,58 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
   }
 });
 
+test('[NOTIFY-01 NOTIFY-02 NOTIFY-03 THREAD-02 A11Y-01] notification preferences, DND, exceptions, and thread follows persist', async ({ page, context, request }) => {
+  await signIn(context);
+  await page.goto('/app');
+  await page.goto(`/app/notifications?channel=${CHANNEL}`);
+  await expect(page.getByRole('heading', { name: 'Notification preferences' })).toBeVisible();
+
+  await page.getByLabel('Notify me about').selectOption('all');
+  await page.getByLabel('Channel keywords').fill('release, customer escalation, RELEASE');
+  await page.getByLabel('Show channels set to All new posts in Activity').check();
+  await page.getByLabel('Show due personal reminders in Activity').uncheck();
+  await page.getByRole('button', { name: 'Save workspace defaults' }).click();
+  await expect(page.getByRole('status')).toHaveText('Notification preferences saved.');
+  await expect(page.getByLabel('Notify me about')).toHaveValue('all');
+  await expect(page.getByLabel('Channel keywords')).toHaveValue('customer escalation, release');
+  await expect(page.getByLabel('Show due personal reminders in Activity')).not.toBeChecked();
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await page.getByRole('link', { name: 'Open conversation details' }).click();
+  await page.getByLabel('Notify me about').selectOption('mute');
+  await page.getByLabel('Follow every thread').check();
+  await page.getByRole('button', { name: 'Save notifications' }).click();
+  await expect(page).toHaveURL(/details=1#conversation-notifications$/);
+  await expect(page.getByLabel('Notify me about')).toHaveValue('mute');
+  await expect(page.getByLabel('Follow every thread')).toBeChecked();
+
+  await page.goto(`/app/notifications?channel=${CHANNEL}`);
+  const exception = page.getByRole('link', { name: /#general/ });
+  await expect(exception).toContainText('mute');
+  await expect(exception).toContainText('following every thread');
+
+  await page.getByLabel('Custom minutes (optional)').fill('1');
+  await page.getByRole('button', { name: 'Pause notifications' }).click();
+  await expect(page.getByRole('status')).toHaveText('Notifications paused. Messages and Activity remain available.');
+  await expect(page.getByRole('button', { name: 'Resume notifications' })).toBeVisible();
+  await page.getByRole('button', { name: 'Resume notifications' }).click();
+  await expect(page.getByRole('status')).toHaveText('Notifications resumed.');
+
+  // Turn off the all-thread channel setting so the per-thread control can
+  // demonstrate both states independently.
+  await exception.click();
+  await page.getByLabel('Follow every thread').uncheck();
+  await page.getByRole('button', { name: 'Save notifications' }).click();
+  const root = await postThroughTheAPI(request, `thread follow browser qualification ${Date.now()}`);
+  await page.goto(`/app?channel=${CHANNEL}&thread=${encodeURIComponent(root.ts)}`);
+  await expect(page.getByRole('button', { name: 'Following' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Following' }).click();
+  await expect(page.getByRole('button', { name: 'Follow thread' })).toHaveAttribute('aria-pressed', 'false');
+  await page.getByRole('button', { name: 'Follow thread' }).click();
+  await expect(page.getByRole('button', { name: 'Following' })).toHaveAttribute('aria-pressed', 'true');
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history, and can be cancelled', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

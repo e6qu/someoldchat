@@ -99,3 +99,91 @@ func TestActivityReactionLifecycleAndConversationReadCursor(t *testing.T) {
 		t.Fatalf("read cursor left message activity unread=%+v err=%v", page, err)
 	}
 }
+
+func TestNotificationPreferencesRouteChannelKeywordAndFollowedThreadActivity(t *testing.T) {
+	ctx := context.Background()
+	s := New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+
+	preferences := domain.DefaultWorkspaceNotificationPreferences("T1", "U2")
+	preferences.Keywords = []string{"release"}
+	if err := s.SetWorkspaceNotificationPreferences(ctx, preferences, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	override := domain.DefaultConversationNotificationPreferences("T1", "U2", "C1")
+	override.Level = domain.NotificationAll
+	if err := s.SetConversationNotificationPreferences(ctx, override, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	if err := s.CreateMessage(ctx, domain.Message{
+		ID: "M1", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "ordinary update", CreatedAt: created,
+	}, events.Event{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	channels, err := s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityChannel}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(channels.Items) != 1 {
+		t.Fatalf("channel activity=%+v err=%v", channels, err)
+	}
+
+	override.Level = domain.NotificationMentions
+	if err := s.SetConversationNotificationPreferences(ctx, override, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMessage(ctx, domain.Message{
+		ID: "M2", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "RELEASE today", CreatedAt: created.Add(time.Minute),
+	}, events.Event{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	keywords, err := s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityKeyword}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(keywords.Items) != 1 {
+		t.Fatalf("keyword activity=%+v err=%v", keywords, err)
+	}
+
+	rootTimestamp := domain.NewMessageTimestamp(created.Add(2 * time.Minute))
+	if err := s.CreateMessage(ctx, domain.Message{
+		ID: "M3", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "thread root", CreatedAt: created.Add(2 * time.Minute),
+	}, events.Event{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetThreadFollowed(ctx, "T1", "U2", "C1", rootTimestamp, true, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMessage(ctx, domain.Message{
+		ID: "M4", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "thread reply",
+		ThreadTimestamp: rootTimestamp, CreatedAt: created.Add(3 * time.Minute),
+	}, events.Event{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	threads, err := s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityThread}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(threads.Items) != 1 {
+		t.Fatalf("thread activity=%+v err=%v", threads, err)
+	}
+
+	override.Level = domain.NotificationMute
+	if err := s.SetConversationNotificationPreferences(ctx, override, events.Event{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateMessage(ctx, domain.Message{
+		ID: "M5", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", Text: "release again", CreatedAt: created.Add(4 * time.Minute),
+	}, events.Event{}, ""); err != nil {
+		t.Fatal(err)
+	}
+	keywords, err = s.ListActivity(ctx, "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityKeyword}, Page: domain.PageRequest{Limit: 20},
+	})
+	if err != nil || len(keywords.Items) != 1 {
+		t.Fatalf("mute did not suppress later keyword activity: %+v err=%v", keywords, err)
+	}
+}

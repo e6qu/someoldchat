@@ -236,23 +236,26 @@ type conversationView struct {
 }
 
 type conversationDetailsView struct {
-	ID          string
-	Name        string
-	IsChannel   bool
-	Topic       string
-	Purpose     string
-	Type        string
-	Archived    bool
-	Members     []memberView
-	Invitees    []memberView
-	Truncated   bool
-	CloseURL    string
-	CanEdit     bool
-	CanInvite   bool
-	CanLeave    bool
-	CanClose    bool
-	CanArchive  bool
-	ArchiveVerb string
+	ID                string
+	Name              string
+	IsChannel         bool
+	Topic             string
+	Purpose           string
+	Type              string
+	Archived          bool
+	Members           []memberView
+	Invitees          []memberView
+	Truncated         bool
+	CloseURL          string
+	CanEdit           bool
+	CanInvite         bool
+	CanLeave          bool
+	CanClose          bool
+	CanArchive        bool
+	CanNotify         bool
+	NotificationLevel string
+	FollowEveryThread bool
+	ArchiveVerb       string
 }
 
 type pageData struct {
@@ -298,6 +301,8 @@ type pageData struct {
 	UploadURL       string
 	TimelineURL     string
 	ThreadURL       string
+	ThreadFollowURL string
+	FollowingThread bool
 	GlobalShortcuts []domain.AppShortcut
 	SlashCommands   []domain.AppShortcut
 	ComposerMembers []memberView
@@ -369,9 +374,32 @@ type activityItemView struct {
 	DisplayTime string
 	SourceURL   string
 	ReplyURL    string
+	ReactionURL string
 	Unread      bool
 	Cleared     bool
 	Unavailable bool
+}
+
+type notificationExceptionView struct {
+	ID                string
+	Name              string
+	Prefix            string
+	Level             string
+	FollowEveryThread bool
+	URL               string
+}
+
+type notificationsData struct {
+	Channel           string
+	CSRFToken         string
+	Level             string
+	Keywords          string
+	ActivityChannels  bool
+	ActivityReminders bool
+	Snoozed           bool
+	SnoozeUntil       string
+	Exceptions        []notificationExceptionView
+	Notice            string
 }
 
 type scheduledMessageView struct {
@@ -663,7 +691,7 @@ const pageStyle = `<style>
 .send{border:0;border-radius:5px;background:var(--ok);color:var(--on-strong);font-weight:700;padding:7px 14px}
 .send-actions{display:flex;align-items:stretch;gap:2px}.schedule-menu{position:relative}.schedule-menu>summary{display:grid;place-items:center;height:100%;min-width:34px;border-radius:5px;background:var(--ok);color:var(--on-strong);cursor:pointer;list-style:none;font-weight:800}.schedule-menu>summary::-webkit-details-marker{display:none}.schedule-popover{position:absolute;z-index:10;right:0;bottom:38px;display:grid;gap:8px;width:min(310px,calc(100vw - 32px));padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel-strong);box-shadow:var(--shadow)}.schedule-popover label{display:grid;gap:5px;font-size:12px;font-weight:800}.schedule-popover input{width:100%;border:1px solid var(--field-line);border-radius:6px;background:var(--bg);color:var(--text);padding:8px 9px;font:inherit}.schedule-popover p{margin:0;color:var(--muted);font-size:12px}.schedule-popover button{border:0;border-radius:6px;background:var(--ok);color:var(--on-strong);padding:8px 11px;font-weight:800}.schedule-popover a{color:var(--action);font-size:12px;font-weight:700}
 .thread{grid-area:thread;min-height:0;border-left:1px solid var(--line);background:var(--panel);padding:16px 18px;overflow:auto}
-.thread h2{margin:0 0 12px;font-size:16px}
+.thread h2{margin:0;font-size:16px}.thread-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:0 0 12px}.thread-heading form{margin:0}.thread-heading button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:6px 9px;font-weight:700}
 @media(max-width:800px){
 .workspace{grid-template-columns:minmax(0,1fr)}
 .search{max-width:none}
@@ -1008,6 +1036,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <nav class="side-section" aria-label="Workspace navigation">
         <div class="side-label">Workspace</div>
         <a class="side-link" id="activity-link" href="/app/activity?channel={{.Channel}}" aria-label="Activity{{if .ReminderUnread}}, reminder due{{end}}" aria-keyshortcuts="Control+3 Control+Shift+3"><span class="side-icon" aria-hidden="true">◉</span><span class="side-text">Activity</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
+        <a class="side-link" href="/app/notifications?channel={{.Channel}}" aria-label="Notification preferences"><span class="side-icon" aria-hidden="true">◌</span><span class="side-text">Notifications</span></a>
         <a class="side-link" href="/app/later?channel={{.Channel}}" aria-label="Later{{if .ReminderUnread}}, reminder due{{end}}"><span class="side-icon" aria-hidden="true">▱</span><span class="side-text">Later</span>{{if .ReminderUnread}}<span class="badge" aria-hidden="true">•</span>{{end}}</a>
         {{if .CanSchedule}}<a class="side-link" href="/app/scheduled?channel={{.Channel}}" aria-label="Scheduled messages"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Scheduled</span></a>{{end}}
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
@@ -1086,7 +1115,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </div>
       {{if .ThreadTimestamp}}
       <aside class="thread" aria-labelledby="thread-heading">
-        <h2 id="thread-heading">Thread</h2>
+        <div class="thread-heading"><h2 id="thread-heading">Thread</h2>{{if .ThreadFollowURL}}<form method="post" action="{{.ThreadFollowURL}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="followed" value="{{if .FollowingThread}}false{{else}}true{{end}}"><button type="submit" aria-pressed="{{if .FollowingThread}}true{{else}}false{{end}}">{{if .FollowingThread}}Following{{else}}Follow thread{{end}}</button></form>{{end}}</div>
         <div id="thread-messages" tabindex="-1" data-fragment="{{.ThreadURL}}" data-live="true">{{template "messages" .Thread}}</div>
       </aside>
       {{end}}
@@ -1206,6 +1235,24 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         </div>
         {{end}}
       </section>
+      {{if .Details.CanNotify}}
+      <section class="conversation-details-section" id="conversation-notifications" aria-labelledby="conversation-notifications-heading">
+        <h3 id="conversation-notifications-heading">Notifications</h3>
+        <form class="conversation-setting" method="post" action="/app/conversation/notifications?channel={{.Details.ID}}">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+          <label for="conversation-notification-level">Notify me about
+            <select id="conversation-notification-level" name="level">
+              <option value="inherit"{{if eq .Details.NotificationLevel "inherit"}} selected{{end}}>Use workspace default</option>
+              <option value="all"{{if eq .Details.NotificationLevel "all"}} selected{{end}}>All new posts</option>
+              <option value="mentions"{{if eq .Details.NotificationLevel "mentions"}} selected{{end}}>Just mentions</option>
+              <option value="mute"{{if eq .Details.NotificationLevel "mute"}} selected{{end}}>Mute conversation</option>
+            </select>
+          </label>
+          <label class="privacy"><input type="checkbox" name="follow_every_thread" value="true"{{if .Details.FollowEveryThread}} checked{{end}}> Follow every thread</label>
+          <button type="submit">Save notifications</button>
+        </form>
+      </section>
+      {{end}}
       <section class="conversation-details-section" aria-labelledby="conversation-members-heading">
         <h3 id="conversation-members-heading">Members ({{len .Details.Members}})</h3>
         <ul class="conversation-members">{{range .Details.Members}}<li class="conversation-member"><span class="conversation-member-avatar" aria-hidden="true">{{.AuthorInitial}}</span><span class="conversation-member-name">{{.Name}}</span></li>{{end}}</ul>
@@ -1429,16 +1476,39 @@ var count=document.getElementById('selection-count');document.addEventListener('
 <div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
 <form method="post" action="/app/activity/mutate?channel={{.Channel}}">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}">
-<div class="bulk-actions"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button type="submit" name="mutation" value="read">Mark selected read</button><button type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
+<div class="bulk-actions"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button type="submit" name="mutation" value="read">Mark selected read</button><button type="submit" name="mutation" value="unread">Mark selected unread</button><button type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
 {{if .Items}}<ul class="activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="activity-row{{if .Unread}} unread{{end}}" data-activity-row tabindex="-1">
 <input class="activity-select" type="checkbox" name="activity_id" value="{{.ID}}" aria-label="Select activity from {{.ActorName}}">
 <div class="activity-main">{{if .ReplyURL}}<a class="visually-hidden" data-activity-reply href="{{.ReplyURL}}">Reply to this activity</a>{{end}}{{if .SourceURL}}<a class="activity-source" data-activity-source href="{{.SourceURL}}">{{end}}<span class="activity-head"><span class="activity-kind">{{.KindLabel}}</span>{{if .ActorName}}<span class="activity-author">{{.ActorName}}</span>{{end}}<time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .ChannelName}}<span class="activity-meta">{{.ChannelName}}</span>{{end}}</span><span class="activity-text{{if .Unavailable}} unavailable{{end}}">{{.Text}}</span>{{if .SourceURL}}</a>{{end}}</div>
-<div class="item-actions">{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button><button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
+<div class="item-actions">{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}{{if .Unread}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=unread" aria-label="Mark this activity unread">Unread</button>{{end}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
 </li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
 </form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}
 </main>{{end}}`
 
 var activityTemplate = mustPage(activityMarkup)
+
+const notificationsMarkup = `{{define "title"}}Notifications · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(760px,calc(100% - 28px));margin:24px auto 48px}.heading h2{margin:0 0 5px}.heading p{margin:0;color:var(--muted)}.settings{display:grid;gap:18px;margin-top:20px}.card{padding:18px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}.card h3{margin:0 0 6px}.card>p{margin:0 0 14px;color:var(--muted)}.fields{display:grid;gap:12px}.fields label{display:grid;gap:6px;font-weight:700}.fields input[type=text],.fields input[type=number],.fields select{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.check{display:flex!important;grid-template-columns:auto 1fr!important;align-items:start;gap:8px!important;font-weight:600!important}.actions{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.actions label{flex:1 1 180px}.actions button,.fields button{border:0;border-radius:6px;background:var(--action);color:var(--on-strong);padding:9px 12px;font-weight:800}.resume{background:var(--danger)!important}.exceptions{margin:0;padding:0;list-style:none;display:grid;gap:8px}.exceptions a{display:flex;justify-content:space-between;gap:10px;padding:11px;border:1px solid var(--line);border-radius:7px;color:var(--text);text-decoration:none}.exceptions span:last-child{color:var(--muted)}
+@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 18px,760px);margin-top:16px}.card{padding:14px}.actions{display:grid}.actions label{width:100%}}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Notifications</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header>
+<main class="layout"><div class="heading"><h2>Notification preferences</h2><p>Choose what needs your attention without changing what you can read.</p></div>{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+<div class="settings">
+<section class="card" aria-labelledby="workspace-notifications-heading"><h3 id="workspace-notifications-heading">Workspace defaults</h3><p>Conversation exceptions override this trigger.</p>
+<form class="fields" method="post" action="/app/notifications/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+<label for="workspace-notification-level">Notify me about<select id="workspace-notification-level" name="level"><option value="mentions"{{if eq .Level "mentions"}} selected{{end}}>Mentions and direct messages</option><option value="all"{{if eq .Level "all"}} selected{{end}}>All new messages</option></select></label>
+<label for="notification-keywords">Channel keywords<input id="notification-keywords" type="text" name="keywords" maxlength="5049" value="{{.Keywords}}" placeholder="release, customer escalation"><span class="muted">Comma-separated; exact matches are case-insensitive and do not trigger in threads.</span></label>
+<label class="check"><input type="checkbox" name="activity_channels" value="true"{{if .ActivityChannels}} checked{{end}}> Show channels set to All new posts in Activity</label>
+<label class="check"><input type="checkbox" name="activity_reminders" value="true"{{if .ActivityReminders}} checked{{end}}> Show due personal reminders in Activity</label>
+<button type="submit">Save workspace defaults</button></form></section>
+<section class="card" aria-labelledby="pause-notifications-heading"><h3 id="pause-notifications-heading">Pause notifications</h3>{{if .Snoozed}}<p>Paused until <time datetime="{{.SnoozeUntil}}">{{.SnoozeUntil}}</time>. Messages and Activity remain available.</p><form method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="resume"><button class="resume" type="submit">Resume notifications</button></form>{{else}}<p>Pause banners and sounds for a preset or custom duration.</p><form class="actions" method="post" action="/app/notifications/dnd?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="action" value="pause"><label for="dnd-minutes">Preset<select id="dnd-minutes" name="minutes"><option value="30">30 minutes</option><option value="60">1 hour</option><option value="120">2 hours</option><option value="480">8 hours</option><option value="1440">24 hours</option></select></label><label for="dnd-custom-minutes">Custom minutes (optional)<input id="dnd-custom-minutes" type="number" name="custom_minutes" min="1" max="1440"></label><button type="submit">Pause notifications</button></form>{{end}}</section>
+<section class="card" aria-labelledby="notification-exceptions-heading"><h3 id="notification-exceptions-heading">Exceptions to defaults</h3>{{if .Exceptions}}<ul class="exceptions">{{range .Exceptions}}<li><a href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span>{{.Level}}{{if .FollowEveryThread}} · following every thread{{end}}</span></a></li>{{end}}</ul>{{else}}<p>No conversation-specific exceptions.</p>{{end}}</section>
+</div></main>{{end}}`
+
+var notificationsTemplate = mustPage(notificationsMarkup)
 
 const laterMarkup = `{{define "title"}}Later · SameOldChat{{end}}
 {{define "styles"}}<style>
@@ -2097,6 +2167,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/activity/mutate", h.mutateActivity)
 	mux.HandleFunc("POST /app/activity/preferences", h.setActivityPreferences)
 	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
+	mux.HandleFunc("GET /app/notifications", h.notifications)
+	mux.HandleFunc("POST /app/notifications/preferences", h.setWorkspaceNotifications)
+	mux.HandleFunc("POST /app/notifications/dnd", h.setNotificationSnooze)
 	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/members", h.members)
@@ -2132,6 +2205,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/conversation/rename", h.renameConversation)
 	mux.HandleFunc("POST /app/conversation/topic", h.setConversationTopic)
 	mux.HandleFunc("POST /app/conversation/purpose", h.setConversationPurpose)
+	mux.HandleFunc("POST /app/conversation/notifications", h.setConversationNotifications)
+	mux.HandleFunc("POST /app/thread/follow", h.setThreadFollow)
 	mux.HandleFunc("POST /app/conversation/archive", h.setConversationArchived)
 	mux.HandleFunc("POST /app/conversation/leave", h.leaveConversation)
 	mux.HandleFunc("POST /app/reaction", h.addReaction)
@@ -2648,6 +2723,17 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
+	}
+	if isMember && threadTimestamp != "" {
+		following, followErr := h.Messages.ThreadFollowed(
+			r.Context(), principal.WorkspaceID, principal.UserID, channel, domain.MessageTimestamp(threadTimestamp),
+		)
+		if followErr != nil {
+			data.Notice = strings.TrimSpace(data.Notice + " Thread follow state is temporarily unavailable.")
+		} else {
+			data.ThreadFollowURL = mutationURL("/app/thread/follow", string(channel), "", threadTimestamp, "")
+			data.FollowingThread = following
+		}
 	}
 	if conversations.More != "" {
 		data.MoreChannelsURL = appURL(string(channel), threadTimestamp, string(before), "", string(conversations.More))
@@ -3273,24 +3359,36 @@ func (h Handler) newConversationDetails(ctx context.Context, principal auth.Prin
 	if conversation.Archived {
 		archiveVerb = "Unarchive"
 	}
+	notificationPreferences := domain.DefaultConversationNotificationPreferences(principal.WorkspaceID, principal.UserID, conversation.ID)
+	canNotify := isMember && isChannel
+	if canNotify {
+		var err error
+		notificationPreferences, err = h.Messages.ConversationNotificationPreferences(ctx, principal.WorkspaceID, principal.UserID, conversation.ID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &conversationDetailsView{
-		ID:          string(conversation.ID),
-		Name:        name,
-		IsChannel:   isChannel,
-		Topic:       conversation.Topic,
-		Purpose:     conversation.Purpose,
-		Type:        conversationType,
-		Archived:    conversation.Archived,
-		Members:     members,
-		Invitees:    invitees,
-		Truncated:   truncated,
-		CloseURL:    appURL(string(conversation.ID), "", "", "", ""),
-		CanEdit:     canManage && isChannel && !conversation.Archived,
-		CanInvite:   canManage && isChannel && !conversation.Archived,
-		CanLeave:    canManage && isChannel && !conversation.Archived && !required,
-		CanClose:    canManage && !isChannel,
-		CanArchive:  canManage && isChannel && !required,
-		ArchiveVerb: archiveVerb,
+		ID:                string(conversation.ID),
+		Name:              name,
+		IsChannel:         isChannel,
+		Topic:             conversation.Topic,
+		Purpose:           conversation.Purpose,
+		Type:              conversationType,
+		Archived:          conversation.Archived,
+		Members:           members,
+		Invitees:          invitees,
+		Truncated:         truncated,
+		CloseURL:          appURL(string(conversation.ID), "", "", "", ""),
+		CanEdit:           canManage && isChannel && !conversation.Archived,
+		CanInvite:         canManage && isChannel && !conversation.Archived,
+		CanLeave:          canManage && isChannel && !conversation.Archived && !required,
+		CanClose:          canManage && !isChannel,
+		CanArchive:        canManage && isChannel && !required,
+		CanNotify:         canNotify,
+		NotificationLevel: string(notificationPreferences.Level),
+		FollowEveryThread: notificationPreferences.FollowEveryThread,
+		ArchiveVerb:       archiveVerb,
 	}, nil
 }
 
@@ -3575,7 +3673,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	kindValue := strings.TrimSpace(r.URL.Query().Get("kind"))
 	kindByValue := map[string]domain.ActivityKind{
 		"dm": domain.ActivityDM, "mention": domain.ActivityMention, "thread": domain.ActivityThread,
-		"reaction": domain.ActivityReaction, "app": domain.ActivityApp, "reminder": domain.ActivityReminder,
+		"channel": domain.ActivityChannel, "reaction": domain.ActivityReaction, "app": domain.ActivityApp, "reminder": domain.ActivityReminder,
 	}
 	var kinds []domain.ActivityKind
 	if kindValue != "" {
@@ -3655,7 +3753,7 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	}
 	filterDefinitions := []struct{ value, label string }{
 		{"", "All"}, {"dm", "DMs"}, {"mention", "Mentions"}, {"thread", "Threads"},
-		{"reaction", "Reactions"}, {"app", "Apps"}, {"reminder", "Reminders"},
+		{"channel", "Channels"}, {"reaction", "Reactions"}, {"app", "Apps"}, {"reminder", "Reminders"},
 	}
 	for _, filter := range filterDefinitions {
 		data.Filters = append(data.Filters, activityFilterView{
@@ -3683,6 +3781,10 @@ func activityKindLabel(item domain.ActivityItem) string {
 			label = "Mention"
 		case domain.ActivityThread:
 			label = "Thread"
+		case domain.ActivityChannel:
+			label = "Channel"
+		case domain.ActivityKeyword:
+			label = "Keyword"
 		case domain.ActivityReaction:
 			label = "Reaction"
 			if item.ReactionName != "" {
@@ -3735,7 +3837,7 @@ func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
 	}
 	mutation := domain.ActivityMutation(mutationValue)
 	if !mutation.Valid() {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity action is not valid", "Choose Mark read, Clear, or Restore and try again.")
+		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity action is not valid", "Choose Mark read, Mark unread, Clear, or Restore and try again.")
 		return
 	}
 	idValues := r.Form["activity_id"]
@@ -3820,6 +3922,169 @@ func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Req
 		channel = string(h.Channel)
 	}
 	h.redirectMutation(w, r, "/app/activity?channel="+url.QueryEscape(channel))
+}
+
+func (h Handler) notifications(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	sessionCookie, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(sessionCookie.Value) == "" {
+		h.writeAuthError(w, auth.ErrNotAuthenticated)
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	preferences, err := h.Messages.WorkspaceNotificationPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your notification preferences are temporarily unavailable.")
+		return
+	}
+	dnd, err := h.Messages.DoNotDisturbInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your notification pause is temporarily unavailable.")
+		return
+	}
+	data := notificationsData{
+		Channel: channel, CSRFToken: auth.CSRFToken(sessionCookie.Value),
+		Level: string(preferences.Level), Keywords: strings.Join(preferences.Keywords, ", "),
+		ActivityChannels: preferences.ActivityChannels, ActivityReminders: preferences.ActivityReminders,
+		Snoozed: dnd.SnoozeUntil.After(time.Now()), SnoozeUntil: dnd.SnoozeUntil.UTC().Format(time.RFC3339),
+	}
+	switch r.URL.Query().Get("status") {
+	case "saved":
+		data.Notice = "Notification preferences saved."
+	case "paused":
+		data.Notice = "Notifications paused. Messages and Activity remain available."
+	case "resumed":
+		data.Notice = "Notifications resumed."
+	}
+
+	var cursor domain.Cursor
+	for pageNumber := 0; pageNumber < 10; pageNumber++ {
+		page, listErr := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
+			Limit: 100, Cursor: cursor, MemberUserID: principal.UserID,
+		})
+		if listErr != nil {
+			h.writeStoreError(w, listErr, "Conversation notification exceptions are temporarily unavailable.")
+			return
+		}
+		for _, conversation := range page.Conversations {
+			// DMs always belong in Activity. The channel override controls are
+			// intentionally limited to channels until banner delivery itself is
+			// represented by this client.
+			if conversation.IsDirect || conversation.IsGroupDirect {
+				continue
+			}
+			override, preferenceErr := h.Messages.ConversationNotificationPreferences(
+				r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID,
+			)
+			if preferenceErr != nil {
+				h.writeStoreError(w, preferenceErr, "Conversation notification exceptions are temporarily unavailable.")
+				return
+			}
+			if override.Level == domain.NotificationInherit && !override.FollowEveryThread {
+				continue
+			}
+			data.Exceptions = append(data.Exceptions, notificationExceptionView{
+				ID: string(conversation.ID), Name: conversationName(conversation), Prefix: "#",
+				Level: string(override.Level), FollowEveryThread: override.FollowEveryThread,
+				URL: conversationDetailsURL(conversation.ID) + "#conversation-notifications",
+			})
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+		if pageNumber == 9 {
+			data.Notice = strings.TrimSpace(data.Notice + " Only the first 1,000 conversation exceptions are shown.")
+		}
+	}
+	sort.Slice(data.Exceptions, func(left, right int) bool {
+		return strings.ToLower(data.Exceptions[left].Name) < strings.ToLower(data.Exceptions[right].Name)
+	})
+	h.writeHTML(w, notificationsTemplate, data, http.StatusOK, "notification preferences rendering unavailable")
+}
+
+func splitNotificationKeywords(value string) []string {
+	parts := strings.Split(value, ",")
+	keywords := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if keyword := strings.TrimSpace(part); keyword != "" {
+			keywords = append(keywords, keyword)
+		}
+	}
+	return keywords
+}
+
+func (h Handler) setWorkspaceNotifications(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Notifications and try again.")
+	if !ok {
+		return
+	}
+	if _, err := h.Messages.SetWorkspaceNotificationPreferences(
+		r.Context(), principal.WorkspaceID, principal.UserID,
+		domain.NotificationLevel(strings.TrimSpace(fields["level"])),
+		splitNotificationKeywords(fields["keywords"]),
+		fields["activity_channels"] == "true", fields["activity_reminders"] == "true",
+	); err != nil {
+		if errors.Is(err, store.ErrInvalidArgument) {
+			h.writeMutationError(w, r, http.StatusBadRequest, "Those notification preferences are not valid", "Choose a trigger and use no more than 50 keywords of 100 characters each.")
+			return
+		}
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Notification preferences were not saved", "The workspace store is temporarily unavailable.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/notifications?channel="+url.QueryEscape(string(h.requestChannel(r)))+"&status=saved")
+}
+
+func (h Handler) setNotificationSnooze(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Notifications and try again.")
+	if !ok {
+		return
+	}
+	status := "paused"
+	switch strings.TrimSpace(fields["action"]) {
+	case "resume":
+		_, err = h.Messages.EndSnooze(r.Context(), principal.WorkspaceID, principal.UserID)
+		status = "resumed"
+	case "pause":
+		minutesValue := strings.TrimSpace(fields["custom_minutes"])
+		if minutesValue == "" {
+			minutesValue = strings.TrimSpace(fields["minutes"])
+		}
+		var minutes int64
+		minutes, err = strconv.ParseInt(minutesValue, 10, 64)
+		if err == nil {
+			_, err = h.Messages.SetSnooze(r.Context(), principal.WorkspaceID, principal.UserID, minutes)
+		}
+	default:
+		h.writeMutationError(w, r, http.StatusBadRequest, "That notification pause is not valid", "Choose a pause duration or Resume notifications.")
+		return
+	}
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, strconv.ErrSyntax) {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That pause duration is not valid", "Choose between 1 minute and 24 hours.")
+			return
+		}
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "The notification pause was not changed", "The workspace store is temporarily unavailable.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/notifications?channel="+url.QueryEscape(string(h.requestChannel(r)))+"&status="+status)
 }
 
 func (h Handler) hasUnacknowledgedReminder(ctx context.Context, principal auth.Principal) (bool, error) {
@@ -5522,6 +5787,75 @@ func (h Handler) setConversationTopic(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) setConversationPurpose(w http.ResponseWriter, r *http.Request) {
 	h.setConversationText(w, r, "purpose")
+}
+
+func (h Handler) setConversationNotifications(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The notification exception could not be read. Reload the conversation and try again.")
+	if !ok {
+		return
+	}
+	channel := h.requestChannel(r)
+	if _, err := h.Messages.SetConversationNotificationPreferences(
+		r.Context(), principal.WorkspaceID, principal.UserID, channel,
+		domain.NotificationLevel(strings.TrimSpace(fields["level"])),
+		fields["follow_every_thread"] == "true",
+	); err != nil {
+		switch {
+		case errors.Is(err, store.ErrInvalidArgument):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That notification exception is not valid", "Choose the workspace default, all new posts, mentions, or mute.")
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Only channel members can change its notification exception.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That channel is no longer available", "Nothing was changed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The notification exception was not saved", "The workspace store is temporarily unavailable.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, conversationDetailsURL(channel)+"#conversation-notifications")
+}
+
+func (h Handler) setThreadFollow(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The thread follow action could not be read. Reload the thread and try again.")
+	if !ok {
+		return
+	}
+	followed, err := strconv.ParseBool(strings.TrimSpace(fields["followed"]))
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That thread follow action is not valid", "Nothing was changed.")
+		return
+	}
+	threadValue := strings.TrimSpace(r.URL.Query().Get("thread_ts"))
+	if threadValue == "" {
+		threadValue = strings.TrimSpace(r.URL.Query().Get("thread"))
+	}
+	thread := domain.MessageTimestamp(threadValue)
+	if err := h.Messages.SetThreadFollowed(
+		r.Context(), principal.WorkspaceID, principal.UserID, h.requestChannel(r), thread, followed,
+	); err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidTimestamp), errors.Is(err, store.ErrInvalidArgument):
+			h.writeMutationError(w, r, http.StatusBadRequest, "That thread link is not valid", "Nothing was changed.")
+		case errors.Is(err, service.ErrNotInConversation):
+			h.writeMutationError(w, r, http.StatusForbidden, "You are not a member of this channel", "Only channel members can follow its threads.")
+		case errors.Is(err, store.ErrNotFound):
+			h.writeMutationError(w, r, http.StatusNotFound, "That thread is no longer available", "Nothing was changed.")
+		default:
+			h.writeMutationError(w, r, http.StatusServiceUnavailable, "The thread follow state was not saved", "The workspace store is temporarily unavailable.")
+		}
+		return
+	}
+	h.redirectMutation(w, r, appURL(string(h.requestChannel(r)), string(thread), "", "", "")+"#thread-heading")
 }
 
 func (h Handler) setConversationText(w http.ResponseWriter, r *http.Request, field string) {

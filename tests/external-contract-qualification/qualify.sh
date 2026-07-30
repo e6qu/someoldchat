@@ -39,6 +39,8 @@ slash_url='https://docs.slack.dev/interactivity/implementing-slash-commands/'
 manifest_url='https://docs.slack.dev/reference/app-manifest/'
 oauth_url='https://docs.slack.dev/authentication/installing-with-oauth/'
 status_url='https://slack.com/help/articles/201864558-Set-your-Slack-status-and-availability'
+notification_url='https://slack.com/help/articles/201355156-Configure-your-Slack-notifications'
+conversation_notification_url='https://slack.com/help/articles/360056534254-Manage-notifications-for-specific-channels-and-direct-messages'
 dnd_url='https://slack.com/help/articles/214908388-Pause-notifications-with-Do-Not-Disturb'
 huddle_url='https://slack.com/help/articles/4402059015315-Use-huddles-in-Slack'
 canvas_url='https://slack.com/help/articles/203950418-Use-a-canvas-in-Slack'
@@ -67,6 +69,8 @@ fetch "$slash_url" "$work/slash.html"
 fetch "$manifest_url" "$work/manifest.html"
 fetch "$oauth_url" "$work/oauth.html"
 fetch "$status_url" "$work/status.html"
+fetch "$notification_url" "$work/notifications.html"
+fetch "$conversation_notification_url" "$work/conversation-notifications.html"
 fetch "$dnd_url" "$work/dnd.html"
 fetch "$huddle_url" "$work/huddles.html"
 fetch "$canvas_url" "$work/canvas.html"
@@ -123,6 +127,22 @@ assert_contains "$work/status.html" 'Remove status after...' \
 	'[STATUS-01] status supports an explicit clear time' "$status_url"
 assert_contains "$work/status.html" 'away after 10 minutes of desktop inactivity' \
 	'[STATUS-02] automatic availability transition' "$status_url"
+assert_contains "$work/notifications.html" 'Everything or Mentions and direct messages' \
+	'[NOTIFY-01] workspace notification trigger choices' "$notification_url"
+assert_contains "$work/notifications.html" 'only exact matches will trigger notifications' \
+	'[NOTIFY-01] channel keywords use exact case-insensitive matching' "$notification_url"
+assert_contains "$work/notifications.html" "Keywords in messages sent in threads won't trigger a notification" \
+	'[NOTIFY-01] channel keywords do not trigger from thread replies' "$notification_url"
+assert_contains "$work/notifications.html" 'Channels with notifications set to "All new posts"' \
+	'[NOTIFY-01 ACTIVITY-01] all-post channels can be included in Activity' "$notification_url"
+assert_contains "$work/conversation-notifications.html" 'All new posts' \
+	'[NOTIFY-02] channels and group DMs expose all-post conversation overrides' "$conversation_notification_url"
+assert_contains "$work/conversation-notifications.html" 'Just mentions' \
+	'[NOTIFY-02] channels and group DMs expose mention-only conversation overrides' "$conversation_notification_url"
+assert_contains "$work/conversation-notifications.html" 'Follow every thread' \
+	'[NOTIFY-02 ACTIVITY-01] conversation settings support following every thread' "$conversation_notification_url"
+assert_contains "$work/conversation-notifications.html" 'Exceptions to the defaults' \
+	'[NOTIFY-02] preference UI lists conversation exceptions' "$conversation_notification_url"
 assert_contains "$work/dnd.html" 'set a notification schedule' \
 	'[NOTIFY-03] notification pause schedules are first-party behavior' "$dnd_url"
 assert_contains "$work/dnd.html" 'override this setting to notify you about an urgent message once per day' \

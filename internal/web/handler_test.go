@@ -514,6 +514,14 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 	}
 	unread := get(t, mux, "/app/activity?channel=Cdev&unread=1")
 	requireMissing(t, "restoring does not undo clear-implied read", unread.Body.String(), "triage me")
+	markUnread := postForm(t, mux, "/app/activity/mutate?channel=Cdev&mutation=unread", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "single_id": {string(id)},
+	}.Encode(), false)
+	if markUnread.Code != http.StatusSeeOther {
+		t.Fatalf("mark unread status=%d body=%s", markUnread.Code, markUnread.Body)
+	}
+	unread = get(t, mux, "/app/activity?channel=Cdev&unread=1")
+	requireContains(t, "mark unread restores unread Activity", unread.Body.String(), "triage me", "Mark this activity read")
 
 	layout := postForm(t, mux, "/app/activity/preferences?channel=Cdev", url.Values{
 		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "layout": {"dense"},
@@ -527,6 +535,99 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
 		"event.key==='x'", "event.key==='c'", "event.key==='r'",
 	)
+}
+
+func TestNotificationPreferencesDNDConversationExceptionAndThreadFollowJourney(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	notifications := get(t, mux, "/app/notifications?channel=Cdev")
+	if notifications.Code != http.StatusOK {
+		t.Fatalf("notifications status=%d body=%s", notifications.Code, notifications.Body)
+	}
+	requireContains(t, "notification preferences", notifications.Body.String(),
+		"Notification preferences", "Mentions and direct messages", "Channel keywords",
+		"Show channels set to All new posts in Activity", "Pause notifications",
+		"No conversation-specific exceptions",
+	)
+
+	saved := postForm(t, mux, "/app/notifications/preferences?channel=Cdev", url.Values{
+		"_csrf":             {auth.CSRFToken("session")},
+		"level":             {"all"},
+		"keywords":          {" Release , customer escalation, RELEASE "},
+		"activity_channels": {"true"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther || !strings.Contains(saved.Header().Get("Location"), "status=saved") {
+		t.Fatalf("save status=%d location=%q body=%s", saved.Code, saved.Header().Get("Location"), saved.Body)
+	}
+	preferences, err := s.GetWorkspaceNotificationPreferences(context.Background(), "T1", "U1")
+	if err != nil || preferences.Level != domain.NotificationAll || len(preferences.Keywords) != 2 || preferences.ActivityReminders {
+		t.Fatalf("workspace preferences=%+v err=%v", preferences, err)
+	}
+
+	exception := postForm(t, mux, "/app/conversation/notifications?channel=Cdev", url.Values{
+		"_csrf":               {auth.CSRFToken("session")},
+		"level":               {"mute"},
+		"follow_every_thread": {"true"},
+	}.Encode(), false)
+	if exception.Code != http.StatusSeeOther {
+		t.Fatalf("exception status=%d body=%s", exception.Code, exception.Body)
+	}
+	notifications = get(t, mux, "/app/notifications?channel=Cdev")
+	requireContains(t, "notification exception list", notifications.Body.String(), "#general", "mute", "following every thread")
+	details := get(t, mux, "/app?channel=Cdev&details=1")
+	requireContains(t, "conversation notification controls", details.Body.String(),
+		`id="conversation-notifications"`, `<option value="mute" selected>Mute conversation</option>`,
+		`name="follow_every_thread" value="true" checked`,
+	)
+
+	paused := postForm(t, mux, "/app/notifications/dnd?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "action": {"pause"}, "minutes": {"30"},
+	}.Encode(), false)
+	if paused.Code != http.StatusSeeOther || !strings.Contains(paused.Header().Get("Location"), "status=paused") {
+		t.Fatalf("pause status=%d location=%q body=%s", paused.Code, paused.Header().Get("Location"), paused.Body)
+	}
+	dnd, err := s.GetDoNotDisturb(context.Background(), "T1", "U1")
+	if err != nil || !dnd.SnoozeUntil.After(time.Now()) {
+		t.Fatalf("dnd=%+v err=%v", dnd, err)
+	}
+	resumed := postForm(t, mux, "/app/notifications/dnd?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "action": {"resume"},
+	}.Encode(), false)
+	if resumed.Code != http.StatusSeeOther {
+		t.Fatalf("resume status=%d body=%s", resumed.Code, resumed.Body)
+	}
+	resetFollowAll := postForm(t, mux, "/app/conversation/notifications?channel=Cdev", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "level": {"mute"},
+	}.Encode(), false)
+	if resetFollowAll.Code != http.StatusSeeOther {
+		t.Fatalf("reset follow-every-thread status=%d body=%s", resetFollowAll.Code, resetFollowAll.Body)
+	}
+
+	root := seedMessage(t, s, "Mfollow-root", "follow this thread", time.Now().UTC().Add(-time.Minute))
+	rootTimestamp := domain.NewMessageTimestamp(root.CreatedAt)
+	threadPage := get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)))
+	requireContains(t, "thread author follows by default", threadPage.Body.String(), ">Following</button>", `aria-pressed="true"`)
+	unfollowed := postForm(t, mux, "/app/thread/follow?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)), url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "followed": {"false"},
+	}.Encode(), false)
+	if unfollowed.Code != http.StatusSeeOther {
+		t.Fatalf("unfollow status=%d body=%s", unfollowed.Code, unfollowed.Body)
+	}
+	if stored, err := s.IsThreadFollowed(context.Background(), "T1", "U1", "Cdev", rootTimestamp); err != nil || stored {
+		t.Fatalf("followed after unfollow=%v err=%v", stored, err)
+	}
+	threadPage = get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)))
+	requireContains(t, "thread unfollow persisted", threadPage.Body.String(), ">Follow thread</button>", `aria-pressed="false"`)
+	followed := postForm(t, mux, "/app/thread/follow?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)), url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "followed": {"true"},
+	}.Encode(), false)
+	if followed.Code != http.StatusSeeOther {
+		t.Fatalf("follow status=%d body=%s", followed.Code, followed.Body)
+	}
+	if stored, err := s.IsThreadFollowed(context.Background(), "T1", "U1", "Cdev", rootTimestamp); err != nil || !stored {
+		t.Fatalf("followed=%v err=%v", stored, err)
+	}
+	threadPage = get(t, mux, "/app?channel=Cdev&thread="+url.QueryEscape(string(rootTimestamp)))
+	requireContains(t, "thread follow persisted", threadPage.Body.String(), ">Following</button>", `aria-pressed="true"`)
 }
 
 // TestNarrowNavigationKeepsConversationNamesReachable covers the responsive

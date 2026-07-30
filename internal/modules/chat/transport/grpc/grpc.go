@@ -2815,6 +2815,69 @@ func (r Remote) SetActivityPreferences(ctx context.Context, workspaceID domain.W
 	return decodeProtoActivityPreferences(out), nil
 }
 
+func (r Remote) WorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceNotificationPreferences, error) {
+	out, err := r.activity.GetWorkspaceNotificationPreferences(ctx, &chatv1.NotificationPreferencesRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	return decodeProtoWorkspaceNotificationPreferences(out)
+}
+
+func (r Remote) SetWorkspaceNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, level domain.NotificationLevel, keywords []string, activityChannels, activityReminders bool) (domain.WorkspaceNotificationPreferences, error) {
+	out, err := r.activity.SetWorkspaceNotificationPreferences(ctx, &chatv1.SetWorkspaceNotificationPreferencesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Level: string(level),
+		Keywords: keywords, ActivityChannels: activityChannels, ActivityReminders: activityReminders,
+	})
+	if err != nil {
+		return domain.WorkspaceNotificationPreferences{}, err
+	}
+	return decodeProtoWorkspaceNotificationPreferences(out)
+}
+
+func (r Remote) ConversationNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.ConversationNotificationPreferences, error) {
+	out, err := r.activity.GetConversationNotificationPreferences(ctx, &chatv1.ConversationNotificationPreferencesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+	})
+	if err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	return decodeProtoConversationNotificationPreferences(out)
+}
+
+func (r Remote) SetConversationNotificationPreferences(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, level domain.NotificationLevel, followEveryThread bool) (domain.ConversationNotificationPreferences, error) {
+	out, err := r.activity.SetConversationNotificationPreferences(ctx, &chatv1.SetConversationNotificationPreferencesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID),
+		Level: string(level), FollowEveryThread: followEveryThread,
+	})
+	if err != nil {
+		return domain.ConversationNotificationPreferences{}, err
+	}
+	return decodeProtoConversationNotificationPreferences(out)
+}
+
+func (r Remote) ThreadFollowed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, root domain.MessageTimestamp) (bool, error) {
+	out, err := r.activity.GetThreadFollow(ctx, &chatv1.ThreadFollowRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), ThreadTimestamp: string(root),
+	})
+	if err != nil {
+		return false, err
+	}
+	return out.GetFollowed(), nil
+}
+
+func (r Remote) SetThreadFollowed(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, root domain.MessageTimestamp, followed bool) error {
+	out, err := r.activity.SetThreadFollow(ctx, &chatv1.SetThreadFollowRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), ThreadTimestamp: string(root), Followed: followed,
+	})
+	if err != nil {
+		return err
+	}
+	if out.GetFollowed() != followed {
+		return errors.New("thread follow mutation was not acknowledged")
+	}
+	return nil
+}
+
 func (r Remote) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
 	out, err := r.reminders.CompleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
 	if err != nil {
@@ -4957,6 +5020,65 @@ func (s *Server) SetActivityPreferences(ctx context.Context, input *chatv1.SetAc
 	return encodeProtoActivityPreferences(preferences), nil
 }
 
+func (s *Server) GetWorkspaceNotificationPreferences(ctx context.Context, input *chatv1.NotificationPreferencesRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
+	preferences, err := s.implementation.WorkspaceNotificationPreferences(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspaceNotificationPreferences(preferences), nil
+}
+
+func (s *Server) SetWorkspaceNotificationPreferences(ctx context.Context, input *chatv1.SetWorkspaceNotificationPreferencesRequest) (*chatv1.WorkspaceNotificationPreferences, error) {
+	preferences, err := s.implementation.SetWorkspaceNotificationPreferences(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.NotificationLevel(input.GetLevel()), input.GetKeywords(), input.GetActivityChannels(), input.GetActivityReminders(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoWorkspaceNotificationPreferences(preferences), nil
+}
+
+func (s *Server) GetConversationNotificationPreferences(ctx context.Context, input *chatv1.ConversationNotificationPreferencesRequest) (*chatv1.ConversationNotificationPreferences, error) {
+	preferences, err := s.implementation.ConversationNotificationPreferences(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversationNotificationPreferences(preferences), nil
+}
+
+func (s *Server) SetConversationNotificationPreferences(ctx context.Context, input *chatv1.SetConversationNotificationPreferencesRequest) (*chatv1.ConversationNotificationPreferences, error) {
+	preferences, err := s.implementation.SetConversationNotificationPreferences(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()),
+		domain.NotificationLevel(input.GetLevel()), input.GetFollowEveryThread(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoConversationNotificationPreferences(preferences), nil
+}
+
+func (s *Server) GetThreadFollow(ctx context.Context, input *chatv1.ThreadFollowRequest) (*chatv1.ThreadFollow, error) {
+	followed, err := s.implementation.ThreadFollowed(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTimestamp()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ThreadFollow{Followed: followed}, nil
+}
+
+func (s *Server) SetThreadFollow(ctx context.Context, input *chatv1.SetThreadFollowRequest) (*chatv1.ThreadFollow, error) {
+	if err := s.implementation.SetThreadFollowed(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTimestamp()), input.GetFollowed(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.ThreadFollow{Followed: input.GetFollowed()}, nil
+}
+
 func (s *Server) ScheduleMessage(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
 	return s.scheduleMessageProto(ctx, input)
 }
@@ -7002,6 +7124,50 @@ func decodeProtoActivityPreferences(value *chatv1.ActivityPreferences) domain.Ac
 		return domain.ActivityPreferences{}
 	}
 	return domain.ActivityPreferences{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Layout: domain.ActivityLayout(value.GetLayout())}
+}
+
+func encodeProtoWorkspaceNotificationPreferences(value domain.WorkspaceNotificationPreferences) *chatv1.WorkspaceNotificationPreferences {
+	return &chatv1.WorkspaceNotificationPreferences{
+		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Level: string(value.Level),
+		Keywords: append([]string(nil), value.Keywords...), ActivityChannels: value.ActivityChannels, ActivityReminders: value.ActivityReminders,
+	}
+}
+
+func decodeProtoWorkspaceNotificationPreferences(value *chatv1.WorkspaceNotificationPreferences) (domain.WorkspaceNotificationPreferences, error) {
+	if value == nil {
+		return domain.WorkspaceNotificationPreferences{}, errors.New("typed workspace notification preferences are incomplete")
+	}
+	preferences := domain.WorkspaceNotificationPreferences{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		Level: domain.NotificationLevel(value.GetLevel()), Keywords: domain.NormalizeNotificationKeywords(value.GetKeywords()),
+		ActivityChannels: value.GetActivityChannels(), ActivityReminders: value.GetActivityReminders(),
+	}
+	if !preferences.Valid() {
+		return domain.WorkspaceNotificationPreferences{}, errors.New("typed workspace notification preferences are invalid")
+	}
+	return preferences, nil
+}
+
+func encodeProtoConversationNotificationPreferences(value domain.ConversationNotificationPreferences) *chatv1.ConversationNotificationPreferences {
+	return &chatv1.ConversationNotificationPreferences{
+		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ConversationId: string(value.Conversation),
+		Level: string(value.Level), FollowEveryThread: value.FollowEveryThread,
+	}
+}
+
+func decodeProtoConversationNotificationPreferences(value *chatv1.ConversationNotificationPreferences) (domain.ConversationNotificationPreferences, error) {
+	if value == nil {
+		return domain.ConversationNotificationPreferences{}, errors.New("typed conversation notification preferences are incomplete")
+	}
+	preferences := domain.ConversationNotificationPreferences{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		Conversation: domain.ConversationID(value.GetConversationId()), Level: domain.NotificationLevel(value.GetLevel()),
+		FollowEveryThread: value.GetFollowEveryThread(),
+	}
+	if !preferences.Valid() {
+		return domain.ConversationNotificationPreferences{}, errors.New("typed conversation notification preferences are invalid")
+	}
+	return preferences, nil
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {
