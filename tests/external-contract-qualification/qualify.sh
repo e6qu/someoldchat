@@ -319,6 +319,8 @@ assert_contains "$work/datastore-query.html" 'BETWEEN ... AND' \
 	'[WORKFLOW-02] hosted datastore query supports the documented comparison grammar' "$datastore_query_url"
 assert_contains "$work/datastore-query.html" 'paginate through your datastore and sum up the count' \
 	'[WORKFLOW-02] hosted datastore count spans every scan page' "$datastore_query_url"
+assert_contains "$work/datastore-query.html" 'filters are applied post-hoc' \
+	'[ADMIN-04] app administration exposes persisted hosted data without changing Slack query semantics' "$datastore_query_url"
 assert_contains "$work/list.html" 'create a list' \
 	'[LIST-01] lists have a current first-party creation journey' "$list_url"
 assert_contains "$work/workflow.html" 'Workflow Builder' \

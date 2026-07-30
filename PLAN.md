@@ -345,7 +345,7 @@ differential results remain named gaps.
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 102 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 35 Playwright scenarios cite 73 IDs. `make journey-check` rejects
+and 36 Playwright scenarios cite 75 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -362,9 +362,9 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 130 representative exact assertions
-explicitly citing 49 of the 102 journey IDs across every journey domain.
-`make journey-check` prints the other 53 as upstream-text evidence
+developer pages and currently checks 131 representative exact assertions
+explicitly citing 50 of the 102 journey IDs across every journey domain.
+`make journey-check` prints the other 52 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and

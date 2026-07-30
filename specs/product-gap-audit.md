@@ -5,7 +5,7 @@ the Slack behavior it is intended to support. A registered handler or a
 server-rendered control is not counted as complete unless the surrounding user
 journey is usable.
 
-Measured on 2026-07-30:
+Measured on 2026-07-31:
 
 - 223 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
@@ -24,13 +24,13 @@ Measured on 2026-07-30:
   comparison currently observes all 231 methods claimed at `sdk-compatible` or
   above (221 current and ten retained legacy methods);
 - all 102 stable journey IDs have an individually checked source-map row. The
-  live official-source gate currently makes 130 representative assertions
-  explicitly citing 49 of those IDs across authentication, navigation,
+  live official-source gate currently makes 131 representative assertions
+  explicitly citing 50 of those IDs across authentication, navigation,
   conversations, messaging, search, files, apps, OAuth, presence, huddles,
   canvases, lists, workflows, administration, Slack Connect, accessibility,
-  Activity, and reminders before local evidence runs. The remaining 53 IDs are
+  Activity, and reminders before local evidence runs. The remaining 52 IDs are
   printed as upstream-text evidence gaps rather than inheriting coverage;
-- 35 Playwright scenarios cite 73 of the normative catalog's 102 stable journey
+- 36 Playwright scenarios cite 75 of the normative catalog's 102 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
   `make journey-check` rejects unknown IDs, missing or duplicate per-journey
@@ -93,7 +93,7 @@ implementation MUST NOT narrow the target.
 | P1 | Direct-message lifecycle | Dedicated DMs navigation/search, one-to-one/group creation, naming, Slack's nine-person limit, durable per-member close, exact API no-op fields, canonical reopen, reviewed add-people with no/all-history choices and notices, and in-place private-channel conversion now work across memory/SQL/gRPC/browser paths. Current official SDKs also prove canonical exact-member group opening. Slack's help page does not enumerate its complete history-option list, so that exact live option inventory, Slack Connect/external conversion policy, and workspace-configurable restrictions remain differential gaps rather than inferred compatibility. |
 | P1 | Notifications and presence | Workspace and per-conversation notification preferences plus snooze/DND controls exist in the client and API. Status expiry and up-to-five future statuses with edit/cancel and atomic worker activation are durable and restart-safe; manual `auto`/`away` selection and truthful member affordances exist. Live activity-derived automatic presence and Slack's ten-minute idle transition, full status projection outside People/profile, workspace emoji validation, typing indicators, and deeper Activity/VIP/invitation policy remain. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
-| P1 | App administration | Manifest JSON editing is real, but install-time incoming-webhook selection, event-delivery health/retries, scope explanation, token inventory/revocation, distribution, external-auth providers, and hosted-datastore browsing are absent. |
+| P1 | App administration | Manifest JSON editing and OAuth installation are real. A developer-owned hosted app can now browse its manifest-declared datastore schema and durable items, execute Slack-compatible expression/cursor queries, count matches, replace/update JSON items, and delete them through the same local/gRPC/storage boundary as `apps.datastore.*`; ownership, installation, hosted-runtime, schema, and query failures remain explicit. Install-time incoming-webhook selection, event-delivery health/retries, scope explanation, token inventory/revocation, distribution, and external-auth providers remain absent. |
 | P2 | Canvases, lists, and workflows | Canvases and lists are now first-class persisted workspace surfaces: access-filtered directories, read/write-grant-aware detail controls, atomic canvas title/content revision, list creation, item creation and complete/restore run through memory/SQL and the generated gRPC seam. Full structured canvas blocks/comments/history, sharing management, list schemas/views/assignments/comments/files, deletion, and workflow creation/execution remain incomplete. |
 | P2 | Client breadth | The semantic journeys now run in Chromium, Firefox, and WebKit, with automated WCAG checks for representative desktop, dialog, and narrow states. Performance budgets, screenshot differential, manual assistive-technology coverage, and live-Slack comparisons remain unqualified. |
 

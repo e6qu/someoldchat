@@ -59,16 +59,28 @@ async function postPayloadWithToken(request, token, body) {
 }
 
 async function installActivityBot(page, request) {
-  await page.goto('/app/developer/apps');
   const redirectURI = 'https://client.example/browser-oauth-callback';
   const name = `Activity bot ${Date.now()}`;
-  await page.getByRole('textbox', { name: 'App manifest (JSON)' }).fill(JSON.stringify({
+  const installed = await createAndInstallApp(page, request, {
     display_information: { name },
     oauth_config: {
       redirect_urls: [redirectURI],
       scopes: { bot: ['channels:join', 'chat:write'] },
     },
-  }, null, 2));
+  }, redirectURI);
+
+  const join = await request.post('/api/conversations.join', {
+    headers: { authorization: `Bearer ${installed.token}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL },
+  });
+  const joined = await join.json();
+  expect(joined.ok, JSON.stringify(joined)).toBe(true);
+  return { ...installed, name };
+}
+
+async function createAndInstallApp(page, request, manifest, redirectURI) {
+  await page.goto('/app/developer/apps');
+  await page.getByRole('textbox', { name: 'App manifest (JSON)' }).fill(JSON.stringify(manifest, null, 2));
   await page.getByRole('button', { name: 'Create app' }).click();
   await expect(page.getByRole('heading', { name: 'Save these app credentials now' })).toBeVisible();
   const appID = new URL(page.url()).searchParams.get('app');
@@ -77,7 +89,7 @@ async function installActivityBot(page, request) {
   const clientSecret = (await page.locator('dt:text-is("Client secret") + dd code').textContent()).trim();
 
   await page.getByRole('link', { name: 'Open install flow' }).click();
-  await expect(page.getByRole('heading', { name: `Authorize ${name}` })).toBeVisible();
+  await expect(page.getByRole('heading', { name: `Authorize ${manifest.display_information.name}` })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Allow' })).toBeEnabled();
   const consent = await page.locator('form').evaluate((form) => Object.fromEntries(new FormData(form)));
   consent.decision = 'approve';
@@ -106,14 +118,7 @@ async function installActivityBot(page, request) {
   expect(installed.ok, JSON.stringify(installed)).toBe(true);
   expect(installed.access_token).toMatch(/^xoxb-/);
   expect(installed.bot_user_id).toBeTruthy();
-
-  const join = await request.post('/api/conversations.join', {
-    headers: { authorization: `Bearer ${installed.access_token}`, 'content-type': 'application/json' },
-    data: { channel: CHANNEL },
-  });
-  const joined = await join.json();
-  expect(joined.ok, JSON.stringify(joined)).toBe(true);
-  return { appID, token: installed.access_token, botUserID: installed.bot_user_id, name };
+  return { appID, token: installed.access_token, botUserID: installed.bot_user_id };
 }
 
 async function expectNoSeriousAccessibilityViolations(page) {
@@ -772,6 +777,62 @@ test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, an
   await page.getByRole('button', { name: 'Delete app' }).click();
   await expect(page).toHaveURL(/\/app\/developer\/apps$/);
   await expect(page.getByText('You have not created an app yet.')).toBeVisible();
+});
+
+test('[ADMIN-04 APP-09 WORKFLOW-02] hosted app datastores are browsable and editable from app administration', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/hosted-datastore-callback';
+  const name = `Hosted data ${Date.now()}`;
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name, description: 'Browser-qualified hosted storage' },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['datastore:read', 'datastore:write'] },
+    },
+    settings: { is_hosted: true, function_runtime: 'slack' },
+    datastores: {
+      incidents: {
+        primary_key: 'id',
+        time_to_live_attribute: 'expires_at',
+        attributes: {
+          id: { type: 'string' },
+          title: { type: 'string' },
+          priority: { type: 'integer' },
+          expires_at: { type: 'slack#/types/timestamp' },
+        },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto(`/app/developer/apps?app=${installed.appID}`);
+  await page.getByRole('link', { name: 'Manage hosted datastores' }).click();
+  await expect(page.getByRole('heading', { name: 'incidents' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Manifest schema' })).toBeVisible();
+  await expect(page.getByText('No items matched this page.')).toBeVisible();
+
+  const item = page.getByRole('textbox', { name: 'Item (JSON)' });
+  await item.fill(JSON.stringify({ title: 'Investigate latency', id: 'INC-1', priority: 1 }, null, 2));
+  await page.getByRole('button', { name: 'Persist item' }).click();
+  await expect(page.getByRole('status')).toContainText('Item persisted');
+  await expect(page.getByText('Investigate latency')).toBeVisible();
+  await expect(page.getByText('1 matching item.')).toBeVisible();
+
+  await page.getByRole('textbox', { name: 'Expression', exact: true }).fill('contains (#title, :term)');
+  await page.getByRole('textbox', { name: 'Expression attributes (JSON)' }).fill('{"#title":"title"}');
+  await page.getByRole('textbox', { name: 'Expression values (JSON)' }).fill('{":term":"latency"}');
+  await page.getByRole('button', { name: 'Run query' }).click();
+  await expect(page.getByText('Investigate latency')).toBeVisible();
+
+  await page.getByLabel('Operation').selectOption('merge');
+  await item.fill('{"id":"INC-1","priority":2}');
+  await page.getByRole('button', { name: 'Persist item' }).click();
+  await expect(page.getByText('Investigate latency')).toBeVisible();
+  await expect(page.locator('.item pre')).toContainText('"priority":2');
+
+  await expectNoSeriousAccessibilityViolations(page);
+  await page.getByRole('button', { name: 'Delete' }).click();
+  await expect(page.getByRole('status')).toContainText('Item deleted');
+  await expect(page.getByText('No items matched this page.')).toBeVisible();
 });
 
 test('[APP-03 APP-07 MSG-01] JSON-authored blocks, attachments, and unfurls render as usable messages', async ({ page, context, request }) => {
