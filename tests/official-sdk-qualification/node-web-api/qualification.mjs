@@ -798,6 +798,7 @@ const createdUsergroup = await client.usergroups.create({
 	description: "SDK qualification",
 });
 assert.equal(createdUsergroup.ok, true);
+assert.equal(createdUsergroup.usergroup.is_subteam, true);
 const usergroupId = createdUsergroup.usergroup.id;
 assert.equal((await client.admin.usergroups.addChannels({ usergroup_id: usergroupId, channel_ids: ["C1"] })).ok, true);
 assert.equal((await client.admin.usergroups.addTeams({ usergroup_id: usergroupId, team_ids: ["T1"] })).ok, true);

@@ -3613,8 +3613,8 @@ func (s *Store) ListActivity(_ context.Context, workspace domain.WorkspaceID, us
 		}
 		if item.MessageID != "" {
 			message, messageErr := s.messageLocked(item.MessageID)
-			_, member := s.memberships[item.Conversation][user]
-			if messageErr == nil && !message.Deleted && member {
+			conversation, conversationExists := s.conversations[item.Conversation]
+			if messageErr == nil && !message.Deleted && conversationExists && s.canViewActivitySourceLocked(workspace, user, conversation) {
 				item.Message = cloneMessage(message)
 				item.SourceAvailable = true
 			}
@@ -3920,17 +3920,18 @@ func (s *Store) createMessageLocked(message domain.Message, event events.Event, 
 func (s *Store) createMessageActivityLocked(message domain.Message) {
 	conversation := s.conversations[message.Conversation]
 	recipients := make(map[domain.UserID]map[domain.ActivityKind]struct{})
-	add := func(user domain.UserID, kind domain.ActivityKind) {
+	add := func(user domain.UserID, kind domain.ActivityKind) bool {
 		if user == "" || user == message.AuthorID {
-			return
+			return false
 		}
-		if _, member := s.memberships[message.Conversation][user]; !member {
-			return
+		if !s.canViewActivitySourceLocked(message.WorkspaceID, user, conversation) {
+			return false
 		}
 		if recipients[user] == nil {
 			recipients[user] = make(map[domain.ActivityKind]struct{})
 		}
 		recipients[user][kind] = struct{}{}
+		return true
 	}
 	root := domain.NewMessageTimestamp(message.CreatedAt)
 	if message.ThreadTimestamp != "" {
@@ -3939,17 +3940,31 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 	// Posting a root or replying follows that thread. A mention in a thread
 	// follows it too, matching Slack's Threads/Activity contract.
 	s.threadFollows[threadFollowKey(message.WorkspaceID, message.AuthorID, message.Conversation, root)] = true
+	addMention := func(user domain.UserID) {
+		if !add(user, domain.ActivityMention) {
+			return
+		}
+		if message.ThreadTimestamp != "" {
+			add(user, domain.ActivityThread)
+			s.threadFollows[threadFollowKey(message.WorkspaceID, user, message.Conversation, root)] = true
+		}
+	}
+	mentions := domain.MentionsInMessage(message.Text, message.Blocks)
+	for _, user := range mentions.Users {
+		addMention(user)
+	}
+	for _, groupID := range mentions.UserGroups {
+		group, ok := s.userGroups[groupID]
+		if !ok || group.WorkspaceID != message.WorkspaceID || !group.Enabled || !group.DeletedAt.IsZero() {
+			continue
+		}
+		for _, user := range group.Users {
+			addMention(user)
+		}
+	}
 	for user := range s.memberships[message.Conversation] {
 		if conversation.IsDirect || conversation.IsGroupDirect {
 			add(user, domain.ActivityDM)
-		}
-		mentioned := strings.Contains(message.Text, "<@"+string(user)+">") || strings.Contains(message.Blocks, "<@"+string(user)+">")
-		if mentioned {
-			add(user, domain.ActivityMention)
-			if message.ThreadTimestamp != "" {
-				add(user, domain.ActivityThread)
-				s.threadFollows[threadFollowKey(message.WorkspaceID, user, message.Conversation, root)] = true
-			}
 		}
 		workspacePreferences := domain.DefaultWorkspaceNotificationPreferences(message.WorkspaceID, user)
 		if stored, ok := s.workspaceNotificationPrefs[workspaceNotificationKey(message.WorkspaceID, user)]; ok {
@@ -4000,6 +4015,42 @@ func (s *Store) createMessageActivityLocked(message domain.Message) {
 			MessageID: message.ID, OccurredAt: message.CreatedAt.UTC(),
 		}
 	}
+}
+
+// canViewActivitySourceLocked applies the same visibility boundary as a normal
+// conversation read. Public-channel mentions can notify an active workspace
+// member who has not joined yet; private conversations and DMs require
+// membership, and a private access-group restriction remains authoritative.
+func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user domain.UserID, conversation domain.Conversation) bool {
+	account, ok := s.users[user]
+	if !ok || account.WorkspaceID != workspace || account.Deleted {
+		return false
+	}
+	membership, ok := s.members[string(workspace)+"\x00"+string(user)]
+	if !ok || !membership.Active {
+		return false
+	}
+	private := conversation.IsPrivate || conversation.IsDirect || conversation.IsGroupDirect
+	if !private {
+		return conversation.WorkspaceID == workspace
+	}
+	if _, member := s.memberships[conversation.ID][user]; !member {
+		return false
+	}
+	groups := s.conversationAccess[conversation.ID]
+	if len(groups) == 0 {
+		return true
+	}
+	for _, groupID := range groups {
+		group, exists := s.userGroups[groupID]
+		if !exists || group.WorkspaceID != workspace || !group.Enabled || !group.DeletedAt.IsZero() {
+			continue
+		}
+		if slices.Contains(group.Users, user) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {

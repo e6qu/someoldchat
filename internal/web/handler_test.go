@@ -334,7 +334,7 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		"<title>#general · SameOldChat</title>",
 		`placeholder="Message #general"`,
 		`role="toolbar" aria-label="Message formatting and insertions"`,
-		`aria-label="Mention a person"`,
+		`aria-label="Mention a person or user group"`,
 		`data-mention-user="U1"`,
 		`id="upload-preview" role="status">No file selected.`,
 		`<span class="author">Ada Developer</span>`,
@@ -493,6 +493,108 @@ func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 		`data-clear-button`,
 	)
 	requireContains(t, "activity shortcut", progressiveEnhancementScript, "key==='3'", "activityLink", "window.location.assign(activityHref)")
+}
+
+func TestComposerUserGroupMentionRendersAndNotifiesEligibleMembers(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Unix(1700000250, 0).UTC()
+	group := domain.UserGroup{
+		ID: "SSUPPORT", WorkspaceID: "T1", Name: "Support rotation", Handle: "support",
+		Description: "People handling the current support queue", Creator: "U1", UpdatedBy: "U1",
+		CreatedAt: now, UpdatedAt: now, Enabled: true,
+	}
+	if err := s.CreateUserGroup(context.Background(), group, events.Event{ID: "Egroup", WorkspaceID: "T1", Topic: "usergroup.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetUserGroupUsers(context.Background(), "T1", group.ID, []domain.UserID{"U2"}, "U1", events.Event{ID: "Egroup-users", WorkspaceID: "T1", Topic: "usergroup.users_changed", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	page := get(t, mux, "/app?channel=Cdev")
+	if page.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "user group composer option", page.Body.String(),
+		`data-mention-group="SSUPPORT"`,
+		`data-mention-name="support"`,
+		"Support rotation · 1 members",
+		`aria-label="Mention a person or user group"`,
+	)
+	requireContains(t, "user group transport selection", progressiveEnhancementScript,
+		"'<!subteam^'+group+'>'",
+		"[data-mention-user],[data-mention-group]",
+	)
+
+	result := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"Please review <!subteam^SSUPPORT>"},
+	}.Encode(), false)
+	if result.Code != http.StatusSeeOther {
+		t.Fatalf("post status=%d body=%s", result.Code, result.Body)
+	}
+	rendered := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "rendered user group handle", rendered.Body.String(),
+		`class="slack-mention">@support</span>`,
+	)
+	requireMissing(t, "raw user group identifier", rendered.Body.String(), "@subteam", "@SSUPPORT")
+
+	activity, err := s.ListActivity(context.Background(), "T1", "U2", domain.ActivityQuery{
+		Kinds: []domain.ActivityKind{domain.ActivityMention}, Page: domain.PageRequest{Limit: 10},
+	})
+	if err != nil || len(activity.Items) != 1 || !activity.Items[0].SourceAvailable {
+		t.Fatalf("group mention activity=%+v err=%v", activity, err)
+	}
+
+	if err := s.SetUserGroupEnabled(context.Background(), "T1", group.ID, false, "U1", events.Event{ID: "Egroup-disabled", WorkspaceID: "T1", Topic: "usergroup.enabled_changed", CreatedAt: now.Add(time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	disabled := get(t, mux, "/app?channel=Cdev")
+	requireMissing(t, "disabled groups are not mentionable", disabled.Body.String(), `data-mention-group="SSUPPORT"`)
+}
+
+func TestComposerUserGroupSuggestionsPageThroughTheWorkspaceCatalog(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	now := time.Unix(1700000250, 0).UTC()
+	for index := 0; index <= memberWindow; index++ {
+		id := domain.UserGroupID(fmt.Sprintf("S%03d", index))
+		if err := s.CreateUserGroup(context.Background(), domain.UserGroup{
+			ID: id, WorkspaceID: "T1", Name: fmt.Sprintf("Group %03d", index), Handle: fmt.Sprintf("group-%03d", index),
+			Creator: "U1", UpdatedBy: "U1", CreatedAt: now, UpdatedAt: now, Enabled: true,
+		}, events.Event{ID: domain.EventID(fmt.Sprintf("Egroup-%03d", index)), WorkspaceID: "T1", Topic: "usergroup.created", CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := get(t, mux, "/app?channel=Cdev")
+	if page.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", page.Code, page.Body)
+	}
+	requireContains(t, "user groups beyond the first store page", page.Body.String(),
+		`data-mention-group="S100"`,
+		`data-mention-name="group-100"`,
+	)
+}
+
+func TestResolveSlackReferenceJSONLeavesOpaqueValuesAndPlainTextLiteral(t *testing.T) {
+	names := &userNames{
+		cache: map[domain.UserID]string{"U1": "Ada"},
+		groups: map[domain.UserGroupID]string{
+			"SSUPPORT": "support",
+		},
+		groupsLoaded: true,
+	}
+	raw := `[
+		{"type":"section","text":{"type":"mrkdwn","text":"notify <!subteam^SSUPPORT>"}},
+		{"type":"actions","elements":[{"type":"button","text":{"type":"plain_text","text":"literal <!subteam^SSUPPORT>"},"value":"route-<!subteam^SSUPPORT>"}]}
+	]`
+	resolved := resolveSlackReferenceJSON(raw, names)
+	requireContains(t, "mrkdwn reference rendering", resolved, `notify \u003c!subteam^SSUPPORT|@support\u003e`)
+	requireContains(t, "opaque Block Kit fields", resolved,
+		`"text":"literal \u003c!subteam^SSUPPORT\u003e"`,
+		`"value":"route-\u003c!subteam^SSUPPORT\u003e"`,
+	)
 }
 
 func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {

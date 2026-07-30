@@ -360,7 +360,7 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 106 representative exact assertions
+developer pages and currently checks 115 representative exact assertions
 explicitly citing 47 of the 102 journey IDs across every journey domain.
 `make journey-check` prints the other 55 as upstream-text evidence
 gaps. This pass corrected two local targets
@@ -379,10 +379,14 @@ the searchable picker, Unicode rendering, reaction validation, and
 `emoji.list(include_categories=true)`. Durable workspace custom emoji and
 aliases are merged through the same model, with HTTP(S)-only image rendering.
 Channel completion stores Slack's `<#ID>` form and resolves only authorized
-visible names at presentation time. Node, Python, and Java typed SDK calls,
-current Slack Help/developer assertions, browser keyboard journeys, and
-service/web/API tests form the qualification stack. User-group completion,
-recent/category/skin-tone picker depth, exact Slack ranking, pasted
+visible names at presentation time. User-group completion now combines enabled
+groups with people under the same keyboard-operable `@` list, stores Slack's
+`<!subteam^ID>` form, resolves the current handle without mutating history, and
+expands enabled membership to visibility-safe Activity. The user-group Web API
+also reports Slack's required `is_subteam:true` object shape. Node, Python, and
+Java typed SDK calls, current Slack Help/developer assertions, browser keyboard
+journeys, and service/web/API/shared-persistence tests form the qualification
+stack. Recent/category/skin-tone picker depth, exact Slack ranking, pasted
 attachments, clips, and controlled live-Slack outcomes remain named gaps.
 
 The first-party reminder slice now has a durable model separate from deprecated
@@ -398,8 +402,8 @@ deterministic deployed-worker browser delivery, and undocumented month-end
 recurrence remain explicit gaps.
 
 The 2026 Activity source refresh now drives a durable cross-layer slice rather
-than a projection assembled by the page. DMs/MPIMs, mentions, followed-thread
-replies, all-new-post channel notifications, exact channel-keyword matches,
+than a projection assembled by the page. DMs/MPIMs, direct and user-group
+mentions, followed-thread replies, all-new-post channel notifications, exact channel-keyword matches,
 reactions, applicable app messages, and delivered personal reminders create
 idempotent per-recipient items in the source
 transaction. Memory and portable SQL persist overlapping filters, read and
@@ -415,7 +419,10 @@ add all-post/mention/mute and follow-every-thread behavior; individual thread
 following is available from the thread pane; and preset/custom DND pause and
 resume use the existing Slack-compatible DND model. The generated gRPC seam,
 memory/SQL stores, SQLite reopen tests, and current first-party Slack Help
-assertions cover this dependency knot. Invitation/VIP/section notifications,
+assertions cover this dependency knot. Public-channel mentions may now reach an
+active member before they join, as Slack documents, while private and
+access-group-restricted sources remain fenced during both creation and
+hydration. Invitation/VIP/section notifications,
 custom views, inline Activity reactions, focus-preserving live updates,
 browser/push/email/sound delivery and timing, notification schedules, urgent
 overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack

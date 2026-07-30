@@ -1327,10 +1327,11 @@ func TestUserGroupLifecycle(t *testing.T) {
 	}
 	var createdBody struct {
 		UserGroup struct {
-			ID string `json:"id"`
+			ID        string `json:"id"`
+			IsSubteam bool   `json:"is_subteam"`
 		} `json:"usergroup"`
 	}
-	if err := json.Unmarshal(created.Body.Bytes(), &createdBody); err != nil || createdBody.UserGroup.ID == "" {
+	if err := json.Unmarshal(created.Body.Bytes(), &createdBody); err != nil || createdBody.UserGroup.ID == "" || !createdBody.UserGroup.IsSubteam {
 		t.Fatalf("create body=%s err=%v", created.Body, err)
 	}
 	id := createdBody.UserGroup.ID

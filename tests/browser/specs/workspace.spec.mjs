@@ -1033,6 +1033,21 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
 
 test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references, emoji, drafts, and file preview are functional', async ({ page, context }) => {
   await signIn(context);
+  const groupHandle = `support-${Date.now()}`;
+  const groupResponse = await page.request.post('/api/usergroups.create', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { name: 'Support rotation', handle: groupHandle, description: 'Browser-qualified user group mention' },
+  });
+  const groupPayload = await groupResponse.json();
+  expect(groupPayload.ok, JSON.stringify(groupPayload)).toBe(true);
+  expect(groupPayload.usergroup.is_subteam).toBe(true);
+  const groupID = groupPayload.usergroup.id;
+  const groupUsersResponse = await page.request.post('/api/usergroups.users.update', {
+    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    data: { usergroup: groupID, users: 'Udev' },
+  });
+  const groupUsersPayload = await groupUsersResponse.json();
+  expect(groupUsersPayload.ok, JSON.stringify(groupUsersPayload)).toBe(true);
   await page.goto('/app');
 
   const composer = page.locator('form.composer textarea[name="text"]');
@@ -1061,6 +1076,16 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await expect(suggestions).toBeVisible();
   await composer.press('Enter');
   await expect(composer).toHaveValue(/^<@U[^>]+> $/);
+
+  await composer.fill(`@${groupHandle}`);
+  await expect(suggestions.getByRole('option', { name: new RegExp(`@${groupHandle}.*Support rotation`) })).toBeVisible();
+  await composer.press('Enter');
+  await expect(composer).toHaveValue(`<!subteam^${groupID}> `);
+  await composer.pressSequentially('please review');
+  await composer.press('Enter');
+  const groupMessage = page.locator('.message').last();
+  await expect(groupMessage.locator('.slack-mention')).toHaveText(`@${groupHandle}`);
+  await expect(groupMessage.locator('.message-text')).not.toContainText(groupID);
 
   await composer.fill('#gen');
   const channels = page.getByRole('listbox', { name: 'Channel suggestions' });

@@ -593,6 +593,7 @@ created_usergroup = client.usergroups_create(
     name="Qualification group", handle="qualification-group", description="SDK qualification"
 )
 assert created_usergroup["ok"] is True
+assert created_usergroup["usergroup"]["is_subteam"] is True
 usergroup_id = created_usergroup["usergroup"]["id"]
 assert client.admin_usergroups_addChannels(usergroup_id=usergroup_id, channel_ids=["C1"])["ok"] is True
 assert client.admin_usergroups_addTeams(usergroup_id=usergroup_id, team_ids=["T1"])["ok"] is True

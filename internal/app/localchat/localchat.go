@@ -94,6 +94,7 @@ type SessionSeeder interface {
 type bootstrapStore interface {
 	SeedWorkspace(context.Context, domain.Workspace) error
 	SeedUser(context.Context, domain.User) error
+	SeedBootstrapAdministrator(context.Context, domain.User) error
 	SeedConversation(context.Context, domain.Conversation) error
 }
 
@@ -133,6 +134,11 @@ func Open(ctx context.Context, config Config) (Runtime, error) {
 		memoryStore := memory.New()
 		memoryStore.SeedWorkspace(domain.Workspace{ID: "Tdev", Name: "SameOldChat"})
 		memoryStore.SeedUser(domain.User{ID: "Udev", WorkspaceID: "Tdev", Email: strings.TrimSpace(config.BootstrapAdminEmail), Name: "sameoldchat", RealName: "SameOldChat"})
+		if strings.TrimSpace(config.BootstrapAdminEmail) != "" {
+			if err := memoryStore.SeedWorkspaceRole("Tdev", "Udev", domain.WorkspaceRoleAdmin); err != nil {
+				return Runtime{}, fmt.Errorf("seed bootstrap administrator role: %w", err)
+			}
+		}
 		memoryStore.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})
 		chatStore, closer = memoryStore, memoryCloser{}
 	case BackendSQLite:
@@ -234,10 +240,16 @@ func openBlobStore(ctx context.Context, config Config) (blob.Store, error) {
 }
 
 func bootstrap(ctx context.Context, selected bootstrapStore, adminEmail string) error {
+	adminEmail = strings.TrimSpace(adminEmail)
 	if err := selected.SeedWorkspace(ctx, domain.Workspace{ID: "Tdev", Name: "SameOldChat"}); err != nil {
 		return err
 	}
-	if err := selected.SeedUser(ctx, domain.User{ID: "Udev", WorkspaceID: "Tdev", Email: strings.TrimSpace(adminEmail), Name: "sameoldchat", RealName: "SameOldChat"}); err != nil {
+	user := domain.User{ID: "Udev", WorkspaceID: "Tdev", Email: adminEmail, Name: "sameoldchat", RealName: "SameOldChat"}
+	if adminEmail != "" {
+		if err := selected.SeedBootstrapAdministrator(ctx, user); err != nil {
+			return fmt.Errorf("seed bootstrap administrator: %w", err)
+		}
+	} else if err := selected.SeedUser(ctx, user); err != nil {
 		return err
 	}
 	return selected.SeedConversation(ctx, domain.Conversation{ID: "Cdev", WorkspaceID: "Tdev", Name: "general"})
