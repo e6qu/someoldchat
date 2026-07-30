@@ -2046,26 +2046,42 @@ return true;
 function regions(force){return document.querySelectorAll(force?'[data-fragment]':'[data-fragment][data-live="true"]')}
 function messageCount(){return document.querySelectorAll('[data-fragment] .message').length}
 function refresh(force){
+var candidates=[];
+var live=regions(force);
+for(var candidateIndex=0;candidateIndex<live.length;candidateIndex++){
+var candidate=live[candidateIndex];
+var candidateTarget=candidate.getAttribute('data-fragment');
+if(!ownPath(candidateTarget)||!shown(candidate))continue;
+var candidateFocused=!!(document.activeElement&&candidate.contains(document.activeElement));
+if(candidateFocused&&!force)continue;
+candidates.push({region:candidate,target:candidateTarget,focused:candidateFocused});
+}
+if(!candidates.length)return Promise.resolve([]);
 generation++;
 var token=generation;
 if(inFlight){inFlight.abort();inFlight=null}
 var controller=window.AbortController?new AbortController():null;
 inFlight=controller;
 var pending=[];
-var live=regions(force);
-for(var index=0;index<live.length;index++){(function(region){
-var target=region.getAttribute('data-fragment');
-if(!ownPath(target))return;
-if(!shown(region))return;
-var focused=!!(document.activeElement&&region.contains(document.activeElement));
-if(focused&&!force)return;
+for(var index=0;index<candidates.length;index++){(function(candidate){
+var region=candidate.region;
+var target=candidate.target;
+var focused=candidate.focused;
 var stick=atBottom(region);
 var options={headers:{'HX-Request':'true'},credentials:'same-origin'};
 if(controller)options.signal=controller.signal;
 var activeMessage=focused?document.activeElement.closest('.message'):null;
 var activeMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
-pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){if(token!==generation)return;region.innerHTML=html;localize(region);if(stick)toBottom(region);if(activeMessageID){var items=messageItems(region);var restored=items.find(function(item){return item.getAttribute('data-message-id')===activeMessageID});if(focusMessage(restored))return}if(focused&&region.hasAttribute('tabindex'))region.focus()}));
-})(live[index])}
+pending.push(fetch(target,options).then(function(response){if(!response.ok)throw new Error('The conversation could not be refreshed.');return response.text()}).then(function(html){
+if(token!==generation)return;
+if(!force&&document.activeElement&&region.contains(document.activeElement))return;
+region.innerHTML=html;
+localize(region);
+if(stick)toBottom(region);
+if(activeMessageID){var items=messageItems(region);var restored=items.find(function(item){return item.getAttribute('data-message-id')===activeMessageID});if(focusMessage(restored))return}
+if(focused&&region.hasAttribute('tabindex'))region.focus();
+}));
+})(candidates[index])}
 return Promise.all(pending).then(function(){if(inFlight===controller)inFlight=null});
 }
 function scheduleRefresh(){
