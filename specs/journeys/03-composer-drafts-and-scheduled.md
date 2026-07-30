@@ -67,11 +67,38 @@ member and workspace.
 
 ## DRAFT-02 — Manage Drafts & sent
 
-The Drafts & sent surface has Slack's current Drafts, Scheduled, and Sent tabs.
-It exposes meaningful empty states and lets the member open, continue, send, or
-delete a draft; open, edit/reschedule, send now, or cancel a scheduled message;
-and inspect recently sent items. Actions update the list and destination
-conversation atomically.
+**Preconditions:** The member is signed in. Drafts and scheduled work are
+private to that member and workspace; Sent contains messages authored by that
+member.
+
+**Target sequence and states:**
+
+1. `Drafts & sent` at the top of the workspace navigation opens one surface
+   with Slack's current Drafts, Scheduled, and Sent tabs. The selected tab is
+   named and exposed as current to assistive technology, survives pagination,
+   and has a distinct meaningful empty state.
+2. Drafts show their exact channel/DM/thread destination, text preview, and last
+   update. Continue returns to that destination with the draft restored; delete
+   removes only the selected draft. A destination the member can no longer
+   access is not reopened or leaked.
+3. Scheduled items show the destination, exact local delivery time, text and
+   delivery/failure state. Edit preserves the original until valid replacement
+   text and time commit. Reschedule, send now, cancel and delete address the
+   exact item and reconcile a concurrent worker outcome instead of reporting a
+   second success.
+4. Sent items are newest first and open the exact authorized conversation,
+   thread and message. Deletion or later permission loss produces an
+   unavailable/redacted result rather than exposing retained content.
+5. Every action returns focus to the affected list/tab or navigated composer,
+   announces its committed outcome, and is usable at narrow width and with a
+   keyboard. Refresh and another signed-in client see the same committed
+   drafts, pending work, failures and sent messages.
+
+The public Slack Web API does not provide a scheduled-message update or
+send-now method. App-authored updates are the documented
+`chat.deleteScheduledMessage` plus `chat.scheduleMessage` sequence. A
+first-party atomic edit/send-now operation MUST remain an internal typed
+service and MUST NOT be advertised as a Slack Web API method.
 
 ## SCHED-01 — Schedule a message
 
@@ -98,6 +125,14 @@ item, and Slack-supported clients can send it now. A cancellation racing
 delivery has one observable outcome. Pagination and ownership are exact-token
 and workspace isolated.
 
+Editing a failed item clears its terminal failure only when the replacement
+commits. Send now uses the scheduled item ID as the post idempotency key: a
+process failure after posting and before acknowledgement cannot create a
+duplicate on retry. A failed edit retains the previous item; a failed send-now
+retains a recoverable scheduled/failed record. Handled permission, archive,
+invalid-thread, quota, past-time, too-far, lease-conflict and already-delivered
+outcomes are not HTTP 500 responses.
+
 ## Evidence
 
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
@@ -107,6 +142,10 @@ and workspace isolated.
   `chat.scheduleMessage`, `chat.scheduledMessages.list`, and
   `chat.deleteScheduledMessage`; scheduler tests use deterministic clocks and
   real persistence in every worker composition.
+- Boundary: the first-party Drafts & sent RPCs are covered by
+  local-versus-gRPC differential and converter-property tests, while the
+  official Node, Python, and Java SDKs continue to exercise only Slack's
+  published schedule/list/delete Web API surface.
 - Differential: capture exact suggestion, draft, schedule-window, quota,
   thread, and failure behavior in a dedicated Slack workspace.
 
@@ -120,12 +159,13 @@ and workspace isolated.
 | DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack preserves and exposes drafts associated with their destination. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
 | SCHED-01 | [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages) | Slack schedules from the send control using suggested or custom local times. |
-| SCHED-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Scheduled items can be edited, rescheduled, sent, cancelled, or deleted. |
+| SCHED-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | First-party scheduled items can be edited, rescheduled, sent, cancelled, or deleted; Slack's developer scheduling guide separately establishes the app-facing delete-plus-schedule update boundary below. |
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-30:
 
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
 - [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages)
 - [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions)
 - [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages)
 - [Send and read messages: manage draft, scheduled, and sent messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
+- [Slack developer guide: sending and scheduling messages](https://docs.slack.dev/messaging/sending-and-scheduling-messages/)

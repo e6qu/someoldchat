@@ -2926,6 +2926,46 @@ func (r Remote) ScheduledMessagesForCredential(ctx context.Context, workspaceID 
 	return domain.ScheduledMessagePage{Items: items, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
 }
 
+func (r Remote) ScheduledMessageHistory(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, includeDelivered bool, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
+	out, err := r.scheduled.ScheduledMessageHistory(ctx, &chatv1.ScheduledMessageHistoryRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit),
+		Cursor: string(request.Cursor), Descending: request.Descending, IncludeDelivered: includeDelivered,
+	})
+	if err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	items := make([]domain.ScheduledMessage, 0, len(out.GetScheduledMessages()))
+	for _, value := range out.GetScheduledMessages() {
+		item, err := decodeProtoScheduledMessage(value)
+		if err != nil {
+			return domain.ScheduledMessagePage{}, err
+		}
+		items = append(items, item)
+	}
+	return domain.ScheduledMessagePage{Items: items, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) UpdateScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledMessageID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
+	out, err := r.scheduled.UpdateScheduledMessage(ctx, &chatv1.UpdateScheduledMessageRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ScheduledMessageId: string(id),
+		ChannelId: string(channel), Text: text, PostAt: postAt.UTC().Unix(),
+	})
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	return decodeProtoScheduledMessage(out)
+}
+
+func (r Remote) SendScheduledMessageNow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledMessageID) (domain.Message, error) {
+	out, err := r.scheduled.SendScheduledMessageNow(ctx, &chatv1.SendScheduledMessageNowRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ScheduledMessageId: string(id),
+	})
+	if err != nil {
+		return domain.Message{}, err
+	}
+	return decodeProtoMessage(out)
+}
+
 func (r Remote) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
 	return r.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, grpcScheduledCredential(workspaceID, userID), channel, id)
 }
@@ -2939,6 +2979,66 @@ func (r Remote) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 		return errors.New("typed scheduled message deletion was not acknowledged")
 	}
 	return nil
+}
+
+func (r Remote) SaveDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string) (domain.Draft, error) {
+	out, err := r.scheduled.SaveDraft(ctx, &chatv1.DraftRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversation),
+		ThreadTs: string(thread), Text: text,
+	})
+	if err != nil {
+		return domain.Draft{}, err
+	}
+	return decodeProtoDraft(out)
+}
+
+func (r Remote) Draft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
+	out, err := r.scheduled.GetDraft(ctx, &chatv1.DraftRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversation), ThreadTs: string(thread),
+	})
+	if err != nil {
+		return domain.Draft{}, err
+	}
+	return decodeProtoDraft(out)
+}
+
+func (r Remote) Drafts(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
+	out, err := r.scheduled.Drafts(ctx, &chatv1.DraftsRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending,
+	})
+	if err != nil {
+		return domain.DraftPage{}, err
+	}
+	items := make([]domain.Draft, 0, len(out.GetDrafts()))
+	for _, value := range out.GetDrafts() {
+		item, err := decodeProtoDraft(value)
+		if err != nil {
+			return domain.DraftPage{}, err
+		}
+		items = append(items, item)
+	}
+	return domain.DraftPage{Items: items, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) DeleteDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) error {
+	out, err := r.scheduled.DeleteDraft(ctx, &chatv1.DraftRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversation), ThreadTs: string(thread),
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "draft deletion")
+}
+
+func (r Remote) SentMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
+	out, err := r.scheduled.SentMessages(ctx, &chatv1.SentMessagesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit),
+		Cursor: string(request.Cursor), Descending: request.Descending,
+	})
+	if err != nil {
+		return domain.MessagePage{}, err
+	}
+	return decodeProtoMessagePage(out)
 }
 
 func (r Remote) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceID, after uint64, limit int) ([]events.Record, error) {
@@ -5087,8 +5187,100 @@ func (s *Server) ScheduledMessages(ctx context.Context, input *chatv1.ScheduledM
 	return s.scheduledMessagesProto(ctx, input)
 }
 
+func (s *Server) ScheduledMessageHistory(ctx context.Context, input *chatv1.ScheduledMessageHistoryRequest) (*chatv1.ScheduledMessagePage, error) {
+	page, err := s.implementation.ScheduledMessageHistory(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetIncludeDelivered(), domain.PageRequest{
+		Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor()), Descending: input.GetDescending(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	items := make([]*chatv1.ScheduledMessage, 0, len(page.Items))
+	for _, value := range page.Items {
+		items = append(items, encodeProtoScheduledMessage(value))
+	}
+	return &chatv1.ScheduledMessagePage{ScheduledMessages: items, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) UpdateScheduledMessage(ctx context.Context, input *chatv1.UpdateScheduledMessageRequest) (*chatv1.ScheduledMessage, error) {
+	value, err := s.implementation.UpdateScheduledMessage(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ScheduledMessageID(input.GetScheduledMessageId()), domain.ConversationID(input.GetChannelId()),
+		input.GetText(), time.Unix(input.GetPostAt(), 0).UTC(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoScheduledMessage(value), nil
+}
+
+func (s *Server) SendScheduledMessageNow(ctx context.Context, input *chatv1.SendScheduledMessageNowRequest) (*chatv1.Message, error) {
+	value, err := s.implementation.SendScheduledMessageNow(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ScheduledMessageID(input.GetScheduledMessageId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessage(value), nil
+}
+
 func (s *Server) DeleteScheduledMessage(ctx context.Context, input *chatv1.DeleteScheduledMessageRequest) (*chatv1.MutationResponse, error) {
 	return s.deleteScheduledMessageProto(ctx, input)
+}
+
+func (s *Server) SaveDraft(ctx context.Context, input *chatv1.DraftRequest) (*chatv1.Draft, error) {
+	value, err := s.implementation.SaveDraft(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTs()), input.GetText(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoDraft(value), nil
+}
+
+func (s *Server) GetDraft(ctx context.Context, input *chatv1.DraftRequest) (*chatv1.Draft, error) {
+	value, err := s.implementation.Draft(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTs()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoDraft(value), nil
+}
+
+func (s *Server) Drafts(ctx context.Context, input *chatv1.DraftsRequest) (*chatv1.DraftPage, error) {
+	request := protoPageRequest(input.GetLimit(), input.GetCursor())
+	request.Descending = input.GetDescending()
+	page, err := s.implementation.Drafts(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	items := make([]*chatv1.Draft, 0, len(page.Items))
+	for _, value := range page.Items {
+		items = append(items, encodeProtoDraft(value))
+	}
+	return &chatv1.DraftPage{Drafts: items, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) DeleteDraft(ctx context.Context, input *chatv1.DraftRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteDraft(
+		ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetThreadTs()),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) SentMessages(ctx context.Context, input *chatv1.SentMessagesRequest) (*chatv1.MessagePage, error) {
+	page, err := s.implementation.SentMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.PageRequest{
+		Limit: int(input.GetLimit()), Cursor: domain.Cursor(input.GetCursor()), Descending: input.GetDescending(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoMessagePage(page), nil
 }
 
 func (s *Server) ListEventsAfter(ctx context.Context, input *chatv1.EventsRequest) (*chatv1.EventsResponse, error) {
@@ -7209,6 +7401,25 @@ func decodeProtoScheduledMessage(value *chatv1.ScheduledMessage) (domain.Schedul
 		ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()), PostAt: time.Unix(value.GetPostAt(), 0).UTC(),
 		CreatedAt: time.Unix(value.GetCreatedAt(), 0).UTC(), DeliveredAt: timeFromUnix(value.GetDeliveredAt()),
 		FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+	}, nil
+}
+
+func encodeProtoDraft(value domain.Draft) *chatv1.Draft {
+	return &chatv1.Draft{
+		WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), ConversationId: string(value.ConversationID),
+		ThreadTs: string(value.ThreadTimestamp), Text: value.Text, UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+	}
+}
+
+func decodeProtoDraft(value *chatv1.Draft) (domain.Draft, error) {
+	if value == nil || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetConversationId() == "" ||
+		value.GetText() == "" || value.GetUpdatedAtUnixNano() <= 0 {
+		return domain.Draft{}, errors.New("typed draft is incomplete")
+	}
+	return domain.Draft{
+		WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		ConversationID: domain.ConversationID(value.GetConversationId()), ThreadTimestamp: domain.MessageTimestamp(value.GetThreadTs()),
+		Text: value.GetText(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
 	}, nil
 }
 

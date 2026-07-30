@@ -20,6 +20,13 @@ documented `search.messages` channel, user, permalink, total, legacy paging, and
 pagination fields, including Slack's `cursor="*"` first-page convention and
 100-result clamp.
 
+Scheduling qualification deliberately covers only Slack's public Web API:
+`chat.scheduleMessage`, `chat.scheduledMessages.list`, and
+`chat.deleteScheduledMessage`. Slack does not publish Web API methods for
+editing or immediately sending a scheduled message. SameOldChat implements
+those Slack client journeys only through its authenticated first-party service
+and gRPC seam; it does not advertise invented Slack Web API methods.
+
 The official Node Socket Mode client also consumes a manifest-derived slash
 command envelope whose `should_escape` option resolves a user mention, public
 channel, and URL. This proves the escaped payload survives the real SDK's

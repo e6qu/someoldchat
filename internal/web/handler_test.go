@@ -1267,7 +1267,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 // which is precisely the failure no unit test would otherwise see.
 func TestTheDocumentAndItsContentSecurityPolicyAgree(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello", "/app/activity?channel=Cdev"} {
+	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello", "/app/activity?channel=Cdev", "/app/drafts?channel=Cdev"} {
 		response := get(t, mux, target)
 		policy := response.Header().Get("Content-Security-Policy")
 		if policy == "" {
@@ -1992,7 +1992,7 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 		`aria-label="Schedule message"`,
 		`type="datetime-local" name="schedule_at"`,
 		`formaction="/app/message/schedule?channel=Cdev&amp;thread=`+string(thread)+`"`,
-		`href="/app/scheduled?channel=Cdev"`,
+		`href="/app/drafts?channel=Cdev&amp;tab=scheduled"`,
 		`body.set('post_at',String(Math.floor(scheduleMillis/1000)))`,
 	)
 
@@ -2004,7 +2004,7 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 		"post_at":               {strconv.FormatInt(postAt.Unix(), 10)},
 	}
 	scheduled := postForm(t, mux, "/app/message/schedule?channel=Cdev&thread="+url.QueryEscape(string(thread)), form.Encode(), false)
-	if scheduled.Code != http.StatusSeeOther || !strings.HasPrefix(scheduled.Header().Get("Location"), "/app/scheduled?") {
+	if scheduled.Code != http.StatusSeeOther || !strings.HasPrefix(scheduled.Header().Get("Location"), "/app/drafts?") || !strings.Contains(scheduled.Header().Get("Location"), "tab=scheduled") {
 		t.Fatalf("schedule status=%d location=%q body=%s", scheduled.Code, scheduled.Header().Get("Location"), scheduled.Body)
 	}
 	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
@@ -2025,9 +2025,45 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 		"follow up later",
 		`datetime="`+postAt.Format(time.RFC3339Nano)+`"`,
 		`href="/app?channel=Cdev&amp;thread=`+string(thread)+`"`,
+		`>Send now</button>`,
+		`>Save changes</button>`,
 		`>Cancel message</button>`,
 	)
 
+	updatedAt := postAt.Add(time.Hour)
+	updateTarget := "/app/message/schedule/update?channel=Cdev&id=" + url.QueryEscape(string(page.Items[0].ID)) + "&return_channel=Cdev"
+	updated := postForm(t, mux, updateTarget, url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"edited follow up"},
+		"post_at":               {strconv.FormatInt(updatedAt.Unix(), 10)},
+	}.Encode(), false)
+	if updated.Code != http.StatusSeeOther || !strings.Contains(updated.Header().Get("Location"), "updated=1") {
+		t.Fatalf("update status=%d location=%q body=%s", updated.Code, updated.Header().Get("Location"), updated.Body)
+	}
+	page, err = (service.Messages{Store: s}).ScheduledMessages(context.Background(), "T1", "U1", "", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Text != "edited follow up" || !page.Items[0].PostAt.Equal(updatedAt) {
+		t.Fatalf("updated scheduled page=%+v err=%v", page, err)
+	}
+	sendTarget := "/app/message/schedule/send-now?id=" + url.QueryEscape(string(page.Items[0].ID)) + "&return_channel=Cdev"
+	sent := postForm(t, mux, sendTarget, url.Values{auth.CSRFTokenFieldName: {auth.CSRFToken("session")}}.Encode(), false)
+	if sent.Code != http.StatusSeeOther || !strings.Contains(sent.Header().Get("Location"), "tab=sent") || !strings.Contains(sent.Header().Get("Location"), "sent=1") {
+		t.Fatalf("send-now status=%d location=%q body=%s", sent.Code, sent.Header().Get("Location"), sent.Body)
+	}
+	history, err = s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 2 || history.Messages[1].Text != "edited follow up" {
+		t.Fatalf("send-now history=%+v err=%v", history, err)
+	}
+
+	form.Set("text", "cancel this later")
+	form.Set("post_at", strconv.FormatInt(postAt.Unix(), 10))
+	rescheduled := postForm(t, mux, "/app/message/schedule?channel=Cdev&thread="+url.QueryEscape(string(thread)), form.Encode(), false)
+	if rescheduled.Code != http.StatusSeeOther {
+		t.Fatalf("second schedule status=%d body=%s", rescheduled.Code, rescheduled.Body)
+	}
+	page, err = (service.Messages{Store: s}).ScheduledMessages(context.Background(), "T1", "U1", "", domain.PageRequest{Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].Text != "cancel this later" {
+		t.Fatalf("second scheduled page=%+v err=%v", page, err)
+	}
 	cancelTarget := "/app/message/schedule/cancel?channel=Cdev&id=" + url.QueryEscape(string(page.Items[0].ID)) + "&return_channel=Cdev"
 	cancelled := postForm(t, mux, cancelTarget, url.Values{auth.CSRFTokenFieldName: {auth.CSRFToken("session")}}.Encode(), false)
 	if cancelled.Code != http.StatusSeeOther || !strings.Contains(cancelled.Header().Get("Location"), "cancelled=1") {
@@ -2037,6 +2073,61 @@ func TestScheduledMessageJourneyCreatesListsAndCancelsWithoutPostingEarly(t *tes
 	if err != nil || len(page.Items) != 0 {
 		t.Fatalf("cancelled schedule remains: page=%+v err=%v", page, err)
 	}
+}
+
+func TestDraftsAndSentPersistsDraftsAndShowsSentMessages(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	form := url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"a durable unfinished message"},
+	}
+	saved := postForm(t, mux, "/app/draft?channel=Cdev", form.Encode(), true)
+	if saved.Code != http.StatusNoContent {
+		t.Fatalf("save draft status=%d body=%s", saved.Code, saved.Body)
+	}
+	draft, err := (service.Messages{Store: s}).Draft(context.Background(), "T1", "U1", "Cdev", "")
+	if err != nil || draft.Text != "a durable unfinished message" {
+		t.Fatalf("saved draft=%+v err=%v", draft, err)
+	}
+	workspace := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "DRAFT-01 restored composer", workspace.Body.String(),
+		`data-draft-url="/app/draft?channel=Cdev"`,
+		`>a durable unfinished message</textarea>`,
+		`saveDraftRemote(true)`,
+	)
+	drafts := get(t, mux, "/app/drafts?channel=Cdev&tab=drafts")
+	if drafts.Code != http.StatusOK {
+		t.Fatalf("drafts status=%d body=%s", drafts.Code, drafts.Body)
+	}
+	requireContains(t, "DRAFT-02 drafts tab", drafts.Body.String(),
+		`aria-current="page">Drafts</a>`,
+		"a durable unfinished message",
+		">Continue</a>",
+		`aria-label="Delete draft in general"`,
+	)
+	deleted := postForm(t, mux, "/app/draft/delete?channel=Cdev&return_channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+	}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther || !strings.Contains(deleted.Header().Get("Location"), "draft_deleted=1") {
+		t.Fatalf("delete draft status=%d location=%q body=%s", deleted.Code, deleted.Header().Get("Location"), deleted.Body)
+	}
+	if _, err := (service.Messages{Store: s}).Draft(context.Background(), "T1", "U1", "Cdev", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted draft error=%v, want not found", err)
+	}
+
+	posted := postForm(t, mux, "/app/message?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")},
+		"text":                  {"recently sent from the composer"},
+	}.Encode(), false)
+	if posted.Code != http.StatusSeeOther {
+		t.Fatalf("post status=%d body=%s", posted.Code, posted.Body)
+	}
+	sent := get(t, mux, "/app/drafts?channel=Cdev&tab=sent")
+	requireContains(t, "DRAFT-02 sent tab", sent.Body.String(),
+		`aria-current="page">Sent</a>`,
+		"recently sent from the composer",
+		">View conversation</a>",
+	)
 }
 
 func TestScheduledMessageValidationRetainsDraftAndClassifiesHandledErrors(t *testing.T) {

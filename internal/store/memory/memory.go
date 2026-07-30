@@ -91,6 +91,7 @@ type Store struct {
 	scheduledLeases               map[domain.ScheduledMessageID]memoryLease
 	scheduledDelivered            map[domain.ScheduledMessageID]bool
 	scheduledNextAttempt          map[domain.ScheduledMessageID]time.Time
+	drafts                        map[string]domain.Draft
 	userGroups                    map[domain.UserGroupID]domain.UserGroup
 	calls                         map[domain.CallID]domain.Call
 	emojis                        map[string]domain.CustomEmoji
@@ -173,7 +174,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -4661,7 +4662,7 @@ func (s *Store) ListScheduledMessages(_ context.Context, workspace domain.Worksp
 	defer s.mu.RUnlock()
 	values := make([]domain.ScheduledMessage, 0, request.Limit+1)
 	for _, value := range s.scheduled {
-		if value.WorkspaceID != workspace || value.Author != user || s.scheduledDelivered[value.ID] || (channel != "" && value.Channel != channel) || (after != "" && string(value.ID) <= after) {
+		if value.WorkspaceID != workspace || value.Author != user || s.scheduledDelivered[value.ID] || !value.FailedAt.IsZero() || (channel != "" && value.Channel != channel) || (after != "" && string(value.ID) <= after) {
 			continue
 		}
 		values = appendSorted(values, value, request.Limit+1, func(left, right domain.ScheduledMessage) bool { return left.ID < right.ID })
@@ -4715,6 +4716,53 @@ func (s *Store) ListScheduledMessagesForCredential(_ context.Context, workspace 
 	return page, err
 }
 
+func (s *Store) ListScheduledMessageHistory(_ context.Context, workspace domain.WorkspaceID, credentialHash string, includeDelivered bool, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
+	if credentialHash == "" {
+		return domain.ScheduledMessagePage{}, store.InvalidArgument("scheduled-message credential is required")
+	}
+	if err := store.CheckPage(request); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	afterTime, afterID, err := store.ParseScheduledMessageCursor(request.Cursor)
+	if err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.ScheduledMessage, 0, request.Limit+1)
+	for _, value := range s.scheduled {
+		if value.WorkspaceID != workspace || value.CredentialHash != credentialHash ||
+			(!includeDelivered && s.scheduledDelivered[value.ID]) {
+			continue
+		}
+		if !afterTime.IsZero() {
+			beforeCursor := value.PostAt.Before(afterTime) || (value.PostAt.Equal(afterTime) && value.ID < afterID)
+			afterCursor := value.PostAt.After(afterTime) || (value.PostAt.Equal(afterTime) && value.ID > afterID)
+			if (request.Descending && !beforeCursor) || (!request.Descending && !afterCursor) {
+				continue
+			}
+		}
+		less := func(left, right domain.ScheduledMessage) bool {
+			return left.PostAt.Before(right.PostAt) || (left.PostAt.Equal(right.PostAt) && left.ID < right.ID)
+		}
+		if request.Descending {
+			less = func(left, right domain.ScheduledMessage) bool {
+				return left.PostAt.After(right.PostAt) || (left.PostAt.Equal(right.PostAt) && left.ID > right.ID)
+			}
+		}
+		values = appendSorted(values, value, request.Limit+1, less)
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ScheduledMessagePage{Items: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(store.ScheduledMessageCursorKey(values[len(values)-1]))
+	}
+	return page, err
+}
+
 func (s *Store) EarliestScheduledMessage(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -4732,6 +4780,60 @@ func (s *Store) EarliestScheduledMessage(_ context.Context, workspace domain.Wor
 		}
 	}
 	return earliest, nil
+}
+
+func (s *Store) UpdateScheduledMessageWithinLimit(_ context.Context, update domain.ScheduledMessageUpdate, window time.Duration, limit int, event events.Event) (domain.ScheduledMessage, error) {
+	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.Text == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
+		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message update is incomplete")
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.scheduled[update.ID]
+	lease, leased := s.scheduledLeases[update.ID]
+	if !ok || value.WorkspaceID != update.WorkspaceID || value.Channel != update.Channel || value.CredentialHash != update.CredentialHash ||
+		s.scheduledDelivered[update.ID] || (leased && lease.Expires.After(now)) {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	nearby := make([]time.Time, 0, limit)
+	for id, scheduled := range s.scheduled {
+		if id == update.ID {
+			continue
+		}
+		if scheduled.WorkspaceID == value.WorkspaceID && scheduled.Channel == value.Channel &&
+			!s.scheduledDelivered[id] && scheduled.FailedAt.IsZero() &&
+			!scheduled.PostAt.Before(update.PostAt.Add(-window)) && !scheduled.PostAt.After(update.PostAt.Add(window)) {
+			nearby = append(nearby, scheduled.PostAt)
+		}
+	}
+	if store.ScheduledMessageLimitExceeded(nearby, update.PostAt, window, limit) {
+		return domain.ScheduledMessage{}, store.ErrScheduledMessageLimit
+	}
+	value.Text = update.Text
+	value.PostAt = update.PostAt.UTC()
+	value.FailedAt = time.Time{}
+	value.FailureCode = ""
+	s.scheduled[update.ID] = value
+	delete(s.scheduledNextAttempt, update.ID)
+	s.outbox = append(s.outbox, event)
+	return value, nil
+}
+
+func (s *Store) ClaimScheduledMessageForCredential(_ context.Context, workspace domain.WorkspaceID, credentialHash string, id domain.ScheduledMessageID, owner string, lease time.Duration) (domain.ScheduledMessage, error) {
+	if workspace == "" || credentialHash == "" || id == "" || owner == "" || lease <= 0 {
+		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message claim is incomplete")
+	}
+	now := time.Now().UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.scheduled[id]
+	active, leased := s.scheduledLeases[id]
+	if !ok || value.WorkspaceID != workspace || value.CredentialHash != credentialHash || s.scheduledDelivered[id] ||
+		(leased && active.Expires.After(now)) {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	s.scheduledLeases[id] = memoryLease{Owner: owner, Expires: now.Add(lease)}
+	return value, nil
 }
 
 func (s *Store) DeleteScheduledMessage(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
@@ -4753,11 +4855,94 @@ func (s *Store) DeleteScheduledMessageForCredential(_ context.Context, workspace
 	value, ok := s.scheduled[id]
 	lease, leased := s.scheduledLeases[id]
 	if credentialHash == "" || !ok || value.WorkspaceID != workspace || value.CredentialHash != credentialHash || value.Channel != channel ||
-		s.scheduledDelivered[id] || !value.FailedAt.IsZero() || (leased && lease.Expires.After(time.Now().UTC())) {
+		s.scheduledDelivered[id] || (leased && lease.Expires.After(time.Now().UTC())) {
 		return store.ErrNotFound
 	}
 	delete(s.scheduled, id)
 	delete(s.scheduledNextAttempt, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func draftKey(workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) string {
+	return string(workspace) + "\x00" + string(user) + "\x00" + string(conversation) + "\x00" + string(thread)
+}
+
+func draftCursorKey(value domain.Draft) string {
+	return string(domain.NewStoredTime(value.UpdatedAt)) + "\x00" + string(value.ConversationID) + "\x00" + string(value.ThreadTimestamp)
+}
+
+func (s *Store) UpsertDraft(_ context.Context, value domain.Draft, event events.Event) (domain.Draft, error) {
+	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" || strings.TrimSpace(value.Text) == "" || value.UpdatedAt.IsZero() {
+		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, userExists := s.users[value.UserID]
+	conversation, conversationExists := s.conversations[value.ConversationID]
+	if !userExists || user.WorkspaceID != value.WorkspaceID || user.Deleted || !conversationExists || conversation.WorkspaceID != value.WorkspaceID {
+		return domain.Draft{}, store.ErrNotFound
+	}
+	value.UpdatedAt = value.UpdatedAt.UTC()
+	s.drafts[draftKey(value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp)] = value
+	s.outbox = append(s.outbox, event)
+	return value, nil
+}
+
+func (s *Store) GetDraft(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, ok := s.drafts[draftKey(workspace, user, conversation, thread)]
+	if !ok {
+		return domain.Draft{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ListDrafts(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.DraftPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.DraftPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Draft, 0, request.Limit+1)
+	for _, value := range s.drafts {
+		if value.WorkspaceID != workspace || value.UserID != user {
+			continue
+		}
+		key := draftCursorKey(value)
+		if after != "" && ((request.Descending && key >= after) || (!request.Descending && key <= after)) {
+			continue
+		}
+		less := func(left, right domain.Draft) bool { return draftCursorKey(left) < draftCursorKey(right) }
+		if request.Descending {
+			less = func(left, right domain.Draft) bool { return draftCursorKey(left) > draftCursorKey(right) }
+		}
+		values = appendSorted(values, value, request.Limit+1, less)
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.DraftPage{Items: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(draftCursorKey(values[len(values)-1]))
+	}
+	return page, err
+}
+
+func (s *Store) DeleteDraft(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := draftKey(workspace, user, conversation, thread)
+	if _, ok := s.drafts[key]; !ok {
+		return store.ErrNotFound
+	}
+	delete(s.drafts, key)
 	s.outbox = append(s.outbox, event)
 	return nil
 }
@@ -4815,6 +5000,8 @@ func (s *Store) MarkScheduledMessageDelivered(_ context.Context, owner string, i
 	s.scheduledDelivered[id] = true
 	value := s.scheduled[id]
 	value.DeliveredAt = time.Now().UTC()
+	value.FailedAt = time.Time{}
+	value.FailureCode = ""
 	s.scheduled[id] = value
 	delete(s.scheduledLeases, id)
 	return nil
@@ -5721,6 +5908,61 @@ func (s *Store) ListMessages(_ context.Context, conversation domain.Conversation
 	page := domain.MessagePage{Messages: window, HasMore: hasMore}
 	if hasMore {
 		cursor, err := domain.NewMessageCursor(window[len(window)-1])
+		if err != nil {
+			return domain.MessagePage{}, err
+		}
+		page.NextCursor = cursor
+	}
+	return page, nil
+}
+
+func (s *Store) ListAuthoredMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.MessagePage{}, err
+	}
+	var cursorTime time.Time
+	var cursorID domain.MessageID
+	if request.Cursor != "" {
+		var err error
+		cursorTime, cursorID, err = domain.DecodeMessageCursor(request.Cursor)
+		if err != nil {
+			return domain.MessagePage{}, err
+		}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Message, 0, request.Limit+1)
+	for _, messages := range s.messages {
+		for _, message := range messages {
+			if message.WorkspaceID != workspace || message.AuthorID != user || message.Deleted {
+				continue
+			}
+			conversation, exists := s.conversations[message.Conversation]
+			if !exists || conversation.WorkspaceID != workspace {
+				continue
+			}
+			if conversation.IsPrivate {
+				if _, member := s.memberships[message.Conversation][user]; !member {
+					continue
+				}
+			}
+			if request.Cursor != "" && !request.PageAfter(message.CreatedAt, message.ID, cursorTime, cursorID) {
+				continue
+			}
+			less := messageBefore
+			if request.Descending {
+				less = func(left, right domain.Message) bool { return messageBefore(right, left) }
+			}
+			values = appendSorted(values, cloneMessage(message), request.Limit+1, less)
+		}
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.MessagePage{Messages: values, HasMore: hasMore}
+	if hasMore {
+		cursor, err := domain.NewMessageCursor(values[len(values)-1])
 		if err != nil {
 			return domain.MessagePage{}, err
 		}

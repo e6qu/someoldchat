@@ -476,6 +476,7 @@ type Store interface {
 	// ListThreadMessages has the same non-deleted history boundary as
 	// ListMessages, in chronological order.
 	ListThreadMessages(context.Context, domain.ConversationID, domain.MessageTimestamp, domain.PageRequest) (domain.MessagePage, error)
+	ListAuthoredMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.MessagePage, error)
 	AddReaction(context.Context, domain.Reaction, events.Event) error
 	RemoveReaction(context.Context, domain.Reaction, events.Event) error
 	ListReactions(context.Context, domain.MessageID, domain.PageRequest) ([]domain.Reaction, domain.Cursor, bool, error)
@@ -520,7 +521,10 @@ type Store interface {
 	CreateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessage, time.Duration, int, events.Event) error
 	ListScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	ListScheduledMessagesForCredential(context.Context, domain.WorkspaceID, domain.ScheduledMessageQuery) (domain.ScheduledMessagePage, error)
+	ListScheduledMessageHistory(context.Context, domain.WorkspaceID, string, bool, domain.PageRequest) (domain.ScheduledMessagePage, error)
 	EarliestScheduledMessage(context.Context, domain.WorkspaceID) (time.Time, error)
+	UpdateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessageUpdate, time.Duration, int, events.Event) (domain.ScheduledMessage, error)
+	ClaimScheduledMessageForCredential(context.Context, domain.WorkspaceID, string, domain.ScheduledMessageID, string, time.Duration) (domain.ScheduledMessage, error)
 	DeleteScheduledMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
 	DeleteScheduledMessageForCredential(context.Context, domain.WorkspaceID, string, domain.ConversationID, domain.ScheduledMessageID, events.Event) error
 	ClaimScheduledMessages(context.Context, domain.WorkspaceID, string, int, time.Duration) ([]domain.ScheduledMessage, error)
@@ -528,6 +532,10 @@ type Store interface {
 	MarkScheduledMessageDelivered(context.Context, string, domain.ScheduledMessageID) error
 	MarkScheduledMessageFailed(context.Context, string, domain.ScheduledMessageID, string, time.Time, events.Event) error
 	ReleaseScheduledMessage(context.Context, string, domain.ScheduledMessageID, time.Time) error
+	UpsertDraft(context.Context, domain.Draft, events.Event) (domain.Draft, error)
+	GetDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp) (domain.Draft, error)
+	ListDrafts(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.DraftPage, error)
+	DeleteDraft(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.MessageTimestamp, events.Event) error
 	CreateUserGroup(context.Context, domain.UserGroup, events.Event) error
 	GetUserGroup(context.Context, domain.WorkspaceID, domain.UserGroupID) (domain.UserGroup, error)
 	ListUserGroups(context.Context, domain.WorkspaceID, bool, domain.PageRequest) (domain.UserGroupPage, error)

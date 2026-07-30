@@ -1068,6 +1068,50 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "durable drafts and first-party scheduled management",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				draft, err := chat.SaveDraft(ctx, "T1", "U1", "C1", "", "unfinished thought")
+				if err != nil {
+					return nil, err
+				}
+				loaded, err := chat.Draft(ctx, "T1", "U1", "C1", "")
+				if err != nil {
+					return nil, err
+				}
+				drafts, err := chat.Drafts(ctx, "T1", "U1", domain.PageRequest{Limit: 10, Descending: true})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteDraft(ctx, "T1", "U1", "C1", ""); err != nil {
+					return nil, err
+				}
+				scheduled, err := chat.ScheduleMessage(ctx, "T1", "U1", "C1", "old text", time.Now().UTC().Add(2*time.Hour))
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.UpdateScheduledMessage(ctx, "T1", "U1", scheduled.ID, "C1", "new text", time.Now().UTC().Add(3*time.Hour))
+				if err != nil {
+					return nil, err
+				}
+				history, err := chat.ScheduledMessageHistory(ctx, "T1", "U1", true, domain.PageRequest{Limit: 10, Descending: true})
+				if err != nil {
+					return nil, err
+				}
+				sent, err := chat.SendScheduledMessageNow(ctx, "T1", "U1", scheduled.ID)
+				if err != nil {
+					return nil, err
+				}
+				sentPage, err := chat.SentMessages(ctx, "T1", "U1", domain.PageRequest{Limit: 10, Descending: true})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					draft.Text, loaded.Text, len(drafts.Items), updated.Text, len(history.Items),
+					sent.Text, len(sentPage.Messages), sentPage.Messages[0].Text,
+				}, nil
+			},
+		},
+		{
 			name: "first-party Later reminder lifecycle",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{

@@ -4362,6 +4362,74 @@ func (m Messages) ScheduledMessagesForCredential(ctx context.Context, workspaceI
 	return m.Store.ListScheduledMessagesForCredential(ctx, workspaceID, query)
 }
 
+func (m Messages) ScheduledMessageHistory(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, includeDelivered bool, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	return m.Store.ListScheduledMessageHistory(ctx, workspaceID, InternalScheduledCredential(workspaceID, userID), includeDelivered, request)
+}
+
+func (m Messages) UpdateScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledMessageID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
+	if id == "" || channel == "" {
+		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message id and channel are required")
+	}
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, channel); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" || messageTextTooLong(text) || postAt.IsZero() {
+		return domain.ScheduledMessage{}, ErrInvalidMessage
+	}
+	now := time.Now().UTC()
+	postAt = time.Unix(postAt.UTC().Unix(), 0).UTC()
+	if !postAt.After(now) {
+		return domain.ScheduledMessage{}, ErrScheduledTimeInPast
+	}
+	if postAt.After(now.Add(120 * 24 * time.Hour)) {
+		return domain.ScheduledMessage{}, ErrScheduledTimeTooFar
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"message.schedule_updated",
+		events.String("scheduled_message_id", string(id)),
+		events.String("channel_id", string(channel)),
+		events.String("post_at", string(domain.NewMessageTimestamp(postAt))),
+	), now)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	value, err := m.Store.UpdateScheduledMessageWithinLimit(ctx, domain.ScheduledMessageUpdate{
+		WorkspaceID: workspaceID, ID: id, Channel: channel, Text: text, PostAt: postAt,
+		CredentialHash: InternalScheduledCredential(workspaceID, userID),
+	}, 5*time.Minute, 30, event)
+	if errors.Is(err, store.ErrScheduledMessageLimit) {
+		return domain.ScheduledMessage{}, ErrScheduledTooMany
+	}
+	return value, err
+}
+
+func (m Messages) SendScheduledMessageNow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledMessageID) (domain.Message, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.Message{}, err
+	}
+	if id == "" {
+		return domain.Message{}, store.InvalidArgument("scheduled-message id is required")
+	}
+	owner := "send-now:" + string(userID) + ":" + string(id)
+	item, err := m.Store.ClaimScheduledMessageForCredential(ctx, workspaceID, InternalScheduledCredential(workspaceID, userID), id, owner, time.Minute)
+	if err != nil {
+		return domain.Message{}, err
+	}
+	message, postErr := m.PostWithBlocksAndAttachments(ctx, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, item.ThreadTimestamp, string(item.ID), item.AppID)
+	if postErr != nil {
+		releaseErr := m.Store.ReleaseScheduledMessage(ctx, owner, item.ID, item.PostAt)
+		return domain.Message{}, errors.Join(postErr, releaseErr)
+	}
+	if err := m.Store.MarkScheduledMessageDelivered(ctx, owner, item.ID); err != nil {
+		return domain.Message{}, err
+	}
+	return message, nil
+}
+
 func (m Messages) DeleteScheduledMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID) error {
 	return m.DeleteScheduledMessageForCredential(ctx, workspaceID, userID, InternalScheduledCredential(workspaceID, userID), channel, id)
 }
@@ -4382,6 +4450,80 @@ func (m Messages) DeleteScheduledMessageForCredential(ctx context.Context, works
 		return err
 	}
 	return m.Store.DeleteScheduledMessageForCredential(ctx, workspaceID, credentialHash, channel, id, event)
+}
+
+func (m Messages) SaveDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, text string) (domain.Draft, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversation); err != nil {
+		return domain.Draft{}, err
+	}
+	if strings.TrimSpace(text) == "" || messageTextTooLong(text) {
+		return domain.Draft{}, ErrInvalidMessage
+	}
+	if thread != "" {
+		createdAt, err := domain.ParseMessageTimestamp(thread)
+		if err != nil {
+			return domain.Draft{}, ErrInvalidTimestamp
+		}
+		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+		if err != nil || parent.WorkspaceID != workspaceID || parent.Deleted || parent.ThreadTimestamp != "" {
+			return domain.Draft{}, store.ErrNotFound
+		}
+	}
+	now := time.Now().UTC()
+	value := domain.Draft{
+		WorkspaceID: workspaceID, UserID: userID, ConversationID: conversation,
+		ThreadTimestamp: thread, Text: text, UpdatedAt: now,
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"draft.saved",
+		events.String("channel_id", string(conversation)),
+		events.String("thread_ts", string(thread)),
+	), now)
+	if err != nil {
+		return domain.Draft{}, err
+	}
+	return m.Store.UpsertDraft(ctx, value, event)
+}
+
+func (m Messages) Draft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
+	if err := m.authorizeConversation(ctx, workspaceID, userID, conversation); err != nil {
+		return domain.Draft{}, err
+	}
+	return m.Store.GetDraft(ctx, workspaceID, userID, conversation, thread)
+}
+
+func (m Messages) Drafts(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.DraftPage{}, err
+	}
+	return m.Store.ListDrafts(ctx, workspaceID, userID, request)
+}
+
+func (m Messages) DeleteDraft(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"draft.deleted",
+		events.String("channel_id", string(conversation)),
+		events.String("thread_ts", string(thread)),
+	), now)
+	if err != nil {
+		return err
+	}
+	err = m.Store.DeleteDraft(ctx, workspaceID, userID, conversation, thread, event)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+func (m Messages) SentMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.MessagePage{}, err
+	}
+	return m.Store.ListAuthoredMessages(ctx, workspaceID, userID, request)
 }
 
 func normalizeUserGroupHandle(value string) string {

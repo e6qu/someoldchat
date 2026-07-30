@@ -5,6 +5,7 @@ package sameoldchat.chat.v1;
 option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
 
 import "sameoldchat/chat/v1/conversation_mutations.proto";
+import "sameoldchat/chat/v1/messages.proto";
 
 message ScheduledMessage {
   string workspace_id = 1;
@@ -58,14 +59,85 @@ message DeleteScheduledMessageRequest {
   string credential_hash = 5;
 }
 
+message ScheduledMessageHistoryRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+  bool include_delivered = 6;
+}
+
+message UpdateScheduledMessageRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string scheduled_message_id = 3;
+  string channel_id = 4;
+  string text = 5;
+  int64 post_at = 6;
+}
+
+message SendScheduledMessageNowRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string scheduled_message_id = 3;
+}
+
 message ScheduledMessagePage {
   repeated ScheduledMessage scheduled_messages = 1;
   string next_cursor = 2;
   bool has_more = 3;
 }
 
+message Draft {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string thread_ts = 4;
+  string text = 5;
+  int64 updated_at_unix_nano = 6;
+}
+
+message DraftRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string thread_ts = 4;
+  string text = 5;
+}
+
+message DraftsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+}
+
+message DraftPage {
+  repeated Draft drafts = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message SentMessagesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+}
+
 service ScheduledMessagesService {
   rpc ScheduleMessage(ScheduleMessageRequest) returns (ScheduledMessage);
   rpc ScheduledMessages(ScheduledMessagesRequest) returns (ScheduledMessagePage);
+  rpc ScheduledMessageHistory(ScheduledMessageHistoryRequest) returns (ScheduledMessagePage);
+  rpc UpdateScheduledMessage(UpdateScheduledMessageRequest) returns (ScheduledMessage);
+  rpc SendScheduledMessageNow(SendScheduledMessageNowRequest) returns (Message);
   rpc DeleteScheduledMessage(DeleteScheduledMessageRequest) returns (MutationResponse);
+  rpc SaveDraft(DraftRequest) returns (Draft);
+  rpc GetDraft(DraftRequest) returns (Draft);
+  rpc Drafts(DraftsRequest) returns (DraftPage);
+  rpc DeleteDraft(DraftRequest) returns (MutationResponse);
+  rpc SentMessages(SentMessagesRequest) returns (MessagePage);
 }

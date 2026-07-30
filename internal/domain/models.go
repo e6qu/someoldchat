@@ -1133,6 +1133,37 @@ type ScheduledMessageQuery struct {
 	Page           PageRequest
 }
 
+// Draft is private first-party composer state. Conversation and
+// ThreadTimestamp form the destination coordinate: a channel composer and each
+// thread composer have independent drafts, as Slack exposes them.
+type Draft struct {
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	ConversationID  ConversationID
+	ThreadTimestamp MessageTimestamp
+	Text            string
+	UpdatedAt       time.Time
+}
+
+type DraftPage struct {
+	Items      []Draft
+	NextCursor Cursor
+	HasMore    bool
+}
+
+// ScheduledMessageUpdate is a first-party client operation, not an invented
+// Slack Web API method. Slack's public API updates by delete-plus-schedule;
+// SameOldChat's own UI needs one atomic replacement so a failed reschedule
+// cannot lose the pending message.
+type ScheduledMessageUpdate struct {
+	WorkspaceID    WorkspaceID
+	ID             ScheduledMessageID
+	Channel        ConversationID
+	Text           string
+	PostAt         time.Time
+	CredentialHash string
+}
+
 type UserGroup struct {
 	WorkspaceID WorkspaceID
 	ID          UserGroupID

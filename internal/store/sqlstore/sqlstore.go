@@ -327,6 +327,13 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
 );
 CREATE INDEX IF NOT EXISTS scheduled_messages_owner ON scheduled_messages(workspace_id, author_id, post_at, id);
 CREATE INDEX IF NOT EXISTS scheduled_messages_credential ON scheduled_messages(workspace_id, credential_hash, post_at, id);
+CREATE TABLE IF NOT EXISTS drafts (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ conversation_id TEXT NOT NULL REFERENCES conversations(id), thread_ts TEXT NOT NULL DEFAULT '',
+ text TEXT NOT NULL, updated_at TEXT NOT NULL,
+ PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts)
+);
+CREATE INDEX IF NOT EXISTS drafts_owner_updated ON drafts(workspace_id, user_id, updated_at, conversation_id, thread_ts);
 CREATE TABLE IF NOT EXISTS user_groups (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), name TEXT NOT NULL, handle TEXT NOT NULL,
  description TEXT NOT NULL DEFAULT '', creator_id TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
@@ -375,7 +382,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 108
+const schemaVersion = 109
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -388,6 +395,7 @@ const schemaVersion = 108
 var storedTimestampColumns = []struct{ table, column string }{
 	{"sessions", "expires_at"},
 	{"messages", "created_at"},
+	{"drafts", "updated_at"},
 	{"ephemeral_messages", "created_at"},
 	{"reactions", "created_at"},
 	{"pins", "created_at"},
@@ -2334,6 +2342,19 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index thread follows: %w", err)
 		}
 	}
+	if version < 109 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS drafts (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			conversation_id TEXT NOT NULL REFERENCES conversations(id), thread_ts TEXT NOT NULL DEFAULT '',
+			text TEXT NOT NULL, updated_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, user_id, conversation_id, thread_ts)
+		)`); err != nil {
+			return fmt.Errorf("migrate drafts: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS drafts_owner_updated ON drafts(workspace_id, user_id, updated_at, conversation_id, thread_ts)`); err != nil {
+			return fmt.Errorf("index drafts: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2604,7 +2625,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -3906,6 +3927,7 @@ func (s *Store) DeleteConversation(ctx context.Context, workspace domain.Workspa
 		`DELETE FROM workspace_default_channels WHERE conversation_id = ?`,
 		`DELETE FROM conversation_prefs WHERE conversation_id = ?`,
 		`DELETE FROM read_cursors WHERE conversation_id = ?`,
+		`DELETE FROM drafts WHERE conversation_id = ?`,
 		`DELETE FROM scheduled_messages WHERE channel_id = ?`,
 		`DELETE FROM reactions WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
 		`DELETE FROM pins WHERE message_id IN (SELECT id FROM messages WHERE conversation = ?)`,
@@ -9094,6 +9116,60 @@ func (s *Store) ListScheduledMessagesForCredential(ctx context.Context, workspac
 	return page, err
 }
 
+func (s *Store) ListScheduledMessageHistory(ctx context.Context, workspace domain.WorkspaceID, credentialHash string, includeDelivered bool, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
+	if credentialHash == "" {
+		return domain.ScheduledMessagePage{}, store.InvalidArgument("scheduled-message credential is required")
+	}
+	if err := store.CheckPage(request); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	query := `SELECT ` + scheduledMessageColumns + ` FROM scheduled_messages WHERE workspace_id = ? AND credential_hash = ?`
+	args := []any{workspace, credentialHash}
+	if !includeDelivered {
+		query += ` AND delivered = 0`
+	}
+	if request.Cursor != "" {
+		afterTime, afterID, err := store.ParseScheduledMessageCursor(request.Cursor)
+		if err != nil {
+			return domain.ScheduledMessagePage{}, err
+		}
+		if request.Descending {
+			query += ` AND (post_at < ? OR (post_at = ? AND id < ?))`
+		} else {
+			query += ` AND (post_at > ? OR (post_at = ? AND id > ?))`
+		}
+		args = append(args, afterTime.Unix(), afterTime.Unix(), afterID)
+	}
+	if request.Descending {
+		query += ` ORDER BY post_at DESC, id DESC LIMIT ?`
+	} else {
+		query += ` ORDER BY post_at, id LIMIT ?`
+	}
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.ScheduledMessage, 0, request.Limit+1)
+	for rows.Next() {
+		value, scanErr := scanScheduledMessage(rows)
+		if scanErr != nil {
+			return domain.ScheduledMessagePage{}, scanErr
+		}
+		items = append(items, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ScheduledMessagePage{}, err
+	}
+	page := domain.ScheduledMessagePage{Items: items, HasMore: len(items) > request.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(store.ScheduledMessageCursorKey(page.Items[len(page.Items)-1]))
+	}
+	return page, err
+}
+
 func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
 	var postAt sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, `SELECT MIN(CASE WHEN next_attempt_at > post_at THEN next_attempt_at ELSE post_at END) FROM scheduled_messages WHERE (? = '' OR workspace_id = ?) AND delivered = 0 AND failed_at = 0`, workspace, workspace).Scan(&postAt); err != nil {
@@ -9103,6 +9179,104 @@ func (s *Store) EarliestScheduledMessage(ctx context.Context, workspace domain.W
 		return time.Time{}, nil
 	}
 	return time.Unix(postAt.Int64, 0).UTC(), nil
+}
+
+func (s *Store) UpdateScheduledMessageWithinLimit(ctx context.Context, update domain.ScheduledMessageUpdate, window time.Duration, limit int, event events.Event) (domain.ScheduledMessage, error) {
+	if update.WorkspaceID == "" || update.ID == "" || update.Channel == "" || update.CredentialHash == "" || update.Text == "" || update.PostAt.IsZero() || window <= 0 || limit <= 0 {
+		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message update is incomplete")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE conversations SET id = id WHERE id = ? AND workspace_id = ?`, update.Channel, update.WorkspaceID)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if changed != 1 {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT post_at FROM scheduled_messages WHERE workspace_id = ? AND channel_id = ? AND id <> ? AND delivered = 0 AND failed_at = 0 AND post_at >= ? AND post_at <= ? ORDER BY post_at`, update.WorkspaceID, update.Channel, update.ID, update.PostAt.Add(-window).Unix(), update.PostAt.Add(window).Unix())
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	nearby := make([]time.Time, 0, limit)
+	for rows.Next() {
+		var postAt int64
+		if err := rows.Scan(&postAt); err != nil {
+			rows.Close()
+			return domain.ScheduledMessage{}, err
+		}
+		nearby = append(nearby, time.Unix(postAt, 0).UTC())
+	}
+	if err := rows.Close(); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if store.ScheduledMessageLimitExceeded(nearby, update.PostAt, window, limit) {
+		return domain.ScheduledMessage{}, store.ErrScheduledMessageLimit
+	}
+	now := time.Now().UTC().Unix()
+	result, err = tx.ExecContext(ctx, `UPDATE scheduled_messages SET text = ?, post_at = ?, failed_at = 0, failure_code = '', next_attempt_at = 0 WHERE id = ? AND workspace_id = ? AND channel_id = ? AND credential_hash = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, update.Text, update.PostAt.UTC().Unix(), update.ID, update.WorkspaceID, update.Channel, update.CredentialHash, now)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	changed, err = result.RowsAffected()
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if changed != 1 {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	value, err := scanScheduledMessage(tx.QueryRowContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE id = ?`, update.ID))
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	return value, nil
+}
+
+func (s *Store) ClaimScheduledMessageForCredential(ctx context.Context, workspace domain.WorkspaceID, credentialHash string, id domain.ScheduledMessageID, owner string, lease time.Duration) (domain.ScheduledMessage, error) {
+	if workspace == "" || credentialHash == "" || id == "" || owner == "" || lease <= 0 {
+		return domain.ScheduledMessage{}, store.InvalidArgument("scheduled-message claim is incomplete")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, `UPDATE scheduled_messages SET lease_owner = ?, lease_until = ? WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, owner, scheduledUnixSecondCeil(now.Add(lease)), id, workspace, credentialHash, now.Unix())
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if changed != 1 {
+		return domain.ScheduledMessage{}, store.ErrNotFound
+	}
+	value, err := scanScheduledMessage(tx.QueryRowContext(ctx, `SELECT `+scheduledMessageColumns+` FROM scheduled_messages WHERE id = ?`, id))
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ScheduledMessage{}, err
+	}
+	return value, nil
 }
 
 func (s *Store) DeleteScheduledMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, id domain.ScheduledMessageID, event events.Event) error {
@@ -9139,7 +9313,7 @@ func (s *Store) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC()
-	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0 AND failed_at = 0 AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, credentialHash, channel, now.Unix())
+	result, err := tx.ExecContext(ctx, `DELETE FROM scheduled_messages WHERE id = ? AND workspace_id = ? AND credential_hash = ? AND channel_id = ? AND delivered = 0 AND (lease_until = 0 OR lease_until <= ?)`, id, workspace, credentialHash, channel, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -9148,6 +9322,149 @@ func (s *Store) DeleteScheduledMessageForCredential(ctx context.Context, workspa
 		return err
 	}
 	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+const draftColumns = `workspace_id, user_id, conversation_id, thread_ts, text, updated_at`
+
+func scanDraft(row rowScanner) (domain.Draft, error) {
+	var value domain.Draft
+	var updatedAt string
+	if err := row.Scan(&value.WorkspaceID, &value.UserID, &value.ConversationID, &value.ThreadTimestamp, &value.Text, &updatedAt); err != nil {
+		return domain.Draft{}, err
+	}
+	var err error
+	value.UpdatedAt, err = domain.ParseStoredTime(updatedAt)
+	return value, err
+}
+
+func draftCursorKey(value domain.Draft) string {
+	return string(domain.NewStoredTime(value.UpdatedAt)) + "\x00" + string(value.ConversationID) + "\x00" + string(value.ThreadTimestamp)
+}
+
+func parseDraftCursor(cursor domain.Cursor) (string, domain.ConversationID, domain.MessageTimestamp, error) {
+	decoded, err := domain.DecodeListCursor(cursor)
+	if err != nil || decoded == "" {
+		return decoded, "", "", err
+	}
+	parts := strings.Split(decoded, "\x00")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return "", "", "", domain.ErrInvalidCursor
+	}
+	if _, err := domain.ParseStoredTime(parts[0]); err != nil {
+		return "", "", "", domain.ErrInvalidCursor
+	}
+	return parts[0], domain.ConversationID(parts[1]), domain.MessageTimestamp(parts[2]), nil
+}
+
+func (s *Store) UpsertDraft(ctx context.Context, value domain.Draft, event events.Event) (domain.Draft, error) {
+	if value.WorkspaceID == "" || value.UserID == "" || value.ConversationID == "" || strings.TrimSpace(value.Text) == "" || value.UpdatedAt.IsZero() {
+		return domain.Draft{}, store.InvalidArgument("draft is incomplete")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Draft{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT INTO drafts(workspace_id, user_id, conversation_id, thread_ts, text, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(workspace_id, user_id, conversation_id, thread_ts) DO UPDATE SET text = excluded.text, updated_at = excluded.updated_at`,
+		value.WorkspaceID, value.UserID, value.ConversationID, value.ThreadTimestamp, value.Text, domain.NewStoredTime(value.UpdatedAt))
+	if err != nil {
+		return domain.Draft{}, classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return domain.Draft{}, err
+	}
+	if changed != 1 {
+		return domain.Draft{}, store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.Draft{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Draft{}, err
+	}
+	value.UpdatedAt = value.UpdatedAt.UTC()
+	return value, nil
+}
+
+func (s *Store) GetDraft(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp) (domain.Draft, error) {
+	value, err := scanDraft(s.db.QueryRowContext(ctx, `SELECT `+draftColumns+` FROM drafts WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND thread_ts = ?`, workspace, user, conversation, thread))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Draft{}, store.ErrNotFound
+	}
+	return value, err
+}
+
+func (s *Store) ListDrafts(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.DraftPage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.DraftPage{}, err
+	}
+	updatedAt, conversation, thread, err := parseDraftCursor(request.Cursor)
+	if err != nil {
+		return domain.DraftPage{}, err
+	}
+	query := `SELECT ` + draftColumns + ` FROM drafts WHERE workspace_id = ? AND user_id = ?`
+	args := []any{workspace, user}
+	if updatedAt != "" {
+		if request.Descending {
+			query += ` AND (updated_at < ? OR (updated_at = ? AND (conversation_id < ? OR (conversation_id = ? AND thread_ts < ?))))`
+		} else {
+			query += ` AND (updated_at > ? OR (updated_at = ? AND (conversation_id > ? OR (conversation_id = ? AND thread_ts > ?))))`
+		}
+		args = append(args, updatedAt, updatedAt, conversation, conversation, thread)
+	}
+	if request.Descending {
+		query += ` ORDER BY updated_at DESC, conversation_id DESC, thread_ts DESC LIMIT ?`
+	} else {
+		query += ` ORDER BY updated_at, conversation_id, thread_ts LIMIT ?`
+	}
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.DraftPage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.Draft, 0, request.Limit+1)
+	for rows.Next() {
+		item, err := scanDraft(rows)
+		if err != nil {
+			return domain.DraftPage{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.DraftPage{}, err
+	}
+	page := domain.DraftPage{Items: items, HasMore: len(items) > request.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(draftCursorKey(page.Items[len(page.Items)-1]))
+	}
+	return page, err
+}
+
+func (s *Store) DeleteDraft(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, conversation domain.ConversationID, thread domain.MessageTimestamp, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM drafts WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND thread_ts = ?`, workspace, user, conversation, thread)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
 		return store.ErrNotFound
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -9223,7 +9540,7 @@ func (s *Store) RenewScheduledMessage(ctx context.Context, owner string, id doma
 
 func (s *Store) MarkScheduledMessageDelivered(ctx context.Context, owner string, id domain.ScheduledMessageID) error {
 	now := time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET delivered = 1, delivered_at = ?, lease_owner = '', lease_until = 0, next_attempt_at = 0 WHERE id = ? AND lease_owner = ? AND delivered = 0 AND failed_at = 0 AND lease_until > ?`, now.Unix(), id, owner, now.Unix())
+	result, err := s.db.ExecContext(ctx, `UPDATE scheduled_messages SET delivered = 1, delivered_at = ?, failed_at = 0, failure_code = '', lease_owner = '', lease_until = 0, next_attempt_at = 0 WHERE id = ? AND lease_owner = ? AND delivered = 0 AND lease_until > ?`, now.Unix(), id, owner, now.Unix())
 	if err != nil {
 		return err
 	}
@@ -10749,6 +11066,80 @@ func (s *Store) ListMessages(ctx context.Context, conversation domain.Conversati
 		page.NextCursor = cursor
 	}
 	return page, nil
+}
+
+func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.MessagePage, error) {
+	if err := store.CheckPage(request); err != nil {
+		return domain.MessagePage{}, err
+	}
+	query := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls
+		FROM messages m
+		JOIN conversations c ON c.id = m.conversation
+		WHERE m.workspace_id = ? AND m.author_id = ? AND m.deleted = 0
+		AND (c.is_private = 0 OR EXISTS (
+			SELECT 1 FROM conversation_members cm
+			WHERE cm.conversation_id = m.conversation AND cm.user_id = ?
+		))`
+	args := []any{workspace, user, user}
+	if request.Cursor != "" {
+		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
+		if err != nil {
+			return domain.MessagePage{}, err
+		}
+		if request.Descending {
+			query += ` AND (m.created_at < ? OR (m.created_at = ? AND m.id < ?))`
+		} else {
+			query += ` AND (m.created_at > ? OR (m.created_at = ? AND m.id > ?))`
+		}
+		created := domain.NewStoredTime(createdAt)
+		args = append(args, created, created, id)
+	}
+	if request.Descending {
+		query += ` ORDER BY m.created_at DESC, m.id DESC LIMIT ?`
+	} else {
+		query += ` ORDER BY m.created_at, m.id LIMIT ?`
+	}
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.MessagePage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.Message, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.Message
+		var created, attachments, unfurls string
+		var deleted int
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.Conversation, &value.AuthorID, &value.AppID, &value.Text, &value.Blocks, &attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp, &created, &deleted, &unfurls); err != nil {
+			return domain.MessagePage{}, err
+		}
+		value.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			return domain.MessagePage{}, err
+		}
+		value.Deleted = deleted != 0
+		value.Attachments = attachments
+		value.Unfurls, err = decodeUnfurls(unfurls)
+		if err != nil {
+			return domain.MessagePage{}, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.MessagePage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	if err := s.hydrateMessageFiles(ctx, values); err != nil {
+		return domain.MessagePage{}, err
+	}
+	page := domain.MessagePage{Messages: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewMessageCursor(values[len(values)-1])
+	}
+	return page, err
 }
 
 func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
