@@ -103,6 +103,20 @@ func browserWorkspace(t *testing.T, scopes []string) (*memory.Store, *http.Serve
 	return s, mux
 }
 
+type failingSearchHistoryStore struct {
+	store.Store
+	recordErr error
+	listErr   error
+}
+
+func (s failingSearchHistoryStore) RecordSearchHistory(context.Context, domain.SearchHistoryEntry) error {
+	return s.recordErr
+}
+
+func (s failingSearchHistoryStore) ListSearchHistory(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error) {
+	return nil, s.listErr
+}
+
 func seedMessage(t *testing.T, s *memory.Store, id domain.MessageID, text string, createdAt time.Time) domain.Message {
 	t.Helper()
 	message := domain.Message{ID: id, WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U1", Text: text, CreatedAt: createdAt}
@@ -2452,6 +2466,134 @@ func TestSearchPageUsesMessageSearchAndLinksToConversation(t *testing.T) {
 		t.Fatalf("open result status=%d body=%s", opened.Code, opened.Body)
 	}
 	requireContains(t, "opened search result", opened.Body.String(), `id="message-M1"`, "searchable hello")
+}
+
+func TestSearchRecentHistoryAndTypeaheadUseRealVisibleDestinations(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	seedMessage(t, s, "Mrecent", "deployment checklist", time.Unix(1_700_000_000, 0).UTC())
+	file := domain.File{
+		ID: "Fnotes", WorkspaceID: "T1", Uploader: "U1", Name: "release-notes.txt", Title: "Release notes",
+		MIMEType: "text/plain", BlobKey: "notes", SharedChannels: []domain.ConversationID{"Cdev"}, CreatedAt: time.Unix(1_700_000_100, 0).UTC(),
+	}
+	if err := s.CreateFile(context.Background(), file, events.Event{ID: "EFnotes", WorkspaceID: "T1", Topic: "file.created", CreatedAt: file.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "private-owner"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "Cprivate", WorkspaceID: "T1", Name: "leadership", IsPrivate: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cprivate", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	privateFile := domain.File{
+		ID: "Fprivate", WorkspaceID: "T1", Uploader: "U2", Name: "secret-roadmap.txt", Title: "Secret roadmap",
+		MIMEType: "text/plain", BlobKey: "secret", SharedChannels: []domain.ConversationID{"Cprivate"}, CreatedAt: time.Unix(1_700_000_200, 0).UTC(),
+	}
+	if err := s.CreateFile(context.Background(), privateFile, events.Event{ID: "EFprivate", WorkspaceID: "T1", Topic: "file.created", CreatedAt: privateFile.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+
+	searched := get(t, mux, "/app/search?q=deployment&channel=Cdev")
+	if searched.Code != http.StatusOK {
+		t.Fatalf("search status=%d body=%s", searched.Code, searched.Body)
+	}
+	blank := get(t, mux, "/app/search?channel=Cdev")
+	if blank.Code != http.StatusOK {
+		t.Fatalf("blank search status=%d body=%s", blank.Code, blank.Body)
+	}
+	requireContains(t, "recent search page", blank.Body.String(),
+		"Recent searches", "deployment", `role="combobox"`, `aria-autocomplete="list"`, `aria-expanded="false"`,
+	)
+
+	decodeSuggestions := func(target string) []searchSuggestion {
+		t.Helper()
+		response := get(t, mux, target)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", target, response.Code, response.Body)
+		}
+		var payload searchSuggestionsResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode %s: %v", target, err)
+		}
+		return payload.Items
+	}
+	recent := decodeSuggestions("/app/search/suggestions?channel=Cdev")
+	if len(recent) != 1 || recent[0].Kind != "recent" || recent[0].Label != "deployment" || !strings.HasPrefix(recent[0].URL, "/app/search?") {
+		t.Fatalf("recent suggestions = %+v", recent)
+	}
+	people := decodeSuggestions("/app/search/suggestions?q=Ada&channel=Cdev")
+	channels := decodeSuggestions("/app/search/suggestions?q=gener&channel=Cdev")
+	files := decodeSuggestions("/app/search/suggestions?q=release&channel=Cdev")
+	if len(people) != 1 || people[0].Kind != "person" || people[0].URL != "/app/members?user=U1" {
+		t.Fatalf("people suggestions = %+v", people)
+	}
+	if len(channels) != 1 || channels[0].Kind != "channel" || channels[0].URL != "/app?channel=Cdev" {
+		t.Fatalf("channel suggestions = %+v", channels)
+	}
+	if len(files) != 1 || files[0].Kind != "file" || files[0].URL != "/api/files/Fnotes" {
+		t.Fatalf("file suggestions = %+v", files)
+	}
+	private := decodeSuggestions("/app/search/suggestions?q=secret&channel=Cdev")
+	if len(private) != 0 {
+		t.Fatalf("private file leaked through typeahead: %+v", private)
+	}
+
+	invalid := get(t, mux, "/app/search/suggestions?q="+url.QueryEscape(strings.Repeat("x", 501)))
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("overlong query status=%d body=%s", invalid.Code, invalid.Body)
+	}
+}
+
+func TestSearchHistoryFailureIsHandledWithoutDiscardingSearchResults(t *testing.T) {
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "developer"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "Cdev", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "U1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedSession(context.Background(), "session", domain.SessionRecord{
+		WorkspaceID: "T1", UserID: "U1", Scopes: auth.AllScopes(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	seedMessage(t, s, "Mhistory-failure", "search result survives", time.Unix(1_700_000_000, 0).UTC())
+	authenticator, err := auth.NewBrowser(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyErr := errors.New("search history unavailable")
+	handler, err := NewHandler(service.Messages{
+		Store: failingSearchHistoryStore{Store: s, recordErr: historyErr, listErr: historyErr},
+	}, authenticator, s, "Cdev", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+
+	searched := get(t, mux, "/app/search?q=survives&channel=Cdev")
+	if searched.Code != http.StatusOK {
+		t.Fatalf("search status=%d body=%s", searched.Code, searched.Body)
+	}
+	requireContains(t, "search history write failure", searched.Body.String(),
+		"search result survives",
+		"Search completed, but it could not be added to recent searches.",
+		`role="status"`,
+	)
+	blank := get(t, mux, "/app/search?channel=Cdev")
+	if blank.Code != http.StatusServiceUnavailable {
+		t.Fatalf("recent history read status=%d body=%s", blank.Code, blank.Body)
+	}
+	requireContains(t, "search history read failure", blank.Body.String(), "Recent searches are temporarily unavailable.")
 }
 
 func TestSearchPageSupportsTypedResultsFiltersAndConversationScope(t *testing.T) {

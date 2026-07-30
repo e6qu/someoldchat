@@ -75,6 +75,11 @@ func InternalTopics() []string {
 // constant so a code cannot outlive it on one storage profile and not another.
 const OAuthCodeLifetime = 10 * time.Minute
 
+// MaxSearchHistoryEntries bounds private per-member recent-search state. The
+// first-party UI displays a smaller window, while the repository keeps enough
+// history for useful matching without allowing an unbounded query log.
+const MaxSearchHistoryEntries = 50
+
 // The access levels a list or canvas grant can carry. They are the values the
 // service layer already writes through SetListAccess and SetCanvasAccess; naming
 // them here keeps the readers, the writers and the authorization decision that
@@ -592,6 +597,8 @@ type Store interface {
 	ListFiles(context.Context, domain.WorkspaceID, domain.PageRequest) (domain.FilePage, error)
 	ListVisibleFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.FilePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearch) (domain.FilePage, error)
+	RecordSearchHistory(context.Context, domain.SearchHistoryEntry) error
+	ListSearchHistory(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error)
 	WalkBlobReferences(context.Context, domain.WorkspaceID, func(string) error) error
 	AddRemoteFile(context.Context, domain.RemoteFile, events.Event) error
 	GetRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFileLookup) (domain.RemoteFile, error)

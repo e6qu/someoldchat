@@ -553,6 +553,46 @@ func (r Remote) SearchMessages(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoMessagePage(out)
 }
 
+func (r Remote) RecordSearch(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string) error {
+	out, err := r.messages.RecordSearch(ctx, &chatv1.RecordSearchRequest{
+		WorkspaceId: string(workspaceID),
+		UserId:      string(userID),
+		Query:       query,
+	})
+	if err != nil {
+		return err
+	}
+	if !out.GetOk() {
+		return errors.New("typed record search response is incomplete")
+	}
+	return nil
+}
+
+func (r Remote) RecentSearches(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, limit int) ([]domain.SearchHistoryEntry, error) {
+	out, err := r.messages.RecentSearches(ctx, &chatv1.RecentSearchesRequest{
+		WorkspaceId: string(workspaceID),
+		UserId:      string(userID),
+		Limit:       int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.SearchHistoryEntry, 0, len(out.GetEntries()))
+	for _, entry := range out.GetEntries() {
+		searchedAt, err := domain.ParseStoredTime(entry.GetSearchedAt())
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, domain.SearchHistoryEntry{
+			WorkspaceID: domain.WorkspaceID(entry.GetWorkspaceId()),
+			UserID:      domain.UserID(entry.GetUserId()),
+			Query:       entry.GetQuery(),
+			SearchedAt:  searchedAt,
+		})
+	}
+	return values, nil
+}
+
 func (r Remote) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, title, mimeType string, size int64, source io.Reader) (domain.File, error) {
 	if source == nil {
 		return domain.File{}, errors.New("file upload requires a source")
@@ -4630,6 +4670,30 @@ func (s *Server) Replies(ctx context.Context, input *chatv1.RepliesRequest) (*ch
 
 func (s *Server) Search(ctx context.Context, input *chatv1.SearchRequest) (*chatv1.MessagePage, error) {
 	return s.searchProto(ctx, input)
+}
+
+func (s *Server) RecordSearch(ctx context.Context, input *chatv1.RecordSearchRequest) (*chatv1.SearchHistoryResponse, error) {
+	if err := s.implementation.RecordSearch(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.SearchHistoryResponse{Ok: true}, nil
+}
+
+func (s *Server) RecentSearches(ctx context.Context, input *chatv1.RecentSearchesRequest) (*chatv1.SearchHistoryResponse, error) {
+	values, err := s.implementation.RecentSearches(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), int(input.GetLimit()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.SearchHistoryResponse{Ok: true, Entries: make([]*chatv1.SearchHistoryEntry, 0, len(values))}
+	for _, value := range values {
+		out.Entries = append(out.Entries, &chatv1.SearchHistoryEntry{
+			WorkspaceId: string(value.WorkspaceID),
+			UserId:      string(value.UserID),
+			Query:       value.Query,
+			SearchedAt:  string(domain.NewStoredTime(value.SearchedAt)),
+		})
+	}
+	return out, nil
 }
 
 func (s *Server) CreateList(ctx context.Context, input *chatv1.CreateListRequest) (*chatv1.ListResponse, error) {

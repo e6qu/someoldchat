@@ -20,6 +20,16 @@ const (
 	SearchDirectionDescending SearchDirection = "desc"
 )
 
+// SearchHistoryEntry is private first-party client state. Slack's public Web
+// API exposes search execution, not the member's recent-search list, so this
+// value belongs on SameOldChat's authenticated application/gRPC seam.
+type SearchHistoryEntry struct {
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	Query       string
+	SearchedAt  time.Time
+}
+
 func NormalizeSearchOrder(sortValue, direction string) (SearchSort, SearchDirection, error) {
 	sortOrder := SearchSort(strings.TrimSpace(strings.ToLower(sortValue)))
 	if sortOrder == "" {

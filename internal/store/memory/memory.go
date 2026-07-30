@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
@@ -75,6 +76,7 @@ type Store struct {
 	threadFollows                 map[string]bool
 	activityItems                 map[domain.ActivityID]domain.ActivityItem
 	activityPreferences           map[string]domain.ActivityPreferences
+	searchHistory                 map[string]domain.SearchHistoryEntry
 	reactions                     map[domain.MessageID]map[string]domain.Reaction
 	pins                          map[domain.MessageID]map[domain.UserID]domain.Pin
 	files                         map[domain.FileID]domain.File
@@ -5934,6 +5936,66 @@ func (s *Store) SearchFiles(_ context.Context, workspace domain.WorkspaceID, use
 	}
 	end := min(start+search.Count, total)
 	return domain.FilePage{Files: values[start:end], HasMore: end < total, Total: total}, nil
+}
+
+func searchHistoryKey(workspace domain.WorkspaceID, user domain.UserID, query string) string {
+	return string(workspace) + "\x00" + string(user) + "\x00" + query
+}
+
+func (s *Store) RecordSearchHistory(_ context.Context, value domain.SearchHistoryEntry) error {
+	value.Query = strings.TrimSpace(value.Query)
+	if value.WorkspaceID == "" || value.UserID == "" || value.Query == "" || utf8.RuneCountInString(value.Query) > 500 || value.SearchedAt.IsZero() {
+		return store.InvalidArgument("search history entry is invalid")
+	}
+	value.SearchedAt = value.SearchedAt.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.searchHistory == nil {
+		s.searchHistory = make(map[string]domain.SearchHistoryEntry)
+	}
+	s.searchHistory[searchHistoryKey(value.WorkspaceID, value.UserID, value.Query)] = value
+	owned := make([]domain.SearchHistoryEntry, 0)
+	for _, candidate := range s.searchHistory {
+		if candidate.WorkspaceID == value.WorkspaceID && candidate.UserID == value.UserID {
+			owned = append(owned, candidate)
+		}
+	}
+	sort.Slice(owned, func(left, right int) bool {
+		if owned[left].SearchedAt.Equal(owned[right].SearchedAt) {
+			return owned[left].Query < owned[right].Query
+		}
+		return owned[left].SearchedAt.After(owned[right].SearchedAt)
+	})
+	if len(owned) > store.MaxSearchHistoryEntries {
+		for _, stale := range owned[store.MaxSearchHistoryEntries:] {
+			delete(s.searchHistory, searchHistoryKey(stale.WorkspaceID, stale.UserID, stale.Query))
+		}
+	}
+	return nil
+}
+
+func (s *Store) ListSearchHistory(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, limit int) ([]domain.SearchHistoryEntry, error) {
+	if workspace == "" || user == "" || limit <= 0 || limit > store.MaxSearchHistoryEntries {
+		return nil, store.InvalidArgument("search history request is invalid")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.SearchHistoryEntry, 0, limit)
+	for _, value := range s.searchHistory {
+		if value.WorkspaceID == workspace && value.UserID == user {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool {
+		if values[left].SearchedAt.Equal(values[right].SearchedAt) {
+			return values[left].Query < values[right].Query
+		}
+		return values[left].SearchedAt.After(values[right].SearchedAt)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
 }
 
 func (s *Store) fileVisibleToUser(file domain.File, user domain.UserID) bool {

@@ -655,7 +655,7 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await composer.press(`${primary}+f`);
   await expect(page).toHaveURL(/\/app\/search\?.*scope=channel/);
   await expect(page.getByText('Searching only this conversation.')).toBeVisible();
-  const query = page.getByRole('searchbox', { name: 'Search the workspace' });
+  const query = page.getByRole('combobox', { name: 'Search the workspace' });
   await expect(query).toBeFocused();
   await query.fill(needle);
   await query.press('Enter');
@@ -679,6 +679,25 @@ test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, fi
   await expect(page.locator('.result', { hasText: 'SameOldChat' })).toBeVisible();
   await page.goto('/app/search?q=general&type=channels&channel=Cdev');
   await expect(page.getByRole('link', { name: '# general' })).toBeVisible();
+
+  await page.goto('/app');
+  const workspaceSearch = page.locator('#workspace-search');
+  await workspaceSearch.focus();
+  await workspaceSearch.fill(needle);
+  const recent = page.getByRole('option', { name: `${needle} Recent search` });
+  await expect(recent).toContainText('Recent search');
+  await expect(page.getByRole('option').filter({ hasText: 'general' })).toHaveCount(0);
+  await workspaceSearch.press('ArrowDown');
+  await workspaceSearch.press('Enter');
+  await expect(page).toHaveURL(new RegExp(`/app/search\\?.*q=${needle}`));
+  await expect(page.locator('.result', { hasText: message })).toBeVisible();
+
+  await page.goto('/app');
+  await workspaceSearch.fill('SameOldChat');
+  const personSuggestion = page.getByRole('option').filter({ hasText: 'Person' });
+  await expect(personSuggestion).toContainText('SameOldChat');
+  await personSuggestion.click();
+  await expect(page).toHaveURL(/\/app\/members\?user=/);
 });
 
 test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, and deletes a real app', async ({ page, context }) => {

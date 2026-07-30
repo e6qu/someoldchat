@@ -208,6 +208,30 @@ message SearchRequest {
   string direction = 8;
 }
 
+message RecordSearchRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+}
+
+message RecentSearchesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+}
+
+message SearchHistoryEntry {
+  string workspace_id = 1;
+  string user_id = 2;
+  string query = 3;
+  string searched_at = 4;
+}
+
+message SearchHistoryResponse {
+  bool ok = 1;
+  repeated SearchHistoryEntry entries = 2;
+}
+
 message IncomingWebhookCreateRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -271,6 +295,8 @@ service MessagesService {
   rpc History(HistoryRequest) returns (MessagePage);
   rpc Replies(RepliesRequest) returns (MessagePage);
   rpc Search(SearchRequest) returns (MessagePage);
+  rpc RecordSearch(RecordSearchRequest) returns (SearchHistoryResponse);
+  rpc RecentSearches(RecentSearchesRequest) returns (SearchHistoryResponse);
   rpc AdminCreateIncomingWebhook(IncomingWebhookCreateRequest) returns (IncomingWebhookCreateResponse);
   rpc AdminSetIncomingWebhookEnabled(IncomingWebhookEnableRequest) returns (IncomingWebhookMutationResponse);
   rpc PostIncomingWebhook(IncomingWebhookPostRequest) returns (Message);

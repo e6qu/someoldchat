@@ -39,6 +39,7 @@ emoji_help_url='https://slack.com/help/articles/202931348-Use-emoji-and-reaction
 emoji_list_url='https://docs.slack.dev/reference/methods/emoji.list/'
 message_formatting_url='https://docs.slack.dev/messaging/formatting-message-text/'
 search_url='https://slack.com/help/articles/202528808-Search-in-Slack'
+slack_updates_url='https://slack.com/help/articles/115004846068-Slack-updates-and-changes/'
 search_messages_url='https://docs.slack.dev/reference/methods/search.messages/'
 search_files_url='https://docs.slack.dev/reference/methods/search.files/'
 search_all_url='https://docs.slack.dev/reference/methods/search.all/'
@@ -80,6 +81,7 @@ fetch "$emoji_help_url" "$work/emoji-help.html"
 fetch "$emoji_list_url" "$work/emoji-list.html"
 fetch "$message_formatting_url" "$work/message-formatting.html"
 fetch "$search_url" "$work/search.html"
+fetch "$slack_updates_url" "$work/slack-updates.html"
 fetch "$search_messages_url" "$work/search-messages.html"
 fetch "$search_files_url" "$work/search-files.html"
 fetch "$search_all_url" "$work/search-all.html"
@@ -179,6 +181,8 @@ assert_contains "$work/search.html" 'switch between result types' \
 	'[SEARCH-01] desktop search result types' "$search_url"
 assert_contains "$work/search.html" 'select a recent search if you' \
 	'[SEARCH-01] search exposes recent-query suggestions' "$search_url"
+assert_contains "$work/slack-updates.html" 'Slack will show you related channels, members, and file matches' \
+	'[SEARCH-01] typed suggestions resolve to real channels, members, and files' "$slack_updates_url"
 assert_contains "$work/search.html" 'in:#team-marketing from:@Sara' \
 	'[SEARCH-02] search modifiers can be combined' "$search_url"
 assert_contains "$work/search.html" 'using hasmy::eyes:' \

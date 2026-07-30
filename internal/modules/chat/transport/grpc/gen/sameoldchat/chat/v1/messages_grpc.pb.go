@@ -36,6 +36,8 @@ const (
 	MessagesService_History_FullMethodName                        = "/sameoldchat.chat.v1.MessagesService/History"
 	MessagesService_Replies_FullMethodName                        = "/sameoldchat.chat.v1.MessagesService/Replies"
 	MessagesService_Search_FullMethodName                         = "/sameoldchat.chat.v1.MessagesService/Search"
+	MessagesService_RecordSearch_FullMethodName                   = "/sameoldchat.chat.v1.MessagesService/RecordSearch"
+	MessagesService_RecentSearches_FullMethodName                 = "/sameoldchat.chat.v1.MessagesService/RecentSearches"
 	MessagesService_AdminCreateIncomingWebhook_FullMethodName     = "/sameoldchat.chat.v1.MessagesService/AdminCreateIncomingWebhook"
 	MessagesService_AdminSetIncomingWebhookEnabled_FullMethodName = "/sameoldchat.chat.v1.MessagesService/AdminSetIncomingWebhookEnabled"
 	MessagesService_PostIncomingWebhook_FullMethodName            = "/sameoldchat.chat.v1.MessagesService/PostIncomingWebhook"
@@ -62,6 +64,8 @@ type MessagesServiceClient interface {
 	History(ctx context.Context, in *HistoryRequest, opts ...grpc.CallOption) (*MessagePage, error)
 	Replies(ctx context.Context, in *RepliesRequest, opts ...grpc.CallOption) (*MessagePage, error)
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*MessagePage, error)
+	RecordSearch(ctx context.Context, in *RecordSearchRequest, opts ...grpc.CallOption) (*SearchHistoryResponse, error)
+	RecentSearches(ctx context.Context, in *RecentSearchesRequest, opts ...grpc.CallOption) (*SearchHistoryResponse, error)
 	AdminCreateIncomingWebhook(ctx context.Context, in *IncomingWebhookCreateRequest, opts ...grpc.CallOption) (*IncomingWebhookCreateResponse, error)
 	AdminSetIncomingWebhookEnabled(ctx context.Context, in *IncomingWebhookEnableRequest, opts ...grpc.CallOption) (*IncomingWebhookMutationResponse, error)
 	PostIncomingWebhook(ctx context.Context, in *IncomingWebhookPostRequest, opts ...grpc.CallOption) (*Message, error)
@@ -245,6 +249,26 @@ func (c *messagesServiceClient) Search(ctx context.Context, in *SearchRequest, o
 	return out, nil
 }
 
+func (c *messagesServiceClient) RecordSearch(ctx context.Context, in *RecordSearchRequest, opts ...grpc.CallOption) (*SearchHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchHistoryResponse)
+	err := c.cc.Invoke(ctx, MessagesService_RecordSearch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *messagesServiceClient) RecentSearches(ctx context.Context, in *RecentSearchesRequest, opts ...grpc.CallOption) (*SearchHistoryResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SearchHistoryResponse)
+	err := c.cc.Invoke(ctx, MessagesService_RecentSearches_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *messagesServiceClient) AdminCreateIncomingWebhook(ctx context.Context, in *IncomingWebhookCreateRequest, opts ...grpc.CallOption) (*IncomingWebhookCreateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(IncomingWebhookCreateResponse)
@@ -296,6 +320,8 @@ type MessagesServiceServer interface {
 	History(context.Context, *HistoryRequest) (*MessagePage, error)
 	Replies(context.Context, *RepliesRequest) (*MessagePage, error)
 	Search(context.Context, *SearchRequest) (*MessagePage, error)
+	RecordSearch(context.Context, *RecordSearchRequest) (*SearchHistoryResponse, error)
+	RecentSearches(context.Context, *RecentSearchesRequest) (*SearchHistoryResponse, error)
 	AdminCreateIncomingWebhook(context.Context, *IncomingWebhookCreateRequest) (*IncomingWebhookCreateResponse, error)
 	AdminSetIncomingWebhookEnabled(context.Context, *IncomingWebhookEnableRequest) (*IncomingWebhookMutationResponse, error)
 	PostIncomingWebhook(context.Context, *IncomingWebhookPostRequest) (*Message, error)
@@ -358,6 +384,12 @@ func (UnimplementedMessagesServiceServer) Replies(context.Context, *RepliesReque
 }
 func (UnimplementedMessagesServiceServer) Search(context.Context, *SearchRequest) (*MessagePage, error) {
 	return nil, status.Error(codes.Unimplemented, "method Search not implemented")
+}
+func (UnimplementedMessagesServiceServer) RecordSearch(context.Context, *RecordSearchRequest) (*SearchHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecordSearch not implemented")
+}
+func (UnimplementedMessagesServiceServer) RecentSearches(context.Context, *RecentSearchesRequest) (*SearchHistoryResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RecentSearches not implemented")
 }
 func (UnimplementedMessagesServiceServer) AdminCreateIncomingWebhook(context.Context, *IncomingWebhookCreateRequest) (*IncomingWebhookCreateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method AdminCreateIncomingWebhook not implemented")
@@ -694,6 +726,42 @@ func _MessagesService_Search_Handler(srv interface{}, ctx context.Context, dec f
 	return interceptor(ctx, in, info, handler)
 }
 
+func _MessagesService_RecordSearch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecordSearchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).RecordSearch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_RecordSearch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).RecordSearch(ctx, req.(*RecordSearchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _MessagesService_RecentSearches_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RecentSearchesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(MessagesServiceServer).RecentSearches(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: MessagesService_RecentSearches_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(MessagesServiceServer).RecentSearches(ctx, req.(*RecentSearchesRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _MessagesService_AdminCreateIncomingWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(IncomingWebhookCreateRequest)
 	if err := dec(in); err != nil {
@@ -822,6 +890,14 @@ var MessagesService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Search",
 			Handler:    _MessagesService_Search_Handler,
+		},
+		{
+			MethodName: "RecordSearch",
+			Handler:    _MessagesService_RecordSearch_Handler,
+		},
+		{
+			MethodName: "RecentSearches",
+			Handler:    _MessagesService_RecentSearches_Handler,
 		},
 		{
 			MethodName: "AdminCreateIncomingWebhook",

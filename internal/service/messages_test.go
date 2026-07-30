@@ -1635,6 +1635,43 @@ func TestSearchNormalizesTermsAndHidesPrivateConversations(t *testing.T) {
 	}
 }
 
+func TestRecentSearchesRequireMembershipAndRemainPrivate(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"}); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s}
+	if err := messages.RecordSearch(ctx, "T1", "U1", "  deployment plan  "); err != nil {
+		t.Fatal(err)
+	}
+	if err := messages.RecordSearch(ctx, "T1", "U2", "private query"); err != nil {
+		t.Fatal(err)
+	}
+	values, err := messages.RecentSearches(ctx, "T1", "U1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 1 || values[0].Query != "deployment plan" {
+		t.Fatalf("recent searches = %+v", values)
+	}
+	if err := messages.RecordSearch(ctx, "T1", "missing", "query"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("foreign user error = %v, want not found", err)
+	}
+	if err := messages.RecordSearch(ctx, "T1", "U1", " "); !errors.Is(err, ErrInvalidSearch) {
+		t.Fatalf("blank query error = %v, want invalid search", err)
+	}
+	if _, err := messages.RecentSearches(ctx, "T1", "U1", 0); !errors.Is(err, ErrInvalidSearch) {
+		t.Fatalf("invalid limit error = %v, want invalid search", err)
+	}
+}
+
 func TestSearchResolvesSlackModifiersAndPreservesDeterministicOrder(t *testing.T) {
 	ctx := context.Background()
 	s := memory.New()

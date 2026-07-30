@@ -287,6 +287,8 @@ type Service interface {
 	Search(context.Context, domain.WorkspaceID, domain.UserID, string, domain.PageRequest) (domain.MessagePage, error)
 	SearchMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageSearchRequest) (domain.MessagePage, error)
 	SearchFiles(context.Context, domain.WorkspaceID, domain.UserID, domain.FileSearchRequest) (domain.FilePage, error)
+	RecordSearch(context.Context, domain.WorkspaceID, domain.UserID, string) error
+	RecentSearches(context.Context, domain.WorkspaceID, domain.UserID, int) ([]domain.SearchHistoryEntry, error)
 	UploadFile(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, int64, io.Reader) (domain.File, error)
 	CreateExternalUpload(context.Context, domain.WorkspaceID, domain.UserID, string, string, int64, time.Duration) (domain.ExternalUpload, error)
 	UploadExternalFile(context.Context, domain.ExternalUploadID, int64, io.Reader) error
