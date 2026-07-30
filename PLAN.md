@@ -356,9 +356,9 @@ this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 97 representative exact assertions
-explicitly citing 44 of the 101 journey IDs across every journey domain.
-`make journey-check` prints the other 57 as upstream-text evidence
+developer pages and currently checks 103 representative exact assertions
+explicitly citing 46 of the 101 journey IDs across every journey domain.
+`make journey-check` prints the other 55 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and
@@ -366,6 +366,20 @@ Slack Connect acceptance must account atomically for Slack's current
 250-organization capacity including the host. This gate detects documentation
 drift; controlled live-workspace behavior and visual comparison remain
 distinct evidence layers.
+
+The current composer/reaction pass removes a second source of false UI parity:
+standard emoji are no longer six hard-coded buttons and reactions are no
+longer arbitrary free text. One checksum-pinned iamcal/emoji-data revision—the
+dataset Slack's current formatting guide names—now drives colon completion,
+the searchable picker, Unicode rendering, reaction validation, and
+`emoji.list(include_categories=true)`. Durable workspace custom emoji and
+aliases are merged through the same model, with HTTP(S)-only image rendering.
+Channel completion stores Slack's `<#ID>` form and resolves only authorized
+visible names at presentation time. Node, Python, and Java typed SDK calls,
+current Slack Help/developer assertions, browser keyboard journeys, and
+service/web/API tests form the qualification stack. User-group completion,
+recent/category/skin-tone picker depth, exact Slack ranking, pasted
+attachments, clips, and controlled live-Slack outcomes remain named gaps.
 
 The first-party reminder slice now has a durable model separate from deprecated
 `reminders.*`, message `M` presets/custom time, Later CRUD and filtering,

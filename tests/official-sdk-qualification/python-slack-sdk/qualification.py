@@ -702,8 +702,10 @@ assert team["team"]["id"] == "T1"
 team_profile = client.team_profile_get()
 assert team_profile["ok"] is True
 assert team_profile["profile"]["fields"] == []
-emoji = client.emoji_list()
+emoji = client.emoji_list(include_categories=True)
 assert emoji["ok"] is True
+assert emoji["categories_version"] == "097705020bcf82331c9ef10df3425aad15f5043c"
+assert any(category["name"] == "Smileys & Emotion" and "grinning" in category["emoji_names"] for category in emoji["categories"])
 identity_result = client.users_identity()
 assert identity_result["ok"] is True
 assert identity_result["user"]["id"] == "U1"

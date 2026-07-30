@@ -35,6 +35,9 @@ add_dm_url='https://slack.com/help/articles/1500002969782-Add-people-to-a-direct
 convert_dm_url='https://slack.com/help/articles/217555437-Convert-a-group-direct-message-to-a-private-channel'
 close_dm_api_url='https://docs.slack.dev/reference/methods/conversations.close/'
 message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
+emoji_help_url='https://slack.com/help/articles/202931348-Use-emoji-and-reactions'
+emoji_list_url='https://docs.slack.dev/reference/methods/emoji.list/'
+message_formatting_url='https://docs.slack.dev/messaging/formatting-message-text/'
 search_url='https://slack.com/help/articles/202528808-Search-in-Slack'
 search_messages_url='https://docs.slack.dev/reference/methods/search.messages/'
 search_files_url='https://docs.slack.dev/reference/methods/search.files/'
@@ -71,6 +74,9 @@ fetch "$add_dm_url" "$work/add-dm.html"
 fetch "$convert_dm_url" "$work/convert-dm.html"
 fetch "$close_dm_api_url" "$work/conversations-close.html"
 fetch "$message_url" "$work/messages.html"
+fetch "$emoji_help_url" "$work/emoji-help.html"
+fetch "$emoji_list_url" "$work/emoji-list.html"
+fetch "$message_formatting_url" "$work/message-formatting.html"
 fetch "$search_url" "$work/search.html"
 fetch "$search_messages_url" "$work/search-messages.html"
 fetch "$search_files_url" "$work/search-files.html"
@@ -149,6 +155,18 @@ assert_contains "$work/messages.html" 'Manage draft, scheduled, and sent message
 	'[DRAFT-02] Drafts and sent is the current aggregate work surface' "$message_url"
 assert_contains "$work/messages.html" 'edit, reschedule, send, cancel, or delete it' \
 	'[SCHED-02] scheduled items expose the current management actions' "$message_url"
+assert_contains "$work/emoji-help.html" 'using a : colon followed by the code or emoji alias' \
+	'[COMP-03] colon codes are a documented Slack composer entry point' "$emoji_help_url"
+assert_contains "$work/emoji-help.html" 'browse categories' \
+	'[COMP-03 ACT-02] the emoji picker supports category browsing' "$emoji_help_url"
+assert_contains "$work/emoji-help.html" 'Click the Add reaction icon and select an option.' \
+	'[ACT-02] Slack exposes reactions from a message action' "$emoji_help_url"
+assert_contains "$work/emoji-list.html" 'include_categories' \
+	'[COMP-03 ACT-02] emoji.list accepts the current category projection argument' "$emoji_list_url"
+assert_contains "$work/emoji-list.html" 'Include a list of categories for Unicode emoji' \
+	'[COMP-03 ACT-02] emoji.list category projection is Unicode emoji metadata' "$emoji_list_url"
+assert_contains "$work/message-formatting.html" 'The list of supported emoji are taken from' \
+	'[COMP-03 ACT-02] Slack names the upstream standard emoji dataset' "$message_formatting_url"
 assert_contains "$work/scheduling-api.html" 'delete the old message and then' \
 	'[SCHED-02] the public Web API updates by delete plus schedule rather than an invented update method' "$schedule_api_url"
 assert_contains "$work/scheduling-api.html" 'Messages can only be scheduled up to 120 days in advance' \

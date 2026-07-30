@@ -1013,6 +1013,18 @@ func TestCustomEmojiLifecycleNormalizesAndPersists(t *testing.T) {
 	seedWorkspaceAdmin(t, s, "T1", "U1")
 	messages := Messages{Store: s}
 	ctx := context.Background()
+	for _, invalid := range []struct {
+		name string
+		url  string
+	}{
+		{name: "bad name", url: "https://cdn.example/bad.png"},
+		{name: "javascript", url: "javascript:alert(1)"},
+		{name: "relative", url: "/emoji.png"},
+	} {
+		if err := messages.AdminAddEmoji(ctx, "T1", "U1", invalid.name, invalid.url); !errors.Is(err, ErrInvalidEmoji) {
+			t.Fatalf("AdminAddEmoji(%q, %q) error=%v", invalid.name, invalid.url, err)
+		}
+	}
 	if err := messages.AdminAddEmoji(ctx, "T1", "U1", " Wave ", "https://cdn.example/wave.png"); err != nil {
 		t.Fatal(err)
 	}
@@ -1516,6 +1528,9 @@ func TestReactionsAreDurableAndIdempotentlyRejected(t *testing.T) {
 	}
 	if err := messages.AddReaction(context.Background(), "T1", "U1", "C1", timestamp, "thumbsup"); err != store.ErrAlreadyExists {
 		t.Fatalf("duplicate reaction err=%v", err)
+	}
+	if err := messages.AddReaction(context.Background(), "T1", "U1", "C1", timestamp, "not_a_real_emoji"); !errors.Is(err, ErrInvalidReaction) {
+		t.Fatalf("unknown reaction err=%v", err)
 	}
 	values, _, more, err := messages.Reactions(context.Background(), "T1", "U1", "C1", timestamp, domain.PageRequest{Limit: 10})
 	if err != nil || more || len(values) != 1 || values[0].Name != "thumbsup" || values[0].UserID != "U1" {

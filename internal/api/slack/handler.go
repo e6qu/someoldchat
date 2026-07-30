@@ -14,6 +14,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/socketmode"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 	"io"
@@ -3003,12 +3004,31 @@ func (h Handler) listEmoji(w http.ResponseWriter, r *http.Request, scope auth.Sc
 		writeAuthError(w, err)
 		return
 	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	includeCategories, err := parseBoolField(fields["include_categories"])
+	if err != nil {
+		writeError(w, "invalid_arguments")
+		return
+	}
 	values, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
 	if err != nil {
 		writeError(w, mapServiceError(err, "fatal_error"))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "emoji": emojiResponse(values)})
+	response := map[string]any{
+		"ok":       true,
+		"emoji":    emojiResponse(values),
+		"cache_ts": slackemoji.Revision,
+	}
+	if includeCategories {
+		response["categories_version"] = slackemoji.CategoriesVersion
+		response["categories"] = slackemoji.Categories()
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 func emojiResponse(values []domain.CustomEmoji) map[string]string {

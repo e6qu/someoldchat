@@ -219,6 +219,16 @@ operations:
   - method: emoji.list
     status: behavior-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/emoji.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - tests/external-contract-qualification/qualify.sh
+      - specs/journeys/03-composer-drafts-and-scheduled.md
+      - specs/journeys/04-messages-threads-and-actions.md
+    deviations:
+      - Live-Slack differential verification and recent/custom category ordering remain unqualified.
   - method: users.identity
     status: behavior-compatible
     provenance: slack-api-specs-openapi

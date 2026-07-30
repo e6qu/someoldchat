@@ -81,7 +81,11 @@ type messageAttachmentFieldView struct {
 	Value string
 }
 
-func newRichMessageContent(message domain.Message) richMessageContent {
+func newRichMessageContent(message domain.Message, customEmoji ...map[string]string) richMessageContent {
+	var emojiImages map[string]string
+	if len(customEmoji) > 0 {
+		emojiImages = customEmoji[0]
+	}
 	streamBlocks, hasStream := decodeMessageStream(message)
 	content := richMessageContent{
 		Blocks:      append(streamBlocks, decodeMessageBlocks(message.Blocks)...),
@@ -94,7 +98,7 @@ func newRichMessageContent(message domain.Message) richMessageContent {
 	// wholly unknown block payload somehow reaches a legacy store, retain the
 	// fallback rather than rendering a blank row.
 	if len(content.Blocks) == 0 && !hasStream {
-		content.Text = renderSlackMrkdwn(message.Text)
+		content.Text = renderSlackMrkdwnWithEmoji(message.Text, emojiImages)
 	}
 	return content
 }
