@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+
+	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 )
 
 // renderMarkdown handles Slack's Markdown block, whose contract is CommonMark
@@ -207,8 +209,12 @@ func renderMarkdownInline(text string) string {
 // SDKs. Every app-controlled byte is escaped before it reaches the returned
 // trusted template fragment; only this renderer supplies tags and attributes.
 func renderSlackMrkdwn(text string) template.HTML {
+	return renderSlackMrkdwnWithEmoji(text, nil)
+}
+
+func renderSlackMrkdwnWithEmoji(text string, customEmoji map[string]string) template.HTML {
 	text = decodeSlackEntities(text)
-	return template.HTML(renderSlackInline(text)) // #nosec G203 -- renderSlackInline escapes every literal and validates every link.
+	return template.HTML(renderSlackInlineWithEmoji(text, customEmoji)) // #nosec G203 -- the renderer escapes every literal and validates every URL.
 }
 
 func decodeSlackEntities(text string) string {
@@ -220,6 +226,10 @@ func decodeSlackEntities(text string) string {
 }
 
 func renderSlackInline(text string) string {
+	return renderSlackInlineWithEmoji(text, nil)
+}
+
+func renderSlackInlineWithEmoji(text string, customEmoji map[string]string) string {
 	var output strings.Builder
 	for offset := 0; offset < len(text); {
 		switch text[offset] {
@@ -273,6 +283,42 @@ func renderSlackInline(text string) string {
 				output.WriteString("&gt;")
 			}
 			offset += end + 2
+		case ':':
+			end := strings.IndexByte(text[offset+1:], ':')
+			if end < 1 {
+				output.WriteByte(':')
+				offset++
+				continue
+			}
+			end += offset + 1
+			name := text[offset+1 : end]
+			if !validEmojiCode(name) {
+				output.WriteByte(':')
+				offset++
+				continue
+			}
+			if imageURL := customEmoji[strings.ToLower(name)]; imageURL != "" {
+				output.WriteString(`<img class="custom-emoji" src="`)
+				output.WriteString(html.EscapeString(imageURL))
+				output.WriteString(`" alt=":`)
+				output.WriteString(html.EscapeString(name))
+				output.WriteString(`:" title=":`)
+				output.WriteString(html.EscapeString(name))
+				output.WriteString(`:" loading="lazy">`)
+				offset = end + 1
+				continue
+			}
+			if emoji, ok := slackemoji.Lookup(name); ok {
+				output.WriteString(`<span class="standard-emoji" role="img" aria-label=":`)
+				output.WriteString(html.EscapeString(name))
+				output.WriteString(`:">`)
+				output.WriteString(html.EscapeString(slackemoji.Unicode(emoji)))
+				output.WriteString(`</span>`)
+				offset = end + 1
+				continue
+			}
+			output.WriteByte(':')
+			offset++
 		case '*', '_', '~':
 			delimiter := text[offset]
 			end := strings.IndexByte(text[offset+1:], delimiter)
@@ -291,13 +337,13 @@ func renderSlackInline(text string) string {
 			output.WriteByte('<')
 			output.WriteString(tag)
 			output.WriteByte('>')
-			output.WriteString(renderSlackInline(text[offset+1 : end]))
+			output.WriteString(renderSlackInlineWithEmoji(text[offset+1:end], customEmoji))
 			output.WriteString("</")
 			output.WriteString(tag)
 			output.WriteByte('>')
 			offset = end + 1
 		default:
-			next := strings.IndexAny(text[offset:], "\n\\`<*_~")
+			next := strings.IndexAny(text[offset:], "\n\\`<*_~:")
 			if next <= 0 {
 				next = len(text) - offset
 			}
@@ -306,6 +352,22 @@ func renderSlackInline(text string) string {
 		}
 	}
 	return output.String()
+}
+
+func validEmojiCode(name string) bool {
+	if name == "" || len(name) > 255 {
+		return false
+	}
+	for _, character := range name {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= 'A' && character <= 'Z') ||
+			(character >= '0' && character <= '9') ||
+			character == '_' || character == '-' || character == '+' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func renderSlackReference(raw string) (string, bool) {

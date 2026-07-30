@@ -20,6 +20,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
+	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -3566,7 +3567,22 @@ func (m Messages) AdminConnectedChannelInfo(ctx context.Context, workspaceID dom
 }
 
 func normalizeEmojiName(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	return strings.ToLower(strings.Trim(strings.TrimSpace(value), ":"))
+}
+
+func validEmojiName(value string) bool {
+	if value == "" || len(value) > 255 {
+		return false
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') ||
+			(character >= '0' && character <= '9') ||
+			character == '_' || character == '-' || character == '+' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func (m Messages) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.CustomEmoji, error) {
@@ -3576,19 +3592,21 @@ func (m Messages) Emojis(ctx context.Context, workspaceID domain.WorkspaceID, us
 	return m.Store.ListEmojis(ctx, workspaceID)
 }
 
-func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, url string) error {
+func (m Messages) AdminAddEmoji(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, name, imageURL string) error {
 	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return err
 	}
-	name, url = normalizeEmojiName(name), strings.TrimSpace(url)
-	if name == "" || len(name) > 255 || url == "" || len(url) > 2048 {
+	name, imageURL = normalizeEmojiName(name), strings.TrimSpace(imageURL)
+	parsedURL, urlErr := url.Parse(imageURL)
+	if !validEmojiName(name) || imageURL == "" || len(imageURL) > 2048 || urlErr != nil ||
+		(parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" {
 		return ErrInvalidEmoji
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("emoji.added", events.String("name", name)), time.Now().UTC())
 	if err != nil {
 		return err
 	}
-	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: url}, event)
+	err = m.Store.AddEmoji(ctx, domain.CustomEmoji{WorkspaceID: workspaceID, Name: name, URL: imageURL}, event)
 	if errors.Is(err, store.ErrAlreadyExists) {
 		return ErrEmojiAlreadyExists
 	}
@@ -3600,7 +3618,7 @@ func (m Messages) AdminAddEmojiAlias(ctx context.Context, workspaceID domain.Wor
 		return err
 	}
 	name, target = normalizeEmojiName(name), normalizeEmojiName(target)
-	if name == "" || target == "" || name == target || len(name) > 255 || len(target) > 255 {
+	if !validEmojiName(name) || !validEmojiName(target) || name == target {
 		return ErrInvalidEmoji
 	}
 	emojis, err := m.Store.ListEmojis(ctx, workspaceID)
@@ -4167,6 +4185,22 @@ func (m Messages) AddReaction(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return err
 	}
+	if _, standard := slackemoji.Lookup(reaction.Name); !standard {
+		custom, listErr := m.Store.ListEmojis(ctx, workspaceID)
+		if listErr != nil {
+			return listErr
+		}
+		found := false
+		for _, value := range custom {
+			if normalizeEmojiName(value.Name) == reaction.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return ErrInvalidReaction
+		}
+	}
 	now := time.Now().UTC()
 	reaction.CreatedAt = now
 	event, err := newEvent(workspaceID, userID, reactionPayload("reaction.added", reaction, userID, conversationID, timestamp), now)
@@ -4219,8 +4253,8 @@ func (m Messages) reactionFor(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return domain.Reaction{}, err
 	}
-	name = strings.ToLower(strings.TrimSpace(name))
-	if name == "" || len(name) > 255 || strings.ContainsAny(name, "\r\n|\x00") {
+	name = normalizeEmojiName(name)
+	if !validEmojiName(name) {
 		return domain.Reaction{}, ErrInvalidReaction
 	}
 	return domain.Reaction{Message: message.ID, Name: name, UserID: userID}, nil

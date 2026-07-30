@@ -2376,12 +2376,23 @@ func TestTeamProfileGet(t *testing.T) {
 }
 
 func TestEmojiList(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/emoji.list", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/emoji.list?include_categories=true", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	res := httptest.NewRecorder()
 	testHandler().ServeHTTP(res, req)
-	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"emoji":{}`) {
+	body := res.Body.String()
+	if res.Code != http.StatusOK || !strings.Contains(body, `"emoji":{}`) ||
+		!strings.Contains(body, `"categories_version":"097705020bcf82331c9ef10df3425aad15f5043c"`) ||
+		!strings.Contains(body, `"name":"Smileys \u0026 Emotion"`) ||
+		!strings.Contains(body, `"emoji_names":["grinning"`) {
 		t.Fatalf("status=%d body=%s", res.Code, res.Body)
+	}
+	invalid := httptest.NewRequest(http.MethodGet, "/api/emoji.list?include_categories=sometimes", nil)
+	invalid.Header.Set("Authorization", "Bearer token")
+	invalidResult := httptest.NewRecorder()
+	testHandler().ServeHTTP(invalidResult, invalid)
+	if invalidResult.Code != http.StatusOK || !strings.Contains(invalidResult.Body.String(), `"error":"invalid_arguments"`) {
+		t.Fatalf("invalid status=%d body=%s", invalidResult.Code, invalidResult.Body)
 	}
 }
 

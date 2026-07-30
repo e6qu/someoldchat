@@ -702,6 +702,54 @@ func TestReactionsAndPinsAreRenderedAndReversible(t *testing.T) {
 	}
 }
 
+func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	custom := domain.CustomEmoji{WorkspaceID: "T1", Name: "party_parrot", URL: "https://cdn.example/party.png"}
+	event := events.Event{ID: "Eemoji", WorkspaceID: "T1", Topic: "emoji.added", CreatedAt: time.Now().UTC()}
+	if err := s.AddEmoji(context.Background(), custom, event); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1700000000, 123456000).UTC()
+	seedMessage(t, s, "Memoji", "Ship it :party_parrot: :tada: in <#Cdev>", created)
+
+	body := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "emoji composer and rendering", body,
+		`id="emoji-picker-dialog"`,
+		`data-channel-id="Cdev"`,
+		`data-channel-name="general"`,
+		`class="custom-emoji" src="https://cdn.example/party.png" alt=":party_parrot:"`,
+		`aria-label=":tada:"`,
+		`class="slack-mention">#general</span>`,
+	)
+	requireMissing(t, "rendered channel reference", body, `class="message-text">Ship it :party_parrot:`)
+
+	options := get(t, mux, "/app/emoji/options?q=party_parrot")
+	if options.Code != http.StatusOK {
+		t.Fatalf("options status=%d body=%s", options.Code, options.Body)
+	}
+	requireContains(t, "emoji options", options.Body.String(),
+		`"name":"party_parrot"`,
+		`"image_url":"https://cdn.example/party.png"`,
+		`"category":"Custom"`,
+	)
+
+	timestamp := string(domain.NewMessageTimestamp(created))
+	added := postForm(t, mux, "/app/reaction?channel=Cdev&ts="+timestamp, "name=%3Aparty_parrot%3A", true)
+	if added.Code != http.StatusNoContent {
+		t.Fatalf("custom reaction status=%d body=%s", added.Code, added.Body)
+	}
+	reactionBody := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "custom reaction", reactionBody,
+		`aria-label="Remove your party_parrot reaction`,
+		`src="https://cdn.example/party.png" alt=":party_parrot:"`,
+	)
+
+	invalid := postForm(t, mux, "/app/reaction?channel=Cdev&ts="+timestamp, "name=not_a_real_emoji", true)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("unknown reaction status=%d body=%s", invalid.Code, invalid.Body)
+	}
+}
+
 // Editing and deleting were complete Slack API operations with no browser
 // journey. Rendering the controls only on the signed-in author's messages is a
 // convenience; the mutation handlers also enforce ownership server-side.
@@ -2991,7 +3039,7 @@ func TestReactionAndPinMutationsPersist(t *testing.T) {
 		t.Fatalf("reaction status=%d body=%s", reaction.Code, reaction.Body)
 	}
 	reactions, _, _, err := s.ListReactions(context.Background(), "M1", domain.PageRequest{Limit: 10})
-	if err != nil || len(reactions) != 1 || reactions[0].Name != ":wave:" {
+	if err != nil || len(reactions) != 1 || reactions[0].Name != "wave" {
 		t.Fatalf("reactions=%+v err=%v", reactions, err)
 	}
 	pin := postForm(t, mux, "/app/pin?channel=Cdev&ts="+timestamp, "", false)

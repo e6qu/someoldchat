@@ -85,6 +85,17 @@ updates the exact member set/count once and synchronizes with API/events.
 Removing the last reaction removes its chip. Deleted custom emoji,
 authorization changes, and concurrent toggles reconcile correctly.
 
+The picker opens from the message action or focused-message `R`, places focus
+in search, supports arrow/Enter selection, and returns focus to the originating
+message action after dismissal. Selection submits the canonical colon-code
+name, never arbitrary free text. Standard aliases and outer colons normalize
+before storage; a new reaction MUST match Slack's standard catalog or a durable
+workspace custom emoji/alias. Existing reactions remain removable after a
+custom emoji is deleted. Custom emoji render as their validated HTTP(S) image
+with `:name:` alternative text; standard reactions render the corresponding
+Unicode sequence; counts and `aria-pressed` identify the current member's
+membership independently of the visual.
+
 ## ACT-03 — Pin, forward, copy, and share
 
 Pinning follows conversation permissions and produces Slack's channel-visible
@@ -96,7 +107,8 @@ copy-text contains the message content Slack exposes rather than hidden HTML.
 ## Evidence
 
 - Browser tests cover every action from mouse, keyboard, and touch-sized narrow
-  layout, including focus return after menus/dialogs.
+  layout, including reaction picker search, standard/custom rendering, and
+  focus return after menus/dialogs.
 - API/event/SDK tests prove edit/delete/reply/reaction/pin/share projections and
   permission failures.
 - Differential fixtures record Slack's shortcut context, confirmation,
@@ -113,13 +125,16 @@ copy-text contains the message content Slack exposes rather than hidden HTML.
 | THREAD-01 | [Use threads](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions) | Thread replies open with their parent conversation context. |
 | THREAD-02 | [Use threads](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions) | A thread reply may also be sent to the channel. |
 | ACT-01 | [Understand your actions](https://slack.com/help/articles/360002063088-Understand-your-actions-in-Slack) | Focused messages expose Slack's action menu and one-key actions. |
-| ACT-02 | [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions) | Members add and remove emoji reactions from messages. |
+| ACT-02 | [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions) | Members search emoji and add/remove reactions; the checked developer sources below establish the shared data/API representation. |
 | ACT-03 | [Understand your actions](https://slack.com/help/articles/360002063088-Understand-your-actions-in-Slack) | Slack message actions include pinning, forwarding, sharing, and copying. |
 
-Sources checked 2026-07-29:
+Sources checked 2026-07-30:
 
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
 - [Edit or delete messages](https://slack.com/help/articles/202395258-Edit-or-delete-messages)
 - [Use threads to organize discussions](https://slack.com/help/articles/115000769927-Use-threads-to-organize-discussions)
 - [Slack keyboard shortcuts and commands](https://slack.com/help/articles/201374536-Slack-keyboard-shortcuts-and-commands)
 - [Understand your actions in Slack](https://slack.com/help/articles/360002063088-Understand-your-actions-in-Slack)
+- [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions)
+- [Formatting message text](https://docs.slack.dev/messaging/formatting-message-text/)
+- [`emoji.list`](https://docs.slack.dev/reference/methods/emoji.list/)

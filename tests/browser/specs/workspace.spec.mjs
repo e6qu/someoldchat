@@ -1012,7 +1012,7 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   await expect(page.getByRole('navigation', { name: 'Activity filters' })).toBeVisible();
 });
 
-test('[COMP-02 COMP-03 DRAFT-01 FILE-01] composer formatting, mentions, emoji, drafts, and file preview are functional', async ({ page, context }) => {
+test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references, emoji, drafts, and file preview are functional', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
 
@@ -1025,18 +1025,40 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01] composer formatting, mentions, emoji, d
 
   await composer.evaluate((field) => field.setSelectionRange(field.value.length, field.value.length));
   await page.getByRole('button', { name: 'Choose an emoji' }).click();
-  await page.getByRole('menuitem', { name: 'Party popper' }).click();
+  const emojiPicker = page.getByRole('dialog', { name: 'Emoji' });
+  await expect(emojiPicker).toBeVisible();
+  const emojiSearch = emojiPicker.getByPlaceholder('Search emoji');
+  await expect(emojiSearch).toBeFocused();
+  await emojiSearch.fill('tada');
+  await emojiPicker.getByRole('option', { name: ':tada:' }).click();
   await expect(composer).toHaveValue('*format me*:tada:');
   await composer.press('Enter');
   const formatted = page.locator('.message').last();
   await expect(formatted.locator('strong')).toHaveText('format me');
-  await expect(formatted.locator('.message-text')).toContainText(':tada:');
+  await expect(formatted.locator('.standard-emoji[aria-label=":tada:"]')).toContainText('🎉');
 
   await composer.fill('@');
   const suggestions = page.getByRole('listbox', { name: 'Mention suggestions' });
   await expect(suggestions).toBeVisible();
   await composer.press('Enter');
   await expect(composer).toHaveValue(/^<@U[^>]+> $/);
+
+  await composer.fill('#gen');
+  const channels = page.getByRole('listbox', { name: 'Channel suggestions' });
+  await expect(channels).toBeVisible();
+  await composer.press('Tab');
+  await expect(composer).toHaveValue('<#Cdev> ');
+  await composer.pressSequentially('channel reference');
+  await composer.press('Enter');
+  const channelMessage = page.locator('.message').last();
+  await expect(channelMessage.locator('.slack-mention')).toHaveText('#general');
+  await expect(channelMessage.locator('.message-text')).not.toContainText('Cdev');
+
+  await composer.fill(':tad');
+  const emojiSuggestions = page.getByRole('listbox', { name: 'Emoji suggestions' });
+  await expect(emojiSuggestions.getByRole('option', { name: ':tada:' })).toBeVisible();
+  await composer.press('Enter');
+  await expect(composer).toHaveValue(':tada: ');
 
   const draft = `durable draft ${Date.now()}`;
   await composer.fill(draft);
@@ -1091,11 +1113,16 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('r');
-  const reaction = lastMessage.locator('input[name="name"]');
-  await expect(reaction).toBeFocused();
-  await reaction.fill('wave');
-  await reaction.press('Enter');
-  await expect(lastMessage.locator('.reactions .chip')).toContainText('wave');
+  const reactionPicker = page.getByRole('dialog', { name: 'Emoji' });
+  const reactionSearch = reactionPicker.getByPlaceholder('Search emoji');
+  await expect(reactionSearch).toBeFocused();
+  await reactionSearch.fill('wave');
+  const waveOption = reactionPicker.getByRole('option', { name: ':wave:' });
+  await expect(waveOption).toBeVisible();
+  await reactionSearch.press('ArrowDown');
+  await expect(waveOption).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(lastMessage.getByRole('button', { name: /wave reaction/ })).toBeVisible();
 
   await lastMessage.focus();
   await page.keyboard.press('e');
@@ -1231,14 +1258,14 @@ test('[ACT-02 ACT-03] reactions and pins render and reverse in place', async ({ 
   const url = page.url();
 
   await target.hover();
-  const reaction = target.locator('form[aria-label="Add reaction"] input[name="name"]');
-  await target.getByText('Add reaction', { exact: true }).click();
-  await reaction.fill('wave');
-  await reaction.press('Enter');
+  await target.getByRole('button', { name: 'Add reaction' }).click();
+  const picker = page.getByRole('dialog', { name: 'Emoji' });
+  await picker.getByPlaceholder('Search emoji').fill('wave');
+  await picker.getByRole('option', { name: ':wave:' }).click();
 
   const chip = target.locator('.reactions .chip');
   await expect(chip).toHaveCount(1);
-  await expect(chip.first()).toContainText('wave');
+  await expect(chip.first()).toHaveAccessibleName(/Remove your wave reaction/);
   await expect(chip.first()).toHaveAttribute('aria-pressed', 'true');
   // The mutation must not navigate: it used to answer HX-Redirect and lose the
   // current view.

@@ -23,6 +23,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/domain"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
+	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
 	"github.com/sameoldchat/sameoldchat/internal/store"
 )
 
@@ -223,9 +224,18 @@ type fileView struct {
 }
 
 type reactionView struct {
-	Name  string
-	Count int
-	Mine  bool
+	Name    string
+	Display template.HTML
+	Count   int
+	Mine    bool
+}
+
+type emojiOptionView struct {
+	Name     string `json:"name"`
+	Display  string `json:"display"`
+	ImageURL string `json:"image_url,omitempty"`
+	Category string `json:"category"`
+	Custom   bool   `json:"custom"`
 }
 
 type conversationView struct {
@@ -295,26 +305,27 @@ type pageData struct {
 	// NewestURL is set when the rendered window is not the newest one, so a
 	// post made while reading older history can take the reader to where the
 	// message actually landed instead of refreshing a window that cannot hold it.
-	NewestURL       string
-	AtLatest        bool
-	Notice          string
-	Error           string
-	Draft           string
-	ScheduleAt      string
-	ComposeURL      string
-	DraftURL        string
-	ScheduleURL     string
-	UploadURL       string
-	TimelineURL     string
-	ThreadURL       string
-	ThreadFollowURL string
-	FollowingThread bool
-	GlobalShortcuts []domain.AppShortcut
-	SlashCommands   []domain.AppShortcut
-	ComposerMembers []memberView
-	Apps            []domain.InstalledApp
-	Modal           *modalView
-	Details         *conversationDetailsView
+	NewestURL        string
+	AtLatest         bool
+	Notice           string
+	Error            string
+	Draft            string
+	ScheduleAt       string
+	ComposeURL       string
+	DraftURL         string
+	ScheduleURL      string
+	UploadURL        string
+	TimelineURL      string
+	ThreadURL        string
+	ThreadFollowURL  string
+	FollowingThread  bool
+	GlobalShortcuts  []domain.AppShortcut
+	SlashCommands    []domain.AppShortcut
+	ComposerMembers  []memberView
+	ComposerChannels []conversationView
+	Apps             []domain.InstalledApp
+	Modal            *modalView
+	Details          *conversationDetailsView
 }
 
 type memberView struct {
@@ -766,10 +777,12 @@ const pageStyle = `<style>
 .composer-popover button:hover,.composer-popover button:focus-visible,.composer-popover button[aria-selected="true"]{background:var(--panel)}
 .emoji-grid{display:grid;grid-template-columns:repeat(6,36px);min-width:auto}
 .emoji-grid button{justify-content:center;font-size:18px;padding:5px}
-.mention-suggestions,.slash-suggestions{position:absolute;z-index:9;left:8px;bottom:42px;min-width:220px;max-width:min(440px,85vw);max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
-.mention-suggestions button,.slash-suggestions button{display:flex;width:100%;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
+.mention-suggestions,.channel-suggestions,.emoji-suggestions,.slash-suggestions{position:absolute;z-index:9;left:8px;bottom:42px;min-width:220px;max-width:min(440px,85vw);max-height:240px;overflow:auto;border:1px solid var(--line);border-radius:8px;background:var(--panel-strong);box-shadow:var(--shadow);padding:6px}
+.mention-suggestions button,.channel-suggestions button,.emoji-suggestions button,.slash-suggestions button{display:flex;width:100%;gap:8px;align-items:center;border:0;border-radius:5px;background:transparent;color:var(--text);padding:7px 9px;text-align:left;cursor:pointer}
 .slash-suggestions button{align-items:flex-start;gap:10px}.slash-suggestions strong{min-width:100px}.slash-suggestions small{display:block;color:var(--muted)}
-.mention-suggestions button:hover,.mention-suggestions button:focus-visible,.mention-suggestions button[aria-selected="true"],.slash-suggestions button:hover,.slash-suggestions button:focus-visible,.slash-suggestions button[aria-selected="true"]{background:var(--panel)}
+.mention-suggestions button:hover,.mention-suggestions button:focus-visible,.mention-suggestions button[aria-selected="true"],.channel-suggestions button:hover,.channel-suggestions button:focus-visible,.channel-suggestions button[aria-selected="true"],.emoji-suggestions button:hover,.emoji-suggestions button:focus-visible,.emoji-suggestions button[aria-selected="true"],.slash-suggestions button:hover,.slash-suggestions button:focus-visible,.slash-suggestions button[aria-selected="true"]{background:var(--panel)}
+.emoji-glyph,.custom-emoji{display:inline-block;width:20px;height:20px;object-fit:contain;vertical-align:-4px}.emoji-glyph,.standard-emoji{font-size:18px;line-height:20px;text-align:center}.reaction-emoji{display:inline-grid;min-width:20px;place-items:center}.reaction-picker-form{display:none}
+.emoji-picker-dialog{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.emoji-picker-dialog::backdrop{background:#0008}.emoji-picker-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.emoji-picker-head label{display:grid;gap:5px;font-weight:800}.emoji-picker-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.emoji-picker-close{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.emoji-picker-status{margin:0;padding:9px 14px;color:var(--muted);font-size:12px}.emoji-picker-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px;margin:0;padding:0 10px 14px;list-style:none;overflow:auto;max-height:calc(100% - 112px)}.emoji-picker-results button{display:flex;width:100%;gap:7px;align-items:center;border:0;border-radius:6px;background:transparent;color:var(--text);padding:8px;text-align:left}.emoji-picker-results button:hover,.emoji-picker-results button:focus-visible,.emoji-picker-results button[aria-selected="true"]{background:var(--hover)}.emoji-picker-results small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
 .conversation-switcher::backdrop{background:#0008}.switcher-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.switcher-head label{flex:1}.switcher-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.switcher-close{border:0;background:transparent;color:var(--muted);font-size:20px}.switcher-results{list-style:none;margin:0;padding:8px;overflow:auto}.switcher-results a{display:flex;gap:8px;border-radius:6px;color:var(--text);padding:8px 10px;text-decoration:none}.switcher-results a:hover,.switcher-results a:focus-visible{background:var(--hover)}
 .upload-preview{margin:5px 0 0;color:var(--muted);font-size:13px}
@@ -999,10 +1012,10 @@ const messagesPartial = `{{define "messages"}}
         <form class="inline-form" method="post" action="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}" hx-post="{{if $reaction.Mine}}{{$message.UnreactURL}}{{else}}{{$message.ReactionURL}}{{end}}">
           <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
           <input type="hidden" name="name" value="{{$reaction.Name}}">
-          <button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></button>
+          <button class="chip" type="submit" aria-pressed="{{if $reaction.Mine}}true{{else}}false{{end}}" aria-label="{{if $reaction.Mine}}Remove your {{$reaction.Name}} reaction{{else}}React with {{$reaction.Name}}{{end}}, {{$reaction.Count}} so far"><span class="reaction-emoji">{{$reaction.Display}}</span> <span class="chip-count">{{$reaction.Count}}</span></button>
         </form>
         {{else}}
-        <span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions">{{$reaction.Name}} <span class="chip-count">{{$reaction.Count}}</span></span>
+        <span class="chip" role="img" aria-label="{{$reaction.Name}}, {{$reaction.Count}} reactions"><span class="reaction-emoji">{{$reaction.Display}}</span> <span class="chip-count">{{$reaction.Count}}</span></span>
         {{end}}
       </li>
       {{end}}
@@ -1011,15 +1024,11 @@ const messagesPartial = `{{define "messages"}}
     {{if not $message.Ephemeral}}<div class="message-actions">
       <a href="{{$message.ReplyURL}}">{{if $.CanReply}}Reply in thread{{else}}View thread{{end}}</a>
       {{if $.CanReact}}
-      <details>
-        <summary>Add reaction</summary>
-        <form class="inline-form" aria-label="Add reaction" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
-          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-          <label class="visually-hidden" for="reaction-{{$message.ID}}">Add a reaction to the message from {{$message.AuthorName}}</label>
-          <input id="reaction-{{$message.ID}}" type="text" name="name" maxlength="255" placeholder=":wave:" required>
-          <button type="submit">Add</button>
-        </form>
-      </details>
+      <form id="reaction-form-{{$message.ID}}" class="reaction-picker-form" aria-label="Add a reaction to the message from {{$message.AuthorName}}" method="post" action="{{$message.ReactionURL}}" hx-post="{{$message.ReactionURL}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <input type="hidden" name="name" value="">
+      </form>
+      <button type="button" data-open-emoji-picker data-emoji-target="reaction" data-reaction-form="reaction-form-{{$message.ID}}" aria-haspopup="dialog">Add reaction</button>
       {{end}}
       <form method="post" action="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" hx-post="{{if $message.Saved}}{{$message.UnsaveURL}}{{else}}{{$message.SaveURL}}{{end}}" data-message-save>
         <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
@@ -1115,6 +1124,11 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
     <div class="switcher-head"><label><span class="visually-hidden" id="conversation-switcher-title">Jump to a conversation</span><input id="conversation-switcher-query" type="search" autocomplete="off" placeholder="Jump to a conversation"></label><button class="switcher-close" type="button" aria-label="Close conversation switcher">×</button></div>
     <ul class="switcher-results" id="conversation-switcher-results">{{range .Channels}}<li><a href="/app?channel={{.ID}}" data-conversation-name="{{.Name}}"><span aria-hidden="true">#</span><span>{{.Name}}</span></a></li>{{end}}{{range .Directs}}<li><a href="/app?channel={{.ID}}" data-conversation-name="{{.Name}}"><span aria-hidden="true">@</span><span>{{.Name}}</span></a></li>{{end}}</ul>
   </dialog>
+  {{if or .CanPost .Timeline.CanReact}}<dialog class="emoji-picker-dialog" id="emoji-picker-dialog" aria-labelledby="emoji-picker-title">
+    <div class="emoji-picker-head"><label><span id="emoji-picker-title">Emoji</span><input id="emoji-picker-query" type="search" autocomplete="off" maxlength="100" placeholder="Search emoji"></label><button class="emoji-picker-close" id="emoji-picker-close" type="button" aria-label="Close emoji picker">×</button></div>
+    <p class="emoji-picker-status" id="emoji-picker-status" role="status">Choose an emoji.</p>
+    <ul class="emoji-picker-results" id="emoji-picker-results" role="listbox" aria-label="Emoji results"></ul>
+  </dialog>{{end}}
   <div class="workspace">
     <aside class="sidebar" id="workspace-sidebar">
       <div>
@@ -1238,16 +1252,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button class="composer-tool" type="button" data-wrap="~" aria-label="Strikethrough" aria-controls="text"><s>S</s></button>
             <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
             <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
-            <details class="composer-menu"><summary role="button" aria-label="Choose an emoji" aria-controls="emoji-picker">☺</summary>
-              <div class="composer-popover emoji-grid" id="emoji-picker" role="menu" aria-label="Emoji">
-                <button type="button" data-insert=":thumbsup:" role="menuitem" aria-label="Thumbs up">👍</button>
-                <button type="button" data-insert=":heart:" role="menuitem" aria-label="Heart">❤️</button>
-                <button type="button" data-insert=":joy:" role="menuitem" aria-label="Joy">😂</button>
-                <button type="button" data-insert=":tada:" role="menuitem" aria-label="Party popper">🎉</button>
-                <button type="button" data-insert=":eyes:" role="menuitem" aria-label="Eyes">👀</button>
-                <button type="button" data-insert=":wave:" role="menuitem" aria-label="Wave">👋</button>
-              </div>
-            </details>
+            <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Choose an emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog">☺</button>
             {{if .ComposerMembers}}<details class="composer-menu"><summary role="button" aria-label="Mention a person" aria-controls="mention-picker">@</summary>
               <div class="composer-popover" id="mention-picker" role="menu" aria-label="Conversation members">{{range .ComposerMembers}}
                 <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" role="menuitem">@{{.Name}}{{if .IsSelf}} (you){{end}}</button>{{end}}
@@ -1255,10 +1260,14 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             </details>{{end}}
           </div>
           <label class="visually-hidden" for="text">{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}</label>
-          <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
+          <textarea id="text" name="text" maxlength="40000" required{{if not .Error}} autofocus{{end}} role="combobox" aria-describedby="composer-hint" aria-keyshortcuts="Enter Shift+Enter Control+B Meta+B Control+I Meta+I Control+Shift+X Meta+Shift+X" aria-autocomplete="list" aria-controls="mention-suggestions channel-suggestions emoji-suggestions slash-suggestions" aria-expanded="false" placeholder="{{if .ThreadTimestamp}}Reply in the thread{{else}}Message {{.ChannelPrefix}}{{.ChannelName}}{{end}}">{{.Draft}}</textarea>
           {{if .ComposerMembers}}<div class="mention-suggestions" id="mention-suggestions" role="listbox" aria-label="Mention suggestions" hidden>{{range .ComposerMembers}}
             <button type="button" role="option" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}">@{{.Name}}{{if .IsSelf}} (you){{end}}</button>{{end}}
           </div>{{end}}
+          {{if .ComposerChannels}}<div class="channel-suggestions" id="channel-suggestions" role="listbox" aria-label="Channel suggestions" hidden>{{range .ComposerChannels}}
+            <button type="button" role="option" data-channel-id="{{.ID}}" data-channel-name="{{.Name}}">#{{.Name}}</button>{{end}}
+          </div>{{end}}
+          <div class="emoji-suggestions" id="emoji-suggestions" role="listbox" aria-label="Emoji suggestions" hidden></div>
           {{if .SlashCommands}}<div class="slash-suggestions" id="slash-suggestions" role="listbox" aria-label="Shortcuts and slash commands" hidden>{{range .SlashCommands}}
             <button type="button" role="option" data-slash-command="{{.Command}}" data-slash-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}} <small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}
           </div>{{end}}
@@ -1897,7 +1906,14 @@ var topics=` + liveEventTopicsLiteral() + `;
 var composer=document.getElementById('composer');
 var text=document.getElementById('text');
 var mentionSuggestions=document.getElementById('mention-suggestions');
+var channelSuggestions=document.getElementById('channel-suggestions');
+var emojiSuggestions=document.getElementById('emoji-suggestions');
 var slashSuggestions=document.getElementById('slash-suggestions');
+var emojiPicker=document.getElementById('emoji-picker-dialog');
+var emojiPickerQuery=document.getElementById('emoji-picker-query');
+var emojiPickerResults=document.getElementById('emoji-picker-results');
+var emojiPickerStatus=document.getElementById('emoji-picker-status');
+var emojiPickerClose=document.getElementById('emoji-picker-close');
 var uploadFile=document.getElementById('upload-file');
 var uploadPreview=document.getElementById('upload-preview');
 var search=document.getElementById('workspace-search');
@@ -1922,6 +1938,13 @@ var draftTimer=null;
 var sending=false;
 var streamState='';
 var mentionStart=-1;
+var channelStart=-1;
+var emojiStart=-1;
+var emojiRequest=null;
+var emojiTimer=null;
+var emojiPickerTarget='composer';
+var emojiReactionFormID='';
+var emojiPickerTrigger=null;
 var draftKey=composer?'sameoldchat-draft:'+composer.getAttribute('action'):'';
 var applePlatform=/Mac|iPhone|iPad/.test(navigator.platform||'');
 function primaryShortcut(event){return applePlatform?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey}
@@ -1984,9 +2007,9 @@ if(mentionSuggestions)mentionSuggestions.hidden=true;
 if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
 }
 function updateMentions(){
-if(!mentionSuggestions||!text){hideMentions();return}
+if(!mentionSuggestions||!text){hideMentions();return false}
 var mention=currentMention();
-if(!mention){hideMentions();return}
+if(!mention){hideMentions();return false}
 mentionStart=mention.start;
 var visible=0;
 var options=mentionSuggestions.querySelectorAll('[data-mention-user]');
@@ -2000,6 +2023,7 @@ if(show){options[index].id='mention-option-'+visible;visible++}else{options[inde
 mentionSuggestions.hidden=visible===0;
 text.setAttribute('aria-expanded',visible?'true':'false');
 if(visible)text.setAttribute('aria-activedescendant','mention-option-0');else text.removeAttribute('aria-activedescendant');
+return visible>0;
 }
 function chooseMention(option){
 if(!text||!option)return;
@@ -2010,6 +2034,158 @@ replaceComposerRange(start,text.selectionStart,'<@'+option.getAttribute('data-me
 hideMentions();
 var details=option.closest('details');
 if(details)details.open=false;
+}
+function currentChannel(){
+if(!text)return null;
+var cursor=text.selectionStart;
+var before=text.value.slice(0,cursor);
+var match=/(^|\s)#([^\s#<>]*)$/.exec(before);
+if(!match)return null;
+return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
+}
+function channelOptions(){return channelSuggestions?Array.prototype.slice.call(channelSuggestions.querySelectorAll('[data-channel-id]')).filter(function(option){return !option.hidden}):[]}
+function hideChannels(){
+channelStart=-1;
+if(channelSuggestions)channelSuggestions.hidden=true;
+if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
+}
+function updateChannels(){
+if(!channelSuggestions||!text){hideChannels();return false}
+var channel=currentChannel();
+if(!channel){hideChannels();return false}
+channelStart=channel.start;
+var visible=0;
+var options=channelSuggestions.querySelectorAll('[data-channel-id]');
+for(var index=0;index<options.length;index++){
+var name=(options[index].getAttribute('data-channel-name')||'').toLowerCase();
+var show=visible<8&&name.indexOf(channel.query)!==-1;
+options[index].hidden=!show;
+options[index].setAttribute('aria-selected',show&&visible===0?'true':'false');
+if(show){options[index].id='channel-option-'+visible;visible++}else{options[index].removeAttribute('id')}
+}
+channelSuggestions.hidden=visible===0;
+text.setAttribute('aria-expanded',visible?'true':'false');
+if(visible)text.setAttribute('aria-activedescendant','channel-option-0');else text.removeAttribute('aria-activedescendant');
+return visible>0;
+}
+function chooseChannel(option){
+if(!text||!option)return;
+var channel=currentChannel();
+var start=channel?channel.start:channelStart;
+if(start<0)start=text.selectionStart;
+replaceComposerRange(start,text.selectionStart,'<#'+option.getAttribute('data-channel-id')+'> ',undefined,undefined);
+hideChannels();
+}
+function currentEmoji(){
+if(!text)return null;
+var cursor=text.selectionStart;
+var before=text.value.slice(0,cursor);
+var match=/(^|\s):([a-zA-Z0-9_+\-]*)$/.exec(before);
+if(!match)return null;
+return{start:cursor-match[2].length-1,end:cursor,query:match[2].toLowerCase()};
+}
+function emojiOptions(region){return region?Array.prototype.slice.call(region.querySelectorAll('[data-emoji-name]')).filter(function(option){return !option.hidden}):[]}
+function hideEmojiSuggestions(){
+emojiStart=-1;
+if(emojiSuggestions){emojiSuggestions.hidden=true;emojiSuggestions.textContent=''}
+if(text){text.setAttribute('aria-expanded','false');text.removeAttribute('aria-activedescendant')}
+}
+function emojiOption(option,index){
+var button=document.createElement('button');
+button.type='button';
+button.setAttribute('role','option');
+button.setAttribute('data-emoji-name',option.name||'');
+button.setAttribute('aria-label',':'+(option.name||'')+':');
+button.setAttribute('aria-selected',index===0?'true':'false');
+var visual;
+if(option.image_url){visual=document.createElement('img');visual.className='custom-emoji';visual.src=option.image_url;visual.alt=''}
+else{visual=document.createElement('span');visual.className='emoji-glyph';visual.setAttribute('aria-hidden','true');visual.textContent=option.display||''}
+var label=document.createElement('small');
+label.textContent=':'+option.name+':';
+button.appendChild(visual);
+button.appendChild(label);
+return button;
+}
+function loadEmojiOptions(query,region,statusNode){
+if(!region)return Promise.resolve([]);
+if(emojiRequest)emojiRequest.abort();
+emojiRequest=window.AbortController?new AbortController():null;
+var options={credentials:'same-origin'};
+if(emojiRequest)options.signal=emojiRequest.signal;
+if(statusNode)statusNode.textContent='Loading emoji…';
+return fetch('/app/emoji/options?q='+encodeURIComponent(query||''),options).then(function(response){
+if(!response.ok)throw new Error('Emoji could not be loaded.');
+return response.json();
+}).then(function(payload){
+region.textContent='';
+var values=payload&&Array.isArray(payload.options)?payload.options:[];
+for(var index=0;index<values.length;index++){
+var item=document.createElement('li');
+item.appendChild(emojiOption(values[index],index));
+region.appendChild(item);
+}
+if(statusNode)statusNode.textContent=values.length?(values.length+' emoji shown.'):'No matching emoji.';
+return values;
+}).catch(function(error){
+if(error&&error.name==='AbortError')return[];
+region.textContent='';
+if(statusNode)statusNode.textContent='Emoji could not be loaded. Try again.';
+return[];
+});
+}
+function updateEmojiSuggestions(){
+if(!emojiSuggestions||!text){hideEmojiSuggestions();return false}
+var emoji=currentEmoji();
+if(!emoji){hideEmojiSuggestions();return false}
+emojiStart=emoji.start;
+emojiSuggestions.hidden=false;
+if(emojiTimer)window.clearTimeout(emojiTimer);
+emojiTimer=window.setTimeout(function(){
+loadEmojiOptions(emoji.query,emojiSuggestions,null).then(function(values){
+if(!currentEmoji()){hideEmojiSuggestions();return}
+emojiSuggestions.hidden=values.length===0;
+text.setAttribute('aria-expanded',values.length?'true':'false');
+if(values.length){var first=emojiOptions(emojiSuggestions)[0];if(first){first.id='emoji-option-0';text.setAttribute('aria-activedescendant','emoji-option-0')}}else text.removeAttribute('aria-activedescendant');
+});
+},100);
+return true;
+}
+function chooseEmoji(option,inline){
+if(!option)return;
+var name=option.getAttribute('data-emoji-name')||'';
+if(!name)return;
+if(inline&&text){
+var emoji=currentEmoji();
+var start=emoji?emoji.start:emojiStart;
+if(start<0)start=text.selectionStart;
+replaceComposerRange(start,text.selectionStart,':'+name+': ',undefined,undefined);
+hideEmojiSuggestions();
+return;
+}
+if(emojiPickerTarget==='reaction'&&emojiReactionFormID){
+var reactionForm=document.getElementById(emojiReactionFormID);
+if(!reactionForm){if(emojiPicker&&emojiPicker.open)emojiPicker.close();announce('That message changed while the picker was open. Open its reaction picker again.');return}
+var input=reactionForm.querySelector('input[name=name]');
+if(input)input.value=name;
+if(emojiPicker&&emojiPicker.open)emojiPicker.close();
+if(typeof reactionForm.requestSubmit==='function')reactionForm.requestSubmit();else reactionForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+return;
+}
+if(text){
+replaceComposerRange(text.selectionStart,text.selectionEnd,':'+name+':',undefined,undefined);
+if(emojiPicker&&emojiPicker.open)emojiPicker.close();
+}
+}
+function openEmojiPicker(control){
+if(!emojiPicker||typeof emojiPicker.showModal!=='function')return false;
+emojiPickerTarget=control&&control.getAttribute('data-emoji-target')||'composer';
+emojiReactionFormID='';
+if(emojiPickerTarget==='reaction'){emojiReactionFormID=control.getAttribute('data-reaction-form')||'';if(!emojiReactionFormID||!document.getElementById(emojiReactionFormID))return false}
+emojiPickerTrigger=control;
+if(!emojiPicker.open)emojiPicker.showModal();
+if(emojiPickerQuery){emojiPickerQuery.value='';emojiPickerQuery.focus()}
+loadEmojiOptions('',emojiPickerResults,emojiPickerStatus);
+return true;
 }
 function currentSlash(){
 if(!text||text.selectionStart!==text.selectionEnd)return null;
@@ -2041,7 +2217,12 @@ text.setAttribute('aria-expanded',visible?'true':'false');
 if(visible)text.setAttribute('aria-activedescendant','slash-option-0');else text.removeAttribute('aria-activedescendant');
 return visible>0;
 }
-function updateAutocomplete(){if(updateSlashes())return;updateMentions()}
+function updateAutocomplete(){
+if(updateSlashes()){hideMentions();hideChannels();hideEmojiSuggestions();return}
+if(updateMentions()){hideChannels();hideEmojiSuggestions();return}
+if(updateChannels()){hideEmojiSuggestions();return}
+updateEmojiSuggestions();
+}
 function chooseSlash(option){
 if(!text||!option)return;
 replaceComposerRange(0,text.value.length,(option.getAttribute('data-slash-command')||'')+' ',undefined,undefined);
@@ -2157,9 +2338,12 @@ if(!ownPath(action))return;
 fetch(action,{method:'POST',body:new FormData(form),headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error('Unread state could not be saved.');form.hidden=true}).catch(function(){announce('Unread state could not be saved. Messages are still available.')});
 }
 document.addEventListener('click',function(event){
-var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-slash-command]'):null;
+var control=event.target.closest?event.target.closest('[data-wrap],[data-insert],[data-mention-user],[data-channel-id],[data-slash-command],[data-emoji-name],[data-open-emoji-picker]'):null;
+if(control&&control.hasAttribute('data-open-emoji-picker')){if(openEmojiPicker(control))event.preventDefault();return}
+if(control&&control.hasAttribute('data-emoji-name')){chooseEmoji(control,!!(emojiSuggestions&&emojiSuggestions.contains(control)));return}
 if(!control||!composer||!composer.contains(control)||!text)return;
 if(control.hasAttribute('data-mention-user')){chooseMention(control);return}
+if(control.hasAttribute('data-channel-id')){chooseChannel(control);return}
 if(control.hasAttribute('data-slash-command')){chooseSlash(control);return}
 var start=text.selectionStart;
 var end=text.selectionEnd;
@@ -2185,6 +2369,41 @@ window.addEventListener('pagehide',function(){saveDraftRemote(true)});
 }
 if(switcherQuery)switcherQuery.addEventListener('input',filterSwitcher);
 if(switcherClose)switcherClose.addEventListener('click',function(){switcher.close()});
+if(emojiPickerQuery)emojiPickerQuery.addEventListener('input',function(){
+if(emojiTimer)window.clearTimeout(emojiTimer);
+emojiTimer=window.setTimeout(function(){loadEmojiOptions(emojiPickerQuery.value,emojiPickerResults,emojiPickerStatus)},100);
+});
+if(emojiPickerQuery)emojiPickerQuery.addEventListener('keydown',function(event){
+var options=emojiOptions(emojiPickerResults);
+if(!options.length)return;
+var selected=options.findIndex(function(option){return option.getAttribute('aria-selected')==='true'});
+if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+event.preventDefault();
+if(selected<0)selected=event.key==='ArrowDown'?0:options.length-1;
+for(var index=0;index<options.length;index++)options[index].setAttribute('aria-selected',index===selected?'true':'false');
+options[selected].scrollIntoView({block:'nearest'});
+options[selected].focus();
+return;
+}
+if(event.key==='Enter'){event.preventDefault();chooseEmoji(options[selected<0?0:selected],false)}
+});
+if(emojiPickerResults)emojiPickerResults.addEventListener('keydown',function(event){
+var options=emojiOptions(emojiPickerResults);
+var selected=options.indexOf(document.activeElement);
+if(event.key==='ArrowDown'||event.key==='ArrowUp'){
+event.preventDefault();
+if(selected<0)selected=0;else selected=event.key==='ArrowDown'?(selected+1)%options.length:(selected+options.length-1)%options.length;
+for(var index=0;index<options.length;index++)options[index].setAttribute('aria-selected',index===selected?'true':'false');
+if(options[selected])options[selected].focus();
+return;
+}
+if(event.key==='Escape'&&emojiPickerQuery){event.preventDefault();emojiPickerQuery.focus()}
+});
+if(emojiPickerClose)emojiPickerClose.addEventListener('click',function(){emojiPicker.close()});
+if(emojiPicker)emojiPicker.addEventListener('close',function(){
+if(emojiPickerTrigger&&document.contains(emojiPickerTrigger))emojiPickerTrigger.focus();
+emojiPickerTarget='composer';emojiReactionFormID='';emojiPickerTrigger=null;
+});
 if(uploadFile&&uploadPreview)uploadFile.addEventListener('change',function(){
 var file=uploadFile.files&&uploadFile.files[0];
 if(!file){uploadPreview.textContent='No file selected.';return}
@@ -2244,17 +2463,17 @@ return refresh(true);
 }).catch(function(error){showError(failure(error,form),form)}).then(release,release);
 });
 if(text&&composer){text.addEventListener('keydown',function(event){
-var suggestions=slashSuggestions&&!slashSuggestions.hidden?slashSuggestions:mentionSuggestions&&!mentionSuggestions.hidden?mentionSuggestions:null;
+var suggestions=slashSuggestions&&!slashSuggestions.hidden?slashSuggestions:mentionSuggestions&&!mentionSuggestions.hidden?mentionSuggestions:channelSuggestions&&!channelSuggestions.hidden?channelSuggestions:emojiSuggestions&&!emojiSuggestions.hidden?emojiSuggestions:null;
 if(suggestions){
-var options=suggestions===slashSuggestions?slashOptions():mentionOptions();
+var options=suggestions===slashSuggestions?slashOptions():suggestions===mentionSuggestions?mentionOptions():suggestions===channelSuggestions?channelOptions():emojiOptions(emojiSuggestions);
 var selected=options.findIndex(function(option){return option.getAttribute('aria-selected')==='true'});
 if(event.key==='ArrowDown'||event.key==='ArrowUp'){
 event.preventDefault();
-if(options.length){if(selected<0)selected=0;else selected=event.key==='ArrowDown'?(selected+1)%options.length:(selected+options.length-1)%options.length;for(var optionIndex=0;optionIndex<options.length;optionIndex++){options[optionIndex].setAttribute('aria-selected',optionIndex===selected?'true':'false');options[optionIndex].removeAttribute('id')}options[selected].id='mention-option-active';text.setAttribute('aria-activedescendant','mention-option-active')}
+if(options.length){if(selected<0)selected=0;else selected=event.key==='ArrowDown'?(selected+1)%options.length:(selected+options.length-1)%options.length;for(var optionIndex=0;optionIndex<options.length;optionIndex++){options[optionIndex].setAttribute('aria-selected',optionIndex===selected?'true':'false');options[optionIndex].removeAttribute('id')}options[selected].id='autocomplete-option-active';text.setAttribute('aria-activedescendant','autocomplete-option-active')}
 return;
 }
-if(event.key==='Escape'){event.preventDefault();if(suggestions===slashSuggestions)hideSlashes();else hideMentions();return}
-if(event.key==='Enter'&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&options.length){event.preventDefault();if(suggestions===slashSuggestions)chooseSlash(options[selected<0?0:selected]);else chooseMention(options[selected<0?0:selected]);return}
+if(event.key==='Escape'){event.preventDefault();if(suggestions===slashSuggestions)hideSlashes();else if(suggestions===mentionSuggestions)hideMentions();else if(suggestions===channelSuggestions)hideChannels();else hideEmojiSuggestions();return}
+if((event.key==='Enter'||event.key==='Tab')&&!event.shiftKey&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&options.length){event.preventDefault();if(suggestions===slashSuggestions)chooseSlash(options[selected<0?0:selected]);else if(suggestions===mentionSuggestions)chooseMention(options[selected<0?0:selected]);else if(suggestions===channelSuggestions)chooseChannel(options[selected<0?0:selected]);else chooseEmoji(options[selected<0?0:selected],true);return}
 }
 var formatKey=typeof event.key==='string'?event.key.toLowerCase():'';
 if(primaryShortcut(event)&&!event.altKey&&(formatKey==='b'||formatKey==='i'||(event.shiftKey&&formatKey==='x'))){
@@ -2351,7 +2570,10 @@ if(back&&ownPath(back.getAttribute('href'))){event.preventDefault();window.locat
 }
 if(key==='e'&&openMessageDetails(focusedMessage,'Edit','textarea')){event.preventDefault();return}
 if(event.key==='Delete'&&openMessageDetails(focusedMessage,'Delete','button[type=submit]')){event.preventDefault();return}
-if(key==='r'&&openMessageDetails(focusedMessage,'Add reaction','input[name=name]')){event.preventDefault();return}
+if(key==='r'){
+var reactionButton=focusedMessage.querySelector('[data-open-emoji-picker][data-emoji-target="reaction"]');
+if(reactionButton&&openEmojiPicker(reactionButton)){event.preventDefault();return}
+}
 if(key==='m'){
 var reminderMenu=focusedMessage.querySelector('[data-reminder-menu]');
 if(reminderMenu){event.preventDefault();reminderMenu.open=true;var reminderControl=reminderMenu.querySelector('button,input');if(reminderControl)reminderControl.focus();return}
@@ -2448,6 +2670,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/timeline", h.timeline)
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
+	mux.HandleFunc("GET /app/emoji/options", h.emojiOptions)
 	mux.HandleFunc("GET /app/activity", h.activity)
 	mux.HandleFunc("POST /app/activity/mutate", h.mutateActivity)
 	mux.HandleFunc("POST /app/activity/preferences", h.setActivityPreferences)
@@ -2891,6 +3114,7 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	canJoin := !isMember && !conversation.Archived && !conversation.IsPrivate && !conversation.IsDirect && !conversation.IsGroupDirect && principal.HasScope(auth.ScopeChannelsManage)
 	canPost := isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite)
 	var composerMembers []memberView
+	var composerChannels []conversationView
 	if canPost {
 		memberPage, memberErr := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: memberWindow})
 		if memberErr != nil {
@@ -2910,6 +3134,11 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 			if memberPage.HasMore {
 				notices = append(notices, "Mention suggestions show the first 100 conversation members.")
 			}
+		}
+		composerChannels, err = h.visibleChannelOptions(r.Context(), principal)
+		if err != nil {
+			notices = append(notices, "Channel suggestions are temporarily unavailable.")
+			composerChannels = nil
 		}
 	}
 	var globalShortcuts []domain.AppShortcut
@@ -2985,45 +3214,46 @@ func (h Handler) renderApp(w http.ResponseWriter, r *http.Request, reader histor
 	}
 
 	data := pageData{
-		Timeline:        timeline,
-		Thread:          thread,
-		ThreadTimestamp: threadTimestamp,
-		Channels:        conversations.Channels,
-		Directs:         conversations.Directs,
-		Channel:         string(channel),
-		ChannelName:     channelName,
-		ChannelPrefix:   channelPrefix,
-		ChannelMeta:     conversationMeta(conversation),
-		WorkspaceName:   workspaceName,
-		CSRFToken:       csrfToken,
-		ShowProfile:     h.canShowIdentity(),
-		ShowAdmin:       h.canShowAuthorizationAdmin(r.Context(), principal),
-		ReminderUnread:  reminderUnread,
-		IsMember:        isMember,
-		CanPost:         canPost,
-		CanSchedule:     principal.HasScope(auth.ScopeChatWrite),
-		CanUpload:       isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
-		CanJoin:         canJoin,
-		CanCreate:       principal.HasScope(auth.ScopeChannelsManage),
-		Username:        username,
-		UserInitial:     initial(username),
-		AtLatest:        history.AtLatest,
-		Notice:          strings.Join(notices, " "),
-		Error:           state.Message,
-		Draft:           state.Draft,
-		ScheduleAt:      state.ScheduleAt,
-		ComposeURL:      mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
-		DraftURL:        mutationURL("/app/draft", string(channel), "", threadTimestamp, ""),
-		ScheduleURL:     mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
-		UploadURL:       mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
-		TimelineURL:     fragmentURL(string(channel), "", string(before)),
-		ThreadURL:       fragmentURL(string(channel), threadTimestamp, ""),
-		GlobalShortcuts: globalShortcuts,
-		SlashCommands:   slashCommands,
-		ComposerMembers: composerMembers,
-		Apps:            workspaceApps,
-		Modal:           modal,
-		Details:         details,
+		Timeline:         timeline,
+		Thread:           thread,
+		ThreadTimestamp:  threadTimestamp,
+		Channels:         conversations.Channels,
+		Directs:          conversations.Directs,
+		Channel:          string(channel),
+		ChannelName:      channelName,
+		ChannelPrefix:    channelPrefix,
+		ChannelMeta:      conversationMeta(conversation),
+		WorkspaceName:    workspaceName,
+		CSRFToken:        csrfToken,
+		ShowProfile:      h.canShowIdentity(),
+		ShowAdmin:        h.canShowAuthorizationAdmin(r.Context(), principal),
+		ReminderUnread:   reminderUnread,
+		IsMember:         isMember,
+		CanPost:          canPost,
+		CanSchedule:      principal.HasScope(auth.ScopeChatWrite),
+		CanUpload:        isMember && !conversation.Archived && principal.HasScope(auth.ScopeChatWrite) && principal.HasScope(auth.ScopeFilesWrite),
+		CanJoin:          canJoin,
+		CanCreate:        principal.HasScope(auth.ScopeChannelsManage),
+		Username:         username,
+		UserInitial:      initial(username),
+		AtLatest:         history.AtLatest,
+		Notice:           strings.Join(notices, " "),
+		Error:            state.Message,
+		Draft:            state.Draft,
+		ScheduleAt:       state.ScheduleAt,
+		ComposeURL:       mutationURL("/app/message", string(channel), "", threadTimestamp, ""),
+		DraftURL:         mutationURL("/app/draft", string(channel), "", threadTimestamp, ""),
+		ScheduleURL:      mutationURL("/app/message/schedule", string(channel), "", threadTimestamp, ""),
+		UploadURL:        mutationURL("/app/file", string(channel), "", threadTimestamp, ""),
+		TimelineURL:      fragmentURL(string(channel), "", string(before)),
+		ThreadURL:        fragmentURL(string(channel), threadTimestamp, ""),
+		GlobalShortcuts:  globalShortcuts,
+		SlashCommands:    slashCommands,
+		ComposerMembers:  composerMembers,
+		ComposerChannels: composerChannels,
+		Apps:             workspaceApps,
+		Modal:            modal,
+		Details:          details,
 	}
 	if canJoin {
 		data.JoinURL = mutationURL("/app/join", string(channel), "", threadTimestamp, "")
@@ -3237,6 +3467,12 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 		Messages:    make([]messageView, 0, len(messages)),
 	}
 	notice := ""
+	emojiImages := map[string]string{}
+	if customEmoji, err := h.Messages.Emojis(ctx, principal.WorkspaceID, principal.UserID); err != nil {
+		notice = "Custom emoji are temporarily unavailable."
+	} else {
+		emojiImages = customEmojiImages(customEmoji)
+	}
 	pinned := map[domain.MessageID]struct{}{}
 	if principal.HasScope(auth.ScopePinsRead) || principal.HasScope(auth.ScopePinsWrite) {
 		pins, _, _, err := h.Messages.Pins(ctx, principal.WorkspaceID, principal.UserID, conversation.ID, domain.PageRequest{Limit: pinWindow})
@@ -3290,8 +3526,8 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			author = presentation.Username
 		}
 		displayMessage := message
-		displayMessage.Text = resolveSlackUserMentions(message.Text, names)
-		content := newRichMessageContent(displayMessage)
+		displayMessage.Text = resolveSlackReferences(message.Text, names)
+		content := newRichMessageContent(displayMessage, emojiImages)
 		actionCatalog.enrich(ctx, h, principal, content.Blocks)
 		ownsMessage := !ephemeral && request.Member && message.AuthorID == principal.UserID && principal.HasScope(auth.ScopeChatWrite)
 		view := messageView{
@@ -3359,7 +3595,7 @@ func (h Handler) newMessageList(ctx context.Context, principal auth.Principal, r
 			if err != nil && notice == "" {
 				notice = "Reactions are temporarily unavailable."
 			}
-			view.Reactions = summarizeReactions(reactions, principal.UserID)
+			view.Reactions = summarizeReactions(reactions, principal.UserID, emojiImages)
 		}
 		list.Messages = append(list.Messages, view)
 	}
@@ -3475,7 +3711,7 @@ func cloneActionOptions(values []messageActionOptionView) []messageActionOptionV
 	return append([]messageActionOptionView(nil), values...)
 }
 
-func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID) []reactionView {
+func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID, customEmoji ...map[string]string) []reactionView {
 	if len(reactions) == 0 {
 		return nil
 	}
@@ -3493,10 +3729,25 @@ func summarizeReactions(reactions []domain.Reaction, viewer domain.UserID) []rea
 	}
 	sort.Strings(order)
 	views := make([]reactionView, 0, len(order))
+	var emojiImages map[string]string
+	if len(customEmoji) > 0 {
+		emojiImages = customEmoji[0]
+	}
 	for _, name := range order {
-		views = append(views, reactionView{Name: name, Count: counts[name], Mine: mine[name]})
+		views = append(views, reactionView{Name: name, Display: renderReactionEmoji(name, emojiImages), Count: counts[name], Mine: mine[name]})
 	}
 	return views
+}
+
+func renderReactionEmoji(name string, customEmoji map[string]string) template.HTML {
+	name = strings.ToLower(strings.Trim(strings.TrimSpace(name), ":"))
+	if imageURL := customEmoji[name]; imageURL != "" {
+		return template.HTML(`<img class="custom-emoji" src="` + template.HTMLEscapeString(imageURL) + `" alt=":` + template.HTMLEscapeString(name) + `:" loading="lazy">`) // #nosec G203 -- URL was scheme-validated and every value is escaped.
+	}
+	if emoji, ok := slackemoji.Lookup(name); ok {
+		return template.HTML(`<span class="standard-emoji" role="img" aria-label=":` + template.HTMLEscapeString(name) + `:">` + template.HTMLEscapeString(slackemoji.Unicode(emoji)) + `</span>`) // #nosec G203 -- every dynamic value is escaped.
+	}
+	return template.HTML(template.HTMLEscapeString(":" + name + ":")) // #nosec G203 -- the value is escaped immediately above.
 }
 
 // sidebarView is the conversation list plus the one fact the page outside it
@@ -4693,12 +4944,20 @@ func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Princip
 		userRequest.Cursor = page.NextCursor
 	}
 	sort.Slice(members, func(left, right int) bool { return members[left].Name < members[right].Name })
+	conversations, err := h.visibleChannelOptions(ctx, principal)
+	if err != nil {
+		return nil, nil, err
+	}
+	return members, conversations, nil
+}
+
+func (h Handler) visibleChannelOptions(ctx context.Context, principal auth.Principal) ([]conversationView, error) {
 	conversations := make([]conversationView, 0)
 	conversationRequest := domain.ConversationListRequest{Limit: 200, IncludeClosedDirects: true}
 	for {
 		page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, conversationRequest)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, conversation := range page.Conversations {
 			if conversation.IsDirect || conversation.IsGroupDirect {
@@ -4712,7 +4971,118 @@ func (h Handler) searchFilterOptions(ctx context.Context, principal auth.Princip
 		conversationRequest.Cursor = page.NextCursor
 	}
 	sort.Slice(conversations, func(left, right int) bool { return conversations[left].Name < conversations[right].Name })
-	return members, conversations, nil
+	return conversations, nil
+}
+
+func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.Authenticator.Authenticate(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if !principal.HasScope(auth.ScopeEmojiRead) && !principal.HasScope(auth.ScopeChatWrite) && !principal.HasScope(auth.ScopeReactionsWrite) {
+		h.writeAuthError(w, auth.ErrMissingScope)
+		return
+	}
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if len(query) > 100 {
+		http.Error(w, "emoji search is too long", http.StatusBadRequest)
+		return
+	}
+	custom, err := h.Messages.Emojis(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		http.Error(w, "emoji are temporarily unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	options := mergedEmojiOptions(query, custom, 60)
+	secureHeaders(w, workspaceContentSecurityPolicy)
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	_ = json.NewEncoder(w).Encode(map[string]any{"options": options, "count": len(options)})
+}
+
+func mergedEmojiOptions(query string, custom []domain.CustomEmoji, limit int) []emojiOptionView {
+	query = strings.ToLower(strings.Trim(strings.TrimSpace(query), ":"))
+	images := customEmojiImages(custom)
+	result := make([]emojiOptionView, 0, limit)
+	for _, value := range custom {
+		if len(result) == limit {
+			break
+		}
+		name := strings.ToLower(strings.TrimSpace(value.Name))
+		if name == "" || (query != "" && !strings.Contains(name, query)) {
+			continue
+		}
+		imageURL := images[name]
+		if imageURL == "" {
+			continue
+		}
+		result = append(result, emojiOptionView{
+			Name: name, Display: ":" + name + ":", ImageURL: imageURL,
+			Category: "Custom", Custom: true,
+		})
+	}
+	if len(result) == limit {
+		return result
+	}
+	for _, value := range slackemoji.Search(query, limit-len(result)) {
+		display := slackemoji.Unicode(value)
+		if display == "" {
+			continue
+		}
+		result = append(result, emojiOptionView{
+			Name: value.Name, Display: display, Category: value.Category,
+		})
+	}
+	return result
+}
+
+func customEmojiImages(values []domain.CustomEmoji) map[string]string {
+	byName := make(map[string]domain.CustomEmoji, len(values))
+	for _, value := range values {
+		name := strings.ToLower(strings.TrimSpace(value.Name))
+		if name != "" {
+			byName[name] = value
+		}
+	}
+	result := make(map[string]string, len(values))
+	var resolve func(string, map[string]struct{}) string
+	resolve = func(name string, seen map[string]struct{}) string {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if cached, ok := result[name]; ok {
+			return cached
+		}
+		if _, cycle := seen[name]; cycle {
+			return ""
+		}
+		value, ok := byName[name]
+		if !ok {
+			return ""
+		}
+		seen[name] = struct{}{}
+		defer delete(seen, name)
+		imageURL := strings.TrimSpace(value.URL)
+		if value.AliasFor != "" {
+			imageURL = resolve(value.AliasFor, seen)
+		}
+		if !safeEmojiImageURL(imageURL) {
+			imageURL = ""
+		}
+		result[name] = imageURL
+		return imageURL
+	}
+	for name := range byName {
+		resolve(name, make(map[string]struct{}))
+	}
+	return result
+}
+
+func safeEmojiImageURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Host != ""
 }
 
 func searchQueryWithFilters(query string, data searchData) string {
@@ -7007,7 +7377,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 
 // workspaceContentSecurityPolicy is the workspace equivalent of the policy the
 // administration page already carried. It differs in exactly four places, each
-// of which the workspace page actually needs: the hashes of its own four inline
+// of which the workspace page actually needs: the hashes of its own inline
 // scripts (so an injected script still cannot run), `connect-src 'self'` for
 // the fragment fetches and the event stream, `img-src` for profile images, and
 // no `form-action`.
@@ -7189,10 +7559,26 @@ type userNames struct {
 	ctx       context.Context
 	principal auth.Principal
 	cache     map[domain.UserID]string
+	channels  map[domain.ConversationID]string
 }
 
 func (h Handler) newUserNames(ctx context.Context, principal auth.Principal) *userNames {
-	return &userNames{handler: h, ctx: ctx, principal: principal, cache: map[domain.UserID]string{}}
+	return &userNames{
+		handler: h, ctx: ctx, principal: principal,
+		cache: map[domain.UserID]string{}, channels: map[domain.ConversationID]string{},
+	}
+}
+
+func (n *userNames) channelName(id domain.ConversationID) string {
+	if cached, ok := n.channels[id]; ok {
+		return cached
+	}
+	resolved := "private channel"
+	if conversation, err := n.handler.Messages.ConversationInfo(n.ctx, n.principal.WorkspaceID, n.principal.UserID, id); err == nil {
+		resolved = "#" + conversationName(conversation)
+	}
+	n.channels[id] = resolved
+	return resolved
 }
 
 func (n *userNames) name(id domain.UserID) string {
@@ -7215,7 +7601,11 @@ func (n *userNames) name(id domain.UserID) string {
 // inside code spans and fenced code blocks stay literal, as Slack rendering
 // requires.
 func resolveSlackUserMentions(text string, names *userNames) string {
-	if !strings.Contains(text, "<@") || names == nil {
+	return resolveSlackReferences(text, names)
+}
+
+func resolveSlackReferences(text string, names *userNames) string {
+	if (!strings.Contains(text, "<@") && !strings.Contains(text, "<#")) || names == nil {
 		return text
 	}
 	var output strings.Builder
@@ -7254,6 +7644,25 @@ func resolveSlackUserMentions(text string, names *userNames) string {
 						output.WriteString(id)
 						output.WriteByte('|')
 						output.WriteByte('@')
+						output.WriteString(label)
+						output.WriteByte('>')
+						offset = end + 1
+						continue
+					}
+				}
+			}
+		}
+		if strings.HasPrefix(text[offset:], "<#") {
+			end := strings.IndexByte(text[offset+2:], '>')
+			if end >= 0 {
+				end += offset + 2
+				id := text[offset+2 : end]
+				if id != "" && !strings.ContainsAny(id, "| \t\r\n<>") {
+					label := strings.Join(strings.Fields(strings.NewReplacer("|", " ", "<", " ", ">", " ").Replace(names.channelName(domain.ConversationID(id)))), " ")
+					if label != "" {
+						output.WriteString("<#")
+						output.WriteString(id)
+						output.WriteByte('|')
 						output.WriteString(label)
 						output.WriteByte('>')
 						offset = end + 1

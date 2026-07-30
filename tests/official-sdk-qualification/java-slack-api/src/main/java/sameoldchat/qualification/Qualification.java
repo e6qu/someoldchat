@@ -940,8 +940,14 @@ public final class Qualification {
                             && teamProfile.getProfile().getFields().isEmpty(),
                     "team.profile.get failed: " + teamProfile.getError());
             EmojiListResponse emoji = methods.emojiList(
-                    com.slack.api.methods.request.emoji.EmojiListRequest.builder().build());
-            require(emoji.isOk(), "emoji.list failed: " + emoji.getError());
+                    com.slack.api.methods.request.emoji.EmojiListRequest.builder().includeCategories(true).build());
+            require(emoji.isOk()
+                            && "097705020bcf82331c9ef10df3425aad15f5043c".equals(emoji.getCategoriesVersion())
+                            && emoji.getCategories() != null
+                            && emoji.getCategories().stream().anyMatch(category ->
+                                    "Smileys & Emotion".equals(category.getName())
+                                            && category.getEmojiNames().contains("grinning")),
+                    "emoji.list categories failed: " + emoji.getError());
             UsersIdentityResponse identityResult = methods.usersIdentity(
                     com.slack.api.methods.request.users.UsersIdentityRequest.builder().build());
             require(identityResult.isOk() && identityResult.getUser() != null

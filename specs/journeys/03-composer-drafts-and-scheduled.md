@@ -52,6 +52,33 @@ Arrow keys move the active option, `Enter`/`Tab` accepts according to Slack,
 `Escape` closes, and continued typing/filtering is announced without stealing
 the composer. Literal trigger characters remain possible.
 
+**Observable states and boundaries:**
+
+1. Before a trigger, no listbox is exposed and the composer reports
+   `aria-expanded=false`.
+2. A recognized trigger filters only objects the member may reference. The
+   first match is active; an empty result closes the list without modifying
+   text. A private channel lookup MUST resolve to an unavailable/private label
+   rather than reveal its name.
+3. Accepting a person stores `<@USER>`, accepting a channel stores
+   `<#CHANNEL>`, and accepting emoji stores `:name:`. The first-party renderer
+   resolves these to the current visible label or image while history and API
+   responses retain Slack's transport representation.
+4. The emoji toolbar opens a modal picker with search over Slack's standard
+   catalog plus durable workspace custom emoji and aliases. Choosing from the
+   picker inserts at the current selection and restores focus to the composer.
+   Custom image URLs are restricted to HTTP(S) and rendered with the emoji name
+   as alternative text.
+5. Standard codes, aliases, custom emoji, and custom aliases share one lookup
+   model across composer suggestions, message rendering, reactions, and
+   `emoji.list`; unknown codes remain literal message text and cannot be added
+   as a reaction.
+
+Recent emoji ordering, user-group completion, skin-tone preference, and Slack's
+exact ranking algorithm remain differential requirements until captured
+against a dedicated Slack workspace. They MUST NOT be inferred from the
+alphabetical or upstream dataset order.
+
 ## DRAFT-01 — Preserve a conversation or thread draft
 
 Leaving a non-empty composer preserves text, formatting, and staged attachments
@@ -140,8 +167,14 @@ outcomes are not HTTP 500 responses.
   picker, edit/cancel/send-now, and delivery/failure updates.
 - Backend: current official SDK qualification for `chat.postMessage`,
   `chat.scheduleMessage`, `chat.scheduledMessages.list`, and
-  `chat.deleteScheduledMessage`; scheduler tests use deterministic clocks and
-  real persistence in every worker composition.
+  `chat.deleteScheduledMessage`; Node, Python, and Java also request
+  `emoji.list(include_categories=true)` through their typed current SDK
+  surfaces. Scheduler tests use deterministic clocks and real persistence in
+  every worker composition.
+- Catalog: standard emoji come from the exact iamcal/emoji-data revision named
+  by Slack's formatting guide, with source and license checksums enforced by
+  the repository updater. Workspace custom emoji remain durable store data and
+  are tested through browser, memory, SQL, and Slack API paths.
 - Boundary: the first-party Drafts & sent RPCs are covered by
   local-versus-gRPC differential and converter-property tests, while the
   official Node, Python, and Java SDKs continue to exercise only Slack's
@@ -155,7 +188,7 @@ outcomes are not HTTP 500 responses.
 | --- | --- | --- |
 | COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips. |
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
-| COMP-03 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Composer entry supports attachments, emoji, mentions, formatting, and shortcuts. |
+| COMP-03 | [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions) | Colon-code entry plus picker, search, category, skin-tone, message, and reaction behavior; the checked developer sources below establish the shared data/API representation. |
 | DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack preserves and exposes drafts associated with their destination. |
 | DRAFT-02 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Drafts and sent contains Drafts, Scheduled, and Sent tabs with item actions. |
 | SCHED-01 | [Send or schedule messages](https://slack.com/help/articles/1500012915082-Send-or-schedule-messages) | Slack schedules from the send control using suggested or custom local times. |
