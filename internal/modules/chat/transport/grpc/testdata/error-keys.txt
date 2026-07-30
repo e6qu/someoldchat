@@ -33,6 +33,7 @@ service.invalid_canvas
 service.invalid_conversation
 service.invalid_conversation_prefs
 service.invalid_datastore_item
+service.invalid_datastore_query
 service.invalid_dialog
 service.invalid_emoji
 service.invalid_entity

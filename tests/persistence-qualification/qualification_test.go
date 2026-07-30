@@ -464,6 +464,7 @@ func listsRepositoryContract(t *testing.T, open opener) {
 	item.Fields = `[{"column_id":"title","value":"after"}]`
 	item.UpdatedAt = now.Add(time.Minute)
 	item.UpdatedBy = userID
+	item.Version = page.Items[0].Version + 1
 	if err := repository.UpdateListItem(ctx, item, event("item-update", "list.item.updated", string(item.ID))); err != nil {
 		t.Fatal(err)
 	}
@@ -665,6 +666,7 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 	}
 	canvas.Title = "Updated qualification canvas"
 	canvas.UpdatedAt = now.Add(time.Minute)
+	canvas.Version = storedCanvas.Version + 1
 	if err := repository.UpdateCanvas(ctx, canvas, event("canvas-update", "canvas.updated", string(canvas.ID))); err != nil {
 		t.Fatal(err)
 	}

@@ -218,14 +218,14 @@ In progress. The 2026-07-30 post-merge audit reconciled the ledger with Slack's
 current method catalog rather than treating every historical ledger entry as a
 current method:
 
-- Slack's current reference contains 310 methods. SameOldChat registers 217 of
-  them and leaves 93 unimplemented.
+- Slack's current reference contains 310 methods. SameOldChat registers 223 of
+  them and leaves 87 unimplemented.
 - The 320-entry ledger also retains ten legacy methods for clients that still
   call them. Those methods are useful compatibility inventory, but they are not
   part of the current Slack denominator.
 - After correcting overstated method claims and separating deprecated
   `reminders.*` from first-party Later, the ledger records 200 current methods
-  as `behavior-compatible`, 15 as `sdk-compatible`, two as
+  as `behavior-compatible`, 21 as `sdk-compatible`, two as
   `schema-compatible`, and none as
   `verified-against-slack`. A passing route, local test, or SDK parse is not
   itself live Slack equivalence.
@@ -233,10 +233,12 @@ current method:
   explicit, reviewed downgrade backed by a concrete deviation; otherwise a
   false compatibility claim becomes permanent.
 
-The remaining 93 current methods break down as 50 `admin.*`, seven `apps.*`,
-five `assistant.*`, one `auth.*`, ten `conversations.*`, six `functions.*`, one
-`rtm.*`, four `team.*`, one `users.*`, and eight
-`workflows.*`.
+The remaining 87 current methods break down as 50 `admin.*`, five `apps.*`,
+five `assistant.*`, nine `conversations.*`, six `functions.*`, three `team.*`,
+one `users.*`, and eight `workflows.*`. This sweep added datastore query/count,
+conversation-canvas creation, `auth.teams.list`, `rtm.start`, and
+`team.preferences.list`; each addition records the Slack variants it does not
+yet claim rather than treating a happy response as full compatibility.
 
 Before another breadth wave, complete the following evidence-backed work in
 order:
@@ -343,7 +345,7 @@ differential results remain named gaps.
 UI evidence is now measured against the normative catalog rather than counted
 from test files: every one of the 102 stable journey IDs has exactly one local
 source-map row linking the specific current official Slack contract,
-and 34 Playwright scenarios cite 69 IDs. `make journey-check` rejects
+and 35 Playwright scenarios cite 73 IDs. `make journey-check` rejects
 duplicate/unknown IDs, missing or duplicate source rows, non-official sources,
 and empty behavioral assertions. The remaining IDs are printed as an explicit
 browser gap list; a citation is not promoted
@@ -354,15 +356,15 @@ SDK evidence is now measured at the HTTP boundary too. The pinned official
 Node, Python, and Java clients record every `/api/{method}` path they actually
 request, and the Deno runtime records its two verified function-completion
 requests at its own receiver. `make sdk-qualification` fails if any operation
-claimed at `sdk-compatible` or above is absent. The current result is 225 of
-225 claimed methods observed (215 current plus ten retained legacy methods);
+claimed at `sdk-compatible` or above is absent. The current result is 231 of
+231 claimed methods observed (221 current plus ten retained legacy methods);
 this proves SDK serialization/decoding only, not live Slack equivalence.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
-developer pages and currently checks 115 representative exact assertions
-explicitly citing 47 of the 102 journey IDs across every journey domain.
-`make journey-check` prints the other 55 as upstream-text evidence
+developer pages and currently checks 130 representative exact assertions
+explicitly citing 49 of the 102 journey IDs across every journey domain.
+`make journey-check` prints the other 53 as upstream-text evidence
 gaps. This pass corrected two local targets
 that had drifted from Slack: a conversation canvas is created or attached as a
 tab rather than modeled as a separate invented channel-canvas object, and
@@ -453,8 +455,8 @@ Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
 that per-method record. The compatibility report now makes the missing records
-explicit: only 16 of the 215 current methods claimed at `sdk-compatible` or
-above carry method-level evidence in the ledger; 199 claims still require
+explicit: only 25 of the 221 current methods claimed at `sdk-compatible` or
+above carry method-level evidence in the ledger; 196 claims still require
 individual review and evidence even though the official SDK aggregate observes
 their request paths.
 

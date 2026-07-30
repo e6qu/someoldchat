@@ -98,7 +98,15 @@ func newRichMessageContent(message domain.Message, customEmoji ...map[string]str
 	// wholly unknown block payload somehow reaches a legacy store, retain the
 	// fallback rather than rendering a blank row.
 	if len(content.Blocks) == 0 && !hasStream {
-		content.Text = renderSlackMrkdwnWithEmoji(message.Text, emojiImages)
+		var state domain.MessageStreamState
+		_ = json.Unmarshal([]byte(message.StreamState), &state)
+		if state.MarkdownText {
+			content.Text = renderMarkdown(message.Text)
+		} else if state.MrkdwnDisabled || state.Parse == "full" {
+			content.Text = template.HTML(strings.ReplaceAll(template.HTMLEscapeString(message.Text), "\n", "<br>")) // #nosec G203 -- text is escaped before the only inserted tag.
+		} else {
+			content.Text = renderSlackMrkdwnWithEmoji(message.Text, emojiImages)
+		}
 	}
 	return content
 }
@@ -109,6 +117,16 @@ func decodeMessageStream(message domain.Message) ([]messageBlockView, bool) {
 	}
 	var state domain.MessageStreamState
 	if json.Unmarshal([]byte(message.StreamState), &state) != nil {
+		return nil, false
+	}
+	if state.MarkdownText {
+		if message.Text == "" {
+			return nil, false
+		}
+		return []messageBlockView{{Kind: "markdown", Text: message.Text, HTML: renderMarkdown(message.Text)}}, true
+	}
+	isStream := state.Active || state.TaskDisplayMode != "" || state.PlanTitle != "" || len(state.Tasks) != 0 || len(state.ChunkBlocks) != 0
+	if !isStream {
 		return nil, false
 	}
 	result := make([]messageBlockView, 0, 2+len(state.Tasks)+len(state.ChunkBlocks))

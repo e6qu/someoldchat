@@ -1106,16 +1106,21 @@ func (x *InstalledAppListResponse) GetApps() []*InstalledApp {
 }
 
 type AppDatastoreRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
-	AppId         string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
-	Datastore     string                 `protobuf:"bytes,4,opt,name=datastore,proto3" json:"datastore,omitempty"`
-	Items         []string               `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
-	Ids           []string               `protobuf:"bytes,6,rep,name=ids,proto3" json:"ids,omitempty"`
-	Merge         bool                   `protobuf:"varint,7,opt,name=merge,proto3" json:"merge,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state                protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId          string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId               string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId                string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Datastore            string                 `protobuf:"bytes,4,opt,name=datastore,proto3" json:"datastore,omitempty"`
+	Items                []string               `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
+	Ids                  []string               `protobuf:"bytes,6,rep,name=ids,proto3" json:"ids,omitempty"`
+	Merge                bool                   `protobuf:"varint,7,opt,name=merge,proto3" json:"merge,omitempty"`
+	Expression           string                 `protobuf:"bytes,8,opt,name=expression,proto3" json:"expression,omitempty"`
+	ExpressionAttributes string                 `protobuf:"bytes,9,opt,name=expression_attributes,json=expressionAttributes,proto3" json:"expression_attributes,omitempty"`
+	ExpressionValues     string                 `protobuf:"bytes,10,opt,name=expression_values,json=expressionValues,proto3" json:"expression_values,omitempty"`
+	Limit                int32                  `protobuf:"varint,11,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor               string                 `protobuf:"bytes,12,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *AppDatastoreRequest) Reset() {
@@ -1197,9 +1202,47 @@ func (x *AppDatastoreRequest) GetMerge() bool {
 	return false
 }
 
+func (x *AppDatastoreRequest) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+func (x *AppDatastoreRequest) GetExpressionAttributes() string {
+	if x != nil {
+		return x.ExpressionAttributes
+	}
+	return ""
+}
+
+func (x *AppDatastoreRequest) GetExpressionValues() string {
+	if x != nil {
+		return x.ExpressionValues
+	}
+	return ""
+}
+
+func (x *AppDatastoreRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *AppDatastoreRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
 type AppDatastoreResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Items         []string               `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,2,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	Count         int64                  `protobuf:"varint,4,opt,name=count,proto3" json:"count,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1239,6 +1282,27 @@ func (x *AppDatastoreResponse) GetItems() []string {
 		return x.Items
 	}
 	return nil
+}
+
+func (x *AppDatastoreResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+func (x *AppDatastoreResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+func (x *AppDatastoreResponse) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
 }
 
 type AppMutationResponse struct {
@@ -1633,7 +1697,7 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x10bot_display_name\x18\a \x01(\tR\x0ebotDisplayName\x12\x1e\n" +
 	"\vbot_user_id\x18\b \x01(\tR\tbotUserId\"Q\n" +
 	"\x18InstalledAppListResponse\x125\n" +
-	"\x04apps\x18\x01 \x03(\v2!.sameoldchat.chat.v1.InstalledAppR\x04apps\"\xc4\x01\n" +
+	"\x04apps\x18\x01 \x03(\v2!.sameoldchat.chat.v1.InstalledAppR\x04apps\"\xf4\x02\n" +
 	"\x13AppDatastoreRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
@@ -1641,9 +1705,21 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\tdatastore\x18\x04 \x01(\tR\tdatastore\x12\x14\n" +
 	"\x05items\x18\x05 \x03(\tR\x05items\x12\x10\n" +
 	"\x03ids\x18\x06 \x03(\tR\x03ids\x12\x14\n" +
-	"\x05merge\x18\a \x01(\bR\x05merge\",\n" +
+	"\x05merge\x18\a \x01(\bR\x05merge\x12\x1e\n" +
+	"\n" +
+	"expression\x18\b \x01(\tR\n" +
+	"expression\x123\n" +
+	"\x15expression_attributes\x18\t \x01(\tR\x14expressionAttributes\x12+\n" +
+	"\x11expression_values\x18\n" +
+	" \x01(\tR\x10expressionValues\x12\x14\n" +
+	"\x05limit\x18\v \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\f \x01(\tR\x06cursor\"~\n" +
 	"\x14AppDatastoreResponse\x12\x14\n" +
-	"\x05items\x18\x01 \x03(\tR\x05items\"Z\n" +
+	"\x05items\x18\x01 \x03(\tR\x05items\x12\x1f\n" +
+	"\vnext_cursor\x18\x02 \x01(\tR\n" +
+	"nextCursor\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12\x14\n" +
+	"\x05count\x18\x04 \x01(\x03R\x05count\"Z\n" +
 	"\x13AppMutationResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x123\n" +
 	"\x03app\x18\x02 \x01(\v2!.sameoldchat.chat.v1.DeveloperAppR\x03app\"\xc8\x02\n" +
@@ -1676,7 +1752,7 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x06bot_id\x18\v \x01(\tR\x05botId\x12\x1e\n" +
 	"\vbot_user_id\x18\f \x01(\tR\tbotUserId\x12%\n" +
 	"\x0ecode_challenge\x18\r \x01(\tR\rcodeChallenge\x122\n" +
-	"\x15code_challenge_method\x18\x0e \x01(\tR\x13codeChallengeMethod2\xee\r\n" +
+	"\x15code_challenge_method\x18\x0e \x01(\tR\x13codeChallengeMethod2\xcc\x0f\n" +
 	"\vAppsService\x12\x81\x01\n" +
 	"\x1aIssueAppConfigurationToken\x121.sameoldchat.chat.v1.AppConfigurationTokenRequest\x1a0.sameoldchat.chat.v1.AppConfigurationCredentials\x12\x88\x01\n" +
 	"\x1bRotateAppConfigurationToken\x127.sameoldchat.chat.v1.AppConfigurationTokenRotateRequest\x1a0.sameoldchat.chat.v1.AppConfigurationCredentials\x12j\n" +
@@ -1689,6 +1765,8 @@ const file_sameoldchat_chat_v1_apps_proto_rawDesc = "" +
 	"\x11ListWorkspaceApps\x12#.sameoldchat.chat.v1.AppListRequest\x1a-.sameoldchat.chat.v1.InstalledAppListResponse\x12k\n" +
 	"\x14PutAppDatastoreItems\x12(.sameoldchat.chat.v1.AppDatastoreRequest\x1a).sameoldchat.chat.v1.AppDatastoreResponse\x12k\n" +
 	"\x14GetAppDatastoreItems\x12(.sameoldchat.chat.v1.AppDatastoreRequest\x1a).sameoldchat.chat.v1.AppDatastoreResponse\x12m\n" +
+	"\x16QueryAppDatastoreItems\x12(.sameoldchat.chat.v1.AppDatastoreRequest\x1a).sameoldchat.chat.v1.AppDatastoreResponse\x12m\n" +
+	"\x16CountAppDatastoreItems\x12(.sameoldchat.chat.v1.AppDatastoreRequest\x1a).sameoldchat.chat.v1.AppDatastoreResponse\x12m\n" +
 	"\x17DeleteAppDatastoreItems\x12(.sameoldchat.chat.v1.AppDatastoreRequest\x1a(.sameoldchat.chat.v1.AppMutationResponse\x12]\n" +
 	"\x0fGetDeveloperApp\x12\".sameoldchat.chat.v1.AppGetRequest\x1a&.sameoldchat.chat.v1.AppExportResponse\x12m\n" +
 	"\x16IssueDeveloperAppToken\x12).sameoldchat.chat.v1.AppTokenIssueRequest\x1a(.sameoldchat.chat.v1.AppTokenCredentials\x12t\n" +
@@ -1751,29 +1829,33 @@ var file_sameoldchat_chat_v1_apps_proto_depIdxs = []int32{
 	10, // 15: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:input_type -> sameoldchat.chat.v1.AppListRequest
 	17, // 16: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
 	17, // 17: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	17, // 18: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
-	11, // 19: sameoldchat.chat.v1.AppsService.GetDeveloperApp:input_type -> sameoldchat.chat.v1.AppGetRequest
-	12, // 20: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:input_type -> sameoldchat.chat.v1.AppTokenIssueRequest
-	20, // 21: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
-	20, // 22: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
-	2,  // 23: sameoldchat.chat.v1.AppsService.IssueAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
-	2,  // 24: sameoldchat.chat.v1.AppsService.RotateAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
-	5,  // 25: sameoldchat.chat.v1.AppsService.ValidateAppManifest:output_type -> sameoldchat.chat.v1.AppManifestValidation
-	8,  // 26: sameoldchat.chat.v1.AppsService.CreateAppFromManifest:output_type -> sameoldchat.chat.v1.AppCreateResponse
-	9,  // 27: sameoldchat.chat.v1.AppsService.ExportAppManifest:output_type -> sameoldchat.chat.v1.AppExportResponse
-	19, // 28: sameoldchat.chat.v1.AppsService.UpdateAppFromManifest:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	19, // 29: sameoldchat.chat.v1.AppsService.DeleteDeveloperApp:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	14, // 30: sameoldchat.chat.v1.AppsService.ListDeveloperApps:output_type -> sameoldchat.chat.v1.AppListResponse
-	16, // 31: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:output_type -> sameoldchat.chat.v1.InstalledAppListResponse
-	18, // 32: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
-	18, // 33: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
-	19, // 34: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppMutationResponse
-	9,  // 35: sameoldchat.chat.v1.AppsService.GetDeveloperApp:output_type -> sameoldchat.chat.v1.AppExportResponse
-	13, // 36: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:output_type -> sameoldchat.chat.v1.AppTokenCredentials
-	21, // 37: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:output_type -> sameoldchat.chat.v1.OAuthAuthorization
-	21, // 38: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:output_type -> sameoldchat.chat.v1.OAuthAuthorization
-	23, // [23:39] is the sub-list for method output_type
-	7,  // [7:23] is the sub-list for method input_type
+	17, // 18: sameoldchat.chat.v1.AppsService.QueryAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	17, // 19: sameoldchat.chat.v1.AppsService.CountAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	17, // 20: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:input_type -> sameoldchat.chat.v1.AppDatastoreRequest
+	11, // 21: sameoldchat.chat.v1.AppsService.GetDeveloperApp:input_type -> sameoldchat.chat.v1.AppGetRequest
+	12, // 22: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:input_type -> sameoldchat.chat.v1.AppTokenIssueRequest
+	20, // 23: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
+	20, // 24: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:input_type -> sameoldchat.chat.v1.OAuthAuthorizationRequest
+	2,  // 25: sameoldchat.chat.v1.AppsService.IssueAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
+	2,  // 26: sameoldchat.chat.v1.AppsService.RotateAppConfigurationToken:output_type -> sameoldchat.chat.v1.AppConfigurationCredentials
+	5,  // 27: sameoldchat.chat.v1.AppsService.ValidateAppManifest:output_type -> sameoldchat.chat.v1.AppManifestValidation
+	8,  // 28: sameoldchat.chat.v1.AppsService.CreateAppFromManifest:output_type -> sameoldchat.chat.v1.AppCreateResponse
+	9,  // 29: sameoldchat.chat.v1.AppsService.ExportAppManifest:output_type -> sameoldchat.chat.v1.AppExportResponse
+	19, // 30: sameoldchat.chat.v1.AppsService.UpdateAppFromManifest:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	19, // 31: sameoldchat.chat.v1.AppsService.DeleteDeveloperApp:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	14, // 32: sameoldchat.chat.v1.AppsService.ListDeveloperApps:output_type -> sameoldchat.chat.v1.AppListResponse
+	16, // 33: sameoldchat.chat.v1.AppsService.ListWorkspaceApps:output_type -> sameoldchat.chat.v1.InstalledAppListResponse
+	18, // 34: sameoldchat.chat.v1.AppsService.PutAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	18, // 35: sameoldchat.chat.v1.AppsService.GetAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	18, // 36: sameoldchat.chat.v1.AppsService.QueryAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	18, // 37: sameoldchat.chat.v1.AppsService.CountAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppDatastoreResponse
+	19, // 38: sameoldchat.chat.v1.AppsService.DeleteAppDatastoreItems:output_type -> sameoldchat.chat.v1.AppMutationResponse
+	9,  // 39: sameoldchat.chat.v1.AppsService.GetDeveloperApp:output_type -> sameoldchat.chat.v1.AppExportResponse
+	13, // 40: sameoldchat.chat.v1.AppsService.IssueDeveloperAppToken:output_type -> sameoldchat.chat.v1.AppTokenCredentials
+	21, // 41: sameoldchat.chat.v1.AppsService.InspectOAuthAuthorization:output_type -> sameoldchat.chat.v1.OAuthAuthorization
+	21, // 42: sameoldchat.chat.v1.AppsService.AuthorizeOAuth:output_type -> sameoldchat.chat.v1.OAuthAuthorization
+	25, // [25:43] is the sub-list for method output_type
+	7,  // [7:25] is the sub-list for method input_type
 	7,  // [7:7] is the sub-list for extension type_name
 	7,  // [7:7] is the sub-list for extension extendee
 	0,  // [0:7] is the sub-list for field type_name

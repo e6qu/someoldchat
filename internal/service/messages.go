@@ -2557,7 +2557,7 @@ func (m Messages) validateStatusEmoji(ctx context.Context, workspaceID domain.Wo
 	if !validEmojiName(name) {
 		return invalid
 	}
-	if _, ok := slackemoji.Lookup(name); ok {
+	if _, _, ok := slackemoji.ParseReactionName(name); ok {
 		return nil
 	}
 	custom, err := m.Store.ListEmojis(ctx, workspaceID)
@@ -2995,6 +2995,47 @@ func (m Messages) WorkspaceInfo(ctx context.Context, workspaceID domain.Workspac
 		return domain.Workspace{}, err
 	}
 	return m.Store.GetWorkspace(ctx, workspaceID)
+}
+
+func (m Messages) AuthorizedAppWorkspaces(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, request domain.PageRequest) (domain.WorkspacePage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.WorkspacePage{}, err
+	}
+	if appID == "" || request.Limit < 1 || request.Limit > 1000 || request.Descending {
+		return domain.WorkspacePage{}, store.ErrInvalidArgument
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.WorkspacePage{}, err
+	}
+	installations, err := m.Store.ListAppInstallations(ctx, appID)
+	if err != nil {
+		return domain.WorkspacePage{}, err
+	}
+	values := make([]domain.Workspace, 0, min(request.Limit+1, len(installations)))
+	for _, installation := range installations {
+		if string(installation.WorkspaceID) <= after {
+			continue
+		}
+		value, getErr := m.Store.GetWorkspace(ctx, installation.WorkspaceID)
+		if getErr != nil {
+			return domain.WorkspacePage{}, getErr
+		}
+		values = append(values, value)
+		if len(values) > request.Limit {
+			break
+		}
+	}
+	page := domain.WorkspacePage{Workspaces: values}
+	if len(values) > request.Limit {
+		page.HasMore = true
+		page.Workspaces = values[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(page.Workspaces[len(page.Workspaces)-1].ID))
+		if err != nil {
+			return domain.WorkspacePage{}, err
+		}
+	}
+	return page, nil
 }
 
 func (m Messages) AdminCreateWorkspace(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, domainName, name, description string, discoverability domain.WorkspaceDiscoverability) (domain.Workspace, error) {
@@ -4329,7 +4370,7 @@ func (m Messages) AddReaction(ctx context.Context, workspaceID domain.WorkspaceI
 	if err != nil {
 		return err
 	}
-	if _, standard := slackemoji.Lookup(reaction.Name); !standard {
+	if _, _, standard := slackemoji.ParseReactionName(reaction.Name); !standard {
 		custom, listErr := m.Store.ListEmojis(ctx, workspaceID)
 		if listErr != nil {
 			return listErr
@@ -4398,6 +4439,9 @@ func (m Messages) reactionFor(ctx context.Context, workspaceID domain.WorkspaceI
 		return domain.Reaction{}, err
 	}
 	name = normalizeEmojiName(name)
+	if _, _, standard := slackemoji.ParseReactionName(name); standard {
+		return domain.Reaction{Message: message.ID, Name: name, UserID: userID}, nil
+	}
 	if !validEmojiName(name) {
 		return domain.Reaction{}, ErrInvalidReaction
 	}
@@ -5079,7 +5123,12 @@ func (m Messages) SendScheduledMessageNow(ctx context.Context, workspaceID domai
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message, postErr := m.PostWithBlocksAndAttachments(ctx, item.WorkspaceID, item.Author, item.Channel, item.Text, item.Blocks, item.Attachments, item.ThreadTimestamp, string(item.ID), item.AppID)
+	request, requestErr := ScheduledMessagePostRequest(item)
+	if requestErr != nil {
+		_ = m.Store.ReleaseScheduledMessage(ctx, owner, item.ID, item.PostAt)
+		return domain.Message{}, requestErr
+	}
+	message, postErr := m.PostMessageAs(ctx, item.WorkspaceID, item.Author, request)
 	if postErr != nil {
 		releaseErr := m.Store.ReleaseScheduledMessage(ctx, owner, item.ID, item.PostAt)
 		return domain.Message{}, errors.Join(postErr, releaseErr)
@@ -6106,6 +6155,20 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 	if err != nil || attachmentErr != nil || (text == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) || request.PostAt.IsZero() {
 		return domain.ScheduledMessage{}, ErrInvalidMessage
 	}
+	metadata := ""
+	if strings.TrimSpace(request.Metadata) != "" {
+		if request.AppID == "" {
+			return domain.ScheduledMessage{}, ErrInvalidMessage
+		}
+		metadata, err = normalizeMessageMetadata(request.Metadata)
+		if err != nil {
+			return domain.ScheduledMessage{}, ErrInvalidMessage
+		}
+	}
+	streamState, err := normalizeScheduledMessageState(request.StreamState, text, normalizedBlocks, request.ThreadTimestamp)
+	if err != nil {
+		return domain.ScheduledMessage{}, err
+	}
 	now := time.Now().UTC()
 	// Slack's post_at contract is whole Unix seconds, and the SQL schema stores
 	// that precision. Normalize before quota bucketing and cursor construction so
@@ -6141,7 +6204,7 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 	value := domain.ScheduledMessage{
 		WorkspaceID: workspaceID, ID: id, Channel: channel, Author: userID,
 		AppID: request.AppID, BotID: request.BotID, CredentialHash: request.CredentialHash,
-		Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
+		Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, Metadata: metadata, StreamState: streamState,
 		ThreadTimestamp: request.ThreadTimestamp, PostAt: postAt, CreatedAt: now,
 	}
 	event, err := newEvent(workspaceID, userID, events.NewPayload("message.scheduled", events.String("scheduled_message_id", string(id)), events.String("channel_id", string(channel)), events.String("post_at", string(domain.NewMessageTimestamp(value.PostAt)))), now)
@@ -6155,6 +6218,54 @@ func (m Messages) ScheduleMessageAs(ctx context.Context, workspaceID domain.Work
 		return domain.ScheduledMessage{}, err
 	}
 	return value, nil
+}
+
+// ScheduledMessagePostRequest reconstructs the exact message mutation stored at
+// scheduling time. The scheduler and the first-party "send now" path share this
+// conversion so options cannot disappear merely because delivery is deferred.
+func ScheduledMessagePostRequest(value domain.ScheduledMessage) (domain.MessagePostRequest, error) {
+	var state domain.MessageStreamState
+	if value.StreamState != "" {
+		if err := json.Unmarshal([]byte(value.StreamState), &state); err != nil {
+			return domain.MessagePostRequest{}, ErrInvalidMessage
+		}
+	}
+	return domain.MessagePostRequest{
+		Conversation: value.Channel, Text: value.Text, Blocks: value.Blocks, Attachments: value.Attachments,
+		Metadata: value.Metadata, ThreadTimestamp: value.ThreadTimestamp, IdempotencyKey: string(value.ID),
+		AppID: value.AppID, MarkdownText: state.MarkdownText, ReplyBroadcast: state.ReplyBroadcast,
+		Parse: state.Parse, MrkdwnDisabled: state.MrkdwnDisabled, LinkNames: state.LinkNames,
+		UnfurlLinks: state.UnfurlLinks, UnfurlMedia: state.UnfurlMedia,
+		Username: state.Username, IconEmoji: state.IconEmoji, IconURL: state.IconURL,
+	}, nil
+}
+
+func normalizeScheduledMessageState(raw, text, blocks string, threadTimestamp domain.MessageTimestamp) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	var state domain.MessageStreamState
+	if err := json.Unmarshal([]byte(raw), &state); err != nil {
+		return "", ErrInvalidMessage
+	}
+	if state.Active || state.TaskDisplayMode != "" || state.BotID != "" || state.PlanTitle != "" ||
+		len(state.Tasks) != 0 || len(state.ChunkBlocks) != 0 || len(state.Warnings) != 0 ||
+		(state.MarkdownText && blocks != "") || (state.MarkdownText && utf8.RuneCountInString(text) > 12000) ||
+		(state.ReplyBroadcast && threadTimestamp == "") ||
+		(state.Parse != "" && state.Parse != "none" && state.Parse != "full") ||
+		utf8.RuneCountInString(state.Username) > 80 ||
+		(state.IconURL != "" && !validMessageIconURL(state.IconURL)) ||
+		(state.IconEmoji != "" && (!strings.HasPrefix(state.IconEmoji, ":") || !strings.HasSuffix(state.IconEmoji, ":"))) {
+		return "", ErrInvalidMessage
+	}
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	if string(encoded) == "{}" {
+		return "", nil
+	}
+	return string(encoded), nil
 }
 
 func (m Messages) PostEphemeralWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, recipientID domain.UserID, text, blocks, attachments string, appID domain.AppID) (domain.EphemeralMessage, error) {
@@ -6234,8 +6345,15 @@ func (m Messages) ListEphemeralMessages(ctx context.Context, workspaceID domain.
 }
 
 func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, conversation domain.ConversationID, text, blocks, attachments string, threadTimestamp domain.MessageTimestamp, idempotencyKey string, appID domain.AppID) (domain.Message, error) {
-	if idempotencyKey != "" {
-		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+	return m.PostMessageAs(ctx, workspaceID, authorID, domain.MessagePostRequest{
+		Conversation: conversation, Text: text, Blocks: blocks, Attachments: attachments,
+		ThreadTimestamp: threadTimestamp, IdempotencyKey: idempotencyKey, AppID: appID,
+	})
+}
+
+func (m Messages) PostMessageAs(ctx context.Context, workspaceID domain.WorkspaceID, authorID domain.UserID, request domain.MessagePostRequest) (domain.Message, error) {
+	if request.IdempotencyKey != "" {
+		cached, err := m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, request.IdempotencyKey)
 		if err == nil {
 			return cached, nil
 		}
@@ -6243,21 +6361,40 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 			return domain.Message{}, err
 		}
 	}
-	if messagePayloadTooLong(blocks, attachments) {
+	if messagePayloadTooLong(request.Blocks, request.Attachments) {
 		return domain.Message{}, ErrInvalidMessage
 	}
-	normalizedBlocks, err := domain.NormalizeBlocks([]byte(blocks))
-	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(attachments))
-	if err != nil || attachmentErr != nil || strings.TrimSpace(string(conversation)) == "" || (strings.TrimSpace(text) == "" && normalizedBlocks == "" && normalizedAttachments == "") || messageTextTooLong(text) {
+	normalizedBlocks, err := domain.NormalizeBlocks([]byte(request.Blocks))
+	normalizedAttachments, attachmentErr := domain.NormalizeAttachments([]byte(request.Attachments))
+	if err != nil || attachmentErr != nil || strings.TrimSpace(string(request.Conversation)) == "" ||
+		(strings.TrimSpace(request.Text) == "" && normalizedBlocks == "" && normalizedAttachments == "") ||
+		messageTextTooLong(request.Text) || (request.MarkdownText && utf8.RuneCountInString(request.Text) > 12000) ||
+		(request.Parse != "" && request.Parse != "none" && request.Parse != "full") ||
+		(request.ReplyBroadcast && request.ThreadTimestamp == "") {
+		return domain.Message{}, ErrInvalidMessage
+	}
+	metadata := ""
+	if strings.TrimSpace(request.Metadata) != "" {
+		if request.AppID == "" {
+			return domain.Message{}, ErrInvalidMessage
+		}
+		metadata, err = normalizeMessageMetadata(request.Metadata)
+		if err != nil {
+			return domain.Message{}, ErrInvalidMessage
+		}
+	}
+	if utf8.RuneCountInString(request.Username) > 80 ||
+		(request.IconURL != "" && !validMessageIconURL(request.IconURL)) ||
+		(request.IconEmoji != "" && (!strings.HasPrefix(request.IconEmoji, ":") || !strings.HasSuffix(request.IconEmoji, ":"))) {
 		return domain.Message{}, ErrInvalidMessage
 	}
 	if _, err := m.Store.GetWorkspace(ctx, workspaceID); err != nil {
 		return domain.Message{}, err
 	}
-	if err := m.requireConversationMembership(ctx, workspaceID, authorID, conversation); err != nil {
+	if err := m.requireConversationMembership(ctx, workspaceID, authorID, request.Conversation); err != nil {
 		return domain.Message{}, err
 	}
-	target, err := m.Store.GetConversation(ctx, conversation)
+	target, err := m.Store.GetConversation(ctx, request.Conversation)
 	if err != nil || target.WorkspaceID != workspaceID {
 		return domain.Message{}, store.ErrNotFound
 	}
@@ -6265,22 +6402,39 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 		return domain.Message{}, ErrConversationAlreadyArchived
 	}
 	threadTimestampValue := domain.MessageTimestamp("")
-	if threadTimestamp != "" {
-		createdAt, err := domain.ParseMessageTimestamp(threadTimestamp)
+	if request.ThreadTimestamp != "" {
+		createdAt, err := domain.ParseMessageTimestamp(request.ThreadTimestamp)
 		if err != nil {
 			return domain.Message{}, ErrInvalidTimestamp
 		}
-		parent, err := m.Store.GetMessageByCreatedAt(ctx, conversation, createdAt)
+		parent, err := m.Store.GetMessageByCreatedAt(ctx, request.Conversation, createdAt)
 		if err != nil || parent.WorkspaceID != workspaceID {
 			return domain.Message{}, store.ErrNotFound
 		}
-		threadTimestampValue = threadTimestamp
+		threadTimestampValue = request.ThreadTimestamp
 	}
 	id, err := domain.NewMessageID()
 	if err != nil {
 		return domain.Message{}, err
 	}
-	message := domain.Message{ID: id, WorkspaceID: workspaceID, Conversation: conversation, AuthorID: authorID, AppID: appID, Text: text, Blocks: normalizedBlocks, Attachments: normalizedAttachments, ThreadTimestamp: threadTimestampValue, CreatedAt: domain.MessageInstant(time.Now())}
+	state := domain.MessageStreamState{
+		Username: request.Username, IconEmoji: request.IconEmoji, IconURL: request.IconURL,
+		MarkdownText: request.MarkdownText, ReplyBroadcast: request.ReplyBroadcast,
+		Parse: request.Parse, MrkdwnDisabled: request.MrkdwnDisabled, LinkNames: request.LinkNames,
+		UnfurlLinks: request.UnfurlLinks, UnfurlMedia: request.UnfurlMedia,
+	}
+	streamState := ""
+	if encoded, encodeErr := json.Marshal(state); encodeErr != nil {
+		return domain.Message{}, encodeErr
+	} else if string(encoded) != "{}" {
+		streamState = string(encoded)
+	}
+	message := domain.Message{
+		ID: id, WorkspaceID: workspaceID, Conversation: request.Conversation, AuthorID: authorID,
+		AppID: request.AppID, Text: request.Text, Blocks: normalizedBlocks, Attachments: normalizedAttachments,
+		Metadata: metadata, StreamState: streamState, ThreadTimestamp: threadTimestampValue,
+		CreatedAt: domain.MessageInstant(time.Now()),
+	}
 	// A message's ts is its public identifier and it carries microseconds, so two
 	// messages in one conversation may not be created on the same microsecond.
 	// The repository refuses the collision; the remedy is the next microsecond,
@@ -6293,14 +6447,14 @@ func (m Messages) PostWithBlocksAndAttachments(ctx context.Context, workspaceID 
 		if err != nil {
 			return domain.Message{}, err
 		}
-		err = m.Store.CreateMessage(ctx, message, event, idempotencyKey)
+		err = m.Store.CreateMessage(ctx, message, event, request.IdempotencyKey)
 		if errors.Is(err, store.ErrMessageTimestampTaken) {
 			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
 			continue
 		}
 		if err != nil {
 			if errors.Is(err, store.ErrIdempotencyConflict) {
-				return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, idempotencyKey)
+				return m.Store.GetIdempotentMessage(ctx, workspaceID, authorID, request.IdempotencyKey)
 			}
 			return domain.Message{}, err
 		}

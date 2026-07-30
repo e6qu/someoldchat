@@ -149,6 +149,116 @@ func postForm(t *testing.T, mux *http.ServeMux, target, body string, htmx bool) 
 	return response
 }
 
+func TestCanvasAndListJourneysUseDurableDocuments(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	csrf := auth.CSRFToken("session")
+
+	canvasCreated := postForm(t, mux, "/app/canvases/create", url.Values{
+		"_csrf": {csrf}, "title": {"Release plan"}, "body": {"Ship the durable UI"},
+	}.Encode(), false)
+	if canvasCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create canvas = %d: %s", canvasCreated.Code, canvasCreated.Body)
+	}
+	canvasURL := canvasCreated.Header().Get("Location")
+	canvasPage := get(t, mux, canvasURL)
+	if canvasPage.Code != http.StatusOK {
+		t.Fatalf("open canvas = %d: %s", canvasPage.Code, canvasPage.Body)
+	}
+	requireContains(t, "canvas", canvasPage.Body.String(), "Release plan", "Ship the durable UI", "Save changes")
+	sectionMatch := regexp.MustCompile(`name="section_id" value="([^"]+)"`).FindStringSubmatch(canvasPage.Body.String())
+	if len(sectionMatch) != 2 {
+		t.Fatalf("canvas editor section is missing: %s", canvasPage.Body)
+	}
+
+	canvasSaved := postForm(t, mux, canvasURL+"/update", url.Values{
+		"_csrf": {csrf}, "section_id": {sectionMatch[1]}, "title": {"Release plan v2"}, "body": {"Shipped atomically"},
+	}.Encode(), false)
+	if canvasSaved.Code != http.StatusSeeOther {
+		t.Fatalf("save canvas = %d: %s", canvasSaved.Code, canvasSaved.Body)
+	}
+	canvasPage = get(t, mux, strings.Split(canvasSaved.Header().Get("Location"), "?")[0])
+	requireContains(t, "saved canvas", canvasPage.Body.String(), "Release plan v2", "Shipped atomically")
+
+	listCreated := postForm(t, mux, "/app/lists/create", url.Values{
+		"_csrf": {csrf}, "title": {"Launch"}, "todo_mode": {"true"},
+	}.Encode(), false)
+	if listCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create list = %d: %s", listCreated.Code, listCreated.Body)
+	}
+	listURL := listCreated.Header().Get("Location")
+	itemCreated := postForm(t, mux, listURL+"/items/create", url.Values{
+		"_csrf": {csrf}, "title": {"Verify persistence"},
+	}.Encode(), false)
+	if itemCreated.Code != http.StatusSeeOther {
+		t.Fatalf("create list item = %d: %s", itemCreated.Code, itemCreated.Body)
+	}
+	listPage := get(t, mux, listURL)
+	requireContains(t, "list", listPage.Body.String(), "Launch", "To-do list", "Verify persistence", "Complete")
+
+	itemPath := regexp.MustCompile(`/items/([^/]+)/toggle`).FindStringSubmatch(listPage.Body.String())
+	if len(itemPath) != 2 {
+		t.Fatalf("list item toggle is missing: %s", listPage.Body)
+	}
+	listID := domain.ListID(strings.TrimPrefix(listURL, "/app/lists/"))
+	itemID := domain.ListItemID(itemPath[1])
+	messages := service.Messages{Store: s}
+	customFields := `[{"column_id":"title","value":"Verify persistence"},{"column_id":"owner","value":"U1"}]`
+	if _, err := messages.UpdateListItem(context.Background(), "T1", "U1", listID, itemID, customFields, false); err != nil {
+		t.Fatal(err)
+	}
+	toggled := postForm(t, mux, listURL+"/items/"+itemPath[1]+"/toggle", url.Values{
+		"_csrf": {csrf}, "archived": {"true"},
+	}.Encode(), false)
+	if toggled.Code != http.StatusSeeOther {
+		t.Fatalf("toggle list item = %d: %s", toggled.Code, toggled.Body)
+	}
+	listPage = get(t, mux, listURL)
+	requireContains(t, "completed list item", listPage.Body.String(), "Verify persistence", "Restore")
+	item, err := s.GetListItem(context.Background(), "T1", listID, itemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Fields != customFields {
+		t.Fatalf("complete replaced custom fields: got %s want %s", item.Fields, customFields)
+	}
+
+	canvases := get(t, mux, "/app/canvases")
+	lists := get(t, mux, "/app/lists")
+	requireContains(t, "canvas directory", canvases.Body.String(), "Release plan v2", "Shipped atomically")
+	requireContains(t, "list directory", lists.Body.String(), "Launch", "To-do list")
+}
+
+func TestCanvasEditorRefusesToFlattenStructuredContent(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	messages := service.Messages{Store: s}
+	value, err := messages.CreateCanvas(context.Background(), "T1", "U1", "Structured plan", `{"type":"heading","text":"Keep this heading"}`, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := "/app/canvases/" + string(value.ID)
+
+	page := get(t, mux, target)
+	if page.Code != http.StatusOK {
+		t.Fatalf("open structured canvas = %d: %s", page.Code, page.Body)
+	}
+	requireContains(t, "structured canvas", page.Body.String(), "Keep this heading", "keeps it read-only")
+	requireMissing(t, "structured canvas", page.Body.String(), "Save changes")
+
+	response := postForm(t, mux, target+"/update", url.Values{
+		"_csrf": {auth.CSRFToken("session")}, "title": {"Flattened"}, "body": {"Lost content"},
+	}.Encode(), false)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("structured save = %d: %s", response.Code, response.Body)
+	}
+	stored, err := s.GetCanvas(context.Background(), "T1", value.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Title != value.Title || stored.DocumentContent != value.DocumentContent || stored.Version != value.Version {
+		t.Fatalf("refused structured save changed canvas: got %#v want %#v", stored, value)
+	}
+}
+
 func requireContains(t *testing.T, what, body string, expected ...string) {
 	t.Helper()
 	for _, value := range expected {
@@ -255,6 +365,78 @@ func TestWorkspaceUploadsSharesRendersAndDownloadsAFile(t *testing.T) {
 	}
 }
 
+func TestComposerStagesPastedAndDroppedFilesIntoOneAtomicMessage(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if _, err := (service.Messages{Store: s}).SaveDraft(context.Background(), "T1", "U1", "Cdev", "", "old durable draft"); err != nil {
+		t.Fatal(err)
+	}
+	page := get(t, mux, "/app?channel=Cdev")
+	requireContains(t, "composer file staging", page.Body.String(),
+		`id="upload-form"`,
+		`id="upload-comment"`,
+		`id="upload-clear"`,
+		`name="file" multiple`,
+		`id="clip-recorder"`,
+		`data-record-clip="audio"`,
+		`data-record-clip="video"`,
+		"You can also paste or drop files into the composer.",
+	)
+	requireContains(t, "composer paste and drop behavior", progressiveEnhancementScript,
+		"text.addEventListener('paste'",
+		"composer.addEventListener('drop'",
+		"existing.concat(Array.prototype.slice.call(fileList)).slice(0,10)",
+		"stagedUpload=form===composer",
+		"navigator.mediaDevices.getUserMedia",
+		"clipRecorder.start(1000)",
+		"},300000)",
+		"stageFiles([file])",
+	)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, value := range map[string]string{
+		auth.CSRFTokenFieldName: auth.CSRFToken("session"),
+		"initial_comment":       "Two staged files with one message",
+	} {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, file := range []struct{ name, contents string }{
+		{name: "first.txt", contents: "first contents"},
+		{name: "second.txt", contents: "second contents"},
+	} {
+		part, err := writer.CreateFormFile("file", file.name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte(file.contents)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodPost, "/app/file?channel=Cdev", &body)
+	request.Header.Set("Content-Type", writer.FormDataContentType())
+	addBrowserCookies(request)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, request)
+	if response.Code != http.StatusSeeOther {
+		t.Fatalf("upload status=%d body=%s", response.Code, response.Body)
+	}
+	history, err := s.ListMessages(context.Background(), "Cdev", domain.PageRequest{Limit: 10})
+	if err != nil || len(history.Messages) != 1 || history.Messages[0].Text != "Two staged files with one message" || len(history.Messages[0].Files) != 2 {
+		t.Fatalf("history=%+v err=%v", history, err)
+	}
+	if history.Messages[0].Files[0].Name != "first.txt" || history.Messages[0].Files[1].Name != "second.txt" {
+		t.Fatalf("files=%+v", history.Messages[0].Files)
+	}
+	if _, err := s.GetDraft(context.Background(), "T1", "U1", "Cdev", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("sent attachment message left its old draft: %v", err)
+	}
+}
+
 // TestThreadRepliesRenderThroughTheSameTypeAsTheTimeline pins the invariant
 // behind the fix: one type feeds every message region, so no region can be
 // rendered with a value that is missing a field the partial needs.
@@ -336,7 +518,7 @@ func TestWorkspaceShellNamesConversationsAndAuthors(t *testing.T) {
 		`role="toolbar" aria-label="Message formatting and insertions"`,
 		`aria-label="Mention a person or user group"`,
 		`data-mention-user="U1"`,
-		`id="upload-preview" role="status">No file selected.`,
+		`id="upload-preview" role="status">No files selected. You can also paste or drop files into the composer.`,
 		`<span class="author">Ada Developer</span>`,
 		`<div class="avatar" aria-hidden="true">A</div>`,
 		`<span class="signed-in-avatar" aria-hidden="true">A</span>`,
@@ -611,13 +793,31 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := domain.ActivityIDFor("U1", "message:"+string(message.ID))
+	active := get(t, mux, "/app/activity?channel=Cdev")
+	reactionURL := "/app/reaction?channel=Cdev&amp;ts=" + url.QueryEscape(string(domain.NewMessageTimestamp(created)))
+	requireContains(t, "Activity message actions", active.Body.String(),
+		"triage me",
+		`data-activity-react="`+reactionURL+`"`,
+		`id="activity-reaction-dialog"`,
+		`id="activity-reaction-category"`,
+		`id="activity-reaction-tone"`,
+	)
+	reaction := postForm(t, mux, "/app/reaction?channel=Cdev&ts="+url.QueryEscape(string(domain.NewMessageTimestamp(created))), url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "name": {"wave::skin-tone-3"},
+	}.Encode(), true)
+	if reaction.Code != http.StatusNoContent {
+		t.Fatalf("Activity reaction status=%d body=%s", reaction.Code, reaction.Body)
+	}
+	renderedMessage := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "Activity reaction persisted", renderedMessage, `aria-label=":wave::skin-tone-3:">👋🏼</span>`)
+
 	clear := postForm(t, mux, "/app/activity/mutate?channel=Cdev&mutation=clear", url.Values{
 		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "single_id": {string(id)},
 	}.Encode(), false)
 	if clear.Code != http.StatusSeeOther {
 		t.Fatalf("clear status=%d body=%s", clear.Code, clear.Body)
 	}
-	active := get(t, mux, "/app/activity?channel=Cdev")
+	active = get(t, mux, "/app/activity?channel=Cdev")
 	requireMissing(t, "cleared item leaves active Activity", active.Body.String(), "triage me")
 	cleared := get(t, mux, "/app/activity?channel=Cdev&cleared=1")
 	requireContains(t, "cleared item is recoverable", cleared.Body.String(), "triage me", "Restore")
@@ -650,6 +850,11 @@ func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
 	requireContains(t, "Activity keyboard contract", activityMarkup,
 		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
 		"event.key==='x'", "event.key==='c'", "event.key==='r'",
+		"new EventSource('/events'",
+		"data-activity-id",
+		"focusedID",
+		"focus({preventScroll:true})",
+		"feed.replaceWith(replacement)",
 	)
 }
 
@@ -831,6 +1036,8 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 	body := get(t, mux, "/app?channel=Cdev").Body.String()
 	requireContains(t, "emoji composer and rendering", body,
 		`id="emoji-picker-dialog"`,
+		`id="emoji-picker-category"`,
+		`id="emoji-picker-tone"`,
 		`data-channel-id="Cdev"`,
 		`data-channel-name="general"`,
 		`class="custom-emoji" src="https://cdn.example/party.png" alt=":party_parrot:"`,
@@ -847,6 +1054,7 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 		`"name":"party_parrot"`,
 		`"image_url":"https://cdn.example/party.png"`,
 		`"category":"Custom"`,
+		`"categories":["Recent","Custom"`,
 	)
 
 	timestamp := string(domain.NewMessageTimestamp(created))
@@ -864,6 +1072,13 @@ func TestComposerAndMessagesUseWorkspaceEmojiAndVisibleChannelReferences(t *test
 	if invalid.Code != http.StatusBadRequest {
 		t.Fatalf("unknown reaction status=%d body=%s", invalid.Code, invalid.Body)
 	}
+
+	toned := postForm(t, mux, "/app/reaction?channel=Cdev&ts="+timestamp, "name=wave%3A%3Askin-tone-3", true)
+	if toned.Code != http.StatusNoContent {
+		t.Fatalf("skin-tone reaction status=%d body=%s", toned.Code, toned.Body)
+	}
+	tonedBody := get(t, mux, "/app?channel=Cdev").Body.String()
+	requireContains(t, "skin-tone reaction", tonedBody, `aria-label=":wave::skin-tone-3:">👋🏼</span>`)
 }
 
 // Editing and deleting were complete Slack API operations with no browser
@@ -2813,7 +3028,12 @@ func TestWorkspaceDiscoversAndDispatchesInstalledAppShortcuts(t *testing.T) {
 		"Shortcuts", "Create ticket", "Create a ticket", "More actions", "Attach ticket", "Attach this message",
 		`aria-label="Shortcuts and slash commands"`, `data-slash-command="/ticket"`, "summary", "Tickets",
 		`data-slash-command="/shrug"`,
+		`id="shortcut-browser"`, `id="shortcut-browser-query"`, `aria-label="Browse shortcuts"`,
+		`data-browser-command="/ticket"`, `data-browser-command="/shrug"`,
 		`action="/app/shortcut"`, `name="app_id" value="A1"`, `name="callback_id" value="create_ticket"`,
+	)
+	requireContains(t, "shortcut browser behavior", progressiveEnhancementScript,
+		"shortcutBrowser.showModal()", "filterShortcuts()", "replaceComposerRange(start,end,command+' '",
 	)
 
 	builtIn := postForm(t, mux, "/app/message?channel=Cdev", url.Values{

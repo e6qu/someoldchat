@@ -30,6 +30,8 @@ const (
 	AppsService_ListWorkspaceApps_FullMethodName           = "/sameoldchat.chat.v1.AppsService/ListWorkspaceApps"
 	AppsService_PutAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/PutAppDatastoreItems"
 	AppsService_GetAppDatastoreItems_FullMethodName        = "/sameoldchat.chat.v1.AppsService/GetAppDatastoreItems"
+	AppsService_QueryAppDatastoreItems_FullMethodName      = "/sameoldchat.chat.v1.AppsService/QueryAppDatastoreItems"
+	AppsService_CountAppDatastoreItems_FullMethodName      = "/sameoldchat.chat.v1.AppsService/CountAppDatastoreItems"
 	AppsService_DeleteAppDatastoreItems_FullMethodName     = "/sameoldchat.chat.v1.AppsService/DeleteAppDatastoreItems"
 	AppsService_GetDeveloperApp_FullMethodName             = "/sameoldchat.chat.v1.AppsService/GetDeveloperApp"
 	AppsService_IssueDeveloperAppToken_FullMethodName      = "/sameoldchat.chat.v1.AppsService/IssueDeveloperAppToken"
@@ -52,6 +54,8 @@ type AppsServiceClient interface {
 	ListWorkspaceApps(ctx context.Context, in *AppListRequest, opts ...grpc.CallOption) (*InstalledAppListResponse, error)
 	PutAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
+	QueryAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
+	CountAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error)
 	DeleteAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppMutationResponse, error)
 	GetDeveloperApp(ctx context.Context, in *AppGetRequest, opts ...grpc.CallOption) (*AppExportResponse, error)
 	IssueDeveloperAppToken(ctx context.Context, in *AppTokenIssueRequest, opts ...grpc.CallOption) (*AppTokenCredentials, error)
@@ -177,6 +181,26 @@ func (c *appsServiceClient) GetAppDatastoreItems(ctx context.Context, in *AppDat
 	return out, nil
 }
 
+func (c *appsServiceClient) QueryAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppDatastoreResponse)
+	err := c.cc.Invoke(ctx, AppsService_QueryAppDatastoreItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *appsServiceClient) CountAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppDatastoreResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AppDatastoreResponse)
+	err := c.cc.Invoke(ctx, AppsService_CountAppDatastoreItems_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *appsServiceClient) DeleteAppDatastoreItems(ctx context.Context, in *AppDatastoreRequest, opts ...grpc.CallOption) (*AppMutationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(AppMutationResponse)
@@ -242,6 +266,8 @@ type AppsServiceServer interface {
 	ListWorkspaceApps(context.Context, *AppListRequest) (*InstalledAppListResponse, error)
 	PutAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	GetAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
+	QueryAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
+	CountAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error)
 	DeleteAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppMutationResponse, error)
 	GetDeveloperApp(context.Context, *AppGetRequest) (*AppExportResponse, error)
 	IssueDeveloperAppToken(context.Context, *AppTokenIssueRequest) (*AppTokenCredentials, error)
@@ -288,6 +314,12 @@ func (UnimplementedAppsServiceServer) PutAppDatastoreItems(context.Context, *App
 }
 func (UnimplementedAppsServiceServer) GetAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetAppDatastoreItems not implemented")
+}
+func (UnimplementedAppsServiceServer) QueryAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method QueryAppDatastoreItems not implemented")
+}
+func (UnimplementedAppsServiceServer) CountAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppDatastoreResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CountAppDatastoreItems not implemented")
 }
 func (UnimplementedAppsServiceServer) DeleteAppDatastoreItems(context.Context, *AppDatastoreRequest) (*AppMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteAppDatastoreItems not implemented")
@@ -522,6 +554,42 @@ func _AppsService_GetAppDatastoreItems_Handler(srv interface{}, ctx context.Cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AppsService_QueryAppDatastoreItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppDatastoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).QueryAppDatastoreItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_QueryAppDatastoreItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).QueryAppDatastoreItems(ctx, req.(*AppDatastoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AppsService_CountAppDatastoreItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AppDatastoreRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AppsServiceServer).CountAppDatastoreItems(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AppsService_CountAppDatastoreItems_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AppsServiceServer).CountAppDatastoreItems(ctx, req.(*AppDatastoreRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AppsService_DeleteAppDatastoreItems_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(AppDatastoreRequest)
 	if err := dec(in); err != nil {
@@ -662,6 +730,14 @@ var AppsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetAppDatastoreItems",
 			Handler:    _AppsService_GetAppDatastoreItems_Handler,
+		},
+		{
+			MethodName: "QueryAppDatastoreItems",
+			Handler:    _AppsService_QueryAppDatastoreItems_Handler,
+		},
+		{
+			MethodName: "CountAppDatastoreItems",
+			Handler:    _AppsService_CountAppDatastoreItems_Handler,
 		},
 		{
 			MethodName: "DeleteAppDatastoreItems",

@@ -279,6 +279,71 @@ func parityCases() []parityCase {
 	}
 	return []parityCase{
 		{
+			name: "typed posting channel canvases and app workspace paging survive the composition seam",
+			seed: func(t *testing.T, target *memory.Store) {
+				seedBaseline(t, target)
+				requireSeed(t, target.SeedWorkspace(domain.Workspace{ID: "T2", Name: "second workspace"}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Unix(1_700_000_000, 0).UTC(),
+				}))
+				requireSeed(t, target.CreateAppInstallation(context.Background(), domain.AppInstallation{
+					AppID: "A1", WorkspaceID: "T2", Enabled: true, CreatedAt: time.Unix(1_700_000_001, 0).UTC(),
+				}))
+			},
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				message, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "typed post"})
+				if err != nil {
+					return nil, err
+				}
+				canvas, err := chat.CreateConversationCanvas(ctx, "T1", "U1", "C1", "Channel canvas", `{"type":"markdown","markdown":"hello"}`)
+				if err != nil {
+					return nil, err
+				}
+				loaded, err := chat.ConversationCanvas(ctx, "T1", "U1", "C1")
+				if err != nil {
+					return nil, err
+				}
+				byID, err := chat.Canvas(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				canvasAccess, err := chat.CanvasAccess(ctx, "T1", "U1", canvas.ID)
+				if err != nil {
+					return nil, err
+				}
+				canvasPage, err := chat.Canvases(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				list, err := chat.CreateList(ctx, "T1", "U1", "Work", "[]", "", "", false, true)
+				if err != nil {
+					return nil, err
+				}
+				listByID, err := chat.List(ctx, "T1", "U1", list.ID)
+				if err != nil {
+					return nil, err
+				}
+				listAccess, err := chat.ListAccess(ctx, "T1", "U1", list.ID)
+				if err != nil {
+					return nil, err
+				}
+				listPage, err := chat.Lists(ctx, "T1", "U1", domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				workspaces, err := chat.AuthorizedAppWorkspaces(ctx, "T1", "U1", "A1", domain.PageRequest{Limit: 1})
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					message.Text, message.Conversation,
+					canvas.Title, loaded.ID == canvas.ID, byID.ID == canvas.ID, canvasAccess.Access, loaded.Version, len(canvasPage.Canvases),
+					listByID.Name, listAccess.Access, len(listPage.Lists),
+					len(workspaces.Workspaces), workspaces.Workspaces[0].ID, workspaces.HasMore, workspaces.NextCursor != "",
+				}, nil
+			},
+		},
+		{
 			name: "direct history expansion and private conversion survive the composition seam",
 			seed: func(t *testing.T, target *memory.Store) {
 				seedBaseline(t, target)
@@ -1680,6 +1745,19 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				query, err := chat.QueryAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+					Expression: "#priority >= :minimum", ExpressionAttributes: `{"#priority":"priority"}`,
+					ExpressionValues: `{":minimum":3}`, Page: domain.PageRequest{Limit: 1},
+				})
+				if err != nil {
+					return nil, err
+				}
+				count, err := chat.CountAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+					Expression: "contains (#title, :term)", ExpressionAttributes: `{"#title":"title"}`, ExpressionValues: `{":term":"i"}`,
+				})
+				if err != nil {
+					return nil, err
+				}
 				if err := chat.DeleteAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-2"}); err != nil {
 					return nil, err
 				}
@@ -1687,7 +1765,7 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				return []any{put, updated, got, remaining}, nil
+				return []any{put, updated, got, query, count, remaining}, nil
 			},
 		},
 		{

@@ -200,24 +200,26 @@ func pinnedErrorCodes(t *testing.T) map[string]struct{} {
 func recordedNonPinnedCodes() map[string]string {
 	return map[string]string{
 		// Surfaces the pinned snapshot does not describe, or that declare no enum.
-		"cant_delete_primary_owner":  "the pinned snapshot declares no owner-protection code for admin.users.*; this names the real cause rather than reporting a permission failure the actor does not have",
-		"canvas_not_found":           "canvases.* is absent from the pinned snapshot",
-		"list_not_found":             "slackLists.* is absent from the pinned snapshot",
-		"call_not_found":             "calls.* declares no error enum",
-		"bookmark_not_found":         "bookmarks.* is absent from the pinned snapshot",
-		"too_many_bookmarks":         "bookmarks.* is absent from the pinned snapshot",
-		"remote_file_not_found":      "files.remote.* declares no error enum",
-		"remote_files_unavailable":   "files.remote.list declares no error enum",
-		"remote_file_already_exists": "files.remote.add declares no error enum",
-		"emoji_not_found":            "admin.emoji.* declares no error enum",
-		"emoji_already_exists":       "admin.emoji.add declares no error enum",
-		"invite_request_not_found":   "admin.inviteRequests.* declares no error enum",
-		"app_not_found":              "admin.apps.* declares no error enum",
-		"usergroup_not_found":        "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
-		"view_not_found":             "views.* declares no error enum",
-		"invalid_view":               "views.* declares no error enum",
-		"hash_conflict":              "views.* declares no error enum",
-		"file_storage_unavailable":   "blob-store outage; no pinned enum declares a storage-outage code",
+		"cant_delete_primary_owner":      "the pinned snapshot declares no owner-protection code for admin.users.*; this names the real cause rather than reporting a permission failure the actor does not have",
+		"canvas_not_found":               "canvases.* is absent from the pinned snapshot",
+		"channel_canvas_already_exists":  "current conversations.canvases.create singular-resource conflict; absent from the legacy OpenAPI snapshot",
+		"channel_canvas_creation_failed": "current conversations.canvases.create storage failure; absent from the legacy OpenAPI snapshot",
+		"list_not_found":                 "slackLists.* is absent from the pinned snapshot",
+		"call_not_found":                 "calls.* declares no error enum",
+		"bookmark_not_found":             "bookmarks.* is absent from the pinned snapshot",
+		"too_many_bookmarks":             "bookmarks.* is absent from the pinned snapshot",
+		"remote_file_not_found":          "files.remote.* declares no error enum",
+		"remote_files_unavailable":       "files.remote.list declares no error enum",
+		"remote_file_already_exists":     "files.remote.add declares no error enum",
+		"emoji_not_found":                "admin.emoji.* declares no error enum",
+		"emoji_already_exists":           "admin.emoji.add declares no error enum",
+		"invite_request_not_found":       "admin.inviteRequests.* declares no error enum",
+		"app_not_found":                  "admin.apps.* declares no error enum",
+		"usergroup_not_found":            "no pinned enum declares a subteam-not-found code, not even no_such_subteam",
+		"view_not_found":                 "views.* declares no error enum",
+		"invalid_view":                   "views.* declares no error enum",
+		"hash_conflict":                  "views.* declares no error enum",
+		"file_storage_unavailable":       "blob-store outage; no pinned enum declares a storage-outage code",
 		// OAuth 2.0 / OpenID Connect codes, governed by RFC 6749 rather than the
 		// Slack snapshot. oauth.* and openid.connect.* declare no error enum.
 		"invalid_client":         "RFC 6749 §5.2 token-endpoint error",
@@ -231,12 +233,15 @@ func recordedNonPinnedCodes() map[string]string {
 		// The immutable legacy OpenAPI snapshot predates the App Manifest APIs.
 		// These codes are declared by the current first-party method references
 		// pinned in specs/compatibility.yaml.
-		"invalid_app_id":   "current apps.manifest.* method references; absent from the legacy OpenAPI snapshot",
-		"invalid_manifest": "current apps.manifest.* method references; absent from the legacy OpenAPI snapshot",
-		"invalid_team_id":  "current apps.manifest.create method reference; absent from the legacy OpenAPI snapshot",
-		"not_enabled":      "current views.publish method reference; returned when the app's Home tab is not enabled and absent from the legacy OpenAPI snapshot",
-		"app_not_hosted":   "current apps.datastore.* method references; absent from the legacy OpenAPI snapshot",
-		"datastore_error":  "current apps.datastore.* structured validation error; absent from the legacy OpenAPI snapshot",
+		"invalid_app_id":                 "current apps.manifest.* method references; absent from the legacy OpenAPI snapshot",
+		"invalid_manifest":               "current apps.manifest.* method references; absent from the legacy OpenAPI snapshot",
+		"invalid_team_id":                "current apps.manifest.create method reference; absent from the legacy OpenAPI snapshot",
+		"not_enabled":                    "current views.publish method reference; returned when the app's Home tab is not enabled and absent from the legacy OpenAPI snapshot",
+		"app_not_hosted":                 "current apps.datastore.* method references; absent from the legacy OpenAPI snapshot",
+		"datastore_error":                "current apps.datastore.* structured validation error; absent from the legacy OpenAPI snapshot",
+		"as_user_not_supported":          "current chat.postMessage no longer accepts as_user for modern apps; absent from the legacy method enum",
+		"markdown_text_conflict":         "current message methods reject simultaneous text and markdown_text; absent from the legacy method enum",
+		"metadata_must_be_sent_from_app": "current Slack metadata contract requires an app identity; absent from the legacy method enum",
 		// Incoming webhooks answer plain text on hooks.slack.com, not a Web API method.
 		"no_team":             "incoming-webhook plain-text contract, not a Web API method",
 		"invalid_payload":     "incoming-webhook plain-text contract, not a Web API method",
@@ -423,9 +428,20 @@ func globallyExemptCodes() map[string]struct{} {
 func perOperationExemptions() map[string]map[string]string {
 	workspaceUnreadable := "the operation's enum declares no code for `the workspace behind an authenticated principal could not be read`; team_not_found names the real cause"
 	return map[string]map[string]string{
-		"/auth.test":                  {"team_not_found": workspaceUnreadable},
-		"/team.info":                  {"team_not_found": workspaceUnreadable},
-		"/rtm.connect":                {"team_not_found": workspaceUnreadable, "user_not_found": "rtm.connect resolves the connecting user and its enum declares no missing-user code"},
+		"/auth.test":   {"team_not_found": workspaceUnreadable},
+		"/team.info":   {"team_not_found": workspaceUnreadable},
+		"/rtm.connect": {"team_not_found": workspaceUnreadable, "user_not_found": "rtm.connect resolves the connecting user and its enum declares no missing-user code"},
+		"/chat.postMessage": {
+			"invalid_arguments": "current mutually exclusive rich-message arguments have no precise legacy error",
+			"missing_scope":     "customized authorship requires chat:write.customize in addition to chat:write",
+		},
+		"/chat.meMessage": {
+			"invalid_arguments": "the shared modern posting decoder validates mutually exclusive fields",
+			"missing_scope":     "the shared modern posting decoder enforces customized-authorship scope",
+		},
+		"/chat.scheduleMessage": {
+			"internal_error": "the method has no declared durable scheduling storage-failure code",
+		},
 		"/conversations.list":         {"team_not_found": workspaceUnreadable},
 		"/users.conversations":        {"team_not_found": workspaceUnreadable},
 		"/users.deletePhoto":          {"user_not_found": "the enum declares no missing-user code, though the operation is defined entirely in terms of a user"},

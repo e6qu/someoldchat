@@ -63,6 +63,26 @@ func TestHostedAppDatastoreCRUDValidatesManifestSchema(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0] != put[1] || got[1] != updated[0] {
 		t.Fatalf("get=%v err=%v", got, err)
 	}
+	query, err := messages.QueryAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+		Expression:           "contains (#title, :term) AND #priority BETWEEN :low AND :high",
+		ExpressionAttributes: `{"#title":"title","#priority":"priority"}`,
+		ExpressionValues:     `{":term":"igate",":low":2,":high":3}`,
+		Page:                 domain.PageRequest{Limit: 100},
+	})
+	if err != nil || query.HasMore || len(query.Items) != 1 || query.Items[0] != updated[0] {
+		t.Fatalf("query=%+v err=%v", query, err)
+	}
+	count, err := messages.CountAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+		Expression: "begins_with (#title, :prefix)", ExpressionAttributes: `{"#title":"title"}`, ExpressionValues: `{":prefix":"M"}`,
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	if _, err := messages.QueryAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", domain.AppDatastoreQuery{
+		Expression: "#id = :id", ExpressionAttributes: `{"#id":"id"}`, ExpressionValues: `{":id":"INC-1"}`, Page: domain.PageRequest{Limit: 100},
+	}); !errors.Is(err, ErrInvalidDatastoreQuery) {
+		t.Fatalf("primary-key query error=%v, want %v", err, ErrInvalidDatastoreQuery)
+	}
 	if err := messages.DeleteAppDatastoreItems(ctx, "T1", "U1", "A1", "incidents", []string{"INC-2"}); err != nil {
 		t.Fatal(err)
 	}

@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/store"
 	"github.com/sameoldchat/sameoldchat/internal/store/memory"
 )
 
@@ -34,6 +36,17 @@ func TestCanvasLifecycleAndSectionLookup(t *testing.T) {
 	if err != nil || len(sections) != 1 {
 		t.Fatalf("edited sections=%+v err=%v", sections, err)
 	}
+	if err := messages.EditCanvas(ctx, "T1", "U1", canvas.ID, `[{"operation":"replace","title_content":{"title":"Revised plan"}},{"operation":"replace","document_content":{"type":"markdown","markdown":"One atomic revision"}}]`); err != nil {
+		t.Fatal(err)
+	}
+	revised, err := store.GetCanvas(ctx, "T1", canvas.ID)
+	if err != nil || revised.Title != "Revised plan" || revised.Version != 3 {
+		t.Fatalf("revised canvas=%+v err=%v", revised, err)
+	}
+	sections, err = messages.LookupCanvasSections(ctx, "T1", "U1", canvas.ID, `{"contains_text":"Details"}`)
+	if err != nil || len(sections) != 0 {
+		t.Fatalf("replaced content still contains old section=%+v err=%v", sections, err)
+	}
 	if err := messages.SetCanvasAccess(ctx, "T1", "U1", canvas.ID, "write", nil, []domain.UserID{"U1"}); err != nil {
 		t.Fatal(err)
 	}
@@ -45,6 +58,32 @@ func TestCanvasLifecycleAndSectionLookup(t *testing.T) {
 	}
 	if _, err := store.GetCanvas(ctx, "T1", canvas.ID); err == nil {
 		t.Fatal("deleted canvas remained readable")
+	}
+}
+
+func TestConversationCanvasIsSingularAndInheritsChannelAccess(t *testing.T) {
+	ctx := context.Background()
+	backing := memory.New()
+	backing.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Workspace"})
+	backing.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	backing.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob"})
+	backing.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	backing.SeedConversationMember("C1", "U1")
+	backing.SeedConversationMember("C1", "U2")
+	messages := Messages{Store: backing}
+
+	canvas, err := messages.CreateConversationCanvas(ctx, "T1", "U1", "C1", "Channel notes", `{"type":"markdown","markdown":"hello"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.ConversationCanvas(ctx, "T1", "U2", "C1"); err != nil {
+		t.Fatalf("channel member could not read its channel canvas: %v", err)
+	}
+	if err := messages.EditCanvas(ctx, "T1", "U2", canvas.ID, `[{"operation":"replace","document_content":{"type":"markdown","markdown":"updated"}}]`); err != nil {
+		t.Fatalf("channel member could not edit its channel canvas: %v", err)
+	}
+	if _, err := messages.CreateConversationCanvas(ctx, "T1", "U1", "C1", "Duplicate", ""); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("duplicate error=%v, want %v", err, store.ErrAlreadyExists)
 	}
 }
 

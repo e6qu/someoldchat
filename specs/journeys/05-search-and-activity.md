@@ -159,6 +159,11 @@ Implemented evidence:
   real items; Enter opens the correct thread reply composer. Clearing marks
   read and hides the item, while restore preserves that read state. The UI
   exposes per-item and bulk mark-unread as the inverse durable operation.
+  Message-backed items expose the same searchable/category/skin-tone reaction
+  picker as the composer. Live source events refetch the current filtered
+  Activity projection, deduplicate through durable item IDs, preserve selected
+  items, focused controls, scroll position, and the exact active filters, and
+  announce reconnect/update state without moving the item being triaged.
 - Search parses quoted/excluded terms and current sender, conversation, date,
   thread, saved, file, pin, reaction, and file-type
   modifiers into a typed domain request. Message and file search apply
@@ -189,8 +194,6 @@ Known gaps, which MUST NOT be reported as full Activity compatibility:
 - invitation, VIP, section notifications, and custom saved views depend on
   product models not yet implemented; those filters are not rendered as empty
   fake controls;
-- the first-party UI does not yet expose inline react actions, and Activity
-  does not yet merge live SSE updates while preserving focus;
 - schema version 107 creates the durable Activity store but does not backfill
   notification history created by an older release. Existing source messages
   remain available through conversation/search history; Activity begins with

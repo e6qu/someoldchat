@@ -22,6 +22,15 @@
    duplicate, and server-rejected sends retain recoverable input and present a
    specific non-500 result.
 
+Audio and video clip controls request only the required browser devices, show
+recording and permission-failure state, stop at Slack's five-minute limit, and
+stage the resulting media without sending it. The member may add text, remove
+the clip, or send it through the same exactly-once file-share transaction as
+other staged attachments. Cancelling or closing the recorder stops every media
+track and adds no file. Slack's video source selection, camera/microphone
+controls, thumbnail selection, and optional transcript are part of this journey
+and remain explicit differential requirements until implemented and captured.
+
 ## COMP-02 — Format with keyboard and controls
 
 Formatting controls and keyboard shortcuts MUST produce Slack-compatible
@@ -163,8 +172,9 @@ outcomes are not HTTP 500 responses.
 ## Evidence
 
 - Browser: rich/plain composition, all suggestion types, keyboard formatting,
-  file staging, draft switching/reload, all Drafts & sent tabs, schedule
-  picker, edit/cancel/send-now, and delivery/failure updates.
+  pasted/dropped/selected file staging, permission-denied/cancelled/completed
+  audio and video clip recording, draft switching/reload, all Drafts & sent
+  tabs, schedule picker, edit/cancel/send-now, and delivery/failure updates.
 - Backend: current official SDK qualification for `chat.postMessage`,
   `chat.scheduleMessage`, `chat.scheduledMessages.list`, and
   `chat.deleteScheduledMessage`; Node, Python, and Java also request
@@ -197,7 +207,7 @@ outcomes are not HTTP 500 responses.
 
 | Journey | Official source | Behavior established |
 | --- | --- | --- |
-| COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips. |
+| COMP-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack's composer sends text, formatting, files, emoji, mentions, and clips; recordings are at most five minutes and may carry an optional message. |
 | COMP-02 | [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages) | Slack publishes formatting controls, markup, and keyboard behavior. |
 | COMP-03 | [Create and edit user groups](https://slack.com/help/articles/212906697-Create-and-edit-user-groups) | A user group's unique handle notifies its members; the emoji and developer transport sources checked below establish the other completion representations. |
 | DRAFT-01 | [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages) | Slack preserves and exposes drafts associated with their destination. |
@@ -208,6 +218,7 @@ outcomes are not HTTP 500 responses.
 Sources checked 2026-07-30:
 
 - [Send and read messages](https://slack.com/help/articles/201457107-Send-and-read-messages)
+- [Record audio and video clips](https://slack.com/help/articles/4406235165587-Record-audio-and-video-clips-in-Slack)
 - [Format your messages](https://slack.com/help/articles/202288908-Format-your-messages)
 - [Use emoji and reactions](https://slack.com/help/articles/202931348-Use-emoji-and-reactions)
 - [Use mentions in Slack](https://slack.com/help/articles/205240127-Use-mentions-in-Slack)

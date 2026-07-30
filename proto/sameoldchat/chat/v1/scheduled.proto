@@ -24,6 +24,8 @@ message ScheduledMessage {
   int64 delivered_at = 14;
   int64 failed_at = 15;
   string failure_code = 16;
+  string metadata = 17;
+  string stream_state = 18;
 }
 
 message ScheduleMessageRequest {
@@ -38,6 +40,8 @@ message ScheduleMessageRequest {
   string bot_id = 9;
   string credential_hash = 10;
   string thread_ts = 11;
+  string metadata = 12;
+  string stream_state = 13;
 }
 
 message ScheduledMessagesRequest {

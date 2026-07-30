@@ -341,6 +341,7 @@ CREATE TABLE IF NOT EXISTS scheduled_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), channel_id TEXT NOT NULL REFERENCES conversations(id),
  author_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', bot_id TEXT NOT NULL DEFAULT '',
  credential_hash TEXT NOT NULL DEFAULT '', text TEXT NOT NULL, blocks TEXT NOT NULL DEFAULT '', attachments TEXT NOT NULL DEFAULT '',
+ metadata TEXT NOT NULL DEFAULT '', stream_state TEXT NOT NULL DEFAULT '',
  thread_ts TEXT NOT NULL DEFAULT '', post_at INTEGER NOT NULL, created_at INTEGER NOT NULL,
  delivered INTEGER NOT NULL DEFAULT 0, delivered_at INTEGER NOT NULL DEFAULT 0, failed_at INTEGER NOT NULL DEFAULT 0,
  failure_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0
@@ -384,12 +385,12 @@ CREATE TABLE IF NOT EXISTS custom_emoji (
 CREATE TABLE IF NOT EXISTS lists (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0,
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+ version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS list_items (
  id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id),
- created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id);
 CREATE TABLE IF NOT EXISTS list_access (
@@ -402,7 +403,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 114
+const schemaVersion = 116
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -1818,7 +1819,7 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 	}
 	if version < 66 {
-		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvases (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, document_content TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)`); err != nil {
 			return fmt.Errorf("migrate canvases: %w", err)
 		}
 		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS canvas_access (canvas_id TEXT NOT NULL REFERENCES canvases(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (canvas_id, entity_type, entity_id))`); err != nil {
@@ -1830,8 +1831,8 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 	}
 	if version < 67 {
 		for _, statement := range []string{
-			`CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
-			`CREATE TABLE IF NOT EXISTS list_items (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)`,
+			`CREATE TABLE IF NOT EXISTS lists (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), owner_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, description_blocks TEXT NOT NULL DEFAULT '[]', schema_json TEXT NOT NULL DEFAULT '[]', todo_mode INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+			`CREATE TABLE IF NOT EXISTS list_items (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), parent_item_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), fields TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL REFERENCES users(id), updated_by TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0, version INTEGER NOT NULL DEFAULT 1)`,
 			`CREATE INDEX IF NOT EXISTS list_items_list_id ON list_items(list_id, id)`,
 			`CREATE TABLE IF NOT EXISTS list_access (list_id TEXT NOT NULL REFERENCES lists(id), entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, access_level TEXT NOT NULL, PRIMARY KEY (list_id, entity_type, entity_id))`,
 			`CREATE TABLE IF NOT EXISTS list_downloads (id TEXT PRIMARY KEY, list_id TEXT NOT NULL REFERENCES lists(id), workspace_id TEXT NOT NULL REFERENCES workspaces(id), status TEXT NOT NULL, url TEXT NOT NULL DEFAULT '', include_archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`,
@@ -2492,6 +2493,37 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index recent searches: %w", err)
 		}
 	}
+	if version < 115 {
+		for _, table := range []string{"canvases", "lists", "list_items"} {
+			existing, err := s.tableColumns(ctx, db, table)
+			if err != nil {
+				return err
+			}
+			if !existing["version"] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN version INTEGER NOT NULL DEFAULT 1`); err != nil {
+					return fmt.Errorf("migrate %s optimistic revision: %w", table, err)
+				}
+			}
+		}
+	}
+	if version < 116 {
+		columns, err := s.tableColumns(ctx, db, "scheduled_messages")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"metadata TEXT NOT NULL DEFAULT ''",
+			"stream_state TEXT NOT NULL DEFAULT ''",
+		} {
+			name := strings.Fields(column)[0]
+			if columns[name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE scheduled_messages ADD COLUMN `+column); err != nil {
+				return fmt.Errorf("migrate scheduled message field %s: %w", name, err)
+			}
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2762,7 +2794,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "drafts" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -9009,7 +9041,10 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix())
 	if err != nil {
 		return classify(err)
 	}
@@ -9019,10 +9054,94 @@ func (s *Store) CreateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 	return tx.Commit()
 }
 
+func (s *Store) CreateCanvasWithAccess(ctx context.Context, canvas domain.Canvas, event events.Event, access domain.CanvasAccess, accessEvent events.Event) error {
+	if access.CanvasID != canvas.ID || access.EntityType == "" || access.EntityID == "" || access.Access == "" {
+		return store.ErrInvalidArgument
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, ?, ?, ?)`, access.CanvasID, access.EntityType, access.EntityID, access.Access); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, accessEvent); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CreateChannelCanvas(ctx context.Context, canvas domain.Canvas, event events.Event, channel domain.ConversationID, accessEvent events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE conversations SET id = id WHERE id = ? AND workspace_id = ?`, channel, canvas.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if changed, err := result.RowsAffected(); err != nil {
+		return err
+	} else if changed != 1 {
+		return store.ErrNotFound
+	}
+	var existing string
+	err = tx.QueryRowContext(ctx, `SELECT canvas_id FROM canvas_access WHERE entity_type = 'channel_canvas' AND entity_id = ? LIMIT 1`, channel).Scan(&existing)
+	if err == nil {
+		return store.ErrAlreadyExists
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvases (id, workspace_id, owner_id, title, document_content, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, canvas.ID, canvas.WorkspaceID, canvas.OwnerID, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.CreatedAt.UTC().Unix(), canvas.UpdatedAt.UTC().Unix()); err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO canvas_access(canvas_id, entity_type, entity_id, access_level) VALUES (?, 'channel_canvas', ?, ?)`, canvas.ID, channel, store.AccessWrite); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	if err := insertOutbox(ctx, tx, accessEvent); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetChannelCanvas(ctx context.Context, workspace domain.WorkspaceID, channel domain.ConversationID) (domain.Canvas, error) {
+	var canvas domain.Canvas
+	var createdAt, updatedAt int64
+	err := s.db.QueryRowContext(ctx, `SELECT c.id, c.workspace_id, c.owner_id, c.title, c.document_content, c.version, c.created_at, c.updated_at
+		FROM canvases c JOIN canvas_access a ON a.canvas_id = c.id
+		JOIN conversations ch ON ch.id = a.entity_id
+		WHERE a.entity_type = 'channel_canvas' AND a.entity_id = ? AND c.workspace_id = ? AND ch.workspace_id = c.workspace_id
+		LIMIT 1`, channel, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.Version, &createdAt, &updatedAt)
+	if err != nil {
+		return domain.Canvas{}, translateNotFound(err)
+	}
+	canvas.CreatedAt = time.Unix(createdAt, 0).UTC()
+	canvas.UpdatedAt = time.Unix(updatedAt, 0).UTC()
+	return canvas, nil
+}
+
 func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
 	var canvas domain.Canvas
 	var created, updated int64
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &created, &updated)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, title, document_content, version, created_at, updated_at FROM canvases WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&canvas.ID, &canvas.WorkspaceID, &canvas.OwnerID, &canvas.Title, &canvas.DocumentContent, &canvas.Version, &created, &updated)
 	if err := translateNotFound(err); err != nil {
 		return domain.Canvas{}, err
 	}
@@ -9031,13 +9150,60 @@ func (s *Store) GetCanvas(ctx context.Context, workspace domain.WorkspaceID, id 
 	return canvas, nil
 }
 
+func (s *Store) ListCanvases(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.workspace_id, d.owner_id, d.title, d.document_content, d.version, d.created_at, d.updated_at
+		FROM canvases d
+		WHERE d.workspace_id = ? AND d.id > ?
+		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
+		  AND (d.owner_id = ? OR EXISTS (
+		    SELECT 1 FROM canvas_access a WHERE a.canvas_id = d.id
+		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
+		        OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (
+		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
+		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))
+		ORDER BY d.id LIMIT ?`, workspace, after, userID, userID, userID, userID, request.Limit+1)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.Canvas, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.Canvas
+		var created, updated int64
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Title, &value.DocumentContent, &value.Version, &created, &updated); err != nil {
+			return domain.CanvasPage{}, err
+		}
+		value.CreatedAt, value.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.CanvasPage{Canvases: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, canvas.Title, canvas.DocumentContent, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE canvases SET title = ?, document_content = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, canvas.Title, canvas.DocumentContent, canvas.Version, canvas.UpdatedAt.UTC().Unix(), canvas.ID, canvas.WorkspaceID, canvas.Version-1)
 	if err != nil {
 		return err
 	}
@@ -9046,6 +9212,13 @@ func (s *Store) UpdateCanvas(ctx context.Context, canvas domain.Canvas, event ev
 		return err
 	}
 	if changed != 1 {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM canvases WHERE id = ? AND workspace_id = ?)`, canvas.ID, canvas.WorkspaceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return store.ErrConflict
+		}
 		return store.ErrNotFound
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -9151,7 +9324,7 @@ func (s *Store) resolveAccess(ctx context.Context, scope accessScope, id string,
 	if owner == userID {
 		bestType, bestID, bestLevel = "user", string(userID), store.AccessOwner
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT a.entity_type, a.entity_id, a.access_level FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+` WHERE a.`+scope.keyColumn+` = ? AND ((a.entity_type = 'user' AND a.entity_id = ?) OR (a.entity_type = 'channel' AND EXISTS (SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))`, id, string(userID), userID)
+	rows, err := s.db.QueryContext(ctx, `SELECT a.entity_type, a.entity_id, a.access_level FROM `+scope.accessTable+` a JOIN `+scope.documentTable+` d ON d.id = a.`+scope.keyColumn+` WHERE a.`+scope.keyColumn+` = ? AND ((a.entity_type = 'user' AND a.entity_id = ?) OR (a.entity_type IN ('channel', 'channel_canvas') AND EXISTS (SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))`, id, string(userID), userID)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -9773,7 +9946,7 @@ func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.Schedul
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.Metadata, value.StreamState, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -9827,7 +10000,7 @@ func (s *Store) CreateScheduledMessageWithinLimit(ctx context.Context, value dom
 	if store.ScheduledMessageLimitExceeded(nearby, value.PostAt, window, limit) {
 		return store.ErrScheduledMessageLimit
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO scheduled_messages(id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered, delivered_at, failed_at, failure_code, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, '', '', 0, 0)`, value.ID, value.WorkspaceID, value.Channel, value.Author, value.AppID, value.BotID, value.CredentialHash, value.Text, value.Blocks, value.Attachments, value.Metadata, value.StreamState, value.ThreadTimestamp, value.PostAt.Unix(), value.CreatedAt.Unix()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -9853,7 +10026,7 @@ func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 	var postAt, createdAt, deliveredAt, failedAt int64
 	err := row.Scan(
 		&value.ID, &value.WorkspaceID, &value.Channel, &value.Author, &value.AppID, &value.BotID,
-		&value.CredentialHash, &value.Text, &value.Blocks, &value.Attachments, &value.ThreadTimestamp,
+		&value.CredentialHash, &value.Text, &value.Blocks, &value.Attachments, &value.Metadata, &value.StreamState, &value.ThreadTimestamp,
 		&postAt, &createdAt, &deliveredAt, &failedAt, &value.FailureCode,
 	)
 	if err != nil {
@@ -9870,7 +10043,7 @@ func scanScheduledMessage(row rowScanner) (domain.ScheduledMessage, error) {
 	return value, nil
 }
 
-const scheduledMessageColumns = `id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, thread_ts, post_at, created_at, delivered_at, failed_at, failure_code`
+const scheduledMessageColumns = `id, workspace_id, channel_id, author_id, app_id, bot_id, credential_hash, text, blocks, attachments, metadata, stream_state, thread_ts, post_at, created_at, delivered_at, failed_at, failure_code`
 
 func (s *Store) ListScheduledMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, channel domain.ConversationID, request domain.PageRequest) (domain.ScheduledMessagePage, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
@@ -12364,7 +12537,10 @@ func (s *Store) CreateListWithItems(ctx context.Context, value domain.List, even
 		return err
 	}
 	defer tx.Rollback()
-	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO lists(id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.OwnerID, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt))
 	if err != nil {
 		return classify(err)
 	}
@@ -12386,7 +12562,7 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 	var value domain.List
 	var createdAt, updatedAt string
 	var todoMode int
-	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, created_at, updated_at FROM lists WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todoMode, &createdAt, &updatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT id, workspace_id, owner_id, name, description_blocks, schema_json, todo_mode, version, created_at, updated_at FROM lists WHERE id = ? AND workspace_id = ?`, id, workspace).Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todoMode, &value.Version, &createdAt, &updatedAt)
 	if err != nil {
 		return domain.List{}, translateNotFound(err)
 	}
@@ -12402,19 +12578,82 @@ func (s *Store) GetList(ctx context.Context, workspace domain.WorkspaceID, id do
 	return value, nil
 }
 
+func (s *Store) ListLists(ctx context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT d.id, d.workspace_id, d.owner_id, d.name, d.description_blocks, d.schema_json, d.todo_mode, d.version, d.created_at, d.updated_at
+		FROM lists d
+		WHERE d.workspace_id = ? AND d.id > ?
+		  AND EXISTS (SELECT 1 FROM users u WHERE u.id = ? AND u.workspace_id = d.workspace_id AND u.deleted = 0)
+		  AND (d.owner_id = ? OR EXISTS (
+		    SELECT 1 FROM list_access a WHERE a.list_id = d.id
+		      AND ((a.entity_type = 'user' AND a.entity_id = ?)
+		        OR (a.entity_type = 'channel' AND EXISTS (
+		          SELECT 1 FROM conversation_members m JOIN conversations c ON c.id = m.conversation_id
+		          WHERE m.conversation_id = a.entity_id AND m.user_id = ? AND c.workspace_id = d.workspace_id)))))
+		ORDER BY d.id LIMIT ?`, workspace, after, userID, userID, userID, userID, request.Limit+1)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	defer rows.Close()
+	values := make([]domain.List, 0, request.Limit+1)
+	for rows.Next() {
+		var value domain.List
+		var todo int
+		var created, updated string
+		if err := rows.Scan(&value.ID, &value.WorkspaceID, &value.OwnerID, &value.Name, &value.DescriptionBlocks, &value.Schema, &todo, &value.Version, &created, &updated); err != nil {
+			return domain.ListPage{}, err
+		}
+		value.TodoMode = todo != 0
+		value.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			return domain.ListPage{}, err
+		}
+		value.UpdatedAt, err = domain.ParseStoredTime(updated)
+		if err != nil {
+			return domain.ListPage{}, err
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ListPage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ListPage{Lists: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateList(ctx context.Context, value domain.List, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, updated_at = ? WHERE id = ? AND workspace_id = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE lists SET name = ?, description_blocks = ?, schema_json = ?, todo_mode = ?, version = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?`, value.Name, value.DescriptionBlocks, value.Schema, boolInt(value.TodoMode), value.Version, domain.NewStoredTime(value.UpdatedAt), value.ID, value.WorkspaceID, value.Version-1)
 	if err != nil {
 		return err
 	}
 	if count, err := result.RowsAffected(); err != nil || count != 1 {
 		if err != nil {
 			return err
+		}
+		var exists bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM lists WHERE id = ? AND workspace_id = ?)`, value.ID, value.WorkspaceID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return store.ErrConflict
 		}
 		return store.ErrNotFound
 	}
@@ -12448,7 +12687,10 @@ func insertListItem(ctx context.Context, tx *sql.Tx, value domain.ListItem) erro
 			return translateNotFound(err)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived)); err != nil {
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO list_items(id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.ListID, value.ParentItemID, value.WorkspaceID, value.Fields, value.CreatedBy, value.UpdatedBy, domain.NewStoredTime(value.CreatedAt), domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version); err != nil {
 		return classify(err)
 	}
 	return nil
@@ -12458,7 +12700,7 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 	var value domain.ListItem
 	var createdAt, updatedAt string
 	var archived int
-	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived); err != nil {
+	if err := scanner.Scan(&value.ID, &value.ListID, &value.ParentItemID, &value.WorkspaceID, &value.Fields, &value.CreatedBy, &value.UpdatedBy, &createdAt, &updatedAt, &archived, &value.Version); err != nil {
 		return domain.ListItem{}, err
 	}
 	var err error
@@ -12475,7 +12717,7 @@ func scanListItem(scanner interface{ Scan(...any) error }) (domain.ListItem, err
 }
 
 func (s *Store) GetListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID) (domain.ListItem, error) {
-	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
+	value, err := scanListItem(s.db.QueryRowContext(ctx, `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?`, id, listID, workspace))
 	if err != nil {
 		return domain.ListItem{}, translateNotFound(err)
 	}
@@ -12490,7 +12732,7 @@ func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, lis
 	if err != nil {
 		return domain.ListItemPage{}, err
 	}
-	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
+	query := `SELECT id, list_id, parent_item_id, workspace_id, fields, created_by, updated_by, created_at, updated_at, archived, version FROM list_items WHERE list_id = ? AND workspace_id = ? AND id > ?`
 	args := []any{listID, workspace, after}
 	if !archived {
 		query += ` AND archived = 0`
@@ -12528,25 +12770,50 @@ func (s *Store) ListItems(ctx context.Context, workspace domain.WorkspaceID, lis
 }
 
 func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
+	return s.UpdateListItems(ctx, []domain.ListItem{value}, []events.Event{event})
+}
+
+func (s *Store) UpdateListItems(ctx context.Context, values []domain.ListItem, records []events.Event) error {
+	if len(values) == 0 || len(values) != len(records) {
+		return store.ErrInvalidArgument
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ? WHERE id = ? AND list_id = ? AND workspace_id = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.ID, value.ListID, value.WorkspaceID)
-	if err != nil {
-		return err
-	}
-	if count, err := result.RowsAffected(); err != nil || count != 1 {
-		if err != nil {
+	seen := make(map[domain.ListItemID]struct{}, len(values))
+	for index, value := range values {
+		if _, duplicate := seen[value.ID]; duplicate {
+			return store.ErrInvalidArgument
+		}
+		seen[value.ID] = struct{}{}
+		result, updateErr := tx.ExecContext(ctx, `UPDATE list_items SET parent_item_id = ?, fields = ?, updated_by = ?, updated_at = ?, archived = ?, version = ? WHERE id = ? AND list_id = ? AND workspace_id = ? AND version = ?`, value.ParentItemID, value.Fields, value.UpdatedBy, domain.NewStoredTime(value.UpdatedAt), boolInt(value.Archived), value.Version, value.ID, value.ListID, value.WorkspaceID, value.Version-1)
+		if updateErr != nil {
+			return updateErr
+		}
+		count, countErr := result.RowsAffected()
+		if countErr != nil {
+			return countErr
+		}
+		if count != 1 {
+			var exists bool
+			if existsErr := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM list_items WHERE id = ? AND list_id = ? AND workspace_id = ?)`, value.ID, value.ListID, value.WorkspaceID).Scan(&exists); existsErr != nil {
+				return existsErr
+			}
+			if exists {
+				return store.ErrConflict
+			}
+			return store.ErrNotFound
+		}
+		if err := insertOutbox(ctx, tx, records[index]); err != nil {
 			return err
 		}
-		return store.ErrNotFound
 	}
-	if err := insertOutbox(ctx, tx, event); err != nil {
+	if err := tx.Commit(); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) DeleteListItem(ctx context.Context, workspace domain.WorkspaceID, listID domain.ListID, id domain.ListItemID, event events.Event) error {

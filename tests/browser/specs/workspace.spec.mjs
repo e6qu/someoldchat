@@ -304,6 +304,19 @@ test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app m
     await page.keyboard.press('c');
     await expect(page.locator('[data-activity-row]')).toHaveCount(1);
 
+    rows = page.locator('[data-activity-row]');
+    const focusedActivityID = await rows.nth(0).getAttribute('data-activity-id');
+    await rows.nth(0).focus();
+    const live = `app mention live ${Date.now()}`;
+    await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${live}` });
+    await expect(page.locator('[data-activity-row]')).toHaveCount(2);
+    await expect(page.locator(`[data-activity-id="${focusedActivityID}"]`)).toBeFocused();
+    const liveRow = page.locator('[data-activity-row]', { hasText: live });
+    await expect(liveRow).toBeVisible();
+    await liveRow.focus();
+    await page.keyboard.press('r');
+    await expect(liveRow).not.toHaveClass(/unread/);
+
     await page.getByRole('link', { name: 'Unread' }).click();
     await expect(page.getByRole('link', { name: 'Unread' })).toHaveAttribute('aria-current', 'page');
     // Opening the source thread advances the conversation read cursor, so the
@@ -1648,6 +1661,41 @@ test('[MSG-01 RESILIENCE-01] a message sent while reading older history is not l
   // The reader is taken to the window the message is actually in.
   await expect(page.locator('#timeline')).toHaveAttribute('data-live', 'true');
   await expect(page.locator('.message-text', { hasText: sent })).toHaveCount(1);
+});
+
+test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive their daily UI journeys', async ({ page, context }) => {
+  await signIn(context);
+  await page.goto('/app');
+
+  await page.getByRole('link', { name: 'Canvases' }).click();
+  await page.getByText('Create a canvas').click();
+  const canvasName = `Launch canvas ${Date.now()}`;
+  await page.getByLabel('Name').fill(canvasName);
+  await page.getByLabel('Content').fill('Initial durable content');
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name: canvasName })).toBeVisible();
+  await page.getByLabel('Title').fill(`${canvasName} revised`);
+  await page.getByLabel('Content').fill('One atomic revision');
+  await page.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByText('Canvas saved')).toBeVisible();
+  await page.getByRole('link', { name: 'Canvases' }).click();
+  await expect(page.getByRole('heading', { name: `${canvasName} revised` })).toBeVisible();
+
+  await page.goto('/app/lists');
+  await page.getByText('Create a list').click();
+  const listName = `Launch list ${Date.now()}`;
+  await page.getByLabel('Name').fill(listName);
+  await page.getByLabel('Use as a to-do list').check();
+  await page.getByRole('button', { name: 'Create' }).click();
+  await expect(page.getByRole('heading', { name: listName })).toBeVisible();
+  await page.getByLabel('New item').fill('Verify the persisted journey');
+  await page.getByRole('button', { name: 'Add' }).click();
+  await expect(page.getByText('Verify the persisted journey')).toBeVisible();
+  await page.getByRole('button', { name: 'Complete' }).click();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Restore' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
 });
 
 // Sign-out must come last in this file. The suite runs with a single worker

@@ -18,6 +18,12 @@ func TestPinnedCatalogIsCompleteAndSearchable(t *testing.T) {
 	if _, ok := Lookup("thumbsup"); !ok {
 		t.Fatal("thumbsup alias is missing")
 	}
+	if rendered, ok := ReactionUnicode("wave::skin-tone-3"); !ok || rendered != "👋🏼" {
+		t.Fatalf("skin-tone reaction=%q ok=%v, want 👋🏼", rendered, ok)
+	}
+	if _, ok := ReactionUnicode("tada::skin-tone-3"); ok {
+		t.Fatal("an emoji without skin variations accepted a skin tone")
+	}
 	categories := Categories()
 	if len(categories) != 9 || categories[0].Name == "" || len(categories[0].EmojiNames) == 0 {
 		t.Fatalf("categories=%+v", categories)

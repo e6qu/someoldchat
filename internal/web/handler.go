@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"html/template"
 	"io"
 	"mime"
@@ -233,11 +234,12 @@ type reactionView struct {
 }
 
 type emojiOptionView struct {
-	Name     string `json:"name"`
-	Display  string `json:"display"`
-	ImageURL string `json:"image_url,omitempty"`
-	Category string `json:"category"`
-	Custom   bool   `json:"custom"`
+	Name      string `json:"name"`
+	Display   string `json:"display"`
+	ImageURL  string `json:"image_url,omitempty"`
+	Category  string `json:"category"`
+	Custom    bool   `json:"custom"`
+	SkinTones bool   `json:"skin_tones,omitempty"`
 }
 
 type conversationView struct {
@@ -381,6 +383,55 @@ type directMessagesData struct {
 	CSRFToken  string
 	Error      string
 	CanMessage bool
+}
+
+type documentsData struct {
+	Kind      string
+	Title     string
+	CSRFToken string
+	CanWrite  bool
+	Canvases  []documentCardView
+	Lists     []documentCardView
+	MoreURL   string
+	Notice    string
+}
+
+type documentCardView struct {
+	ID        string
+	Title     string
+	Preview   string
+	URL       string
+	UpdatedAt string
+}
+
+type canvasData struct {
+	ID             string
+	Title          string
+	Body           string
+	SectionID      string
+	UpdatedAt      string
+	CSRFToken      string
+	CanWrite       bool
+	CanDelete      bool
+	ReadOnlyReason string
+	Notice         string
+}
+
+type listData struct {
+	ID        string
+	Name      string
+	TodoMode  bool
+	Items     []listItemView
+	MoreURL   string
+	CSRFToken string
+	CanWrite  bool
+	Notice    string
+}
+
+type listItemView struct {
+	ID       string
+	Title    string
+	Archived bool
 }
 
 type directExpansionReviewData struct {
@@ -827,7 +878,9 @@ const pageStyle = `<style>
 .slash-suggestions button{align-items:flex-start;gap:10px}.slash-suggestions strong{min-width:100px}.slash-suggestions small{display:block;color:var(--muted)}
 .mention-suggestions button:hover,.mention-suggestions button:focus-visible,.mention-suggestions button[aria-selected="true"],.channel-suggestions button:hover,.channel-suggestions button:focus-visible,.channel-suggestions button[aria-selected="true"],.emoji-suggestions button:hover,.emoji-suggestions button:focus-visible,.emoji-suggestions button[aria-selected="true"],.slash-suggestions button:hover,.slash-suggestions button:focus-visible,.slash-suggestions button[aria-selected="true"]{background:var(--panel)}
 .emoji-glyph,.custom-emoji{display:inline-block;width:20px;height:20px;object-fit:contain;vertical-align:-4px}.emoji-glyph,.standard-emoji{font-size:18px;line-height:20px;text-align:center}.reaction-emoji{display:inline-grid;min-width:20px;place-items:center}.reaction-picker-form{display:none}
-.emoji-picker-dialog{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.emoji-picker-dialog::backdrop{background:#0008}.emoji-picker-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.emoji-picker-head label{display:grid;gap:5px;font-weight:800}.emoji-picker-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.emoji-picker-close{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.emoji-picker-status{margin:0;padding:9px 14px;color:var(--muted);font-size:12px}.emoji-picker-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px;margin:0;padding:0 10px 14px;list-style:none;overflow:auto;max-height:calc(100% - 112px)}.emoji-picker-results button{display:flex;width:100%;gap:7px;align-items:center;border:0;border-radius:6px;background:transparent;color:var(--text);padding:8px;text-align:left}.emoji-picker-results button:hover,.emoji-picker-results button:focus-visible,.emoji-picker-results button[aria-selected="true"]{background:var(--hover)}.emoji-picker-results small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.emoji-picker-dialog{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.emoji-picker-dialog::backdrop{background:#0008}.emoji-picker-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.emoji-picker-head label{display:grid;gap:5px;font-weight:800}.emoji-picker-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.emoji-picker-close{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.emoji-picker-filters{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,180px);gap:8px;padding:10px 14px 0}.emoji-picker-filters label{display:grid;gap:4px;color:var(--muted);font-size:12px;font-weight:700}.emoji-picker-filters select{min-width:0;border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px}.emoji-picker-status{margin:0;padding:9px 14px;color:var(--muted);font-size:12px}.emoji-picker-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:4px;margin:0;padding:0 10px 14px;list-style:none;overflow:auto;max-height:calc(100% - 174px)}.emoji-picker-results button{display:flex;width:100%;gap:7px;align-items:center;border:0;border-radius:6px;background:transparent;color:var(--text);padding:8px;text-align:left}.emoji-picker-results button:hover,.emoji-picker-results button:focus-visible,.emoji-picker-results button[aria-selected="true"]{background:var(--hover)}.emoji-picker-results small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shortcut-browser{width:min(620px,calc(100vw - 28px));height:min(620px,calc(100vh - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}.shortcut-browser::backdrop{background:#0008}.shortcut-browser-head{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.shortcut-browser-head label{display:grid;gap:5px;font-weight:800}.shortcut-browser-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.shortcut-browser-head button{align-self:end;border:0;background:transparent;color:var(--muted);font-size:22px}.shortcut-browser-results{display:grid;gap:4px;padding:10px;overflow:auto;max-height:calc(100% - 78px)}.shortcut-browser-results>button,.shortcut-browser-results form>button{display:grid;grid-template-columns:minmax(110px,auto) minmax(0,1fr);align-items:start;gap:12px;width:100%;border:0;border-radius:7px;background:transparent;color:var(--text);padding:10px;text-align:left}.shortcut-browser-results>button:hover,.shortcut-browser-results>button:focus-visible,.shortcut-browser-results form>button:hover,.shortcut-browser-results form>button:focus-visible{background:var(--hover)}.shortcut-browser-results span{display:grid;gap:2px}.shortcut-browser-results small{color:var(--muted)}.shortcut-browser-empty{padding:30px;text-align:center;color:var(--muted)}
+.clip-recorder{width:min(560px,calc(100vw - 28px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:18px}.clip-recorder::backdrop{background:#0008}.clip-recorder h2{margin:0 0 6px;font-size:18px}.clip-recorder p{margin:0 0 14px;color:var(--muted)}.clip-recorder video{display:block;width:100%;max-height:min(360px,55vh);margin:0 0 14px;border-radius:9px;background:#111;object-fit:contain}.clip-recorder-actions{display:flex;justify-content:flex-end;gap:8px}.clip-recorder-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel);color:var(--text);padding:8px 12px;font-weight:800}.clip-recorder-actions .clip-stop{border-color:var(--danger);background:var(--danger);color:var(--on-strong)}
 .conversation-switcher{width:min(560px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 32px));border:1px solid var(--line);border-radius:12px;background:var(--panel-strong);color:var(--text);box-shadow:var(--shadow);padding:0}
 .conversation-switcher::backdrop{background:#0008}.switcher-head{display:flex;align-items:center;gap:10px;padding:14px;border-bottom:1px solid var(--line)}.switcher-head label{flex:1}.switcher-head input{width:100%;border:1px solid var(--field-line);border-radius:7px;background:var(--panel);color:var(--text);padding:9px 11px}.switcher-close{border:0;background:transparent;color:var(--muted);font-size:20px}.switcher-results{list-style:none;margin:0;padding:8px;overflow:auto}.switcher-results a{display:flex;gap:8px;border-radius:6px;color:var(--text);padding:8px 10px;text-decoration:none}.switcher-results a:hover,.switcher-results a:focus-visible{background:var(--hover)}
 .upload-preview{margin:5px 0 0;color:var(--muted);font-size:13px}
@@ -905,6 +958,7 @@ const workspaceRefinements = `<style>
 .composer-wrap{background:var(--panel-strong);padding-top:7px;padding-bottom:12px}
 .composer{border-color:var(--field-line);border-radius:9px;box-shadow:none;padding:8px 10px}
 .composer:focus-within{border-color:var(--focus);box-shadow:0 0 0 1px var(--focus)}
+.composer.is-dragging{border-color:var(--action);box-shadow:0 0 0 3px color-mix(in srgb,var(--action) 25%,transparent)}
 .composer textarea{min-height:44px}
 .composer-footer{border-top:1px solid var(--line);padding-top:6px}
 .composer-tools kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:1px 5px;background:var(--panel);font:11px/1.4 inherit}
@@ -1171,8 +1225,24 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
   </dialog>
   {{if or .CanPost .Timeline.CanReact}}<dialog class="emoji-picker-dialog" id="emoji-picker-dialog" aria-labelledby="emoji-picker-title">
     <div class="emoji-picker-head"><label><span id="emoji-picker-title">Emoji</span><input id="emoji-picker-query" type="search" autocomplete="off" maxlength="100" placeholder="Search emoji"></label><button class="emoji-picker-close" id="emoji-picker-close" type="button" aria-label="Close emoji picker">×</button></div>
+    <div class="emoji-picker-filters"><label>Category<select id="emoji-picker-category"><option value="">All emoji</option><option value="Recent">Recent</option><option value="Custom">Custom</option></select></label><label>Skin tone<select id="emoji-picker-tone"><option value="">Default</option><option value="2">Light</option><option value="3">Medium-light</option><option value="4">Medium</option><option value="5">Medium-dark</option><option value="6">Dark</option></select></label></div>
     <p class="emoji-picker-status" id="emoji-picker-status" role="status">Choose an emoji.</p>
     <ul class="emoji-picker-results" id="emoji-picker-results" role="listbox" aria-label="Emoji results"></ul>
+  </dialog>{{end}}
+  {{if and .CanPost (or .SlashCommands .GlobalShortcuts)}}<dialog class="shortcut-browser" id="shortcut-browser" aria-labelledby="shortcut-browser-title">
+    <div class="shortcut-browser-head"><label><span id="shortcut-browser-title">Shortcuts</span><input id="shortcut-browser-query" type="search" autocomplete="off" placeholder="Search shortcuts and commands"></label><button id="shortcut-browser-close" type="button" aria-label="Close shortcuts">×</button></div>
+    <div class="shortcut-browser-results" id="shortcut-browser-results">{{range .SlashCommands}}<button type="button" data-browser-command="{{.Command}}" data-shortcut-search="{{.Command}} {{.Description}} {{.UsageHint}} {{.AppName}}"><strong>{{.Command}}</strong><span>{{.Description}}{{if .UsageHint}}<small>{{.UsageHint}}</small>{{end}}{{if .AppName}}<small>{{.AppName}}</small>{{end}}</span></button>{{end}}{{range $shortcut := .GlobalShortcuts}}
+      <form method="post" action="/app/shortcut" hx-post="/app/shortcut" data-shortcut-search="{{$shortcut.Name}} {{$shortcut.Description}} {{$shortcut.AppName}}">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="channel" value="{{$.Channel}}"><input type="hidden" name="app_id" value="{{$shortcut.AppID}}"><input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
+        <button type="submit"><strong>{{$shortcut.Name}}</strong><span>{{$shortcut.Description}}<small>{{$shortcut.AppName}}</small></span></button>
+      </form>{{end}}</div>
+    <p class="shortcut-browser-empty" id="shortcut-browser-empty" role="status" hidden>No matching shortcuts.</p>
+  </dialog>{{end}}
+  {{if and .CanPost .CanUpload}}<dialog class="clip-recorder" id="clip-recorder" aria-labelledby="clip-recorder-title" aria-describedby="clip-recorder-status">
+    <h2 id="clip-recorder-title">Record a clip</h2>
+    <p id="clip-recorder-status" role="status" aria-live="polite">Choose an audio or video clip from the composer.</p>
+    <video id="clip-recorder-preview" autoplay muted playsinline hidden></video>
+    <div class="clip-recorder-actions"><button type="button" id="clip-recorder-cancel">Cancel</button><button class="clip-stop" type="button" id="clip-recorder-stop" disabled>Stop recording</button></div>
   </dialog>{{end}}
   <div class="workspace">
     <aside class="sidebar" id="workspace-sidebar">
@@ -1188,6 +1258,8 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
         {{if .CanSchedule}}<a class="side-link" href="/app/drafts?channel={{.Channel}}" aria-label="Drafts and sent"><span class="side-icon" aria-hidden="true">◷</span><span class="side-text">Drafts &amp; sent</span></a>{{end}}
         <a class="side-link" href="/app/dms" aria-label="Direct messages"><span class="side-icon" aria-hidden="true">⌁</span><span class="side-text">DMs</span></a>
         <a class="side-link" href="/app/members" aria-label="Members"><span class="side-icon" aria-hidden="true">@</span><span class="side-text">People</span></a>
+        <a class="side-link" href="/app/canvases" aria-label="Canvases"><span class="side-icon" aria-hidden="true">▤</span><span class="side-text">Canvases</span></a>
+        <a class="side-link" href="/app/lists" aria-label="Lists"><span class="side-icon" aria-hidden="true">☷</span><span class="side-text">Lists</span></a>
         <a class="side-link" href="/app/apps?channel={{.Channel}}" aria-label="Apps"><span class="side-icon" aria-hidden="true">◇</span><span class="side-text">Apps</span></a>
         <a class="side-link" href="/app/developer/apps" aria-label="Developer apps"><span class="side-icon" aria-hidden="true">⌘</span><span class="side-text">Developer apps</span></a>
         {{if .ShowAdmin}}<a class="side-link" href="/app/admin/auth" aria-label="Authorization"><span class="side-icon" aria-hidden="true">A</span><span class="side-text">Authorization</span></a>{{end}}
@@ -1270,20 +1342,15 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       <div class="composer-wrap">
         <p class="live-status" id="live-status" role="status" aria-live="polite"></p>
         {{if .CanPost}}
-        {{if .GlobalShortcuts}}<details class="composer-shortcuts"><summary>Shortcuts</summary><div class="shortcut-list" role="menu">{{range $shortcut := .GlobalShortcuts}}
-          <form method="post" action="/app/shortcut" hx-post="/app/shortcut">
-            <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
-            <input type="hidden" name="channel" value="{{$.Channel}}">
-            <input type="hidden" name="app_id" value="{{$shortcut.AppID}}">
-            <input type="hidden" name="callback_id" value="{{$shortcut.CallbackID}}">
-            <button type="submit" role="menuitem">{{$shortcut.Name}}<small>{{$shortcut.AppName}} · {{$shortcut.Description}}</small></button>
-          </form>{{end}}</div></details>{{end}}
-        {{if .CanUpload}}<details class="composer-shortcuts"><summary>Attach a file</summary>
-          <form class="upload-form" method="post" action="{{.UploadURL}}" enctype="multipart/form-data">
+        {{if .CanUpload}}<details class="composer-shortcuts" id="upload-details"><summary>Attach a file</summary>
+          <form class="upload-form" id="upload-form" method="post" action="{{.UploadURL}}" enctype="multipart/form-data">
             <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
-            <label for="upload-file">File<input id="upload-file" type="file" name="file" required aria-describedby="upload-preview"></label>
-            <p class="upload-preview" id="upload-preview" role="status">No file selected.</p>
-            <label>Title (optional)<input type="text" name="title" maxlength="255"></label>
+            <input type="hidden" id="upload-comment" name="initial_comment">
+            <label for="upload-file">Files<input id="upload-file" type="file" name="file" multiple required aria-describedby="upload-preview"></label>
+            <p class="upload-preview" id="upload-preview" role="status">No files selected. You can also paste or drop files into the composer.</p>
+            <label for="upload-title">Title (optional)<input id="upload-title" type="text" name="title" maxlength="255" aria-describedby="upload-title-hint"></label>
+            <span id="upload-title-hint" class="muted">Applied when one file is staged.</span>
+            <button type="button" id="upload-clear" hidden>Remove staged files</button>
             <button type="submit">Upload and send</button>
           </form>
         </details>{{end}}
@@ -1298,6 +1365,9 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
             <button class="composer-tool" type="button" data-wrap="&#96;" aria-label="Inline code" aria-controls="text">&lt;/&gt;</button>
             <button class="composer-tool" type="button" data-insert="&lt;https://example.com|link text&gt;" data-select-offset="1" data-select-length="19" aria-label="Insert link" aria-controls="text">🔗</button>
             <button class="composer-tool" type="button" data-open-emoji-picker data-emoji-target="composer" aria-label="Choose an emoji" aria-haspopup="dialog" aria-controls="emoji-picker-dialog">☺</button>
+            {{if or .SlashCommands .GlobalShortcuts}}<button class="composer-tool" type="button" id="open-shortcut-browser" aria-label="Browse shortcuts" aria-haspopup="dialog" aria-controls="shortcut-browser">＋</button>{{end}}
+            {{if .CanUpload}}<button class="composer-tool" type="button" data-record-clip="audio" aria-label="Record audio clip" aria-haspopup="dialog" aria-controls="clip-recorder">◉</button>
+            <button class="composer-tool" type="button" data-record-clip="video" aria-label="Record video clip" aria-haspopup="dialog" aria-controls="clip-recorder">▣</button>{{end}}
             {{if or .ComposerMembers .ComposerGroups}}<details class="composer-menu"><summary role="button" aria-label="Mention a person or user group" aria-controls="mention-picker">@</summary>
               <div class="composer-popover" id="mention-picker" role="menu" aria-label="People and user groups">{{range .ComposerMembers}}
                 <button type="button" data-mention-user="{{.ID}}" data-mention-name="{{.Name}}" data-mention-search="{{.Name}}" role="menuitem"><span>@{{.Name}}{{if .IsSelf}} (you){{end}}</span><small>Person</small></button>{{end}}{{range .ComposerGroups}}
@@ -1770,37 +1840,59 @@ const searchMarkup = `{{define "title"}}Search · SameOldChat{{end}}
 
 var searchTemplate = mustPage(searchMarkup)
 
-const activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
+var activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
 .layout{width:min(980px,calc(100% - 28px));margin:22px auto 48px}.activity-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.activity-heading h2{margin:0 auto 0 0;font-size:25px}.layout-forms{display:flex;gap:4px}.layout-forms form{margin:0}.layout-forms button,.bulk-actions button,.item-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.layout-forms button[aria-pressed=true]{background:var(--action);color:var(--on-strong)}
 .activity-tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:10px}.activity-tabs a{white-space:nowrap;padding:9px 11px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.activity-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.activity-options{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.activity-options a{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;color:var(--text);text-decoration:none;font-weight:700}.activity-options a[aria-current=page]{background:var(--hover);border-color:var(--action)}
 .bulk-actions{min-height:39px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:8px 8px 0 0;background:var(--panel)}.bulk-actions span{margin-right:auto;color:var(--muted);font-size:13px}.activity-list{margin:0;padding:0;list-style:none;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden}.activity-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;padding:14px;background:var(--panel);border-top:1px solid var(--line);outline:none}.activity-row:first-child{border-top:0}.activity-row:hover,.activity-row:focus{background:var(--hover)}.activity-row.unread{box-shadow:inset 3px 0 var(--action)}.activity-select{margin-top:3px}.activity-main{min-width:0}.activity-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.activity-kind{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:var(--action)}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.activity-source{color:inherit;text-decoration:none}.activity-source:focus-visible{text-decoration:underline}.item-actions{display:flex;gap:4px;align-items:start}.item-actions button{padding:5px 8px}.unavailable{color:var(--muted);font-style:italic}.empty{margin:0;padding:34px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:16px}
 .activity-list.dense .activity-row{padding:8px 12px}.activity-list.dense .activity-text{display:inline;margin-left:5px}.activity-list.dense .activity-head{display:inline-flex}
+.activity-reaction-dialog{width:min(520px,calc(100% - 24px));border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);padding:0;box-shadow:0 18px 55px #0005}.activity-reaction-dialog::backdrop{background:#0007}.activity-reaction-shell{padding:16px}.activity-reaction-head{display:flex;align-items:center;gap:10px}.activity-reaction-head h3{margin:0 auto 0 0}.activity-reaction-head button{border:0;background:transparent;color:var(--text);font-size:22px}.activity-reaction-controls{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;margin:13px 0}.activity-reaction-controls input,.activity-reaction-controls select{min-width:0;padding:8px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.activity-reaction-results{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:5px;margin:0;padding:0;list-style:none;max-height:310px;overflow:auto}.activity-reaction-results button{width:100%;min-height:58px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--text);display:grid;place-items:center;padding:4px}.activity-reaction-results button:hover,.activity-reaction-results button:focus{background:var(--hover);border-color:var(--action)}.activity-reaction-results img{width:24px;height:24px;object-fit:contain}.activity-reaction-results small{max-width:100%;overflow:hidden;text-overflow:ellipsis}.activity-reaction-status{min-height:20px;color:var(--muted);font-size:13px}
 @media(max-width:650px){.bar{padding:0 12px}.layout{width:min(100% - 16px,980px);margin-top:14px}.activity-row{grid-template-columns:auto minmax(0,1fr)}.item-actions{grid-column:2}.bulk-actions{overflow-x:auto}.activity-list.dense .activity-text{display:block;margin:4px 0 0}}
 </style>{{end}}
 {{define "scripts"}}` + localTimeScript + `<script>(function(){
-var rows=Array.prototype.slice.call(document.querySelectorAll('[data-activity-row]'));if(!rows.length)return;
-var current=0;rows[0].tabIndex=0;
-function focusRow(index){rows[current].tabIndex=-1;current=(index+rows.length)%rows.length;rows[current].tabIndex=0;rows[current].focus()}
+var activityTopics=` + liveEventTopicsLiteral() + `.concat(['later_reminder.delivered','later_reminder.failed']);
+var feed=document.getElementById('activity-feed');var liveStatus=document.getElementById('activity-live-status');var rows=[];var current=0;var refreshing=false;var refreshQueued=false;var refreshTimer=0;
+function syncRows(preferredID){rows=Array.prototype.slice.call(document.querySelectorAll('[data-activity-row]'));current=0;if(preferredID){var preferred=rows.findIndex(function(row){return row.getAttribute('data-activity-id')===preferredID});if(preferred>=0)current=preferred}rows.forEach(function(row,index){row.tabIndex=index===current?0:-1})}
+syncRows('');
+function focusRow(index){if(!rows.length)return;rows[current].tabIndex=-1;current=(index+rows.length)%rows.length;rows[current].tabIndex=0;rows[current].focus()}
 document.addEventListener('keydown',function(event){if(event.altKey||event.ctrlKey||event.metaKey||event.target.matches('input,textarea,select'))return;var row=event.target.closest('[data-activity-row]');if(row)current=rows.indexOf(row);
 if(event.key==='ArrowDown'){event.preventDefault();focusRow(current+1)}else if(event.key==='ArrowUp'){event.preventDefault();focusRow(current-1)}else if(event.key==='Enter'&&row){var reply=row.querySelector('[data-activity-reply]');if(reply){event.preventDefault();reply.click()}}else if((event.key==='x'||event.key==='X')&&row){event.preventDefault();var box=row.querySelector('input[type=checkbox]');box.checked=!box.checked;box.dispatchEvent(new Event('change',{bubbles:true}))}else if((event.key==='c'||event.key==='C')&&row){event.preventDefault();row.querySelector('[data-clear-button]').click()}else if((event.key==='r'||event.key==='R')&&row){var read=row.querySelector('[data-read-button]');if(read){event.preventDefault();read.click()}}});
-var count=document.getElementById('selection-count');document.addEventListener('change',function(){var selected=document.querySelectorAll('input[name=activity_id]:checked').length;count.textContent=selected?selected+' selected':'Select items with X or the checkboxes'});
+var count=document.getElementById('selection-count');document.addEventListener('change',function(){if(!count)return;var selected=document.querySelectorAll('input[name=activity_id]:checked').length;count.textContent=selected?selected+' selected':'Select items with X or the checkboxes'});
+var dialog=document.getElementById('activity-reaction-dialog');var form=document.getElementById('activity-reaction-form');var search=document.getElementById('activity-reaction-search');var category=document.getElementById('activity-reaction-category');var tone=document.getElementById('activity-reaction-tone');var results=document.getElementById('activity-reaction-results');var status=document.getElementById('activity-reaction-status');var returnFocus=null;var request=null;var timer=0;
+function recentEmoji(){try{var value=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');return Array.isArray(value)?value:[]}catch(error){return[]}}
+function rememberEmoji(name){var values=recentEmoji().filter(function(value){return value!==name});values.unshift(name);try{localStorage.setItem('sameoldchat-recent-emoji',JSON.stringify(values.slice(0,24)))}catch(error){}}
+function closeReaction(){if(dialog&&dialog.open)dialog.close();if(returnFocus)returnFocus.focus()}
+function loadReactions(){if(!results)return;if(request)request.abort();request=window.AbortController?new AbortController():null;status.textContent='Loading emoji…';var parameters=new URLSearchParams({q:search.value||''});if(category.value)parameters.set('category',category.value);var recent=recentEmoji();if(recent.length)parameters.set('recent',recent.slice(0,24).join(','));fetch('/app/emoji/options?'+parameters.toString(),{credentials:'same-origin',signal:request?request.signal:undefined}).then(function(response){if(!response.ok)throw new Error();return response.json()}).then(function(payload){results.textContent='';var options=payload&&Array.isArray(payload.options)?payload.options:[];if(payload&&Array.isArray(payload.categories)&&category.options.length<=1){payload.categories.forEach(function(name){var option=document.createElement('option');option.value=name;option.textContent=name;category.appendChild(option)})}options.forEach(function(option){var item=document.createElement('li');var button=document.createElement('button');button.type='button';button.setAttribute('data-activity-emoji',option.name);button.setAttribute('data-skin-tones',option.skin_tones?'true':'false');button.setAttribute('aria-label','React with :'+option.name+':');var visual;if(option.image_url){visual=document.createElement('img');visual.src=option.image_url;visual.alt=''}else{visual=document.createElement('span');visual.textContent=option.display||''}var label=document.createElement('small');label.textContent=':'+option.name+':';button.appendChild(visual);button.appendChild(label);item.appendChild(button);results.appendChild(item)});status.textContent=options.length?options.length+' emoji shown.':'No matching emoji.'}).catch(function(error){if(error&&error.name==='AbortError')return;results.textContent='';status.textContent='Emoji could not be loaded. Try again.'})}
+document.addEventListener('click',function(event){var open=event.target.closest('[data-activity-react]');if(open){returnFocus=open;form.action=open.getAttribute('data-activity-react');dialog.showModal();search.value='';category.value='';search.focus();loadReactions();return}var choice=event.target.closest('[data-activity-emoji]');if(choice){var name=choice.getAttribute('data-activity-emoji');var selectedTone=tone.value;if(selectedTone&&choice.getAttribute('data-skin-tones')==='true')name+='::skin-tone-'+selectedTone;var body=new FormData(form);body.set('name',name);choice.disabled=true;status.textContent='Adding reaction…';fetch(form.action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();rememberEmoji(choice.getAttribute('data-activity-emoji'));closeReaction()}).catch(function(){choice.disabled=false;status.textContent='The reaction was not added. Try again.'})}});
+if(search)search.addEventListener('input',function(){window.clearTimeout(timer);timer=window.setTimeout(loadReactions,120)});
+if(category)category.addEventListener('change',loadReactions);
+var close=document.getElementById('activity-reaction-close');if(close)close.addEventListener('click',closeReaction);
+if(dialog)dialog.addEventListener('click',function(event){if(event.target===dialog)closeReaction()});
+function refreshActivity(){
+if(!feed)return;if(refreshing){refreshQueued=true;return}refreshing=true;
+var active=document.activeElement;var focusedRow=active&&active.closest?active.closest('[data-activity-row]'):null;var focusedID=focusedRow?focusedRow.getAttribute('data-activity-id'):'';var focusedLabel=active&&active.getAttribute?active.getAttribute('aria-label')||'':'';var selected={};Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]:checked'),function(input){selected[input.value]=true});var scrollX=window.scrollX;var scrollY=window.scrollY;
+fetch(window.location.pathname+window.location.search,{headers:{'X-SameOldChat-Activity-Refresh':'true'},credentials:'same-origin'}).then(function(response){if(!response.ok)throw new Error();return response.text()}).then(function(html){var parsed=new DOMParser().parseFromString(html,'text/html');var replacement=parsed.getElementById('activity-feed');if(!replacement)throw new Error();feed.replaceWith(replacement);feed=replacement;Object.keys(selected).forEach(function(id){Array.prototype.forEach.call(feed.querySelectorAll('input[name=activity_id]'),function(input){if(input.value===id)input.checked=true})});syncRows(focusedID);if(focusedID){var row=rows[current];var target=row;if(focusedLabel){Array.prototype.some.call(row.querySelectorAll('[aria-label]'),function(candidate){if(candidate.getAttribute('aria-label')===focusedLabel){target=candidate;return true}return false})}target.focus({preventScroll:true});window.scrollTo(scrollX,scrollY)}if(liveStatus)liveStatus.textContent='Activity updated.'}).catch(function(){if(liveStatus)liveStatus.textContent='New activity is available. Reload to update the list.'}).finally(function(){refreshing=false;if(refreshQueued){refreshQueued=false;refreshActivity()}});
+}
+function scheduleActivityRefresh(){window.clearTimeout(refreshTimer);refreshTimer=window.setTimeout(refreshActivity,180)}
+if(window.EventSource){var cursor='';try{cursor=sessionStorage.getItem('sameoldchat-last-event')||''}catch(error){}var stream=new EventSource('/events'+(cursor?'?last_event_id='+encodeURIComponent(cursor):''));activityTopics.forEach(function(topic){stream.addEventListener(topic,function(event){if(event.lastEventId){try{sessionStorage.setItem('sameoldchat-last-event',event.lastEventId)}catch(error){}}scheduleActivityRefresh()})});stream.onerror=function(){if(liveStatus)liveStatus.textContent='Reconnecting to live Activity…'};stream.onopen=function(){if(liveStatus&&liveStatus.textContent==='Reconnecting to live Activity…')liveStatus.textContent='Live Activity resumed.'}}
 })();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<div class="activity-heading"><h2>Activity</h2><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
+<div class="activity-heading"><h2>Activity</h2><span class="visually-hidden" id="activity-live-status" role="status" aria-live="polite"></span><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
 <nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
 <div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
+<div id="activity-feed">
 <form method="post" action="/app/activity/mutate?channel={{.Channel}}">
 <input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}">
 <div class="bulk-actions"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button type="submit" name="mutation" value="read">Mark selected read</button><button type="submit" name="mutation" value="unread">Mark selected unread</button><button type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
-{{if .Items}}<ul class="activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="activity-row{{if .Unread}} unread{{end}}" data-activity-row tabindex="-1">
+{{if .Items}}<ul class="activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="activity-row{{if .Unread}} unread{{end}}" data-activity-row data-activity-id="{{.ID}}" tabindex="-1">
 <input class="activity-select" type="checkbox" name="activity_id" value="{{.ID}}" aria-label="Select activity from {{.ActorName}}">
 <div class="activity-main">{{if .ReplyURL}}<a class="visually-hidden" data-activity-reply href="{{.ReplyURL}}">Reply to this activity</a>{{end}}{{if .SourceURL}}<a class="activity-source" data-activity-source href="{{.SourceURL}}">{{end}}<span class="activity-head"><span class="activity-kind">{{.KindLabel}}</span>{{if .ActorName}}<span class="activity-author">{{.ActorName}}</span>{{end}}<time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .ChannelName}}<span class="activity-meta">{{.ChannelName}}</span>{{end}}</span><span class="activity-text{{if .Unavailable}} unavailable{{end}}">{{.Text}}</span>{{if .SourceURL}}</a>{{end}}</div>
-<div class="item-actions">{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}{{if .Unread}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=unread" aria-label="Mark this activity unread">Unread</button>{{end}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
+<div class="item-actions">{{if .ReactionURL}}<button type="button" data-activity-react="{{.ReactionURL}}" aria-label="Add a reaction to this message">React</button>{{end}}{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}{{if .Unread}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=unread" aria-label="Mark this activity unread">Unread</button>{{end}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
 </li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
-</form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}
+</form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}</div>
+<dialog class="activity-reaction-dialog" id="activity-reaction-dialog" aria-labelledby="activity-reaction-heading"><div class="activity-reaction-shell"><div class="activity-reaction-head"><h3 id="activity-reaction-heading">Add reaction</h3><button id="activity-reaction-close" type="button" aria-label="Close reaction picker">×</button></div><form id="activity-reaction-form" method="post"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><div class="activity-reaction-controls"><label class="visually-hidden" for="activity-reaction-search">Search emoji</label><input id="activity-reaction-search" type="search" autocomplete="off" placeholder="Search emoji"><label class="visually-hidden" for="activity-reaction-category">Category</label><select id="activity-reaction-category"><option value="">All categories</option></select><label class="visually-hidden" for="activity-reaction-tone">Skin tone</label><select id="activity-reaction-tone"><option value="">Default tone</option><option value="2">Skin tone 2</option><option value="3">Skin tone 3</option><option value="4">Skin tone 4</option><option value="5">Skin tone 5</option><option value="6">Skin tone 6</option></select></div><p class="activity-reaction-status" id="activity-reaction-status" role="status"></p><ul class="activity-reaction-results" id="activity-reaction-results" aria-label="Emoji results"></ul><noscript><p>Open the message to add a reaction.</p></noscript></form></div></dialog>
 </main>{{end}}`
 
 var activityTemplate = mustPage(activityMarkup)
@@ -1951,6 +2043,44 @@ a{font-weight:700}
 {{define "content"}}<main class="layout"><h1>{{.Heading}}</h1><p>{{.Message}}</p><a href="/app">Back to chat</a></main>{{end}}`
 
 var errorTemplate = mustPage(errorMarkup)
+
+const documentsMarkup = `{{define "title"}}{{.Title}} · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(940px,calc(100% - 32px));margin:28px auto 56px}.heading{display:flex;align-items:start;justify-content:space-between;gap:20px;margin-bottom:20px}.heading h2,.heading p{margin:0}.heading p{color:var(--muted);margin-top:5px}
+.create{padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--panel);margin-bottom:18px}.create summary{cursor:pointer;font-weight:800}.create form{display:grid;gap:10px;margin-top:14px}.create label{display:grid;gap:6px;font-weight:700}.create input,.create textarea{padding:9px;border:1px solid var(--field-line);border-radius:6px;background:var(--field);color:var(--text)}.create textarea{min-height:130px;resize:vertical}.create button{justify-self:start;border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}.card{display:grid;gap:10px;min-height:150px;padding:17px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--text);text-decoration:none}.card:hover{border-color:var(--action);background:var(--hover)}.card h3,.card p{margin:0}.card p{color:var(--muted);white-space:pre-wrap;overflow-wrap:anywhere}.card time{align-self:end;color:var(--muted);font-size:12px}.empty{padding:32px;border:1px dashed var(--line);border-radius:10px;text-align:center;color:var(--muted)}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app">← Back to chat</a><h1>{{.Title}}</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
+<div class="heading"><div><h2>{{.Title}}</h2><p>{{if eq .Kind "canvas"}}Create, read, and revise shared workspace documents.{{else}}Track work in persisted, structured rows.{{end}}</p></div></div>
+{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
+{{if .CanWrite}}<details class="create"><summary>Create {{if eq .Kind "canvas"}}a canvas{{else}}a list{{end}}</summary><form method="post" action="/app/{{if eq .Kind "canvas"}}canvases{{else}}lists{{end}}/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Name<input name="title" maxlength="255" required></label>{{if eq .Kind "canvas"}}<label>Content<textarea name="body" maxlength="100000" placeholder="Start writing…"></textarea></label>{{else}}<label><span><input type="checkbox" name="todo_mode" value="true"> Use as a to-do list</span></label>{{end}}<button type="submit">Create</button></form></details>{{end}}
+<div class="grid">{{if eq .Kind "canvas"}}{{range .Canvases}}<a class="card" href="{{.URL}}"><h3>{{.Title}}</h3><p>{{.Preview}}</p><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></a>{{else}}<p class="empty">No canvases yet.</p>{{end}}{{else}}{{range .Lists}}<a class="card" href="{{.URL}}"><h3>{{.Title}}</h3><p>{{.Preview}}</p><time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></a>{{else}}<p class="empty">No lists yet.</p>{{end}}{{end}}</div>
+{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more</a></p>{{end}}</main>{{end}}`
+
+var documentsTemplate = mustPage(documentsMarkup)
+
+const canvasMarkup = `{{define "title"}}{{.Title}} · Canvas · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(860px,calc(100% - 32px));margin:28px auto 56px}.canvas{padding:28px;border:1px solid var(--line);border-radius:12px;background:var(--panel)}.canvas h2{margin:0 0 8px}.canvas .meta{color:var(--muted);font-size:12px}.canvas-body{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.6}
+.editor{display:grid;gap:11px;margin-top:24px;padding-top:20px;border-top:1px solid var(--line)}.editor label{display:grid;gap:6px;font-weight:700}.editor input,.editor textarea{padding:10px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}.editor textarea{min-height:300px;resize:vertical}.actions{display:flex;gap:10px;flex-wrap:wrap}.actions button{border:0;border-radius:7px;padding:9px 14px;background:var(--action);color:var(--on-strong);font-weight:800}.delete{margin-top:18px}.delete button{border:1px solid var(--danger);border-radius:7px;padding:8px 12px;background:transparent;color:var(--danger);font-weight:800}
+</style>{{end}}
+{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "content"}}<header class="bar"><a href="/app/canvases">← Canvases</a><h1>Canvas</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<article class="canvas"><h2>{{.Title}}</h2><p class="meta">Updated <time datetime="{{.UpdatedAt}}">{{.UpdatedAt}}</time></p><div class="canvas-body">{{.Body}}</div>{{if .ReadOnlyReason}}<p class="notice" role="note">{{.ReadOnlyReason}}</p>{{end}}{{if .CanWrite}}<form class="editor" method="post" action="/app/canvases/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="section_id" value="{{.SectionID}}"><label>Title<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Content<textarea name="body" maxlength="100000">{{.Body}}</textarea></label><div class="actions"><button type="submit">Save changes</button></div></form>{{end}}{{if .CanDelete}}<form class="delete" method="post" action="/app/canvases/{{.ID}}/delete"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Delete canvas</button></form>{{end}}</article></main>{{end}}`
+
+var canvasTemplate = mustPage(canvasMarkup)
+
+const listMarkup = `{{define "title"}}{{.Name}} · List · SameOldChat{{end}}
+{{define "styles"}}<style>
+.bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);font-weight:700;text-decoration:none}.bar h1{margin:0 auto 0 0;font-size:18px}
+.layout{width:min(940px,calc(100% - 28px));margin:26px auto 56px}.heading{display:flex;align-items:center;justify-content:space-between;gap:16px}.heading h2{margin:0}.new-item{display:flex;gap:8px;margin:18px 0}.new-item input{flex:1;min-width:0;padding:9px;border:1px solid var(--field-line);border-radius:7px;background:var(--field);color:var(--text)}button{border:0;border-radius:7px;padding:9px 13px;background:var(--action);color:var(--on-strong);font-weight:800}
+.items{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}.item{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line)}.item:last-child{border-bottom:0}.item.archived .title{text-decoration:line-through;color:var(--muted)}.item form{margin:0}.item button{background:var(--panel-strong);color:var(--text);border:1px solid var(--field-line)}.empty{padding:30px;text-align:center;color:var(--muted)}.mode{color:var(--muted);font-size:13px}
+</style>{{end}}
+{{define "content"}}<header class="bar"><a href="/app/lists">← Lists</a><h1>List</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">{{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="heading"><div><h2>{{.Name}}</h2><span class="mode">{{if .TodoMode}}To-do list{{else}}List{{end}}</span></div></div>{{if .CanWrite}}<form class="new-item" method="post" action="/app/lists/{{.ID}}/items/create"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label class="visually-hidden" for="new-list-item">New item</label><input id="new-list-item" name="title" maxlength="1000" placeholder="Add an item" required><button type="submit">Add</button></form>{{end}}<ul class="items">{{range .Items}}<li class="item{{if .Archived}} archived{{end}}"><span aria-hidden="true">{{if .Archived}}✓{{else}}○{{end}}</span><span class="title">{{.Title}}</span>{{if $.CanWrite}}<form method="post" action="/app/lists/{{$.ID}}/items/{{.ID}}/toggle"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="archived" value="{{if .Archived}}false{{else}}true{{end}}"><button type="submit">{{if .Archived}}Restore{{else}}Complete{{end}}</button></form>{{end}}</li>{{else}}<li class="empty">No items yet.</li>{{end}}</ul>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more items</a></p>{{end}}</main>{{end}}`
+
+var listTemplate = mustPage(listMarkup)
 
 // localTimeScript renders machine timestamps in the reader's own locale and
 // zone. The server keeps the machine value in datetime= so the page is still
@@ -2116,8 +2246,26 @@ var emojiPickerQuery=document.getElementById('emoji-picker-query');
 var emojiPickerResults=document.getElementById('emoji-picker-results');
 var emojiPickerStatus=document.getElementById('emoji-picker-status');
 var emojiPickerClose=document.getElementById('emoji-picker-close');
+var emojiPickerCategory=document.getElementById('emoji-picker-category');
+var emojiPickerTone=document.getElementById('emoji-picker-tone');
+var shortcutBrowser=document.getElementById('shortcut-browser');
+var shortcutBrowserQuery=document.getElementById('shortcut-browser-query');
+var shortcutBrowserResults=document.getElementById('shortcut-browser-results');
+var shortcutBrowserEmpty=document.getElementById('shortcut-browser-empty');
+var shortcutBrowserClose=document.getElementById('shortcut-browser-close');
+var shortcutBrowserOpen=document.getElementById('open-shortcut-browser');
 var uploadFile=document.getElementById('upload-file');
 var uploadPreview=document.getElementById('upload-preview');
+var uploadForm=document.getElementById('upload-form');
+var uploadComment=document.getElementById('upload-comment');
+var uploadClear=document.getElementById('upload-clear');
+var uploadDetails=document.getElementById('upload-details');
+var clipDialog=document.getElementById('clip-recorder');
+var clipTitle=document.getElementById('clip-recorder-title');
+var clipStatus=document.getElementById('clip-recorder-status');
+var clipPreview=document.getElementById('clip-recorder-preview');
+var clipStop=document.getElementById('clip-recorder-stop');
+var clipCancel=document.getElementById('clip-recorder-cancel');
 var search=document.getElementById('workspace-search');
 var activityLink=document.getElementById('activity-link');
 var errorBox=document.getElementById('composer-error');
@@ -2147,6 +2295,15 @@ var emojiTimer=null;
 var emojiPickerTarget='composer';
 var emojiReactionFormID='';
 var emojiPickerTrigger=null;
+var clipRecorder=null;
+var clipStream=null;
+var clipChunks=[];
+var clipCancelled=false;
+var clipLimitTimer=null;
+var clipElapsedTimer=null;
+var clipStartedAt=0;
+var clipTrigger=null;
+var clipGeneration=0;
 var draftKey=composer?'sameoldchat-draft:'+composer.getAttribute('action'):'';
 var applePlatform=/Mac|iPhone|iPad/.test(navigator.platform||'');
 function primaryShortcut(event){return applePlatform?event.metaKey&&!event.ctrlKey:event.ctrlKey&&!event.metaKey}
@@ -2301,9 +2458,10 @@ button.setAttribute('role','option');
 button.setAttribute('data-emoji-name',option.name||'');
 button.setAttribute('aria-label',':'+(option.name||'')+':');
 button.setAttribute('aria-selected',index===0?'true':'false');
+if(option.skin_tones)button.setAttribute('data-skin-tones','true');
 var visual;
 if(option.image_url){visual=document.createElement('img');visual.className='custom-emoji';visual.src=option.image_url;visual.alt=''}
-else{visual=document.createElement('span');visual.className='emoji-glyph';visual.setAttribute('aria-hidden','true');visual.textContent=option.display||''}
+else{visual=document.createElement('span');visual.className='emoji-glyph';visual.setAttribute('aria-hidden','true');visual.textContent=(option.display||'')+(option.skin_tones&&emojiPickerTone&&emojiPickerTone.value?String.fromCodePoint(0x1F3FB+parseInt(emojiPickerTone.value,10)-2):'')}
 var label=document.createElement('small');
 label.textContent=':'+option.name+':';
 button.appendChild(visual);
@@ -2317,12 +2475,24 @@ emojiRequest=window.AbortController?new AbortController():null;
 var options={credentials:'same-origin'};
 if(emojiRequest)options.signal=emojiRequest.signal;
 if(statusNode)statusNode.textContent='Loading emoji…';
-return fetch('/app/emoji/options?q='+encodeURIComponent(query||''),options).then(function(response){
+var category=region===emojiPickerResults&&emojiPickerCategory?emojiPickerCategory.value:'';
+var recent=[];
+try{recent=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');if(!Array.isArray(recent))recent=[]}catch(error){recent=[]}
+var parameters=new URLSearchParams({q:query||''});
+if(category)parameters.set('category',category);
+if(recent.length)parameters.set('recent',recent.slice(0,24).join(','));
+return fetch('/app/emoji/options?'+parameters.toString(),options).then(function(response){
 if(!response.ok)throw new Error('Emoji could not be loaded.');
 return response.json();
 }).then(function(payload){
 region.textContent='';
 var values=payload&&Array.isArray(payload.options)?payload.options:[];
+if(emojiPickerCategory&&payload&&Array.isArray(payload.categories)&&emojiPickerCategory.options.length<=3){
+for(var categoryIndex=0;categoryIndex<payload.categories.length;categoryIndex++){
+var categoryName=String(payload.categories[categoryIndex]||'');
+if(!categoryName||Array.prototype.some.call(emojiPickerCategory.options,function(item){return item.value===categoryName}))continue;
+var categoryOption=document.createElement('option');categoryOption.value=categoryName;categoryOption.textContent=categoryName;emojiPickerCategory.appendChild(categoryOption);
+}}
 for(var index=0;index<values.length;index++){
 var item=document.createElement('li');
 item.appendChild(emojiOption(values[index],index));
@@ -2358,11 +2528,14 @@ function chooseEmoji(option,inline){
 if(!option)return;
 var name=option.getAttribute('data-emoji-name')||'';
 if(!name)return;
+try{var recent=JSON.parse(localStorage.getItem('sameoldchat-recent-emoji')||'[]');if(!Array.isArray(recent))recent=[];recent=recent.filter(function(value){return value!==name});recent.unshift(name);localStorage.setItem('sameoldchat-recent-emoji',JSON.stringify(recent.slice(0,24)))}catch(error){}
+var tone=option.hasAttribute('data-skin-tones')&&emojiPickerTone?emojiPickerTone.value:'';
+var reactionName=name+(tone?'::skin-tone-'+tone:'');
 if(inline&&text){
 var emoji=currentEmoji();
 var start=emoji?emoji.start:emojiStart;
 if(start<0)start=text.selectionStart;
-replaceComposerRange(start,text.selectionStart,':'+name+': ',undefined,undefined);
+replaceComposerRange(start,text.selectionStart,':'+reactionName+': ',undefined,undefined);
 hideEmojiSuggestions();
 return;
 }
@@ -2370,13 +2543,13 @@ if(emojiPickerTarget==='reaction'&&emojiReactionFormID){
 var reactionForm=document.getElementById(emojiReactionFormID);
 if(!reactionForm){if(emojiPicker&&emojiPicker.open)emojiPicker.close();announce('That message changed while the picker was open. Open its reaction picker again.');return}
 var input=reactionForm.querySelector('input[name=name]');
-if(input)input.value=name;
+if(input)input.value=reactionName;
 if(emojiPicker&&emojiPicker.open)emojiPicker.close();
 if(typeof reactionForm.requestSubmit==='function')reactionForm.requestSubmit();else reactionForm.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
 return;
 }
 if(text){
-replaceComposerRange(text.selectionStart,text.selectionEnd,':'+name+':',undefined,undefined);
+replaceComposerRange(text.selectionStart,text.selectionEnd,':'+reactionName+':',undefined,undefined);
 if(emojiPicker&&emojiPicker.open)emojiPicker.close();
 }
 }
@@ -2577,6 +2750,9 @@ if(emojiPickerQuery)emojiPickerQuery.addEventListener('input',function(){
 if(emojiTimer)window.clearTimeout(emojiTimer);
 emojiTimer=window.setTimeout(function(){loadEmojiOptions(emojiPickerQuery.value,emojiPickerResults,emojiPickerStatus)},100);
 });
+if(emojiPickerCategory)emojiPickerCategory.addEventListener('change',function(){loadEmojiOptions(emojiPickerQuery?emojiPickerQuery.value:'',emojiPickerResults,emojiPickerStatus)});
+if(emojiPickerTone)emojiPickerTone.addEventListener('change',function(){try{localStorage.setItem('sameoldchat-emoji-tone',emojiPickerTone.value)}catch(error){}loadEmojiOptions(emojiPickerQuery?emojiPickerQuery.value:'',emojiPickerResults,emojiPickerStatus)});
+if(emojiPickerTone){try{emojiPickerTone.value=localStorage.getItem('sameoldchat-emoji-tone')||''}catch(error){}}
 if(emojiPickerQuery)emojiPickerQuery.addEventListener('keydown',function(event){
 var options=emojiOptions(emojiPickerResults);
 if(!options.length)return;
@@ -2608,26 +2784,136 @@ if(emojiPicker)emojiPicker.addEventListener('close',function(){
 if(emojiPickerTrigger&&document.contains(emojiPickerTrigger))emojiPickerTrigger.focus();
 emojiPickerTarget='composer';emojiReactionFormID='';emojiPickerTrigger=null;
 });
-if(uploadFile&&uploadPreview)uploadFile.addEventListener('change',function(){
-var file=uploadFile.files&&uploadFile.files[0];
-if(!file){uploadPreview.textContent='No file selected.';return}
-var size=file.size;
-var unit='B';
-if(size>=1048576){size=size/1048576;unit='MiB'}else if(size>=1024){size=size/1024;unit='KiB'}
-uploadPreview.textContent=file.name+' · '+(unit==='B'?size:String(Math.round(size*10)/10))+' '+unit;
+function filterShortcuts(){
+if(!shortcutBrowserResults)return;
+var query=(shortcutBrowserQuery.value||'').trim().toLowerCase();var shown=0;
+Array.prototype.forEach.call(shortcutBrowserResults.children,function(item){var search=(item.getAttribute('data-shortcut-search')||'').toLowerCase();var visible=!query||search.indexOf(query)!==-1;item.hidden=!visible;if(visible)shown++});
+if(shortcutBrowserEmpty)shortcutBrowserEmpty.hidden=shown!==0;
+}
+function closeShortcutBrowser(){if(shortcutBrowser&&shortcutBrowser.open)shortcutBrowser.close()}
+if(shortcutBrowserOpen)shortcutBrowserOpen.addEventListener('click',function(){shortcutBrowser.showModal();shortcutBrowserQuery.value='';filterShortcuts();shortcutBrowserQuery.focus()});
+if(shortcutBrowserQuery)shortcutBrowserQuery.addEventListener('input',filterShortcuts);
+if(shortcutBrowserClose)shortcutBrowserClose.addEventListener('click',closeShortcutBrowser);
+if(shortcutBrowserResults)shortcutBrowserResults.addEventListener('click',function(event){var choice=event.target.closest('[data-browser-command]');if(!choice)return;var command=choice.getAttribute('data-browser-command');var start=text.selectionStart;var end=text.selectionEnd;replaceComposerRange(start,end,command+' ',undefined,undefined);closeShortcutBrowser()});
+if(shortcutBrowser)shortcutBrowser.addEventListener('click',function(event){if(event.target===shortcutBrowser)closeShortcutBrowser()});
+if(shortcutBrowser)shortcutBrowser.addEventListener('close',function(){if(shortcutBrowserOpen)shortcutBrowserOpen.focus()});
+function formatFileSize(value){var size=value;var unit='B';if(size>=1048576){size=size/1048576;unit='MiB'}else if(size>=1024){size=size/1024;unit='KiB'}return(unit==='B'?size:String(Math.round(size*10)/10))+' '+unit}
+function updateUploadPreview(){
+if(!uploadFile||!uploadPreview)return;
+var files=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
+if(!files.length){uploadPreview.textContent='No files selected. You can also paste or drop files into the composer.';if(uploadClear)uploadClear.hidden=true;if(text)text.required=true;return}
+uploadPreview.textContent=files.map(function(file){return(file.name||'Pasted file')+' · '+formatFileSize(file.size)}).join(' · ');
+if(uploadClear)uploadClear.hidden=false;
+if(uploadDetails)uploadDetails.open=true;
+if(text)text.required=false;
+announce(files.length===1?'One file staged. Send when ready.':files.length+' files staged. Send when ready.');
+}
+function stageFiles(fileList){
+if(!uploadFile||!fileList||!fileList.length)return false;
+if(!window.DataTransfer){announce('Choose pasted files with Attach files in this browser.');return false}
+var transfer=new DataTransfer();var existing=uploadFile.files?Array.prototype.slice.call(uploadFile.files):[];
+existing.concat(Array.prototype.slice.call(fileList)).slice(0,10).forEach(function(file){transfer.items.add(file)});
+uploadFile.files=transfer.files;updateUploadPreview();return true;
+}
+function clearClipTimers(){
+if(clipLimitTimer)window.clearTimeout(clipLimitTimer);
+if(clipElapsedTimer)window.clearInterval(clipElapsedTimer);
+clipLimitTimer=null;clipElapsedTimer=null;
+}
+function releaseClipStream(){
+if(clipStream){clipStream.getTracks().forEach(function(track){track.stop()});clipStream=null}
+if(clipPreview){clipPreview.pause();clipPreview.srcObject=null}
+}
+function clipClock(seconds){return Math.floor(seconds/60)+':'+String(seconds%60).padStart(2,'0')}
+function updateClipElapsed(kind){
+if(!clipStatus||!clipStartedAt)return;
+var elapsed=Math.min(300,Math.floor((Date.now()-clipStartedAt)/1000));
+clipStatus.textContent='Recording '+kind+' · '+clipClock(elapsed)+' / 5:00';
+}
+function supportedClipMime(kind){
+var choices=kind==='video'?['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/mp4']:['audio/webm;codecs=opus','audio/webm','audio/mp4','audio/ogg;codecs=opus'];
+for(var index=0;index<choices.length;index++)if(!MediaRecorder.isTypeSupported||MediaRecorder.isTypeSupported(choices[index]))return choices[index];
+return '';
+}
+function clipExtension(type){if(type.indexOf('mp4')!==-1)return'mp4';if(type.indexOf('ogg')!==-1)return'ogg';return'webm'}
+function closeClipDialog(){
+if(clipDialog&&clipDialog.open)clipDialog.close();
+}
+function cancelClip(){
+clipGeneration++;clipCancelled=true;clearClipTimers();
+if(clipRecorder&&clipRecorder.state!=='inactive'){clipRecorder.stop();return}
+releaseClipStream();closeClipDialog();
+}
+function startClip(kind,trigger){
+if(!clipDialog||!uploadFile)return;
+clearError(composer);
+if(!window.MediaRecorder||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){showError('This browser cannot record clips. Attach an audio or video file instead.',composer);return}
+var generation=++clipGeneration;
+clipTrigger=trigger;clipCancelled=false;clipChunks=[];clipRecorder=null;
+if(clipTitle)clipTitle.textContent=kind==='video'?'Record a video clip':'Record an audio clip';
+if(clipStatus)clipStatus.textContent=kind==='video'?'Requesting camera and microphone access…':'Requesting microphone access…';
+if(clipPreview){clipPreview.hidden=kind!=='video';clipPreview.srcObject=null}
+if(clipStop)clipStop.disabled=true;
+clipDialog.showModal();
+navigator.mediaDevices.getUserMedia(kind==='video'?{audio:true,video:true}:{audio:true}).then(function(stream){
+if(generation!==clipGeneration){stream.getTracks().forEach(function(track){track.stop()});return}
+clipStream=stream;
+if(kind==='video'&&clipPreview){clipPreview.srcObject=stream;clipPreview.play().catch(function(){})}
+var mime=supportedClipMime(kind);var options=mime?{mimeType:mime}:undefined;
+try{clipRecorder=new MediaRecorder(stream,options)}catch(error){releaseClipStream();closeClipDialog();showError('Recording could not start in this browser. Attach an audio or video file instead.',composer);return}
+clipRecorder.addEventListener('dataavailable',function(event){if(event.data&&event.data.size)clipChunks.push(event.data)});
+clipRecorder.addEventListener('error',function(){clipCancelled=true;showError('The clip recording failed. No attachment was added.',composer)});
+clipRecorder.addEventListener('stop',function(){
+clearClipTimers();releaseClipStream();
+var recorderType=clipRecorder&&clipRecorder.mimeType?clipRecorder.mimeType:mime;
+clipRecorder=null;closeClipDialog();
+if(clipCancelled||!clipChunks.length)return;
+var blob=new Blob(clipChunks,{type:recorderType});
+var stamp=new Date().toISOString().replace(/[:.]/g,'-');
+var file=new File([blob],kind+'-clip-'+stamp+'.'+clipExtension(recorderType),{type:recorderType,lastModified:Date.now()});
+if(stageFiles([file]))announce((kind==='video'?'Video':'Audio')+' clip staged. Add a message or send when ready.');
+else showError('The recorded clip could not be staged. Attach an audio or video file instead.',composer);
 });
+clipRecorder.start(1000);clipStartedAt=Date.now();
+if(clipStop)clipStop.disabled=false;
+updateClipElapsed(kind);
+clipElapsedTimer=window.setInterval(function(){updateClipElapsed(kind)},1000);
+clipLimitTimer=window.setTimeout(function(){if(clipRecorder&&clipRecorder.state!=='inactive'){announce('Five-minute clip limit reached.');clipRecorder.stop()}},300000);
+}).catch(function(error){
+if(generation!==clipGeneration)return;
+releaseClipStream();closeClipDialog();
+var denied=error&&(error.name==='NotAllowedError'||error.name==='SecurityError');
+showError(denied?'Microphone or camera permission was denied. Allow access or attach a file instead.':'The microphone or camera is unavailable. Attach an audio or video file instead.',composer);
+});
+}
+Array.prototype.forEach.call(document.querySelectorAll('[data-record-clip]'),function(button){button.addEventListener('click',function(){startClip(button.getAttribute('data-record-clip'),button)})});
+if(clipStop)clipStop.addEventListener('click',function(){if(clipRecorder&&clipRecorder.state!=='inactive')clipRecorder.stop()});
+if(clipCancel)clipCancel.addEventListener('click',cancelClip);
+if(clipDialog)clipDialog.addEventListener('cancel',function(event){event.preventDefault();cancelClip()});
+if(clipDialog)clipDialog.addEventListener('click',function(event){if(event.target===clipDialog)cancelClip()});
+if(clipDialog)clipDialog.addEventListener('close',function(){if(clipTrigger&&document.contains(clipTrigger))clipTrigger.focus();clipTrigger=null});
+if(uploadFile){uploadFile.addEventListener('change',updateUploadPreview);updateUploadPreview()}
+if(uploadClear)uploadClear.addEventListener('click',function(){uploadFile.value='';updateUploadPreview();if(text)text.focus()});
+if(text&&uploadFile){
+text.addEventListener('paste',function(event){var files=event.clipboardData&&event.clipboardData.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
+composer.addEventListener('dragover',function(event){if(event.dataTransfer&&event.dataTransfer.types&&Array.prototype.indexOf.call(event.dataTransfer.types,'Files')!==-1){event.preventDefault();composer.classList.add('is-dragging')}});
+composer.addEventListener('dragleave',function(){composer.classList.remove('is-dragging')});
+composer.addEventListener('drop',function(event){composer.classList.remove('is-dragging');var files=event.dataTransfer&&event.dataTransfer.files;if(files&&files.length&&stageFiles(files))event.preventDefault()});
+}
 document.addEventListener('submit',function(event){
 var form=event.target.closest('form');
 if(!form||!form.hasAttribute('hx-post'))return;
 var submitter=event.submitter;
 var action=submitter&&submitter.getAttribute('formaction')||form.getAttribute('hx-post');
+var stagedUpload=form===composer&&uploadForm&&uploadFile&&uploadFile.files&&uploadFile.files.length>0&&action.indexOf('/app/message/schedule')!==0;
+if(stagedUpload){action=uploadForm.getAttribute('action');if(uploadComment)uploadComment.value=text?text.value:''}
 if(!ownPath(action))return;
 event.preventDefault();
-if(form===composer){if(sending)return;sending=true}
+if(form===composer){if(sending)return;sending=true;if(draftTimer){window.clearTimeout(draftTimer);draftTimer=null}}
 var activeMessage=document.activeElement&&document.activeElement.closest?document.activeElement.closest('.message'):null;
 var restoreMessageID=activeMessage?activeMessage.getAttribute('data-message-id'):'';
 var quiet=form.getAttribute('data-quiet')==='true';
-var body=new FormData(form);
+var body=new FormData(stagedUpload?uploadForm:form);
 var unixInput=form.querySelector('[data-unix-seconds="true"]');
 if(unixInput&&unixInput.value){var unixMillis=new Date(unixInput.value).getTime();if(!isNaN(unixMillis))body.set('value',String(Math.floor(unixMillis/1000)))}
 var scheduleInput=form.querySelector('[data-schedule-at]');
@@ -2641,7 +2927,7 @@ fetch(action,{method:'POST',body:body,headers:{'HX-Request':'true'},credentials:
 if(!response.ok)return response.text().then(function(body){throw new Error(body)});
 if(response.headers.get('X-SameOldChat-Draft-Cleanup')==='failed')announce('Your message was sent, but its old draft could not be cleared. Delete it from Drafts & sent.');
 var redirect=response.headers.get('HX-Redirect');
-if(redirect){if(form===composer&&text&&text.value===sent){text.value='';persistDraft()}if(ownPath(redirect))window.location.assign(redirect);return null}
+if(redirect){if(form===composer&&text&&text.value===sent){text.value='';persistDraft()}if(stagedUpload&&uploadFile){uploadFile.value='';updateUploadPreview()}if(ownPath(redirect))window.location.assign(redirect);return null}
 if(response.status===204)return '';
 return response.text();
 }).then(function(html){
@@ -2660,7 +2946,7 @@ var target=document.querySelector(form.getAttribute('hx-target'));
 if(!target)throw new Error('The page could not be updated. Reload to see the message.');
 target.insertAdjacentHTML('beforeend',html);
 localize(target);
-if(form===composer&&text){if(text.value===sent){text.value='';persistDraft()}text.focus()}else{form.reset()}
+if(form===composer&&text){if(text.value===sent){text.value='';persistDraft()}if(stagedUpload&&uploadFile){uploadFile.value='';updateUploadPreview()}text.focus()}else{form.reset()}
 toBottom(target);
 toBottom(document.getElementById('timeline'));
 return refresh(true);
@@ -2888,6 +3174,16 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
 	mux.HandleFunc("GET /app/dms", h.directMessages)
 	mux.HandleFunc("GET /app/members", h.members)
+	mux.HandleFunc("GET /app/canvases", h.canvases)
+	mux.HandleFunc("POST /app/canvases/create", h.createCanvas)
+	mux.HandleFunc("GET /app/canvases/{canvasID}", h.canvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/update", h.updateCanvas)
+	mux.HandleFunc("POST /app/canvases/{canvasID}/delete", h.deleteCanvas)
+	mux.HandleFunc("GET /app/lists", h.lists)
+	mux.HandleFunc("POST /app/lists/create", h.createList)
+	mux.HandleFunc("GET /app/lists/{listID}", h.list)
+	mux.HandleFunc("POST /app/lists/{listID}/items/create", h.createListItem)
+	mux.HandleFunc("POST /app/lists/{listID}/items/{itemID}/toggle", h.toggleListItem)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
 	mux.HandleFunc("POST /app/apps/{appID}/action", h.appHomeAction)
@@ -3989,8 +4285,8 @@ func renderReactionEmoji(name string, customEmoji map[string]string) template.HT
 	if imageURL := customEmoji[name]; imageURL != "" {
 		return template.HTML(`<img class="custom-emoji" src="` + template.HTMLEscapeString(imageURL) + `" alt=":` + template.HTMLEscapeString(name) + `:" loading="lazy">`) // #nosec G203 -- URL was scheme-validated and every value is escaped.
 	}
-	if emoji, ok := slackemoji.Lookup(name); ok {
-		return template.HTML(`<span class="standard-emoji" role="img" aria-label=":` + template.HTMLEscapeString(name) + `:">` + template.HTMLEscapeString(slackemoji.Unicode(emoji)) + `</span>`) // #nosec G203 -- every dynamic value is escaped.
+	if rendered, ok := slackemoji.ReactionUnicode(name); ok {
+		return template.HTML(`<span class="standard-emoji" role="img" aria-label=":` + template.HTMLEscapeString(name) + `:">` + template.HTMLEscapeString(rendered) + `</span>`) // #nosec G203 -- every dynamic value is escaped.
 	}
 	return template.HTML(template.HTMLEscapeString(":" + name + ":")) // #nosec G203 -- the value is escaped immediately above.
 }
@@ -4653,6 +4949,15 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 				}
 				view.ReplyURL = appURL(string(item.Message.Conversation), replyThread, "", "", "")
 				view.ChannelName = message.ChannelPrefix + message.ChannelName
+				if principal.HasScope(auth.ScopeReactionsWrite) {
+					view.ReactionURL = mutationURL(
+						"/app/reaction",
+						string(item.Message.Conversation),
+						string(domain.NewMessageTimestamp(item.Message.CreatedAt)),
+						string(item.Message.ThreadTimestamp),
+						"",
+					)
+				}
 				if item.ReminderID == "" {
 					view.ActorName = message.AuthorName
 				}
@@ -5354,6 +5659,7 @@ func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	category := strings.TrimSpace(r.URL.Query().Get("category"))
 	if len(query) > 100 {
 		http.Error(w, "emoji search is too long", http.StatusBadRequest)
 		return
@@ -5363,18 +5669,65 @@ func (h Handler) emojiOptions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "emoji are temporarily unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	options := mergedEmojiOptions(query, custom, 60)
+	recent := strings.Split(r.URL.Query().Get("recent"), ",")
+	if len(recent) > 24 {
+		recent = recent[:24]
+	}
+	options := mergedEmojiOptions(query, category, recent, custom, 60)
+	categories := []string{"Recent", "Custom"}
+	for _, value := range slackemoji.Categories() {
+		categories = append(categories, value.Name)
+	}
 	secureHeaders(w, workspaceContentSecurityPolicy)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	_ = json.NewEncoder(w).Encode(map[string]any{"options": options, "count": len(options)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"options": options, "count": len(options), "categories": categories})
 }
 
-func mergedEmojiOptions(query string, custom []domain.CustomEmoji, limit int) []emojiOptionView {
+func mergedEmojiOptions(query, category string, recent []string, custom []domain.CustomEmoji, limit int) []emojiOptionView {
 	query = strings.ToLower(strings.Trim(strings.TrimSpace(query), ":"))
+	category = strings.TrimSpace(category)
 	images := customEmojiImages(custom)
 	result := make([]emojiOptionView, 0, limit)
+	seen := make(map[string]struct{}, limit)
+	appendOption := func(option emojiOptionView) {
+		if len(result) == limit || option.Name == "" {
+			return
+		}
+		if _, exists := seen[option.Name]; exists {
+			return
+		}
+		seen[option.Name] = struct{}{}
+		result = append(result, option)
+	}
+	if category == "Recent" {
+		customByName := make(map[string]domain.CustomEmoji, len(custom))
+		for _, value := range custom {
+			customByName[strings.ToLower(strings.TrimSpace(value.Name))] = value
+		}
+		for _, rawName := range recent {
+			name := strings.ToLower(strings.Trim(strings.TrimSpace(rawName), ":"))
+			if name == "" || (query != "" && !strings.Contains(name, query)) {
+				continue
+			}
+			if _, exists := customByName[name]; exists {
+				if imageURL := images[name]; imageURL != "" {
+					appendOption(emojiOptionView{Name: name, Display: ":" + name + ":", ImageURL: imageURL, Category: "Custom", Custom: true})
+				}
+				continue
+			}
+			if value, ok := slackemoji.Lookup(name); ok {
+				appendOption(emojiOptionView{Name: value.Name, Display: slackemoji.Unicode(value), Category: value.Category, SkinTones: value.SkinTones})
+			}
+		}
+		return result
+	}
+	includeCustom := category == "" || category == "Custom"
+	includeStandard := category != "Custom"
 	for _, value := range custom {
+		if !includeCustom {
+			break
+		}
 		if len(result) == limit {
 			break
 		}
@@ -5386,7 +5739,7 @@ func mergedEmojiOptions(query string, custom []domain.CustomEmoji, limit int) []
 		if imageURL == "" {
 			continue
 		}
-		result = append(result, emojiOptionView{
+		appendOption(emojiOptionView{
 			Name: name, Display: ":" + name + ":", ImageURL: imageURL,
 			Category: "Custom", Custom: true,
 		})
@@ -5394,14 +5747,21 @@ func mergedEmojiOptions(query string, custom []domain.CustomEmoji, limit int) []
 	if len(result) == limit {
 		return result
 	}
-	for _, value := range slackemoji.Search(query, limit-len(result)) {
+	if !includeStandard {
+		return result
+	}
+	for _, value := range slackemoji.Search(query, len(slackemoji.All())) {
+		if category != "" && value.Category != category {
+			continue
+		}
 		display := slackemoji.Unicode(value)
 		if display == "" {
 			continue
 		}
-		result = append(result, emojiOptionView{
-			Name: value.Name, Display: display, Category: value.Category,
-		})
+		appendOption(emojiOptionView{Name: value.Name, Display: display, Category: value.Category, SkinTones: value.SkinTones})
+		if len(result) == limit {
+			break
+		}
 	}
 	return result
 }
@@ -5559,6 +5919,325 @@ func (h Handler) newResultViews(ctx context.Context, principal auth.Principal, m
 // ---------------------------------------------------------------------------
 // Members and profile
 // ---------------------------------------------------------------------------
+
+func pageCSRFToken(r *http.Request) (string, error) {
+	session, err := r.Cookie(auth.SessionCookieName)
+	if err != nil || strings.TrimSpace(session.Value) == "" {
+		return "", auth.ErrNotAuthenticated
+	}
+	return auth.CSRFToken(session.Value), nil
+}
+
+func canvasEditor(value domain.Canvas) (body, sectionID string, editable bool) {
+	var document struct {
+		Sections []domain.CanvasSection `json:"sections"`
+	}
+	if json.Unmarshal([]byte(value.DocumentContent), &document) != nil {
+		return "", "", false
+	}
+	if len(document.Sections) == 0 {
+		return "", "", true
+	}
+	if len(document.Sections) == 1 && document.Sections[0].Type == "markdown" {
+		section := document.Sections[0]
+		return section.Text, section.ID, true
+	}
+	parts := make([]string, 0, len(document.Sections))
+	for _, section := range document.Sections {
+		if text := strings.TrimSpace(section.Text); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n"), "", false
+}
+
+func canvasBody(value domain.Canvas) string {
+	body, _, _ := canvasEditor(value)
+	return body
+}
+
+func (h Handler) canvases(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
+	page, err := h.Messages.Canvases(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 48, Cursor: cursor})
+	if err != nil {
+		h.writeStoreError(w, err, "Canvases are temporarily unavailable.")
+		return
+	}
+	csrf, err := pageCSRFToken(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	cards := make([]documentCardView, 0, len(page.Canvases))
+	for _, value := range page.Canvases {
+		preview := canvasBody(value)
+		if len([]rune(preview)) > 180 {
+			preview = string([]rune(preview)[:180]) + "…"
+		}
+		cards = append(cards, documentCardView{ID: string(value.ID), Title: value.Title, Preview: preview, URL: "/app/canvases/" + url.PathEscape(string(value.ID)), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano)})
+	}
+	more := ""
+	if page.HasMore {
+		more = "/app/canvases?cursor=" + url.QueryEscape(string(page.NextCursor))
+	}
+	h.writeHTML(w, documentsTemplate, documentsData{Kind: "canvas", Title: "Canvases", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeCanvasesWrite), Canvases: cards, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+}
+
+func (h Handler) canvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	value, err := h.Messages.Canvas(r.Context(), principal.WorkspaceID, principal.UserID, domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID"))))
+	if err != nil {
+		h.writeStoreError(w, err, "That canvas is not available.")
+		return
+	}
+	access, err := h.Messages.CanvasAccess(r.Context(), principal.WorkspaceID, principal.UserID, value.ID)
+	if err != nil {
+		h.writeStoreError(w, err, "That canvas is not available.")
+		return
+	}
+	csrf, err := pageCSRFToken(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	owner := value.OwnerID == principal.UserID
+	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
+	body, sectionID, plainEditable := canvasEditor(value)
+	canEdit := canWrite && principal.HasScope(auth.ScopeCanvasesWrite)
+	readOnlyReason := ""
+	if canEdit && !plainEditable {
+		readOnlyReason = "This canvas contains structured content. SameOldChat keeps it read-only here so headings, lists, and embeds are not flattened."
+	}
+	h.writeHTML(w, canvasTemplate, canvasData{ID: string(value.ID), Title: value.Title, Body: body, SectionID: sectionID, UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano), CSRFToken: csrf, CanWrite: canEdit && plainEditable, CanDelete: owner && principal.HasScope(auth.ScopeCanvasesWrite), ReadOnlyReason: readOnlyReason, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "canvas rendering unavailable")
+}
+
+func (h Handler) createCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Canvases and try again.")
+	if !ok {
+		return
+	}
+	content, _ := json.Marshal(map[string]string{"type": "markdown", "markdown": fields["body"]})
+	value, err := h.Messages.CreateCanvas(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], string(content), "")
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The canvas was not created", "Enter a name and valid content, then try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(value.ID)))
+}
+
+func (h Handler) updateCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the canvas and try again.")
+	if !ok {
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	current, err := h.Messages.Canvas(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "The canvas was not saved", "It no longer exists or you no longer have access.")
+		return
+	}
+	_, sectionID, editable := canvasEditor(current)
+	if !editable || fields["section_id"] != sectionID {
+		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "Its document structure changed. Reload it before editing.")
+		return
+	}
+	operation := "replace"
+	if sectionID == "" {
+		operation = "insert_at_end"
+	}
+	changes, _ := json.Marshal([]map[string]any{
+		{"operation": "replace", "title_content": map[string]string{"title": strings.TrimSpace(fields["title"])}},
+		{"operation": operation, "section_id": sectionID, "document_content": map[string]string{"type": "markdown", "markdown": fields["body"]}},
+	})
+	if err := h.Messages.EditCanvas(r.Context(), principal.WorkspaceID, principal.UserID, id, string(changes)); err != nil {
+		h.writeMutationError(w, r, http.StatusConflict, "The canvas was not saved", "It changed elsewhere or you no longer have edit access. Reload it and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases/"+url.PathEscape(string(id))+"?notice=Canvas+saved")
+}
+
+func (h Handler) deleteCanvas(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeCanvasesWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	if _, ok := h.decodeMutation(w, r, "Reload the canvas and try again."); !ok {
+		return
+	}
+	id := domain.CanvasID(strings.TrimSpace(r.PathValue("canvasID")))
+	if err := h.Messages.DeleteCanvas(r.Context(), principal.WorkspaceID, principal.UserID, id); err != nil {
+		h.writeMutationError(w, r, http.StatusNotFound, "The canvas was not deleted", "It no longer exists or you are not its owner.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/canvases?notice=Canvas+deleted")
+}
+
+func listItemTitle(fields string) string {
+	var values []struct {
+		ColumnID string `json:"column_id"`
+		Value    any    `json:"value"`
+	}
+	if json.Unmarshal([]byte(fields), &values) != nil {
+		return ""
+	}
+	for _, value := range values {
+		if value.ColumnID == "title" {
+			return strings.TrimSpace(fmt.Sprint(value.Value))
+		}
+	}
+	return ""
+}
+
+func listTitleFields(title string) string {
+	value, _ := json.Marshal([]map[string]any{{"column_id": "title", "value": strings.TrimSpace(title)}})
+	return string(value)
+}
+
+func (h Handler) lists(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	page, err := h.Messages.Lists(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 48, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))})
+	if err != nil {
+		h.writeStoreError(w, err, "Lists are temporarily unavailable.")
+		return
+	}
+	csrf, err := pageCSRFToken(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	cards := make([]documentCardView, 0, len(page.Lists))
+	for _, value := range page.Lists {
+		preview := "Structured list"
+		if value.TodoMode {
+			preview = "To-do list"
+		}
+		cards = append(cards, documentCardView{ID: string(value.ID), Title: value.Name, Preview: preview, URL: "/app/lists/" + url.PathEscape(string(value.ID)), UpdatedAt: value.UpdatedAt.UTC().Format(time.RFC3339Nano)})
+	}
+	more := ""
+	if page.HasMore {
+		more = "/app/lists?cursor=" + url.QueryEscape(string(page.NextCursor))
+	}
+	h.writeHTML(w, documentsTemplate, documentsData{Kind: "list", Title: "Lists", CSRFToken: csrf, CanWrite: principal.HasScope(auth.ScopeListsWrite), Lists: cards, MoreURL: more, Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+}
+
+func (h Handler) list(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsRead)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	value, err := h.Messages.List(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	if err != nil {
+		h.writeStoreError(w, err, "That list is not available.")
+		return
+	}
+	access, err := h.Messages.ListAccess(r.Context(), principal.WorkspaceID, principal.UserID, id)
+	if err != nil {
+		h.writeStoreError(w, err, "That list is not available.")
+		return
+	}
+	page, err := h.Messages.ListItems(r.Context(), principal.WorkspaceID, principal.UserID, id, domain.PageRequest{Limit: 100, Cursor: domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))}, true)
+	if err != nil {
+		h.writeStoreError(w, err, "The list items are temporarily unavailable.")
+		return
+	}
+	csrf, err := pageCSRFToken(r)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	items := make([]listItemView, 0, len(page.Items))
+	for _, item := range page.Items {
+		items = append(items, listItemView{ID: string(item.ID), Title: listItemTitle(item.Fields), Archived: item.Archived})
+	}
+	more := ""
+	if page.HasMore {
+		more = "/app/lists/" + url.PathEscape(string(id)) + "?cursor=" + url.QueryEscape(string(page.NextCursor))
+	}
+	canWrite := access.Access == store.AccessWrite || access.Access == store.AccessOwner
+	h.writeHTML(w, listTemplate, listData{ID: string(id), Name: value.Name, TodoMode: value.TodoMode, Items: items, MoreURL: more, CSRFToken: csrf, CanWrite: canWrite && principal.HasScope(auth.ScopeListsWrite), Notice: strings.TrimSpace(r.URL.Query().Get("notice"))}, http.StatusOK, "list rendering unavailable")
+}
+
+func (h Handler) createList(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Lists and try again.")
+	if !ok {
+		return
+	}
+	value, err := h.Messages.CreateList(r.Context(), principal.WorkspaceID, principal.UserID, fields["title"], "[]", "", "", false, fields["todo_mode"] == "true")
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The list was not created", "Enter a name and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(value.ID)))
+}
+
+func (h Handler) createListItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	id := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	if _, err := h.Messages.CreateListItem(r.Context(), principal.WorkspaceID, principal.UserID, id, "", listTitleFields(fields["title"])); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The item was not added", "Enter a title and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(id)))
+}
+
+func (h Handler) toggleListItem(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeListsWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload the list and try again.")
+	if !ok {
+		return
+	}
+	listID := domain.ListID(strings.TrimSpace(r.PathValue("listID")))
+	itemID := domain.ListItemID(strings.TrimSpace(r.PathValue("itemID")))
+	archived := fields["archived"] == "true"
+	if _, err := h.Messages.UpdateListItem(r.Context(), principal.WorkspaceID, principal.UserID, listID, itemID, "", archived); err != nil {
+		h.writeMutationError(w, r, http.StatusConflict, "The item was not updated", "It changed elsewhere or you no longer have edit access. Reload the list and try again.")
+		return
+	}
+	h.redirectMutation(w, r, "/app/lists/"+url.PathEscape(string(listID)))
+}
 
 func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 	principal, err := h.authenticate(r, auth.ScopeUsersRead)
@@ -6496,55 +7175,74 @@ func (h Handler) uploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	headers := r.MultipartForm.File["file"]
-	if len(headers) != 1 {
-		h.writeMutationError(w, r, http.StatusBadRequest, "Choose one file", "Exactly one file must be selected before it can be sent.")
+	if len(headers) == 0 || len(headers) > 10 {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Choose up to ten files", "Between one and ten files can be staged in one message.")
 		return
 	}
-	header := headers[0]
-	source, err := header.Open()
-	if err != nil {
-		h.writeMutationError(w, r, http.StatusBadRequest, "That file could not be opened", "Choose the file again and retry.")
-		return
-	}
-	defer source.Close()
-	name := strings.TrimSpace(header.Filename)
-	title := strings.TrimSpace(r.FormValue("title"))
-	if title == "" {
-		title = name
-	}
-	mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
-	if mimeType == "" {
-		mimeType = "application/octet-stream"
-	}
-	file, err := h.Messages.UploadFile(r.Context(), principal.WorkspaceID, principal.UserID, name, title, mimeType, header.Size, source)
-	if err != nil {
-		status, reason := http.StatusServiceUnavailable, "The file store is temporarily unavailable. Nothing was sent."
-		if errors.Is(err, service.ErrInvalidFile) {
-			status, reason = http.StatusBadRequest, "The selected file is empty or its metadata is not valid."
+	completions := make([]domain.ExternalUploadCompletion, 0, len(headers))
+	singleTitle := strings.TrimSpace(r.FormValue("title"))
+	for index, header := range headers {
+		name := strings.TrimSpace(header.Filename)
+		if name == "" {
+			name = "pasted-file-" + strconv.Itoa(index+1)
 		}
-		h.writeMutationError(w, r, status, "That file was not uploaded", reason)
-		return
+		mimeType := strings.TrimSpace(header.Header.Get("Content-Type"))
+		if mimeType == "" {
+			mimeType = "application/octet-stream"
+		}
+		upload, err := h.Messages.CreateExternalUpload(r.Context(), principal.WorkspaceID, principal.UserID, name, mimeType, header.Size, 15*time.Minute)
+		if err != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That file was not staged", "Choose non-empty files with valid names and try again.")
+			return
+		}
+		source, err := header.Open()
+		if err != nil {
+			h.writeMutationError(w, r, http.StatusBadRequest, "That file could not be opened", "Choose the files again and retry.")
+			return
+		}
+		err = h.Messages.UploadExternalFile(r.Context(), upload.ID, header.Size, source)
+		closeErr := source.Close()
+		if err == nil {
+			err = closeErr
+		}
+		if err != nil {
+			status, reason := http.StatusServiceUnavailable, "The file store is temporarily unavailable. Nothing was sent."
+			if errors.Is(err, service.ErrInvalidExternalUpload) {
+				status, reason = http.StatusBadRequest, "One selected file is empty or does not match its staged size."
+			}
+			h.writeMutationError(w, r, status, "Those files were not uploaded", reason)
+			return
+		}
+		title := name
+		if len(headers) == 1 && singleTitle != "" {
+			title = singleTitle
+		}
+		completions = append(completions, domain.ExternalUploadCompletion{ID: upload.ID, Title: title})
 	}
 	channel := h.requestChannel(r)
 	thread := domain.MessageTimestamp(strings.TrimSpace(r.URL.Query().Get("thread")))
-	if _, err := h.Messages.ShareFile(r.Context(), principal.WorkspaceID, principal.UserID, file.ID, channel, thread); err != nil {
-		cleanupErr := h.Messages.DeleteFile(r.Context(), principal.WorkspaceID, principal.UserID, file.ID)
-		reason := "The file was not sent and the incomplete upload was removed."
-		if cleanupErr != nil {
-			reason = "The file was not sent. Its incomplete upload could not be removed automatically."
-		}
+	if _, err := h.Messages.CompleteExternalUploads(
+		r.Context(), principal.WorkspaceID, principal.UserID, completions, []domain.ConversationID{channel},
+		r.FormValue("initial_comment"), "", thread,
+	); err != nil {
+		reason := "The files remain staged but were not shared into the conversation."
 		status := http.StatusServiceUnavailable
 		if errors.Is(err, service.ErrNotInConversation) {
-			status, reason = http.StatusForbidden, "You are not a member of this conversation, so the file was not sent."
+			status, reason = http.StatusForbidden, "You are not a member of this conversation, so the files were not sent."
 		} else if errors.Is(err, service.ErrConversationAlreadyArchived) {
-			status, reason = http.StatusConflict, "This conversation is archived, so the file was not sent."
-		} else if errors.Is(err, service.ErrInvalidTimestamp) {
+			status, reason = http.StatusConflict, "This conversation is archived, so the files were not sent."
+		} else if errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidExternalUpload) {
 			status, reason = http.StatusBadRequest, "That thread is not a message in this conversation."
 		} else if errors.Is(err, store.ErrNotFound) {
-			status, reason = http.StatusNotFound, "That conversation or file is no longer available."
+			status, reason = http.StatusNotFound, "That conversation or staged file is no longer available."
 		}
-		h.writeMutationError(w, r, status, "That file was not sent", reason)
+		h.writeMutationError(w, r, status, "Those files were not sent", reason)
 		return
+	}
+	if cleanupErr := h.Messages.DeleteDraft(r.Context(), principal.WorkspaceID, principal.UserID, channel, thread); cleanupErr != nil && !errors.Is(cleanupErr, store.ErrNotFound) {
+		// The file-share message is already committed. Report the recoverable
+		// cleanup failure without pretending the upload failed or retrying it.
+		w.Header().Set("X-SameOldChat-Draft-Cleanup", "failed")
 	}
 	h.redirectMutation(w, r, h.viewURL(r, string(thread)))
 }

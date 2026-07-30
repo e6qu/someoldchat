@@ -126,6 +126,24 @@ type ConversationPage struct {
 	HasMore       bool
 }
 
+type WorkspacePage struct {
+	Workspaces []Workspace
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type CanvasPage struct {
+	Canvases   []Canvas
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type ListPage struct {
+	Lists      []List
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type UserReactionPage struct {
 	Items      []UserReaction
 	NextCursor Cursor

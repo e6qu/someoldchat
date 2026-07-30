@@ -61,6 +61,14 @@ func TestSQLiteAppDatastoreItemsAreOrderedReplacedDeletedAndUninstalled(t *testi
 	if err != nil || len(got) != 2 || got[0].ID != "two" || got[1].Item != values[0].Item || !got[1].UpdatedAt.Equal(now) {
 		t.Fatalf("ordered items=%+v err=%v", got, err)
 	}
+	page, more, cursor, err := s.ListAppDatastoreItems(ctx, "A1", "T1", "incidents", domain.PageRequest{Limit: 1})
+	if err != nil || !more || cursor == "" || len(page) != 1 || page[0].ID != "one" {
+		t.Fatalf("first page=%+v more=%v cursor=%q err=%v", page, more, cursor, err)
+	}
+	page, more, _, err = s.ListAppDatastoreItems(ctx, "A1", "T1", "incidents", domain.PageRequest{Limit: 1, Cursor: cursor})
+	if err != nil || more || len(page) != 1 || page[0].ID != "two" {
+		t.Fatalf("second page=%+v more=%v err=%v", page, more, err)
+	}
 	if err := s.DeleteAppDatastoreItems(ctx, "A1", "T1", "incidents", []string{"two"}); err != nil {
 		t.Fatal(err)
 	}

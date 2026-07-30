@@ -180,6 +180,7 @@ func conversionCases() map[string]conversionCase {
 	return map[string]conversionCase{
 		"User":              {sample: &domain.User{}, through: through(encodeProtoUser, decodeProtoUser)},
 		"Workspace":         {sample: &domain.Workspace{}, through: through(encodeProtoWorkspace, decodeProtoWorkspace)},
+		"WorkspacePage":     {sample: &domain.WorkspacePage{}, through: through(encodeProtoWorkspacePage, decodeProtoWorkspacePage)},
 		"Conversation":      {sample: &domain.Conversation{}, through: through(encodeProtoConversation, decodeProtoConversation)},
 		"ConversationPage":  {sample: &domain.ConversationPage{}, through: through(encodeProtoConversationPage, decodeProtoConversationPage)},
 		"ConversationPrefs": {sample: &domain.ConversationPrefs{}, through: through(encodeProtoConversationPrefs, decodeProtoConversationPrefs)},
@@ -318,7 +319,9 @@ func conversionCases() map[string]conversionCase {
 		"UserGroup":        {sample: &domain.UserGroup{}, through: through(encodeProtoUserGroup, decodeProtoUserGroup)},
 		"Call":             {sample: &domain.Call{}, through: through(encodeProtoCall, decodeProtoCall)},
 		"Canvas":           {sample: &domain.Canvas{}, through: through(encodeProtoCanvas, decodeProtoCanvas)},
+		"CanvasPage":       {sample: &domain.CanvasPage{}, through: through(encodeProtoCanvasPage, decodeProtoCanvasPage)},
 		"List":             {sample: &domain.List{}, through: through(encodeProtoList, decodeProtoList)},
+		"ListPage":         {sample: &domain.ListPage{}, through: through(encodeProtoListPage, decodeProtoListPage)},
 		"ListItem":         {sample: &domain.ListItem{}, through: through(encodeProtoListItem, decodeProtoListItem)},
 		"ListItemPage":     {sample: &domain.ListItemPage{}, through: through(encodeProtoListItemPage, decodeProtoListItemPage)},
 		"ListDownload":     {sample: &domain.ListDownload{}, through: through(encodeProtoListDownload, decodeProtoListDownload)},

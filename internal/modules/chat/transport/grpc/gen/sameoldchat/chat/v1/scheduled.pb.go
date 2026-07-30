@@ -39,6 +39,8 @@ type ScheduledMessage struct {
 	DeliveredAt    int64                  `protobuf:"varint,14,opt,name=delivered_at,json=deliveredAt,proto3" json:"delivered_at,omitempty"`
 	FailedAt       int64                  `protobuf:"varint,15,opt,name=failed_at,json=failedAt,proto3" json:"failed_at,omitempty"`
 	FailureCode    string                 `protobuf:"bytes,16,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	Metadata       string                 `protobuf:"bytes,17,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	StreamState    string                 `protobuf:"bytes,18,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -185,6 +187,20 @@ func (x *ScheduledMessage) GetFailureCode() string {
 	return ""
 }
 
+func (x *ScheduledMessage) GetMetadata() string {
+	if x != nil {
+		return x.Metadata
+	}
+	return ""
+}
+
+func (x *ScheduledMessage) GetStreamState() string {
+	if x != nil {
+		return x.StreamState
+	}
+	return ""
+}
+
 type ScheduleMessageRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -198,6 +214,8 @@ type ScheduleMessageRequest struct {
 	BotId          string                 `protobuf:"bytes,9,opt,name=bot_id,json=botId,proto3" json:"bot_id,omitempty"`
 	CredentialHash string                 `protobuf:"bytes,10,opt,name=credential_hash,json=credentialHash,proto3" json:"credential_hash,omitempty"`
 	ThreadTs       string                 `protobuf:"bytes,11,opt,name=thread_ts,json=threadTs,proto3" json:"thread_ts,omitempty"`
+	Metadata       string                 `protobuf:"bytes,12,opt,name=metadata,proto3" json:"metadata,omitempty"`
+	StreamState    string                 `protobuf:"bytes,13,opt,name=stream_state,json=streamState,proto3" json:"stream_state,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -305,6 +323,20 @@ func (x *ScheduleMessageRequest) GetCredentialHash() string {
 func (x *ScheduleMessageRequest) GetThreadTs() string {
 	if x != nil {
 		return x.ThreadTs
+	}
+	return ""
+}
+
+func (x *ScheduleMessageRequest) GetMetadata() string {
+	if x != nil {
+		return x.Metadata
+	}
+	return ""
+}
+
+func (x *ScheduleMessageRequest) GetStreamState() string {
+	if x != nil {
+		return x.StreamState
 	}
 	return ""
 }
@@ -1149,7 +1181,7 @@ var File_sameoldchat_chat_v1_scheduled_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\n" +
-	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\"\xde\x03\n" +
+	"#sameoldchat/chat/v1/scheduled.proto\x12\x13sameoldchat.chat.v1\x1a0sameoldchat/chat/v1/conversation_mutations.proto\x1a\"sameoldchat/chat/v1/messages.proto\"\x9d\x04\n" +
 	"\x10ScheduledMessage\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12\x1d\n" +
@@ -1169,7 +1201,9 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\tthread_ts\x18\r \x01(\tR\bthreadTs\x12!\n" +
 	"\fdelivered_at\x18\x0e \x01(\x03R\vdeliveredAt\x12\x1b\n" +
 	"\tfailed_at\x18\x0f \x01(\x03R\bfailedAt\x12!\n" +
-	"\ffailure_code\x18\x10 \x01(\tR\vfailureCode\"\xce\x02\n" +
+	"\ffailure_code\x18\x10 \x01(\tR\vfailureCode\x12\x1a\n" +
+	"\bmetadata\x18\x11 \x01(\tR\bmetadata\x12!\n" +
+	"\fstream_state\x18\x12 \x01(\tR\vstreamState\"\x8d\x03\n" +
 	"\x16ScheduleMessageRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
@@ -1183,7 +1217,9 @@ const file_sameoldchat_chat_v1_scheduled_proto_rawDesc = "" +
 	"\x06bot_id\x18\t \x01(\tR\x05botId\x12'\n" +
 	"\x0fcredential_hash\x18\n" +
 	" \x01(\tR\x0ecredentialHash\x12\x1b\n" +
-	"\tthread_ts\x18\v \x01(\tR\bthreadTs\"\xfc\x01\n" +
+	"\tthread_ts\x18\v \x01(\tR\bthreadTs\x12\x1a\n" +
+	"\bmetadata\x18\f \x01(\tR\bmetadata\x12!\n" +
+	"\fstream_state\x18\r \x01(\tR\vstreamState\"\xfc\x01\n" +
 	"\x18ScheduledMessagesRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
 	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +

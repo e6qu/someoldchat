@@ -86,6 +86,58 @@ func TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes(t *testin
 	if bulkGet["ok"] != true || len(items) != 2 || first["id"] != "INC-3" || second["id"] != "INC-1" {
 		t.Fatalf("bulk get=%v", bulkGet)
 	}
+	query := callDatastoreAPI(t, mux, "/api/apps.datastore.query", "xoxb-hosted", map[string]any{
+		"datastore": "incidents", "limit": 1,
+		"expression":            "#priority >= :minimum",
+		"expression_attributes": map[string]any{"#priority": "priority"},
+		"expression_values":     map[string]any{":minimum": 3},
+	})
+	queryItems, _ := query["items"].([]any)
+	queryMetadata, _ := query["response_metadata"].(map[string]any)
+	if query["ok"] != true || len(queryItems) != 0 || queryMetadata["next_cursor"] == "" {
+		t.Fatalf("first query page=%v", query)
+	}
+	query = callDatastoreAPI(t, mux, "/api/apps.datastore.query", "xoxb-hosted", map[string]any{
+		"datastore": "incidents", "limit": 1, "cursor": queryMetadata["next_cursor"],
+		"expression":            "#priority >= :minimum",
+		"expression_attributes": map[string]any{"#priority": "priority"},
+		"expression_values":     map[string]any{":minimum": 3},
+	})
+	queryMetadata, _ = query["response_metadata"].(map[string]any)
+	if queryItems, _ = query["items"].([]any); len(queryItems) != 0 || queryMetadata["next_cursor"] == "" {
+		t.Fatalf("second query page=%v", query)
+	}
+	query = callDatastoreAPI(t, mux, "/api/apps.datastore.query", "xoxb-hosted", map[string]any{
+		"datastore": "incidents", "limit": 1, "cursor": queryMetadata["next_cursor"],
+		"expression":            "#priority >= :minimum",
+		"expression_attributes": map[string]any{"#priority": "priority"},
+		"expression_values":     map[string]any{":minimum": 3},
+	})
+	queryItems, _ = query["items"].([]any)
+	if len(queryItems) != 1 {
+		t.Fatalf("third query page=%v", query)
+	}
+	matched, _ := queryItems[0].(map[string]any)
+	if matched["id"] != "INC-3" {
+		t.Fatalf("third query page=%v", query)
+	}
+	count := callDatastoreAPI(t, mux, "/api/apps.datastore.count", "xoxb-hosted", map[string]any{
+		"datastore":             "incidents",
+		"expression":            "contains (#title, :term)",
+		"expression_attributes": map[string]any{"#title": "title"},
+		"expression_values":     map[string]any{":term": "i"},
+	})
+	if count["ok"] != true || count["count"] != float64(2) {
+		t.Fatalf("count=%v", count)
+	}
+	invalidQuery := callDatastoreAPI(t, mux, "/api/apps.datastore.query", "xoxb-hosted", map[string]any{
+		"datastore": "incidents", "expression": "#id = :id",
+		"expression_attributes": map[string]any{"#id": "id"},
+		"expression_values":     map[string]any{":id": "INC-1"},
+	})
+	if invalidQuery["error"] != "invalid_arguments" {
+		t.Fatalf("primary-key query=%v", invalidQuery)
+	}
 	missing := callDatastoreAPI(t, mux, "/api/apps.datastore.get", "xoxb-hosted", map[string]any{
 		"datastore": "incidents", "id": "missing",
 	})
@@ -121,7 +173,7 @@ func TestAppsDatastoreMethodsMatchCurrentSlackRequestAndResponseShapes(t *testin
 	}
 }
 
-func TestAppsDatastoreMethodsRequireBotTokens(t *testing.T) {
+func TestAppsDatastoreUserTokensRequireAnInstalledAppID(t *testing.T) {
 	repository := memory.New()
 	if err := repository.SeedWorkspace(domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
 		t.Fatal(err)
@@ -145,8 +197,14 @@ func TestAppsDatastoreMethodsRequireBotTokens(t *testing.T) {
 	response := callDatastoreAPI(t, mux, "/api/apps.datastore.get", "xoxp-user", map[string]any{
 		"app_id": "A1", "datastore": "incidents", "id": "INC-1",
 	})
-	if response["error"] != "not_allowed_token_type" {
+	if response["error"] != "invalid_app_id" {
 		t.Fatalf("response=%v", response)
+	}
+	missingAppID := callDatastoreAPI(t, mux, "/api/apps.datastore.get", "xoxp-user", map[string]any{
+		"datastore": "incidents", "id": "INC-1",
+	})
+	if missingAppID["error"] != "invalid_arguments" {
+		t.Fatalf("missing app id response=%v", missingAppID)
 	}
 }
 

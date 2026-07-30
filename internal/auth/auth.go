@@ -24,6 +24,7 @@ type Scope string
 
 const (
 	ScopeChatWrite               Scope = "chat:write"
+	ScopeChatWriteCustomize      Scope = "chat:write.customize"
 	ScopeChannelsHistory         Scope = "channels:history"
 	ScopeUsersRead               Scope = "users:read"
 	ScopeUsersReadEmail          Scope = "users:read.email"
@@ -51,6 +52,7 @@ const (
 	ScopeListsRead               Scope = "lists:read"
 	ScopeListsWrite              Scope = "lists:write"
 	ScopeTeamRead                Scope = "team:read"
+	ScopeTeamPreferencesRead     Scope = "team.preferences:read"
 	ScopeEmojiRead               Scope = "emoji:read"
 	ScopeAuthorizationsRead      Scope = "authorizations:read"
 	ScopeLinksWrite              Scope = "links:write"
@@ -449,6 +451,7 @@ func multipartToken(r *http.Request, boundary string) string {
 // specs/upstream/slack-api-specs/web-api/slack_web_openapi_v2.json.
 var allScopes = []Scope{
 	ScopeChatWrite,
+	ScopeChatWriteCustomize,
 	ScopeChannelsHistory,
 	ScopeUsersRead,
 	ScopeUsersReadEmail,
@@ -476,6 +479,7 @@ var allScopes = []Scope{
 	ScopeListsRead,
 	ScopeListsWrite,
 	ScopeTeamRead,
+	ScopeTeamPreferencesRead,
 	ScopeEmojiRead,
 	ScopeAuthorizationsRead,
 	ScopeLinksWrite,

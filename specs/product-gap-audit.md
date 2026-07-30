@@ -7,9 +7,9 @@ journey is usable.
 
 Measured on 2026-07-30:
 
-- 217 of Slack's 310 current catalogued Web API methods are registered; the
+- 223 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
-- 200 current methods are recorded as behavior-compatible, 15 as
+- 200 current methods are recorded as behavior-compatible, 21 as
   SDK-compatible, two as schema-compatible, and none as live-differential
   `verified-against-slack`;
 - the current official Node Web API SDK exercises the product end to end,
@@ -21,16 +21,16 @@ Measured on 2026-07-30:
 - the official SDK qualification fixture records the exact Web API method paths
   emitted by the pinned Node, Python, and Java clients, while the Deno runtime
   suite records its separately verified completion requests. The fail-closed
-  comparison currently observes all 225 methods claimed at `sdk-compatible` or
-  above (215 current and ten retained legacy methods);
+  comparison currently observes all 231 methods claimed at `sdk-compatible` or
+  above (221 current and ten retained legacy methods);
 - all 102 stable journey IDs have an individually checked source-map row. The
-  live official-source gate currently makes 109 representative assertions
-  explicitly citing 47 of those IDs across authentication, navigation,
+  live official-source gate currently makes 130 representative assertions
+  explicitly citing 49 of those IDs across authentication, navigation,
   conversations, messaging, search, files, apps, OAuth, presence, huddles,
   canvases, lists, workflows, administration, Slack Connect, accessibility,
-  Activity, and reminders before local evidence runs. The remaining 55 IDs are
+  Activity, and reminders before local evidence runs. The remaining 53 IDs are
   printed as upstream-text evidence gaps rather than inheriting coverage;
-- 34 Playwright scenarios cite 69 of the normative catalog's 102 stable journey
+- 35 Playwright scenarios cite 73 of the normative catalog's 102 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
   `make journey-check` rejects unknown IDs, missing or duplicate per-journey
@@ -87,28 +87,28 @@ implementation MUST NOT narrow the target.
 | Priority | Journey | Concrete gap |
 | --- | --- | --- |
 | P0 | Search depth | Messages and hosted files now use typed modifier plans, visibility-safe totals/pagination, persistent Unicode-folded file search, private durable recent history, visibility-aware people/channel/file typeahead, generated gRPC parity, user-token Web API methods, pinned Node/Python/Java calls, and real Messages/Files/People/Channels UI tabs with `Command/Control+F`. Remaining depth is Canvases, semantic ranking/highlighting, every modifier variant, full People/Channels pagination, exact thread-entry scope and hit marking, visual baselines, and live-Slack differential outcomes. |
-| P0 | Activity depth | Activity now uses durable per-recipient records for DMs/MPIMs, mentions, authored-thread and followed-thread replies, all-new-post channel preferences, reactions, applicable app messages, and delivered reminders, with shared memory/SQL/gRPC pagination, typed filters, dense/detailed layout, read/clear/restore, source authorization, bulk actions, and keyboard triage. Remaining depth is invitation/VIP notifications, custom views, inline react UI, focus-preserving live updates, and pre-v107 history backfill. |
-| P0 | Composer depth | Formatting, member/user-group/channel autocomplete, a searchable standard/custom emoji picker backed by Slack's pinned catalog, custom alias rendering, file preview, draft recovery, and browser-time-zone scheduled send work. User-group selection uses Slack's subteam transport syntax and drives visibility-safe Activity. Recent/category/skin-tone picker depth, pasted-file staging, voice/video clips, and Slack's full shortcuts browser remain. |
+| P0 | Activity depth | Activity now uses durable per-recipient records for DMs/MPIMs, mentions, authored-thread and followed-thread replies, all-new-post channel preferences, reactions, applicable app messages, and delivered reminders, with shared memory/SQL/gRPC pagination, typed filters, dense/detailed layout, read/clear/restore, source authorization, bulk actions, keyboard triage, inline reactions, and focus/selection-preserving live refresh. Remaining depth is invitation/VIP/section notifications, custom views, and pre-v107 history backfill. |
+| P0 | Composer depth | Formatting, member/user-group/channel autocomplete, a searchable standard/custom emoji picker backed by Slack's pinned catalog, durable recent/category/skin-tone choices, custom alias rendering, selected/pasted/dropped multi-file staging, permission-aware five-minute audio/video recording, atomic attachment-plus-text send, draft recovery, browser-time-zone scheduled send, and a full searchable built-in/installed-app shortcuts browser work. User-group selection uses Slack's subteam transport syntax and drives visibility-safe Activity. Slack video source/device controls, thumbnails, transcripts, the exact emoji ranking differential, and durable staged-attachment drafts remain. |
 | P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers; list pending, failed, and sent work in Drafts & sent; edit/reschedule; send now; and cancel without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. First-party reminders have a separate durable model, message-action presets/custom time, Later CRUD/filtering, named-weekday `/remind`, private channel-reminder listing, guest enforcement, worker recurrence/retry/failure fencing, Activity/source projection, and wake publication. Broader natural-language reminder parsing, month-end recurrence, deterministic deployed-worker browser delivery, and live-Slack differential outcomes remain. The five deprecated app-facing `reminders.*` methods remain only SDK-compatible and are not evidence for the first-party Later model. |
 | P1 | Direct-message lifecycle | Dedicated DMs navigation/search, one-to-one/group creation, naming, Slack's nine-person limit, durable per-member close, exact API no-op fields, canonical reopen, reviewed add-people with no/all-history choices and notices, and in-place private-channel conversion now work across memory/SQL/gRPC/browser paths. Current official SDKs also prove canonical exact-member group opening. Slack's help page does not enumerate its complete history-option list, so that exact live option inventory, Slack Connect/external conversion policy, and workspace-configurable restrictions remain differential gaps rather than inferred compatibility. |
 | P1 | Notifications and presence | Workspace and per-conversation notification preferences plus snooze/DND controls exist in the client and API. Status expiry and up-to-five future statuses with edit/cancel and atomic worker activation are durable and restart-safe; manual `auto`/`away` selection and truthful member affordances exist. Live activity-derived automatic presence and Slack's ten-minute idle transition, full status projection outside People/profile, workspace emoji validation, typing indicators, and deeper Activity/VIP/invitation policy remain. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
 | P1 | App administration | Manifest JSON editing is real, but install-time incoming-webhook selection, event-delivery health/retries, scope explanation, token inventory/revocation, distribution, external-auth providers, and hosted-datastore browsing are absent. |
-| P2 | Canvases, lists, and workflows | API slices exist, but these are not first-class workspace surfaces and workflow creation/execution is incomplete. |
+| P2 | Canvases, lists, and workflows | Canvases and lists are now first-class persisted workspace surfaces: access-filtered directories, read/write-grant-aware detail controls, atomic canvas title/content revision, list creation, item creation and complete/restore run through memory/SQL and the generated gRPC seam. Full structured canvas blocks/comments/history, sharing management, list schemas/views/assignments/comments/files, deletion, and workflow creation/execution remain incomplete. |
 | P2 | Client breadth | The semantic journeys now run in Chromium, Firefox, and WebKit, with automated WCAG checks for representative desktop, dialog, and narrow states. Performance budgets, screenshot differential, manual assistive-technology coverage, and live-Slack comparisons remain unqualified. |
 
 ## Web API and app-platform gaps
 
-The 93 unimplemented current Web API methods are:
+The 87 unimplemented current Web API methods are:
 
 | Namespace | Missing | Boundary |
 | --- | ---: | --- |
 | `admin.*` | 50 | Enterprise analytics, policies, roles, bulk conversation operations, org sessions, and org-wide app/function/workflow administration |
-| `apps.*` | 7 | Datastore query/count, external-auth get/delete, app activity history, app icons, and user connection state |
-| `conversations.*` | 10 | Slack Connect invitation/approval policy and conversation canvases |
+| `apps.*` | 5 | External-auth get/delete, app activity history, app icons, and user connection state |
+| `conversations.*` | 9 | Slack Connect invitation/approval and external-invite policy |
 | `functions.*` / `workflows.*` | 14 | Function distribution, workflow-step discovery/export, featured workflows, and trigger permissions |
 | `assistant.*` | 5 | Assistant search context and thread title/status/suggested-prompt presentation |
-| `auth.*`, `rtm.*`, `team.*`, `users.*` | 7 | Authorized-team enumeration, legacy RTM bootstrap, billing/external-team/preferences, and discoverable contacts |
+| `team.*`, `users.*` | 4 | Billing/external-team administration and discoverable contacts |
 
 App-platform work must remain dependency-ordered:
 
@@ -122,8 +122,9 @@ App-platform work must remain dependency-ordered:
 3. implement external OAuth provider configuration, browser consent, encrypted
    refresh/access tokens, and `apps.auth.external.*`/connection callbacks as one
    journey;
-4. implement full datastore query/count semantics using Slack's documented
-   DynamoDB expression contract rather than a partial expression parser;
+4. extend the implemented datastore query/count expression evaluator and
+   documented scan semantics only when a current Slack contract or controlled
+   differential establishes additional operators;
 5. add app icon storage/rendering and delivery-health/token administration;
 6. then expand assistant, Slack Connect, and Enterprise administration.
 
@@ -133,8 +134,8 @@ Official SDK qualification now proves, method by method, that genuine clients
 issued a request and parsed SameOldChat's response; a large neighboring test
 can no longer lend SDK evidence to an uncalled method. It still does not prove
 live Slack equivalence. The compatibility report also exposes the distinction:
-only 16 of 215 current claims at `sdk-compatible` or above presently carry
-method-level evidence in the ledger; the remaining 199 must not inherit that
+only 25 of 221 current claims at `sdk-compatible` or above presently carry
+method-level evidence in the ledger; the remaining 196 must not inherit that
 evidence from the aggregate green suite. The remaining evidence layers are:
 
 1. pin per-method current argument/response/error schemas, not only the current

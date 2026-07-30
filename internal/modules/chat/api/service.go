@@ -28,6 +28,8 @@ type Service interface {
 	ListWorkspaceApps(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.InstalledApp, error)
 	PutAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string, bool) ([]string, error)
 	GetAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) ([]string, error)
+	QueryAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.AppDatastoreQuery) (domain.AppDatastoreQueryPage, error)
+	CountAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.AppDatastoreQuery) (int, error)
 	DeleteAppDatastoreItems(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, []string) error
 	AppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
 	OpenAppHome(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID) (domain.InstalledApp, domain.View, error)
@@ -74,6 +76,7 @@ type Service interface {
 	PostEphemeral(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string) (domain.EphemeralMessage, error)
 	PostEphemeralWithBlocks(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.UserID, string, string) (domain.EphemeralMessage, error)
 	PostWithBlocksAndAttachments(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string, string, domain.MessageTimestamp, string, domain.AppID) (domain.Message, error)
+	PostMessageAs(context.Context, domain.WorkspaceID, domain.UserID, domain.MessagePostRequest) (domain.Message, error)
 	StartMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamStart) (domain.Message, error)
 	AppendMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
 	StopMessageStream(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageStreamMutation) (domain.Message, error)
@@ -198,6 +201,7 @@ type Service interface {
 	ConversationMembers(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.UserPage, error)
 	IsConversationMember(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (bool, error)
 	WorkspaceInfo(context.Context, domain.WorkspaceID, domain.UserID) (domain.Workspace, error)
+	AuthorizedAppWorkspaces(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.PageRequest) (domain.WorkspacePage, error)
 	AdminCreateWorkspace(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.WorkspaceDiscoverability) (domain.Workspace, error)
 	TeamBillableInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.UserID) (domain.BillableInfo, error)
 	Conversations(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationListRequest) (domain.ConversationPage, error)
@@ -309,12 +313,20 @@ type Service interface {
 	ShareRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileLookup, []domain.ConversationID) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.UserID, domain.RemoteFileUpdate) (domain.RemoteFile, error)
 	CreateCanvas(context.Context, domain.WorkspaceID, domain.UserID, string, string, domain.ConversationID) (domain.Canvas, error)
+	CreateConversationCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, string, string) (domain.Canvas, error)
+	ConversationCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID) (domain.Canvas, error)
+	Canvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) (domain.Canvas, error)
+	CanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) (domain.CanvasAccess, error)
+	Canvases(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.CanvasPage, error)
 	EditCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) error
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID) error
 	SetCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string, []domain.ConversationID, []domain.UserID) error
 	DeleteCanvasAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, []domain.ConversationID, []domain.UserID) error
 	LookupCanvasSections(context.Context, domain.WorkspaceID, domain.UserID, domain.CanvasID, string) ([]domain.CanvasSection, error)
 	CreateList(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, domain.ListID, bool, bool) (domain.List, error)
+	List(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) (domain.List, error)
+	ListAccess(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID) (domain.ListAccess, error)
+	Lists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
 	UpdateList(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, string, string, bool, bool) (domain.List, error)
 	CreateListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID, string) (domain.ListItem, error)
 	GetListItem(context.Context, domain.WorkspaceID, domain.UserID, domain.ListID, domain.ListItemID) (domain.ListItem, error)

@@ -14,6 +14,7 @@ message List {
   bool todo_mode = 7;
   string created_at = 8;
   string updated_at = 9;
+  int64 version = 10;
 }
 
 message ListItem {
@@ -27,10 +28,25 @@ message ListItem {
   string created_at = 8;
   string updated_at = 9;
   bool archived = 10;
+  int64 version = 11;
 }
 
 message ListItemPage {
   repeated ListItem items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message ListsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+}
+
+message ListPage {
+  repeated List lists = 1;
   string next_cursor = 2;
   bool has_more = 3;
 }
@@ -115,6 +131,13 @@ message ListAccessRequest {
   repeated string user_ids = 6;
 }
 
+message ListAccessResponse {
+  string list_id = 1;
+  string entity_type = 2;
+  string entity_id = 3;
+  string access = 4;
+}
+
 message ListDownloadRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -149,6 +172,9 @@ message ListOKResponse {
 
 service ListsService {
   rpc CreateList(CreateListRequest) returns (ListResponse);
+  rpc GetList(ListItemRequest) returns (ListResponse);
+  rpc GetListAccess(ListItemRequest) returns (ListAccessResponse);
+  rpc ListLists(ListsRequest) returns (ListPage);
   rpc UpdateList(UpdateListRequest) returns (ListResponse);
   rpc CreateListItem(CreateListItemRequest) returns (ListItemResponse);
   rpc GetListItem(ListItemRequest) returns (ListItemResponse);

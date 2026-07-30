@@ -109,11 +109,14 @@ func TestRemoteScheduledMessagesPreserveCredentialRangeThreadAndAttribution(t *t
 		Channel: "C1", Text: "credential-owned", PostAt: postAt,
 		ThreadTimestamp: domain.NewMessageTimestamp(parent.CreatedAt),
 		AppID:           "A1", BotID: "B1", CredentialHash: "credential-one",
+		Metadata:    `{"event_type":"remote","event_payload":{"id":"1"}}`,
+		StreamState: `{"reply_broadcast":true,"parse":"none","unfurl_links":false}`,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if scheduled.AppID != "A1" || scheduled.BotID != "B1" || scheduled.CredentialHash != "credential-one" || scheduled.ThreadTimestamp == "" {
+	if scheduled.AppID != "A1" || scheduled.BotID != "B1" || scheduled.CredentialHash != "credential-one" || scheduled.ThreadTimestamp == "" ||
+		scheduled.Metadata == "" || scheduled.StreamState == "" {
 		t.Fatalf("scheduled message lost transport fields: %+v", scheduled)
 	}
 	other, err := remote.ScheduledMessagesForCredential(ctx, "T1", "U1", domain.ScheduledMessageQuery{

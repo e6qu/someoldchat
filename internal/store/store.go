@@ -356,6 +356,7 @@ type Store interface {
 	PutAppDatastoreItems(context.Context, []domain.AppDatastoreItem) error
 	MergeAppDatastoreItems(context.Context, []domain.AppDatastoreItem) ([]domain.AppDatastoreItem, error)
 	GetAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, []string) ([]domain.AppDatastoreItem, error)
+	ListAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, domain.PageRequest) ([]domain.AppDatastoreItem, bool, domain.Cursor, error)
 	DeleteAppDatastoreItems(context.Context, domain.AppID, domain.WorkspaceID, string, []string) error
 	CreateAppPermissionRequest(context.Context, domain.AppPermissionRequest, events.Event) error
 	CreateView(context.Context, domain.View, events.Event) error
@@ -607,7 +608,11 @@ type Store interface {
 	SetRemoteFileShares(context.Context, domain.WorkspaceID, domain.RemoteFileLookup, []domain.ConversationID, events.Event) (domain.RemoteFile, error)
 	UpdateRemoteFile(context.Context, domain.WorkspaceID, domain.RemoteFile, events.Event) (domain.RemoteFile, error)
 	CreateCanvas(context.Context, domain.Canvas, events.Event) error
+	CreateCanvasWithAccess(context.Context, domain.Canvas, events.Event, domain.CanvasAccess, events.Event) error
+	CreateChannelCanvas(context.Context, domain.Canvas, events.Event, domain.ConversationID, events.Event) error
+	GetChannelCanvas(context.Context, domain.WorkspaceID, domain.ConversationID) (domain.Canvas, error)
 	GetCanvas(context.Context, domain.WorkspaceID, domain.CanvasID) (domain.Canvas, error)
+	ListCanvases(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.CanvasPage, error)
 	UpdateCanvas(context.Context, domain.Canvas, events.Event) error
 	DeleteCanvas(context.Context, domain.WorkspaceID, domain.CanvasID, events.Event) error
 	SetCanvasAccess(context.Context, domain.CanvasAccess, events.Event) error
@@ -631,11 +636,15 @@ type Store interface {
 	// bounding it; it is a list's item count, which the product already bounds.
 	CreateListWithItems(context.Context, domain.List, events.Event, []ListItemCreation) error
 	GetList(context.Context, domain.WorkspaceID, domain.ListID) (domain.List, error)
+	ListLists(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ListPage, error)
 	UpdateList(context.Context, domain.List, events.Event) error
 	CreateListItem(context.Context, domain.ListItem, events.Event) error
 	GetListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID) (domain.ListItem, error)
 	ListItems(context.Context, domain.WorkspaceID, domain.ListID, domain.PageRequest, bool) (domain.ListItemPage, error)
 	UpdateListItem(context.Context, domain.ListItem, events.Event) error
+	// UpdateListItems commits every revision and event as one unit and rejects
+	// the whole batch if any submitted revision is stale.
+	UpdateListItems(context.Context, []domain.ListItem, []events.Event) error
 	DeleteListItem(context.Context, domain.WorkspaceID, domain.ListID, domain.ListItemID, events.Event) error
 	DeleteListItems(context.Context, domain.WorkspaceID, domain.ListID, []domain.ListItemID, events.Event) error
 	SetListAccess(context.Context, domain.ListAccess, events.Event) error

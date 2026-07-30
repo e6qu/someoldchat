@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,25 +50,95 @@ func (m Messages) CreateCanvas(ctx context.Context, workspaceID domain.Workspace
 	if canvasTitle == "" {
 		canvasTitle = "Untitled"
 	}
-	canvas := domain.Canvas{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Title: canvasTitle, DocumentContent: content, CreatedAt: now, UpdatedAt: now}
+	canvas := domain.Canvas{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Title: canvasTitle, DocumentContent: content, Version: 1, CreatedAt: now, UpdatedAt: now}
 	event, err := canvasEvent(workspaceID, userID, "canvas.created", id, now)
 	if err != nil {
 		return domain.Canvas{}, err
 	}
-	if err := m.Store.CreateCanvas(ctx, canvas, event); err != nil {
+	if channelID != "" {
+		access := domain.CanvasAccess{CanvasID: id, EntityType: "channel", EntityID: string(channelID), Access: "write"}
+		accessEvent, eventErr := canvasEvent(workspaceID, userID, "canvas.access_set", id, now,
+			events.String("entity_type", "channel"), events.String("entity_id", string(channelID)), events.String("access", "write"))
+		if eventErr != nil {
+			return domain.Canvas{}, eventErr
+		}
+		if err := m.Store.CreateCanvasWithAccess(ctx, canvas, event, access, accessEvent); err != nil {
+			return domain.Canvas{}, err
+		}
+	} else if err := m.Store.CreateCanvas(ctx, canvas, event); err != nil {
 		return domain.Canvas{}, err
 	}
-	if channelID != "" {
-		if err := m.SetCanvasAccess(ctx, workspaceID, userID, id, "write", []domain.ConversationID{channelID}, nil); err != nil {
-			reverted, revertErr := canvasEvent(workspaceID, userID, "canvas.create_reverted", id, time.Now().UTC())
-			if revertErr != nil {
-				return domain.Canvas{}, errors.Join(err, revertErr)
-			}
-			cleanupErr := m.Store.DeleteCanvas(ctx, workspaceID, id, reverted)
-			return domain.Canvas{}, errors.Join(err, cleanupErr)
-		}
+	return canvas, nil
+}
+
+// CreateConversationCanvas creates Slack's singular channel-canvas resource.
+// It is deliberately separate from sharing a standalone canvas with a channel:
+// a channel may have many shared canvases, but only one channel canvas.
+func (m Messages) CreateConversationCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channelID domain.ConversationID, title, documentContent string) (domain.Canvas, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.Canvas{}, err
+	}
+	if channelID == "" {
+		return domain.Canvas{}, ErrInvalidCanvas
+	}
+	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, []domain.ConversationID{channelID}); err != nil {
+		return domain.Canvas{}, err
+	}
+	content, err := normalizeCanvasContent(documentContent)
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	id, err := domain.NewCanvasID()
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	now := time.Now().UTC()
+	canvasTitle := strings.TrimSpace(title)
+	if canvasTitle == "" {
+		canvasTitle = "Untitled"
+	}
+	canvas := domain.Canvas{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Title: canvasTitle, DocumentContent: content, Version: 1, CreatedAt: now, UpdatedAt: now}
+	event, err := canvasEvent(workspaceID, userID, "canvas.created", id, now)
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	accessEvent, err := canvasEvent(workspaceID, userID, "canvas.access_set", id, now,
+		events.String("entity_type", "channel_canvas"), events.String("entity_id", string(channelID)), events.String("access", store.AccessWrite))
+	if err != nil {
+		return domain.Canvas{}, err
+	}
+	if err := m.Store.CreateChannelCanvas(ctx, canvas, event, channelID, accessEvent); err != nil {
+		return domain.Canvas{}, err
 	}
 	return canvas, nil
+}
+
+func (m Messages) ConversationCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channelID domain.ConversationID) (domain.Canvas, error) {
+	if err := m.authorizeDocumentChannels(ctx, workspaceID, userID, []domain.ConversationID{channelID}); err != nil {
+		return domain.Canvas{}, err
+	}
+	return m.Store.GetChannelCanvas(ctx, workspaceID, channelID)
+}
+
+func (m Messages) Canvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) (domain.Canvas, error) {
+	if err := m.requireCanvasAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return domain.Canvas{}, err
+	}
+	return m.Store.GetCanvas(ctx, workspaceID, id)
+}
+
+func (m Messages) CanvasAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID) (domain.CanvasAccess, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.CanvasAccess{}, err
+	}
+	return m.Store.GetCanvasAccess(ctx, id, userID)
+}
+
+func (m Messages) Canvases(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, page domain.PageRequest) (domain.CanvasPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	return m.Store.ListCanvases(ctx, workspaceID, userID, page)
 }
 
 func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.CanvasID, changes string) error {
@@ -81,21 +150,24 @@ func (m Messages) EditCanvas(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	var input []canvasChange
-	if err := json.Unmarshal([]byte(changes), &input); err != nil || len(input) != 1 {
+	if err := json.Unmarshal([]byte(changes), &input); err != nil || len(input) == 0 || len(input) > 100 {
 		return ErrInvalidCanvas
 	}
 	document, err := decodeCanvasDocument(canvas.DocumentContent)
 	if err != nil {
 		return err
 	}
-	if err := applyCanvasChange(&document, &canvas, input[0]); err != nil {
-		return err
+	for _, change := range input {
+		if err := applyCanvasChange(&document, &canvas, change); err != nil {
+			return err
+		}
 	}
 	encoded, err := json.Marshal(document)
 	if err != nil {
 		return err
 	}
 	canvas.DocumentContent = string(encoded)
+	canvas.Version++
 	canvas.UpdatedAt = time.Now().UTC()
 	event, err := canvasEvent(workspaceID, userID, "canvas.updated", id, canvas.UpdatedAt)
 	if err != nil {

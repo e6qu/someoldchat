@@ -127,7 +127,7 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 		return domain.List{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.List{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Name: name, DescriptionBlocks: descriptionBlocks, Schema: schema, TodoMode: todoMode, CreatedAt: now, UpdatedAt: now}
+	value := domain.List{ID: id, WorkspaceID: workspaceID, OwnerID: userID, Name: name, DescriptionBlocks: descriptionBlocks, Schema: schema, TodoMode: todoMode, Version: 1, CreatedAt: now, UpdatedAt: now}
 	if copyFrom != "" {
 		// Copying reads the source list's description and schema, and optionally
 		// every record in it, so it needs read access to the source.
@@ -173,6 +173,27 @@ func (m Messages) CreateList(ctx context.Context, workspaceID domain.WorkspaceID
 	return value, nil
 }
 
+func (m Messages) List(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) (domain.List, error) {
+	if err := m.requireListAccess(ctx, workspaceID, userID, id, documentAccessRead); err != nil {
+		return domain.List{}, err
+	}
+	return m.Store.GetList(ctx, workspaceID, id)
+}
+
+func (m Messages) ListAccess(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ListID) (domain.ListAccess, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ListAccess{}, err
+	}
+	return m.Store.GetListAccess(ctx, id, userID)
+}
+
+func (m Messages) Lists(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, page domain.PageRequest) (domain.ListPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.ListPage{}, err
+	}
+	return m.Store.ListLists(ctx, workspaceID, userID, page)
+}
+
 // maxCopiedListRecords bounds lists.create with copy_from. A copy larger than
 // this is refused rather than ground through one write transaction per record.
 const maxCopiedListRecords = 1000
@@ -201,7 +222,7 @@ func (m Messages) copyListRecords(ctx context.Context, workspaceID domain.Worksp
 			if err != nil {
 				return nil, nil, err
 			}
-			items = append(items, domain.ListItem{ID: itemID, ListID: into, WorkspaceID: workspaceID, Fields: source.Fields, CreatedBy: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now})
+			items = append(items, domain.ListItem{ID: itemID, ListID: into, WorkspaceID: workspaceID, Fields: source.Fields, CreatedBy: userID, UpdatedBy: userID, Version: 1, CreatedAt: now, UpdatedAt: now})
 			records = append(records, created)
 		}
 		if !page.HasMore {
@@ -231,6 +252,7 @@ func (m Messages) UpdateList(ctx context.Context, workspaceID domain.WorkspaceID
 	if todoModeSet {
 		value.TodoMode = todoMode
 	}
+	value.Version++
 	value.UpdatedAt = time.Now().UTC()
 	event, err := listEvent(workspaceID, userID, "list.updated", events.String("list_id", string(id)))
 	if err != nil {
@@ -258,7 +280,7 @@ func (m Messages) CreateListItem(ctx context.Context, workspaceID domain.Workspa
 		return domain.ListItem{}, err
 	}
 	now := time.Now().UTC()
-	value := domain.ListItem{ID: id, ListID: listID, ParentItemID: parentItemID, WorkspaceID: workspaceID, Fields: fields, CreatedBy: userID, UpdatedBy: userID, CreatedAt: now, UpdatedAt: now}
+	value := domain.ListItem{ID: id, ListID: listID, ParentItemID: parentItemID, WorkspaceID: workspaceID, Fields: fields, CreatedBy: userID, UpdatedBy: userID, Version: 1, CreatedAt: now, UpdatedAt: now}
 	event, err := listEvent(workspaceID, userID, "list.item.created", events.String("list_item_id", string(id)), events.String("list_id", string(listID)))
 	if err != nil {
 		return domain.ListItem{}, err
@@ -297,6 +319,7 @@ func (m Messages) UpdateListItem(ctx context.Context, workspaceID domain.Workspa
 	}
 	value.Archived = archived
 	value.UpdatedBy = userID
+	value.Version++
 	value.UpdatedAt = time.Now().UTC()
 	event, err := listEvent(workspaceID, userID, "list.item.updated", events.String("list_item_id", string(itemID)), events.String("list_id", string(listID)))
 	if err != nil {
@@ -392,6 +415,7 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 		}
 		item.Fields = string(encoded)
 		item.UpdatedBy = userID
+		item.Version++
 		item.UpdatedAt = time.Now().UTC()
 		event, err := listEvent(workspaceID, userID, "list.item.updated", events.String("list_item_id", string(itemID)), events.String("list_id", string(listID)))
 		if err != nil {
@@ -400,10 +424,8 @@ func (m Messages) UpdateListCells(ctx context.Context, workspaceID domain.Worksp
 		result = append(result, item)
 		pending = append(pending, event)
 	}
-	for index, item := range result {
-		if err := m.Store.UpdateListItem(ctx, item, pending[index]); err != nil {
-			return nil, err
-		}
+	if err := m.Store.UpdateListItems(ctx, result, pending); err != nil {
+		return nil, err
 	}
 	return result, nil
 }

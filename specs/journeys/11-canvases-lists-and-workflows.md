@@ -77,8 +77,10 @@ tokens, trigger conflicts, and concurrent publishing are explicit.
 
 ## Evidence
 
-- Browser tests edit real structured objects and verify their API representation
-  rather than asserting decorative cards.
+- The first-party HTTP journey creates a durable canvas, reloads it, atomically
+  changes its title and body, creates a durable to-do list and item, completes
+  and restores that item, and then reopens both directory views. It does not
+  assert decorative cards.
 - Current official SDK/CLI clients exercise canvases, lists, functions,
   workflows, triggers, hosted datastores, external auth, and activity methods
   they expose.
@@ -86,6 +88,24 @@ tokens, trigger conflicts, and concurrent publishing are explicit.
   cancellation, and app/token isolation.
 - Differential fixtures compare live Slack object schemas, supported controls,
   and run-state transitions.
+
+## Current SameOldChat boundary
+
+CANVAS-01 and the basic persistence portion of CANVAS-02 now have a real
+workspace surface and access-filtered memory/SQL/gRPC reads. Owner edits of a
+single Markdown section commit title and body as one compare-and-swap revision.
+Structured canvases render read-only rather than being silently flattened;
+collaborative cursors, comments, history, autosave/offline recovery, full rich
+block editing, tab attachment, and sharing review remain gaps.
+
+LIST-01 and the basic completion portion of LIST-02 now have a persisted
+directory, to-do creation, item creation, and complete/restore flow. Custom
+schemas, templates, views, filters, sorting, assignments, dates, comments,
+attachments, item deletion, and full
+notification/workflow effects remain gaps.
+
+WORKFLOW-01 through WORKFLOW-03 remain target contracts, not completed
+journeys. Their presence here must not be inferred as implementation evidence.
 
 ## Journey-source map
 

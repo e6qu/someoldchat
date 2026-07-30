@@ -122,10 +122,18 @@ message AppDatastoreRequest {
   repeated string items = 5;
   repeated string ids = 6;
   bool merge = 7;
+  string expression = 8;
+  string expression_attributes = 9;
+  string expression_values = 10;
+  int32 limit = 11;
+  string cursor = 12;
 }
 
 message AppDatastoreResponse {
   repeated string items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+  int64 count = 4;
 }
 
 message AppMutationResponse {
@@ -174,6 +182,8 @@ service AppsService {
   rpc ListWorkspaceApps(AppListRequest) returns (InstalledAppListResponse);
   rpc PutAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc GetAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
+  rpc QueryAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
+  rpc CountAppDatastoreItems(AppDatastoreRequest) returns (AppDatastoreResponse);
   rpc DeleteAppDatastoreItems(AppDatastoreRequest) returns (AppMutationResponse);
   rpc GetDeveloperApp(AppGetRequest) returns (AppExportResponse);
   rpc IssueDeveloperAppToken(AppTokenIssueRequest) returns (AppTokenCredentials);

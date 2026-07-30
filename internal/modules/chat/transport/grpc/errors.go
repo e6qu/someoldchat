@@ -123,6 +123,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_app_manifest", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppManifest},
 	{key: "service.invalid_app_response", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppResponse},
 	{key: "service.invalid_datastore_item", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreItem},
+	{key: "service.invalid_datastore_query", code: codes.InvalidArgument, sentinel: service.ErrInvalidDatastoreQuery},
 	{key: "service.invalid_trigger", code: codes.InvalidArgument, sentinel: service.ErrInvalidTrigger},
 	{key: "service.slash_command_in_thread", code: codes.InvalidArgument, sentinel: service.ErrSlashCommandInThread},
 	// The generic member of the class closes it, and it restores a bare

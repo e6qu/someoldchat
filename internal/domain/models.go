@@ -1022,8 +1022,11 @@ type Canvas struct {
 	OwnerID         UserID
 	Title           string
 	DocumentContent string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// Version is a monotonic compare-and-swap revision. Writers submit the
+	// revision they read plus one; stores reject stale writes with ErrConflict.
+	Version   int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type CanvasAccess struct {
@@ -1155,6 +1158,8 @@ type ScheduledMessage struct {
 	Text            string
 	Blocks          string
 	Attachments     string
+	Metadata        string
+	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	PostAt          time.Time
 	CreatedAt       time.Time
@@ -1174,6 +1179,8 @@ type ScheduledMessageRequest struct {
 	Text            string
 	Blocks          string
 	Attachments     string
+	Metadata        string
+	StreamState     string
 	ThreadTimestamp MessageTimestamp
 	PostAt          time.Time
 	AppID           AppID
@@ -1488,6 +1495,19 @@ type AppDatastoreItem struct {
 	UpdatedAt   time.Time
 }
 
+type AppDatastoreQuery struct {
+	Expression           string
+	ExpressionAttributes string
+	ExpressionValues     string
+	Page                 PageRequest
+}
+
+type AppDatastoreQueryPage struct {
+	Items      []string
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type AppPermissionRequest struct {
 	ID           AppRequestID
 	WorkspaceID  WorkspaceID
@@ -1534,6 +1554,7 @@ type List struct {
 	DescriptionBlocks string
 	Schema            string
 	TodoMode          bool
+	Version           int64
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 }
@@ -1549,6 +1570,7 @@ type ListItem struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	Archived     bool
+	Version      int64
 }
 
 type ListItemPage struct {
@@ -1661,6 +1683,37 @@ type MessageStreamState struct {
 	Tasks           []json.RawMessage `json:"tasks,omitempty"`
 	ChunkBlocks     []json.RawMessage `json:"chunk_blocks,omitempty"`
 	Warnings        []string          `json:"warnings,omitempty"`
+	MarkdownText    bool              `json:"markdown_text,omitempty"`
+	ReplyBroadcast  bool              `json:"reply_broadcast,omitempty"`
+	Parse           string            `json:"parse,omitempty"`
+	MrkdwnDisabled  bool              `json:"mrkdwn_disabled,omitempty"`
+	LinkNames       bool              `json:"link_names,omitempty"`
+	UnfurlLinks     *bool             `json:"unfurl_links,omitempty"`
+	UnfurlMedia     *bool             `json:"unfurl_media,omitempty"`
+}
+
+// MessagePostRequest is the complete current chat.postMessage payload after
+// transport decoding. Keeping it typed prevents the Web API, scheduled worker,
+// and first-party composer from silently supporting different message shapes.
+type MessagePostRequest struct {
+	Conversation    ConversationID
+	Text            string
+	Blocks          string
+	Attachments     string
+	Metadata        string
+	ThreadTimestamp MessageTimestamp
+	IdempotencyKey  string
+	AppID           AppID
+	MarkdownText    bool
+	ReplyBroadcast  bool
+	Parse           string
+	MrkdwnDisabled  bool
+	LinkNames       bool
+	UnfurlLinks     *bool
+	UnfurlMedia     *bool
+	Username        string
+	IconEmoji       string
+	IconURL         string
 }
 
 // MessagePatch preserves the difference between an omitted Slack field and a

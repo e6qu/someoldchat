@@ -336,6 +336,16 @@ func TestListAndCanvasAccessResolveEveryGrantPath(t *testing.T) {
 	if err != nil || access.Access != store.AccessRead || access.EntityType != "channel" || access.EntityID != "C1" {
 		t.Fatalf("canvas channel grant=%+v err=%v", access, err)
 	}
+	for _, expectation := range []struct {
+		user            domain.UserID
+		lists, canvases int
+	}{{"U1", 1, 1}, {"Ureader", 1, 0}, {"Uchannel", 1, 1}, {"Ustranger", 0, 0}, {"Udeleted", 0, 0}} {
+		lists, listErr := s.ListLists(ctx, "T1", expectation.user, domain.PageRequest{Limit: 10})
+		canvases, canvasErr := s.ListCanvases(ctx, "T1", expectation.user, domain.PageRequest{Limit: 10})
+		if listErr != nil || canvasErr != nil || len(lists.Lists) != expectation.lists || len(canvases.Canvases) != expectation.canvases {
+			t.Fatalf("visible documents for %s: lists=%d/%v canvases=%d/%v", expectation.user, len(lists.Lists), listErr, len(canvases.Canvases), canvasErr)
+		}
+	}
 	if err := s.DeleteListAccess(ctx, domain.ListAccess{ListID: list.ID, EntityType: "user", EntityID: "Ureader"}, event("E-list-revoke")); err != nil {
 		t.Fatal(err)
 	}

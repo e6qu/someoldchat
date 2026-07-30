@@ -77,6 +77,25 @@ const datastoreBulkGet = await client.apiCall("apps.datastore.bulkGet", {
 });
 assert.equal(datastoreBulkGet.ok, true);
 assert.deepEqual(datastoreBulkGet.items.map((item) => item.id), ["SDK-3", "SDK-1"]);
+const datastoreQueryPageOne = await client.apiCall("apps.datastore.query", {
+	datastore: "incidents",
+	expression: "#priority >= :minimum",
+	expression_attributes: { "#priority": "priority" },
+	expression_values: { ":minimum": 3 },
+	limit: 1,
+});
+assert.equal(datastoreQueryPageOne.ok, true);
+assert.deepEqual(datastoreQueryPageOne.items, []);
+assert.equal(typeof datastoreQueryPageOne.response_metadata.next_cursor, "string");
+assert.notEqual(datastoreQueryPageOne.response_metadata.next_cursor, "");
+const datastoreCount = await client.apiCall("apps.datastore.count", {
+	datastore: "incidents",
+	expression: "contains (#title, :term)",
+	expression_attributes: { "#title": "title" },
+	expression_values: { ":term": "i" },
+});
+assert.equal(datastoreCount.ok, true);
+assert.equal(datastoreCount.count, 2);
 const datastoreBulkDelete = await client.apiCall("apps.datastore.bulkDelete", {
 	datastore: "incidents",
 	ids: ["SDK-2", "SDK-3"],
@@ -568,6 +587,16 @@ assert.equal((await client.chat.delete({ channel: "C1", ts: richForUpdate.ts }))
 const conversation = await client.conversations.info({ channel: "C1" });
 assert.equal(conversation.ok, true);
 assert.equal(conversation.channel.id, "C1");
+const channelCanvas = await client.apiCall("conversations.canvases.create", {
+	channel_id: "C1",
+	title: "Channel canvas qualification",
+	document_content: { type: "markdown", markdown: "# Qualification" },
+});
+assert.equal(channelCanvas.ok, true);
+assert.match(channelCanvas.canvas_id, /^F/);
+const conversationWithCanvas = await client.conversations.info({ channel: "C1" });
+assert.equal(conversationWithCanvas.channel.properties.canvas.file_id, channelCanvas.canvas_id);
+assert.equal(conversationWithCanvas.channel.properties.canvas.is_empty, false);
 const members = await client.conversations.members({ channel: "C1", limit: 1 });
 assert.equal(members.ok, true);
 assert.deepEqual(members.members, ["U1"]);
@@ -740,6 +769,17 @@ assert.equal(rtm.ok, true);
 assert.equal(typeof rtm.url, "string");
 assert.equal(rtm.team.id, "T1");
 assert.equal(rtm.self.id, "U1");
+const legacyRtm = await client.apiCall("rtm.start", { no_latest: true, no_unreads: true });
+assert.equal(legacyRtm.ok, true);
+assert.equal(typeof legacyRtm.url, "string");
+assert.equal(legacyRtm.team.id, "T1");
+const authorizedTeams = await client.apiCall("auth.teams.list", { limit: 100, include_icon: true });
+assert.equal(authorizedTeams.ok, true);
+assert.deepEqual(authorizedTeams.teams.map((team) => team.id), ["T1"]);
+const teamPreferences = await client.apiCall("team.preferences.list");
+assert.equal(teamPreferences.ok, true);
+assert.equal(teamPreferences.disable_file_uploads, "allow_all");
+assert.equal(teamPreferences.who_can_post_general, "everyone");
 // reminders.* is a deprecated user-token surface. Exercise the official
 // client's real request and response types with that identity rather than the
 // suite's broad bot token, and keep known behavioral gaps executable.

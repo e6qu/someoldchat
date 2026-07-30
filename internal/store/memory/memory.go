@@ -201,9 +201,83 @@ func (s *Store) CreateCanvas(_ context.Context, canvas domain.Canvas, event even
 	if _, exists := s.canvases[canvas.ID]; exists {
 		return store.ErrAlreadyExists
 	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
 	s.canvases[canvas.ID] = canvas
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) CreateCanvasWithAccess(_ context.Context, canvas domain.Canvas, event events.Event, access domain.CanvasAccess, accessEvent events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.workspaces[canvas.WorkspaceID]; !ok {
+		return store.ErrNotFound
+	}
+	if user, ok := s.users[canvas.OwnerID]; !ok || user.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.canvases[canvas.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if access.CanvasID != canvas.ID || access.EntityType == "" || access.EntityID == "" || access.Access == "" {
+		return store.ErrInvalidArgument
+	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	s.canvases[canvas.ID] = canvas
+	s.canvasAccess[canvasAccessKey(access)] = access
+	s.outbox = append(s.outbox, event, accessEvent)
+	return nil
+}
+
+func (s *Store) CreateChannelCanvas(_ context.Context, canvas domain.Canvas, event events.Event, channel domain.ConversationID, accessEvent events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	conversation, ok := s.conversations[channel]
+	if !ok || conversation.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	for _, existing := range s.canvasAccess {
+		if existing.EntityType == "channel_canvas" && existing.EntityID == string(channel) {
+			return store.ErrAlreadyExists
+		}
+	}
+	if _, exists := s.canvases[canvas.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if user, ok := s.users[canvas.OwnerID]; !ok || user.WorkspaceID != canvas.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if canvas.Version == 0 {
+		canvas.Version = 1
+	}
+	access := domain.CanvasAccess{CanvasID: canvas.ID, EntityType: "channel_canvas", EntityID: string(channel), Access: store.AccessWrite}
+	s.canvases[canvas.ID] = canvas
+	s.canvasAccess[canvasAccessKey(access)] = access
+	s.outbox = append(s.outbox, event, accessEvent)
+	return nil
+}
+
+func (s *Store) GetChannelCanvas(_ context.Context, workspace domain.WorkspaceID, channel domain.ConversationID) (domain.Canvas, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	conversation, ok := s.conversations[channel]
+	if !ok || conversation.WorkspaceID != workspace {
+		return domain.Canvas{}, store.ErrNotFound
+	}
+	for _, access := range s.canvasAccess {
+		if access.EntityType != "channel_canvas" || access.EntityID != string(channel) {
+			continue
+		}
+		canvas, exists := s.canvases[access.CanvasID]
+		if exists && canvas.WorkspaceID == workspace {
+			return canvas, nil
+		}
+	}
+	return domain.Canvas{}, store.ErrNotFound
 }
 
 func (s *Store) GetCanvas(_ context.Context, workspace domain.WorkspaceID, id domain.CanvasID) (domain.Canvas, error) {
@@ -216,12 +290,53 @@ func (s *Store) GetCanvas(_ context.Context, workspace domain.WorkspaceID, id do
 	return canvas, nil
 }
 
+func (s *Store) ListCanvases(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.CanvasPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.CanvasPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.CanvasPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.Canvas, 0, request.Limit+1)
+	for _, canvas := range s.canvases {
+		if canvas.WorkspaceID != workspace || (after != "" && string(canvas.ID) <= after) {
+			continue
+		}
+		_, _, _, allowed := s.resolveAccessLocked(workspace, canvas.OwnerID, userID, func(visit func(string, string, string)) {
+			for _, grant := range s.canvasAccess {
+				if grant.CanvasID == canvas.ID {
+					visit(grant.EntityType, grant.EntityID, grant.Access)
+				}
+			}
+		})
+		if allowed {
+			values = append(values, canvas)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.CanvasPage{Canvases: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateCanvas(_ context.Context, canvas domain.Canvas, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, ok := s.canvases[canvas.ID]
 	if !ok || current.WorkspaceID != canvas.WorkspaceID {
 		return store.ErrNotFound
+	}
+	if canvas.Version != current.Version+1 {
+		return store.ErrConflict
 	}
 	canvas.CreatedAt = current.CreatedAt
 	s.canvases[canvas.ID] = canvas
@@ -6863,7 +6978,14 @@ func (s *Store) CreateListWithItems(_ context.Context, value domain.List, event 
 				return store.ErrNotFound
 			}
 		}
-		created[creation.Item.ID] = creation.Item
+		item := creation.Item
+		if item.Version == 0 {
+			item.Version = 1
+		}
+		created[item.ID] = item
+	}
+	if value.Version == 0 {
+		value.Version = 1
 	}
 	s.lists[value.ID] = value
 	s.listItems[value.ID] = created
@@ -6884,12 +7006,53 @@ func (s *Store) GetList(_ context.Context, workspace domain.WorkspaceID, id doma
 	return value, nil
 }
 
+func (s *Store) ListLists(_ context.Context, workspace domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.ListPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.ListPage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.ListPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.List, 0, request.Limit+1)
+	for _, list := range s.lists {
+		if list.WorkspaceID != workspace || (after != "" && string(list.ID) <= after) {
+			continue
+		}
+		_, _, _, allowed := s.resolveAccessLocked(workspace, list.OwnerID, userID, func(visit func(string, string, string)) {
+			for _, grant := range s.listAccess {
+				if grant.ListID == list.ID {
+					visit(grant.EntityType, grant.EntityID, grant.Access)
+				}
+			}
+		})
+		if allowed {
+			values = append(values, list)
+		}
+	}
+	sort.Slice(values, func(left, right int) bool { return values[left].ID < values[right].ID })
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	page := domain.ListPage{Lists: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
 func (s *Store) UpdateList(_ context.Context, value domain.List, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	previous, exists := s.lists[value.ID]
 	if !exists || previous.WorkspaceID != value.WorkspaceID {
 		return store.ErrNotFound
+	}
+	if value.Version != previous.Version+1 {
+		return store.ErrConflict
 	}
 	value.CreatedAt = previous.CreatedAt
 	s.lists[value.ID] = value
@@ -6911,6 +7074,9 @@ func (s *Store) CreateListItem(_ context.Context, value domain.ListItem, event e
 	}
 	if _, exists := s.listItems[value.ListID][value.ID]; exists {
 		return store.ErrAlreadyExists
+	}
+	if value.Version == 0 {
+		value.Version = 1
 	}
 	s.listItems[value.ListID][value.ID] = value
 	s.outbox = append(s.outbox, event)
@@ -6967,21 +7133,41 @@ func (s *Store) ListItems(_ context.Context, workspace domain.WorkspaceID, listI
 	return page, nil
 }
 
-func (s *Store) UpdateListItem(_ context.Context, value domain.ListItem, event events.Event) error {
+func (s *Store) UpdateListItem(ctx context.Context, value domain.ListItem, event events.Event) error {
+	return s.UpdateListItems(ctx, []domain.ListItem{value}, []events.Event{event})
+}
+
+func (s *Store) UpdateListItems(_ context.Context, values []domain.ListItem, records []events.Event) error {
+	if len(values) == 0 || len(values) != len(records) {
+		return store.ErrInvalidArgument
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	list, exists := s.lists[value.ListID]
-	if !exists || list.WorkspaceID != value.WorkspaceID {
-		return store.ErrNotFound
+	seen := make(map[domain.ListItemID]struct{}, len(values))
+	for _, value := range values {
+		list, exists := s.lists[value.ListID]
+		if !exists || list.WorkspaceID != value.WorkspaceID {
+			return store.ErrNotFound
+		}
+		previous, exists := s.listItems[value.ListID][value.ID]
+		if !exists {
+			return store.ErrNotFound
+		}
+		if _, duplicate := seen[value.ID]; duplicate {
+			return store.ErrInvalidArgument
+		}
+		seen[value.ID] = struct{}{}
+		if value.Version != previous.Version+1 {
+			return store.ErrConflict
+		}
 	}
-	previous, exists := s.listItems[value.ListID][value.ID]
-	if !exists {
-		return store.ErrNotFound
+	for index, value := range values {
+		previous := s.listItems[value.ListID][value.ID]
+		value.CreatedAt = previous.CreatedAt
+		value.CreatedBy = previous.CreatedBy
+		s.listItems[value.ListID][value.ID] = value
+		s.outbox = append(s.outbox, records[index])
 	}
-	value.CreatedAt = previous.CreatedAt
-	value.CreatedBy = previous.CreatedBy
-	s.listItems[value.ListID][value.ID] = value
-	s.outbox = append(s.outbox, event)
 	return nil
 }
 
@@ -7043,7 +7229,7 @@ func (s *Store) resolveAccessLocked(workspace domain.WorkspaceID, owner, userID 
 			if domain.UserID(entityID) != userID {
 				return
 			}
-		case "channel":
+		case "channel", "channel_canvas":
 			conversation, ok := s.conversations[domain.ConversationID(entityID)]
 			if !ok || conversation.WorkspaceID != workspace {
 				return

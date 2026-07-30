@@ -22,6 +22,7 @@ const (
 	DirectoryService_Users_FullMethodName                       = "/sameoldchat.chat.v1.DirectoryService/Users"
 	DirectoryService_ConversationMembers_FullMethodName         = "/sameoldchat.chat.v1.DirectoryService/ConversationMembers"
 	DirectoryService_WorkspaceInfo_FullMethodName               = "/sameoldchat.chat.v1.DirectoryService/WorkspaceInfo"
+	DirectoryService_AuthorizedAppWorkspaces_FullMethodName     = "/sameoldchat.chat.v1.DirectoryService/AuthorizedAppWorkspaces"
 	DirectoryService_TeamBillableInfo_FullMethodName            = "/sameoldchat.chat.v1.DirectoryService/TeamBillableInfo"
 	DirectoryService_RemoveUser_FullMethodName                  = "/sameoldchat.chat.v1.DirectoryService/RemoveUser"
 	DirectoryService_SetUserRole_FullMethodName                 = "/sameoldchat.chat.v1.DirectoryService/SetUserRole"
@@ -65,6 +66,7 @@ type DirectoryServiceClient interface {
 	Users(ctx context.Context, in *UsersRequest, opts ...grpc.CallOption) (*UserPage, error)
 	ConversationMembers(ctx context.Context, in *ConversationMembersRequest, opts ...grpc.CallOption) (*UserPage, error)
 	WorkspaceInfo(ctx context.Context, in *WorkspaceRequest, opts ...grpc.CallOption) (*Workspace, error)
+	AuthorizedAppWorkspaces(ctx context.Context, in *AuthorizedAppWorkspacesRequest, opts ...grpc.CallOption) (*WorkspacePage, error)
 	TeamBillableInfo(ctx context.Context, in *BillableInfoRequest, opts ...grpc.CallOption) (*BillableInfo, error)
 	RemoveUser(ctx context.Context, in *RemoveUserRequest, opts ...grpc.CallOption) (*MutationResponse, error)
 	SetUserRole(ctx context.Context, in *SetUserRoleRequest, opts ...grpc.CallOption) (*MutationResponse, error)
@@ -133,6 +135,16 @@ func (c *directoryServiceClient) WorkspaceInfo(ctx context.Context, in *Workspac
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Workspace)
 	err := c.cc.Invoke(ctx, DirectoryService_WorkspaceInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *directoryServiceClient) AuthorizedAppWorkspaces(ctx context.Context, in *AuthorizedAppWorkspacesRequest, opts ...grpc.CallOption) (*WorkspacePage, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkspacePage)
+	err := c.cc.Invoke(ctx, DirectoryService_AuthorizedAppWorkspaces_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -486,6 +498,7 @@ type DirectoryServiceServer interface {
 	Users(context.Context, *UsersRequest) (*UserPage, error)
 	ConversationMembers(context.Context, *ConversationMembersRequest) (*UserPage, error)
 	WorkspaceInfo(context.Context, *WorkspaceRequest) (*Workspace, error)
+	AuthorizedAppWorkspaces(context.Context, *AuthorizedAppWorkspacesRequest) (*WorkspacePage, error)
 	TeamBillableInfo(context.Context, *BillableInfoRequest) (*BillableInfo, error)
 	RemoveUser(context.Context, *RemoveUserRequest) (*MutationResponse, error)
 	SetUserRole(context.Context, *SetUserRoleRequest) (*MutationResponse, error)
@@ -537,6 +550,9 @@ func (UnimplementedDirectoryServiceServer) ConversationMembers(context.Context, 
 }
 func (UnimplementedDirectoryServiceServer) WorkspaceInfo(context.Context, *WorkspaceRequest) (*Workspace, error) {
 	return nil, status.Error(codes.Unimplemented, "method WorkspaceInfo not implemented")
+}
+func (UnimplementedDirectoryServiceServer) AuthorizedAppWorkspaces(context.Context, *AuthorizedAppWorkspacesRequest) (*WorkspacePage, error) {
+	return nil, status.Error(codes.Unimplemented, "method AuthorizedAppWorkspaces not implemented")
 }
 func (UnimplementedDirectoryServiceServer) TeamBillableInfo(context.Context, *BillableInfoRequest) (*BillableInfo, error) {
 	return nil, status.Error(codes.Unimplemented, "method TeamBillableInfo not implemented")
@@ -710,6 +726,24 @@ func _DirectoryService_WorkspaceInfo_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(DirectoryServiceServer).WorkspaceInfo(ctx, req.(*WorkspaceRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _DirectoryService_AuthorizedAppWorkspaces_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AuthorizedAppWorkspacesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DirectoryServiceServer).AuthorizedAppWorkspaces(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DirectoryService_AuthorizedAppWorkspaces_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DirectoryServiceServer).AuthorizedAppWorkspaces(ctx, req.(*AuthorizedAppWorkspacesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1344,6 +1378,10 @@ var DirectoryService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WorkspaceInfo",
 			Handler:    _DirectoryService_WorkspaceInfo_Handler,
+		},
+		{
+			MethodName: "AuthorizedAppWorkspaces",
+			Handler:    _DirectoryService_AuthorizedAppWorkspaces_Handler,
 		},
 		{
 			MethodName: "TeamBillableInfo",
