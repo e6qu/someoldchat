@@ -470,6 +470,9 @@ func (s *Store) DeleteApp(ctx context.Context, appID domain.AppID, ownerID domai
 			`UPDATE tokens SET revoked = 1 WHERE app_id = ?`,
 			`UPDATE app_tokens SET revoked = 1 WHERE app_id = ?`,
 			`UPDATE incoming_webhooks SET enabled = 0 WHERE app_id = ?`,
+			`DELETE FROM conversation_members WHERE user_id IN (SELECT user_id FROM bots WHERE app_id = ?)`,
+			`UPDATE workspace_members SET active = 0 WHERE user_id IN (SELECT user_id FROM bots WHERE app_id = ?)`,
+			`UPDATE users SET deleted = 1 WHERE id IN (SELECT user_id FROM bots WHERE app_id = ?)`,
 			`UPDATE bots SET deleted = 1, updated_at = ? WHERE app_id = ?`,
 		} {
 			var execErr error

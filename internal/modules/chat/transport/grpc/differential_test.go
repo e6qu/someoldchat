@@ -1007,6 +1007,45 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "durable Activity filters triage and layout",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				message, err := chat.Post(ctx, "T1", "U2", "C1", "hello <@U1>", "", "")
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.Activity(ctx, "T1", "U1", domain.ActivityQuery{
+					Kinds: []domain.ActivityKind{domain.ActivityMention},
+					Page:  domain.PageRequest{Limit: 10},
+				})
+				if err != nil {
+					return nil, err
+				}
+				if len(page.Items) != 1 {
+					return nil, fmt.Errorf("Activity returned %d items after mention", len(page.Items))
+				}
+				if err := chat.MutateActivity(ctx, "T1", "U1", []domain.ActivityID{page.Items[0].ID}, domain.ActivityClear); err != nil {
+					return nil, err
+				}
+				cleared, err := chat.Activity(ctx, "T1", "U1", domain.ActivityQuery{ClearedOnly: true, Page: domain.PageRequest{Limit: 10}})
+				if err != nil {
+					return nil, err
+				}
+				defaults, err := chat.ActivityPreferences(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				preferences, err := chat.SetActivityPreferences(ctx, "T1", "U1", domain.ActivityDense)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					page.Items[0].Message.ID == message.ID, page.Items[0].Kinds,
+					len(cleared.Items), !cleared.Items[0].ReadAt.IsZero(),
+					defaults.Layout, preferences.Layout,
+				}, nil
+			},
+		},
+		{
 			name: "reminders and scheduled messages",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				reminder, err := chat.AddReminder(ctx, "T1", "U1", "", "water the plants", time.Now().UTC().Add(time.Hour))

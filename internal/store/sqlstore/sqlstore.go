@@ -240,6 +240,22 @@ CREATE TABLE IF NOT EXISTS read_cursors (
  last_read TEXT NOT NULL, updated_at TEXT NOT NULL,
  PRIMARY KEY (workspace_id, user_id, conversation_id)
 );
+CREATE TABLE IF NOT EXISTS activity_items (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
+ reminder_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
+ read_at INTEGER NOT NULL DEFAULT 0, cleared_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS activity_items_user_time ON activity_items(workspace_id, user_id, cleared_at, occurred_at DESC, id DESC);
+CREATE TABLE IF NOT EXISTS activity_item_kinds (
+ activity_id TEXT NOT NULL REFERENCES activity_items(id) ON DELETE CASCADE, kind TEXT NOT NULL,
+ PRIMARY KEY (activity_id, kind)
+);
+CREATE INDEX IF NOT EXISTS activity_item_kinds_filter ON activity_item_kinds(kind, activity_id);
+CREATE TABLE IF NOT EXISTS activity_preferences (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ layout TEXT NOT NULL, PRIMARY KEY (workspace_id, user_id)
+);
 CREATE TABLE IF NOT EXISTS do_not_disturb (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  enabled INTEGER NOT NULL DEFAULT 0, snooze_until INTEGER NOT NULL DEFAULT 0,
@@ -340,7 +356,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 106
+const schemaVersion = 107
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2238,6 +2254,34 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			if _, err := db.ExecContext(ctx, `ALTER TABLE later_reminders ADD COLUMN acknowledged_at INTEGER NOT NULL DEFAULT 0`); err != nil {
 				return fmt.Errorf("migrate Later reminder acknowledgement: %w", err)
 			}
+		}
+	}
+	if version < 107 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS activity_items (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', message_id TEXT NOT NULL DEFAULT '',
+			reminder_id TEXT NOT NULL DEFAULT '', reaction_name TEXT NOT NULL DEFAULT '', occurred_at INTEGER NOT NULL,
+			read_at INTEGER NOT NULL DEFAULT 0, cleared_at INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+			return fmt.Errorf("migrate Activity items: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS activity_items_user_time ON activity_items(workspace_id, user_id, cleared_at, occurred_at DESC, id DESC)`); err != nil {
+			return fmt.Errorf("index Activity items: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS activity_item_kinds (
+			activity_id TEXT NOT NULL REFERENCES activity_items(id) ON DELETE CASCADE, kind TEXT NOT NULL,
+			PRIMARY KEY (activity_id, kind)
+		)`); err != nil {
+			return fmt.Errorf("migrate Activity item kinds: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS activity_item_kinds_filter ON activity_item_kinds(kind, activity_id)`); err != nil {
+			return fmt.Errorf("index Activity kinds: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS activity_preferences (
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			layout TEXT NOT NULL, PRIMARY KEY (workspace_id, user_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate Activity preferences: %w", err)
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -4145,6 +4189,15 @@ func (s *Store) UninstallApp(ctx context.Context, workspaceID domain.WorkspaceID
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM app_datastore_items WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM conversation_members WHERE user_id IN (SELECT user_id FROM bots WHERE workspace_id = ? AND app_id = ?)`, workspaceID, appID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE workspace_members SET active = 0 WHERE workspace_id = ? AND user_id IN (SELECT user_id FROM bots WHERE workspace_id = ? AND app_id = ?)`, workspaceID, workspaceID, appID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET deleted = 1 WHERE workspace_id = ? AND id IN (SELECT user_id FROM bots WHERE workspace_id = ? AND app_id = ?)`, workspaceID, workspaceID, appID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE bots SET deleted = 1 WHERE workspace_id = ? AND app_id = ?`, workspaceID, appID); err != nil {
@@ -6159,6 +6212,10 @@ func (s *Store) GetReadCursor(ctx context.Context, workspace domain.WorkspaceID,
 }
 
 func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, event events.Event) error {
+	readAt, err := domain.ParseMessageTimestamp(cursor.LastRead)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -6167,10 +6224,225 @@ func (s *Store) SetReadCursor(ctx context.Context, cursor domain.ReadCursor, eve
 	if _, err := tx.ExecContext(ctx, `INSERT INTO read_cursors(workspace_id, user_id, conversation_id, last_read, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, conversation_id) DO UPDATE SET last_read = excluded.last_read, updated_at = excluded.updated_at`, cursor.WorkspaceID, cursor.UserID, cursor.Conversation, cursor.LastRead, domain.NewStoredTime(cursor.UpdatedAt)); err != nil {
 		return err
 	}
+	if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = ? WHERE workspace_id = ? AND user_id = ? AND conversation_id = ? AND occurred_at <= ? AND read_at = 0`,
+		cursor.UpdatedAt.UTC().UnixNano(), cursor.WorkspaceID, cursor.UserID, cursor.Conversation, readAt.UTC().UnixNano()); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+func activityCursor(item domain.ActivityItem) string {
+	return fmt.Sprintf("%020d:%s", item.OccurredAt.UTC().UnixNano(), item.ID)
+}
+
+func parseActivityCursor(value domain.Cursor) (int64, domain.ActivityID, error) {
+	decoded, err := domain.DecodeListCursor(value)
+	if err != nil || decoded == "" {
+		return 0, "", err
+	}
+	parts := strings.SplitN(decoded, ":", 2)
+	if len(parts) != 2 || parts[1] == "" {
+		return 0, "", domain.ErrInvalidCursor
+	}
+	occurred, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return 0, "", domain.ErrInvalidCursor
+	}
+	return occurred, domain.ActivityID(parts[1]), nil
+}
+
+func (s *Store) ListActivity(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.ActivityQuery) (domain.ActivityPage, error) {
+	if err := store.CheckPage(request.Page); err != nil {
+		return domain.ActivityPage{}, err
+	}
+	if !request.Valid() {
+		return domain.ActivityPage{}, store.InvalidArgument("activity filter is invalid")
+	}
+	query := `SELECT a.id, a.workspace_id, a.user_id, a.actor_id, a.conversation_id, a.message_id, a.reminder_id, a.reaction_name, a.occurred_at, a.read_at, a.cleared_at
+		FROM activity_items a WHERE a.workspace_id = ? AND a.user_id = ?`
+	args := []any{workspace, user}
+	if request.ClearedOnly {
+		query += ` AND a.cleared_at <> 0`
+	} else {
+		query += ` AND a.cleared_at = 0`
+	}
+	if request.UnreadOnly {
+		query += ` AND a.read_at = 0`
+	}
+	if len(request.Kinds) > 0 {
+		query += ` AND EXISTS (SELECT 1 FROM activity_item_kinds k WHERE k.activity_id = a.id AND k.kind IN (` + placeholders(len(request.Kinds)) + `))`
+		for _, kind := range request.Kinds {
+			args = append(args, kind)
+		}
+	}
+	if request.Page.Cursor != "" {
+		occurred, id, err := parseActivityCursor(request.Page.Cursor)
+		if err != nil {
+			return domain.ActivityPage{}, err
+		}
+		query += ` AND (a.occurred_at < ? OR (a.occurred_at = ? AND a.id < ?))`
+		args = append(args, occurred, occurred, id)
+	}
+	query += ` ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?`
+	args = append(args, request.Page.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.ActivityPage{}, err
+	}
+	items := make([]domain.ActivityItem, 0, request.Page.Limit+1)
+	for rows.Next() {
+		var item domain.ActivityItem
+		var occurredAt, readAt, clearedAt int64
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.ActorID, &item.Conversation, &item.MessageID, &item.ReminderID, &item.ReactionName, &occurredAt, &readAt, &clearedAt); err != nil {
+			rows.Close()
+			return domain.ActivityPage{}, err
+		}
+		item.OccurredAt = time.Unix(0, occurredAt).UTC()
+		if readAt != 0 {
+			item.ReadAt = time.Unix(0, readAt).UTC()
+		}
+		if clearedAt != 0 {
+			item.ClearedAt = time.Unix(0, clearedAt).UTC()
+		}
+		items = append(items, item)
+	}
+	if err := rows.Close(); err != nil {
+		return domain.ActivityPage{}, err
+	}
+	if err := rows.Err(); err != nil {
+		return domain.ActivityPage{}, err
+	}
+	page := domain.ActivityPage{Items: items, HasMore: len(items) > request.Page.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:request.Page.Limit]
+		page.NextCursor, err = domain.NewListCursor(activityCursor(page.Items[len(page.Items)-1]))
+		if err != nil {
+			return domain.ActivityPage{}, err
+		}
+	}
+	for index := range page.Items {
+		item := &page.Items[index]
+		kindRows, err := s.db.QueryContext(ctx, `SELECT kind FROM activity_item_kinds WHERE activity_id = ? ORDER BY kind`, item.ID)
+		if err != nil {
+			return domain.ActivityPage{}, err
+		}
+		for kindRows.Next() {
+			var kind domain.ActivityKind
+			if err := kindRows.Scan(&kind); err != nil {
+				kindRows.Close()
+				return domain.ActivityPage{}, err
+			}
+			item.Kinds = append(item.Kinds, kind)
+		}
+		if err := kindRows.Close(); err != nil {
+			return domain.ActivityPage{}, err
+		}
+		if item.ReminderID != "" {
+			if reminder, reminderErr := s.GetLaterReminder(ctx, workspace, user, item.ReminderID); reminderErr == nil {
+				item.Reminder = reminder
+				item.SourceAvailable = true
+			} else if !errors.Is(reminderErr, store.ErrNotFound) {
+				return domain.ActivityPage{}, reminderErr
+			}
+		}
+		if item.MessageID != "" {
+			member, memberErr := s.IsConversationMember(ctx, item.Conversation, user)
+			if memberErr != nil {
+				return domain.ActivityPage{}, memberErr
+			}
+			if member {
+				if message, messageErr := s.GetMessage(ctx, item.MessageID); messageErr == nil && !message.Deleted {
+					item.Message = message
+					item.SourceAvailable = true
+				} else if messageErr != nil && !errors.Is(messageErr, store.ErrNotFound) {
+					return domain.ActivityPage{}, messageErr
+				}
+			}
+		}
+	}
+	return page, nil
+}
+
+func placeholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimSuffix(strings.Repeat("?,", count), ",")
+}
+
+func (s *Store) MutateActivity(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, ids []domain.ActivityID, mutation domain.ActivityMutation, changedAt time.Time) error {
+	if workspace == "" || user == "" || len(ids) == 0 || !mutation.Valid() || changedAt.IsZero() {
+		return store.InvalidArgument("activity mutation is incomplete")
+	}
+	unique := make([]domain.ActivityID, 0, len(ids))
+	seen := make(map[domain.ActivityID]struct{}, len(ids))
+	for _, id := range ids {
+		if id == "" {
+			return store.InvalidArgument("activity item id is required")
+		}
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			unique = append(unique, id)
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	args := []any{workspace, user}
+	for _, id := range unique {
+		args = append(args, id)
+	}
+	var found int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM activity_items WHERE workspace_id = ? AND user_id = ? AND id IN (`+placeholders(len(unique))+`)`, args...).Scan(&found); err != nil {
+		return err
+	}
+	if found != len(unique) {
+		return store.ErrNotFound
+	}
+	set := ""
+	changed := changedAt.UTC().UnixNano()
+	updateArgs := []any{}
+	switch mutation {
+	case domain.ActivityMarkRead:
+		set, updateArgs = `read_at = ?`, []any{changed}
+	case domain.ActivityMarkUnread:
+		set = `read_at = 0`
+	case domain.ActivityClear:
+		set, updateArgs = `read_at = ?, cleared_at = ?`, []any{changed, changed}
+	case domain.ActivityRestore:
+		set = `cleared_at = 0`
+	}
+	updateArgs = append(updateArgs, workspace, user)
+	for _, id := range unique {
+		updateArgs = append(updateArgs, id)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET `+set+` WHERE workspace_id = ? AND user_id = ? AND id IN (`+placeholders(len(unique))+`)`, updateArgs...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetActivityPreferences(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID) (domain.ActivityPreferences, error) {
+	preferences := domain.ActivityPreferences{WorkspaceID: workspace, UserID: user, Layout: domain.ActivityDetailed}
+	err := s.db.QueryRowContext(ctx, `SELECT layout FROM activity_preferences WHERE workspace_id = ? AND user_id = ?`, workspace, user).Scan(&preferences.Layout)
+	if errors.Is(err, sql.ErrNoRows) {
+		return preferences, nil
+	}
+	return preferences, err
+}
+
+func (s *Store) SetActivityPreferences(ctx context.Context, preferences domain.ActivityPreferences) error {
+	if preferences.WorkspaceID == "" || preferences.UserID == "" || !preferences.Layout.Valid() {
+		return store.InvalidArgument("activity preferences are invalid")
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO activity_preferences(workspace_id, user_id, layout) VALUES (?, ?, ?) ON CONFLICT(workspace_id, user_id) DO UPDATE SET layout = excluded.layout`,
+		preferences.WorkspaceID, preferences.UserID, preferences.Layout)
+	return classify(err)
 }
 
 func (s *Store) ListConversations(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.ConversationListRequest) (domain.ConversationPage, error) {
@@ -6411,6 +6683,9 @@ func (s *Store) CreateMessage(ctx context.Context, message domain.Message, event
 	if err := insertMessageFiles(ctx, tx, message); err != nil {
 		return err
 	}
+	if err := insertMessageActivity(ctx, tx, message); err != nil {
+		return err
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		_ = tx.Rollback()
 		return err
@@ -6487,7 +6762,83 @@ func insertFileShareMessage(ctx context.Context, tx *sql.Tx, message domain.Mess
 	if err := insertMessageFiles(ctx, tx, message); err != nil {
 		return err
 	}
+	if err := insertMessageActivity(ctx, tx, message); err != nil {
+		return err
+	}
 	return insertOutbox(ctx, tx, event)
+}
+
+func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Message) error {
+	var direct, groupDirect int
+	if err := tx.QueryRowContext(ctx, `SELECT is_direct, is_group_direct FROM conversations WHERE id = ? AND workspace_id = ?`, message.Conversation, message.WorkspaceID).Scan(&direct, &groupDirect); errors.Is(err, sql.ErrNoRows) {
+		return store.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	recipients := make(map[domain.UserID]map[domain.ActivityKind]struct{})
+	add := func(user domain.UserID, kind domain.ActivityKind) {
+		if user == "" || user == message.AuthorID {
+			return
+		}
+		if recipients[user] == nil {
+			recipients[user] = make(map[domain.ActivityKind]struct{})
+		}
+		recipients[user][kind] = struct{}{}
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT user_id FROM conversation_members WHERE conversation_id = ?`, message.Conversation)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var user domain.UserID
+		if err := rows.Scan(&user); err != nil {
+			rows.Close()
+			return err
+		}
+		if direct != 0 || groupDirect != 0 {
+			add(user, domain.ActivityDM)
+		}
+		if strings.Contains(message.Text, "<@"+string(user)+">") || strings.Contains(message.Blocks, "<@"+string(user)+">") {
+			add(user, domain.ActivityMention)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if message.ThreadTimestamp != "" {
+		rootAt, err := domain.ParseMessageTimestamp(message.ThreadTimestamp)
+		if err != nil {
+			return err
+		}
+		var author domain.UserID
+		err = tx.QueryRowContext(ctx, `SELECT m.author_id FROM messages m JOIN conversation_members cm ON cm.conversation_id = m.conversation AND cm.user_id = m.author_id WHERE m.conversation = ? AND m.created_at = ?`, message.Conversation, domain.NewStoredTime(rootAt)).Scan(&author)
+		if err == nil {
+			add(author, domain.ActivityThread)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
+	for user, set := range recipients {
+		kinds := make([]domain.ActivityKind, 0, len(set)+1)
+		for kind := range set {
+			kinds = append(kinds, kind)
+		}
+		if message.AppID != "" {
+			kinds = append(kinds, domain.ActivityApp)
+		}
+		slices.Sort(kinds)
+		id := domain.ActivityIDFor(user, "message:"+string(message.ID))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, message_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			id, message.WorkspaceID, user, message.AuthorID, message.Conversation, message.ID, message.CreatedAt.UTC().UnixNano()); err != nil {
+			return err
+		}
+		for _, kind := range kinds {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, kind); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
@@ -6750,6 +7101,29 @@ func (s *Store) AddReaction(ctx context.Context, reaction domain.Reaction, event
 	if count != 1 {
 		return store.ErrAlreadyExists
 	}
+	var message domain.Message
+	if err := tx.QueryRowContext(ctx, `SELECT id, workspace_id, conversation, author_id FROM messages WHERE id = ?`, reaction.Message).
+		Scan(&message.ID, &message.WorkspaceID, &message.Conversation, &message.AuthorID); errors.Is(err, sql.ErrNoRows) {
+		return store.ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if message.AuthorID != reaction.UserID {
+		var member int
+		err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversation_members WHERE conversation_id = ? AND user_id = ?`, message.Conversation, message.AuthorID).Scan(&member)
+		if err == nil {
+			id := domain.ActivityIDFor(message.AuthorID, "reaction:"+string(reaction.Message)+":"+reaction.Name+":"+string(reaction.UserID))
+			if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, actor_id, conversation_id, message_id, reaction_name, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+				id, message.WorkspaceID, message.AuthorID, reaction.UserID, message.Conversation, reaction.Message, reaction.Name, reaction.CreatedAt.UTC().UnixNano()); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, id, domain.ActivityReaction); err != nil {
+				return err
+			}
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -6762,6 +7136,12 @@ func (s *Store) RemoveReaction(ctx context.Context, reaction domain.Reaction, ev
 		return err
 	}
 	defer tx.Rollback()
+	var author domain.UserID
+	if err := tx.QueryRowContext(ctx, `SELECT author_id FROM messages WHERE id = ?`, reaction.Message).Scan(&author); errors.Is(err, sql.ErrNoRows) {
+		return store.ErrNotFound
+	} else if err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM reactions WHERE message_id = ? AND name = ? AND user_id = ?`, reaction.Message, reaction.Name, reaction.UserID)
 	if err != nil {
 		return err
@@ -6772,6 +7152,9 @@ func (s *Store) RemoveReaction(ctx context.Context, reaction domain.Reaction, ev
 	}
 	if count != 1 {
 		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_items WHERE id = ?`, domain.ActivityIDFor(author, "reaction:"+string(reaction.Message)+":"+reaction.Name+":"+string(reaction.UserID))); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -7959,6 +8342,10 @@ func (s *Store) AcknowledgeLaterReminders(ctx context.Context, workspace domain.
 		return err
 	}
 	if changed > 0 {
+		if _, err := tx.ExecContext(ctx, `UPDATE activity_items SET read_at = ? WHERE workspace_id = ? AND user_id = ? AND reminder_id <> '' AND read_at = 0`,
+			acknowledged.UTC().UnixNano(), workspace, user); err != nil {
+			return err
+		}
 		if err := insertOutbox(ctx, tx, event); err != nil {
 			return err
 		}
@@ -8016,6 +8403,9 @@ func (s *Store) DeleteLaterReminder(ctx context.Context, workspace domain.Worksp
 	}
 	if count != 1 {
 		return store.ErrNotFound
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM activity_items WHERE workspace_id = ? AND user_id = ? AND reminder_id = ?`, workspace, user, id); err != nil {
+		return err
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -8146,6 +8536,22 @@ func (s *Store) MarkLaterReminderDelivered(ctx context.Context, owner string, id
 	}
 	if changed != 1 {
 		return store.ErrLeaseConflict
+	}
+	var reminder domain.LaterReminder
+	var target domain.LaterReminderTarget
+	if err := tx.QueryRowContext(ctx, `SELECT workspace_id, user_id, source_message_id, source_conversation_id, target FROM later_reminders WHERE id = ?`, id).
+		Scan(&reminder.WorkspaceID, &reminder.UserID, &reminder.SourceMessageID, &reminder.SourceConversation, &target); err != nil {
+		return err
+	}
+	if target == domain.LaterReminderPersonal && reminder.UserID != "" {
+		activityID := domain.ActivityIDFor(reminder.UserID, "reminder:"+string(id)+":"+string(domain.NewStoredTime(deliveredAt)))
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_items(id, workspace_id, user_id, conversation_id, message_id, reminder_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+			activityID, reminder.WorkspaceID, reminder.UserID, reminder.SourceConversation, reminder.SourceMessageID, id, deliveredAt.UnixNano()); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO activity_item_kinds(activity_id, kind) VALUES (?, ?) ON CONFLICT(activity_id, kind) DO NOTHING`, activityID, domain.ActivityReminder); err != nil {
+			return err
+		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err

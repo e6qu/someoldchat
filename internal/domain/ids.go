@@ -24,6 +24,7 @@ type FileCommentID string
 type ExternalUploadID string
 type ReminderID string
 type LaterReminderID string
+type ActivityID string
 type SavedItemID string
 type ScheduledMessageID string
 type UserGroupID string
@@ -124,6 +125,18 @@ func NewReminderID() (ReminderID, error) {
 func NewLaterReminderID() (LaterReminderID, error) {
 	value, err := PublicID("later_reminder_")
 	return LaterReminderID(value), err
+}
+
+// ActivityIDFor returns the stable identity of a notification-producing fact.
+//
+// Message delivery, reaction delivery, and reminder delivery are committed in
+// the same transaction as their source mutation and may be retried. A random
+// identifier would turn a successful retry into a duplicate notification. The
+// source key includes the recipient and occurrence identity. The readable
+// composition is deliberate: schema upgrades can derive the same key with
+// portable SQL, so existing history does not disappear after an upgrade.
+func ActivityIDFor(recipient UserID, sourceKey string) ActivityID {
+	return ActivityID("activity:" + string(recipient) + ":" + sourceKey)
 }
 
 func NewSavedItemID() (SavedItemID, error) {

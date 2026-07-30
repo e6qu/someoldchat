@@ -439,7 +439,7 @@ func TestSidebarSeparatesDirectMessagesAndClearsTheOpenChannelBadge(t *testing.T
 	requireMissing(t, "sidebar", body, `>direct<`, `aria-label="general, `)
 }
 
-func TestActivityAggregatesJoinedUnreadConversationsAndMentions(t *testing.T) {
+func TestActivityShowsDurableMentionWithFiltersAndTriage(t *testing.T) {
 	s, mux := browserWorkspace(t, auth.AllScopes())
 	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"}); err != nil {
 		t.Fatal(err)
@@ -465,15 +465,68 @@ func TestActivityAggregatesJoinedUnreadConversationsAndMentions(t *testing.T) {
 	}
 	requireContains(t, "activity page", activity.Body.String(),
 		"<title>Activity · SameOldChat</title>",
-		"Unread conversations",
+		`aria-label="Activity filters"`,
+		">Unread</a>",
+		">Cleared</a>",
+		">Detailed</button>",
+		">Dense</button>",
 		"#general",
-		`aria-label="1 unread messages"`,
 		"Mentions",
 		"Bob Builder",
 		"Please review this",
 		`class="slack-mention">@Ada Developer</span>`,
+		`data-read-button`,
+		`data-clear-button`,
 	)
 	requireContains(t, "activity shortcut", progressiveEnhancementScript, "key==='3'", "activityLink", "window.location.assign(activityHref)")
+}
+
+func TestActivityPersistsClearRestoreReadAndLayoutActions(t *testing.T) {
+	s, mux := browserWorkspace(t, auth.AllScopes())
+	if err := s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1", Name: "bob", RealName: "Bob Builder"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("Cdev", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Unix(1700000300, 0).UTC()
+	message := domain.Message{ID: "Mactivity-actions", WorkspaceID: "T1", Conversation: "Cdev", AuthorID: "U2", Text: "<@U1> triage me", CreatedAt: created}
+	if err := s.CreateMessage(context.Background(), message, events.Event{ID: "Eactivity-actions", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}, ""); err != nil {
+		t.Fatal(err)
+	}
+	id := domain.ActivityIDFor("U1", "message:"+string(message.ID))
+	clear := postForm(t, mux, "/app/activity/mutate?channel=Cdev&mutation=clear", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "single_id": {string(id)},
+	}.Encode(), false)
+	if clear.Code != http.StatusSeeOther {
+		t.Fatalf("clear status=%d body=%s", clear.Code, clear.Body)
+	}
+	active := get(t, mux, "/app/activity?channel=Cdev")
+	requireMissing(t, "cleared item leaves active Activity", active.Body.String(), "triage me")
+	cleared := get(t, mux, "/app/activity?channel=Cdev&cleared=1")
+	requireContains(t, "cleared item is recoverable", cleared.Body.String(), "triage me", "Restore")
+
+	restore := postForm(t, mux, "/app/activity/mutate?channel=Cdev&mutation=restore", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "single_id": {string(id)}, "cleared": {"1"},
+	}.Encode(), false)
+	if restore.Code != http.StatusSeeOther {
+		t.Fatalf("restore status=%d body=%s", restore.Code, restore.Body)
+	}
+	unread := get(t, mux, "/app/activity?channel=Cdev&unread=1")
+	requireMissing(t, "restoring does not undo clear-implied read", unread.Body.String(), "triage me")
+
+	layout := postForm(t, mux, "/app/activity/preferences?channel=Cdev", url.Values{
+		auth.CSRFTokenFieldName: {auth.CSRFToken("session")}, "layout": {"dense"},
+	}.Encode(), false)
+	if layout.Code != http.StatusSeeOther {
+		t.Fatalf("layout status=%d body=%s", layout.Code, layout.Body)
+	}
+	dense := get(t, mux, "/app/activity?channel=Cdev")
+	requireContains(t, "dense layout persisted", dense.Body.String(), `class="activity-list dense"`, `value="dense"><button type="submit" aria-pressed="true"`)
+	requireContains(t, "Activity keyboard contract", activityMarkup,
+		"event.key==='ArrowDown'", "event.key==='ArrowUp'", "event.key==='Enter'",
+		"event.key==='x'", "event.key==='c'", "event.key==='r'",
+	)
 }
 
 // TestNarrowNavigationKeepsConversationNamesReachable covers the responsive
@@ -939,9 +992,9 @@ func TestDeliveredPersonalReminderAppearsInActivityWithItsSource(t *testing.T) {
 	}
 	activity := get(t, mux, "/app/activity?channel=Cdev")
 	requireContains(t, "REMIND-04 Activity projection", activity.Body.String(),
-		"Personal reminders that have been delivered.", "review the source",
+		">Reminders</a>", "review the source",
 		`datetime="`+now.Format(time.RFC3339)+`"`, "#message-M-activity-reminder",
-		`id="ack-reminders"`,
+		"Mark selected read",
 	)
 	workspace := get(t, mux, "/app?channel=Cdev")
 	requireContains(t, "REMIND-04 due badges", workspace.Body.String(),
@@ -1113,7 +1166,7 @@ func TestLiveUpdatesSubscribeToExactlyTheEmittedTopics(t *testing.T) {
 // which is precisely the failure no unit test would otherwise see.
 func TestTheDocumentAndItsContentSecurityPolicyAgree(t *testing.T) {
 	_, mux := browserWorkspace(t, auth.AllScopes())
-	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello"} {
+	for _, target := range []string{"/app?channel=Cdev", "/app/members", "/app/search?q=hello", "/app/activity?channel=Cdev"} {
 		response := get(t, mux, target)
 		policy := response.Header().Get("Content-Security-Policy")
 		if policy == "" {

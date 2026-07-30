@@ -66,6 +66,18 @@ func TestAppManifestRevisionAndDeletionContract(t *testing.T) {
 	if err := s.CreateApp(ctx, app, revision, domain.OAuthClient{ID: "client", SecretHash: "client-hash", AppID: "A1"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.SeedUser(domain.User{ID: "Ubot", WorkspaceID: "T1", Name: "example-bot"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "Ubot", Name: "example-bot", UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("C1", "Ubot"); err != nil {
+		t.Fatal(err)
+	}
 	app.Name = "Example 2"
 	app.ManifestVersion = 2
 	app.UpdatedAt = now.Add(time.Second)
@@ -92,6 +104,12 @@ func TestAppManifestRevisionAndDeletionContract(t *testing.T) {
 	}
 	if _, err := s.GetOAuthClient(ctx, "client"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("deleted app client error=%v, want %v", err, store.ErrNotFound)
+	}
+	if botUser, err := s.GetUser(ctx, "Ubot"); err != nil || !botUser.Deleted {
+		t.Fatalf("deleted app bot user=%+v err=%v", botUser, err)
+	}
+	if member, err := s.IsConversationMember(ctx, "C1", "Ubot"); err != nil || member {
+		t.Fatalf("deleted app bot membership=%t err=%v", member, err)
 	}
 }
 

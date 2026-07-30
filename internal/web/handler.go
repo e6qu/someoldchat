@@ -337,28 +337,41 @@ type searchData struct {
 	Searched bool
 }
 
-type activityConversationView struct {
-	Name        string
-	Prefix      string
-	UnreadCount int
-	URL         string
-}
-
 type activityData struct {
-	Channel              string
-	CSRFToken            string
-	AcknowledgeReminders bool
-	Unread               []activityConversationView
-	Mentions             []messageView
-	Reminders            []activityReminderView
-	Notice               string
+	Channel     string
+	CSRFToken   string
+	Items       []activityItemView
+	Filters     []activityFilterView
+	Layout      string
+	UnreadOnly  bool
+	ClearedOnly bool
+	Kind        string
+	UnreadURL   string
+	ClearedURL  string
+	ActiveURL   string
+	MoreURL     string
+	Notice      string
 }
 
-type activityReminderView struct {
-	Text        string
+type activityFilterView struct {
+	Label   string
+	URL     string
+	Current bool
+}
+
+type activityItemView struct {
+	ID          string
+	KindLabel   string
+	ActorName   string
+	ChannelName string
+	Text        template.HTML
 	MachineTime string
 	DisplayTime string
 	SourceURL   string
+	ReplyURL    string
+	Unread      bool
+	Cleared     bool
+	Unavailable bool
 }
 
 type scheduledMessageView struct {
@@ -1068,7 +1081,7 @@ var pageMarkup = attachmentPartial + `{{define "title"}}{{.ChannelPrefix}}{{.Cha
       </header>
       <div class="timeline-wrap">
         {{if .OlderURL}}<p class="pager pager-older"><a href="{{.OlderURL}}">Show older messages</a></p>{{end}}
-        <section id="timeline" class="timeline" tabindex="-1" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
+        <section id="timeline" class="timeline" tabindex="0" aria-label="Messages" data-fragment="{{.TimelineURL}}" data-live="{{if .AtLatest}}true{{else}}false{{end}}">{{template "messages" .Timeline}}</section>
         {{if .LatestURL}}<p class="pager pager-newer"><a href="{{.LatestURL}}">Jump to the latest messages</a></p>{{end}}
       </div>
       {{if .ThreadTimestamp}}
@@ -1395,22 +1408,34 @@ var searchTemplate = mustPage(searchMarkup)
 const activityMarkup = `{{define "title"}}Activity · SameOldChat{{end}}
 {{define "styles"}}<style>
 .bar{height:52px;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;padding:0 20px;gap:16px}.bar a{color:var(--on-accent);text-decoration:none;font-weight:700}.bar h1{margin:0 auto 0 0;font-size:18px}
-.layout{width:min(920px,calc(100% - 32px));margin:28px auto 48px;display:grid;gap:24px}.activity-section{display:grid;gap:9px}.activity-section h2{margin:0;font-size:20px}.section-copy{margin:0;color:var(--muted)}
-.unread-list,.activity-list{display:grid;gap:8px;margin:0;padding:0;list-style:none}.unread-link,.activity-item{display:block;padding:13px 15px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:inherit;text-decoration:none}.unread-link:hover,.activity-item:hover{border-color:var(--action)}
-.unread-link{display:flex;align-items:center;gap:9px;font-weight:700}.unread-count{margin-left:auto;min-width:26px;border-radius:14px;background:var(--accent);color:var(--on-accent);padding:2px 8px;text-align:center;font-size:12px}
-.activity-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.empty{margin:0;padding:18px;border:1px dashed var(--line);border-radius:9px;color:var(--muted)}
-@media(max-width:600px){.bar{padding:0 12px}.layout{width:min(100% - 20px,920px);margin-top:18px}}
+.layout{width:min(980px,calc(100% - 28px));margin:22px auto 48px}.activity-heading{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}.activity-heading h2{margin:0 auto 0 0;font-size:25px}.layout-forms{display:flex;gap:4px}.layout-forms form{margin:0}.layout-forms button,.bulk-actions button,.item-actions button{border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);padding:7px 10px;font-weight:800}.layout-forms button[aria-pressed=true]{background:var(--action);color:var(--on-strong)}
+.activity-tabs{display:flex;gap:3px;overflow-x:auto;border-bottom:1px solid var(--line);margin-bottom:10px}.activity-tabs a{white-space:nowrap;padding:9px 11px;color:var(--muted);font-weight:800;text-decoration:none;border-bottom:3px solid transparent}.activity-tabs a[aria-current=page]{color:var(--text);border-bottom-color:var(--action)}.activity-options{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 10px}.activity-options a{border:1px solid var(--field-line);border-radius:18px;padding:5px 10px;color:var(--text);text-decoration:none;font-weight:700}.activity-options a[aria-current=page]{background:var(--hover);border-color:var(--action)}
+.bulk-actions{min-height:39px;display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid var(--line);border-radius:8px 8px 0 0;background:var(--panel)}.bulk-actions span{margin-right:auto;color:var(--muted);font-size:13px}.activity-list{margin:0;padding:0;list-style:none;border:1px solid var(--line);border-top:0;border-radius:0 0 8px 8px;overflow:hidden}.activity-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;padding:14px;background:var(--panel);border-top:1px solid var(--line);outline:none}.activity-row:first-child{border-top:0}.activity-row:hover,.activity-row:focus{background:var(--hover)}.activity-row.unread{box-shadow:inset 3px 0 var(--action)}.activity-select{margin-top:3px}.activity-main{min-width:0}.activity-head{display:flex;align-items:baseline;gap:7px;flex-wrap:wrap}.activity-kind{font-size:11px;font-weight:900;text-transform:uppercase;letter-spacing:.04em;color:var(--action)}.activity-author{font-weight:800}.activity-meta{color:var(--muted);font-size:12px}.activity-text{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}.activity-source{color:inherit;text-decoration:none}.activity-source:focus-visible{text-decoration:underline}.item-actions{display:flex;gap:4px;align-items:start}.item-actions button{padding:5px 8px}.unavailable{color:var(--muted);font-style:italic}.empty{margin:0;padding:34px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);text-align:center}.pager{text-align:center;margin-top:16px}
+.activity-list.dense .activity-row{padding:8px 12px}.activity-list.dense .activity-text{display:inline;margin-left:5px}.activity-list.dense .activity-head{display:inline-flex}
+@media(max-width:650px){.bar{padding:0 12px}.layout{width:min(100% - 16px,980px);margin-top:14px}.activity-row{grid-template-columns:auto minmax(0,1fr)}.item-actions{grid-column:2}.bulk-actions{overflow-x:auto}.activity-list.dense .activity-text{display:block;margin:4px 0 0}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
-{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1></header><main class="layout">
+{{define "scripts"}}` + localTimeScript + `<script>(function(){
+var rows=Array.prototype.slice.call(document.querySelectorAll('[data-activity-row]'));if(!rows.length)return;
+var current=0;rows[0].tabIndex=0;
+function focusRow(index){rows[current].tabIndex=-1;current=(index+rows.length)%rows.length;rows[current].tabIndex=0;rows[current].focus()}
+document.addEventListener('keydown',function(event){if(event.altKey||event.ctrlKey||event.metaKey||event.target.matches('input,textarea,select'))return;var row=event.target.closest('[data-activity-row]');if(row)current=rows.indexOf(row);
+if(event.key==='ArrowDown'){event.preventDefault();focusRow(current+1)}else if(event.key==='ArrowUp'){event.preventDefault();focusRow(current-1)}else if(event.key==='Enter'&&row){var reply=row.querySelector('[data-activity-reply]');if(reply){event.preventDefault();reply.click()}}else if((event.key==='x'||event.key==='X')&&row){event.preventDefault();var box=row.querySelector('input[type=checkbox]');box.checked=!box.checked;box.dispatchEvent(new Event('change',{bubbles:true}))}else if((event.key==='c'||event.key==='C')&&row){event.preventDefault();row.querySelector('[data-clear-button]').click()}else if((event.key==='r'||event.key==='R')&&row){var read=row.querySelector('[data-read-button]');if(read){event.preventDefault();read.click()}}});
+var count=document.getElementById('selection-count');document.addEventListener('change',function(){var selected=document.querySelectorAll('input[name=activity_id]:checked').length;count.textContent=selected?selected+' selected':'Select items with X or the checkboxes'});
+})();</script>{{end}}
+{{define "content"}}<header class="bar"><a href="/app?channel={{.Channel}}">← Back to chat</a><h1>Activity</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false"><span aria-hidden="true">☾</span><span class="visually-hidden">Dark theme</span></button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-{{if .AcknowledgeReminders}}<form id="ack-reminders" method="post" action="/app/activity/read?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><button type="submit">Mark all reminders read</button></form>{{end}}
-<section class="activity-section" aria-labelledby="unread-heading"><h2 id="unread-heading">Unread conversations</h2><p class="section-copy">Open a conversation to review its unread messages.</p>
-<ul class="unread-list">{{range .Unread}}<li><a class="unread-link" href="{{.URL}}"><span>{{.Prefix}}{{.Name}}</span><span class="unread-count" aria-label="{{.UnreadCount}} unread messages">{{.UnreadCount}}</span></a></li>{{else}}<li class="empty">You’re caught up on joined conversations.</li>{{end}}</ul></section>
-<section class="activity-section" aria-labelledby="reminders-heading"><h2 id="reminders-heading">Reminders</h2><p class="section-copy">Personal reminders that have been delivered.</p>
-<ul class="activity-list">{{range .Reminders}}<li>{{if .SourceURL}}<a class="activity-item" href="{{.SourceURL}}">{{else}}<a class="activity-item" href="/app/later?channel={{$.Channel}}&state=completed">{{end}}<span class="activity-head"><span class="activity-author">Reminder</span><time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time></span><div class="activity-text">{{.Text}}</div></a></li>{{else}}<li class="empty">No delivered reminders.</li>{{end}}</ul></section>
-<section class="activity-section" aria-labelledby="mentions-heading"><h2 id="mentions-heading">Mentions</h2><p class="section-copy">Recent messages that explicitly mention you.</p>
-<ul class="activity-list">{{range .Mentions}}<li><a class="activity-item" href="{{.Permalink}}"><span class="activity-head"><span class="activity-author">{{.AuthorName}}</span><time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time><span class="activity-meta">{{.ChannelPrefix}}{{.ChannelName}}</span></span><div class="activity-text">{{.DisplayText}}</div></a></li>{{else}}<li class="empty">No recent mentions.</li>{{end}}</ul></section>
+<div class="activity-heading"><h2>Activity</h2><div class="layout-forms" aria-label="Activity layout"><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="detailed"><button type="submit" aria-pressed="{{if eq .Layout "detailed"}}true{{else}}false{{end}}">Detailed</button></form><form method="post" action="/app/activity/preferences?channel={{.Channel}}"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="layout" value="dense"><button type="submit" aria-pressed="{{if eq .Layout "dense"}}true{{else}}false{{end}}">Dense</button></form></div></div>
+<nav class="activity-tabs" aria-label="Activity filters">{{range .Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</nav>
+<div class="activity-options"><a href="{{.UnreadURL}}"{{if .UnreadOnly}} aria-current="page"{{end}}>Unread</a>{{if .ClearedOnly}}<a href="{{.ActiveURL}}">Back to activity</a>{{else}}<a href="{{.ClearedURL}}">Cleared</a>{{end}}</div>
+<form method="post" action="/app/activity/mutate?channel={{.Channel}}">
+<input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="kind" value="{{.Kind}}"><input type="hidden" name="unread" value="{{if .UnreadOnly}}1{{end}}"><input type="hidden" name="cleared" value="{{if .ClearedOnly}}1{{end}}">
+<div class="bulk-actions"><span id="selection-count" aria-live="polite">Select items with X or the checkboxes</span>{{if .ClearedOnly}}<button type="submit" name="mutation" value="restore">Restore selected</button>{{else}}<button type="submit" name="mutation" value="read">Mark selected read</button><button type="submit" name="mutation" value="clear">Clear selected</button>{{end}}</div>
+{{if .Items}}<ul class="activity-list {{.Layout}}" aria-label="Activity feed">{{range .Items}}<li class="activity-row{{if .Unread}} unread{{end}}" data-activity-row tabindex="-1">
+<input class="activity-select" type="checkbox" name="activity_id" value="{{.ID}}" aria-label="Select activity from {{.ActorName}}">
+<div class="activity-main">{{if .ReplyURL}}<a class="visually-hidden" data-activity-reply href="{{.ReplyURL}}">Reply to this activity</a>{{end}}{{if .SourceURL}}<a class="activity-source" data-activity-source href="{{.SourceURL}}">{{end}}<span class="activity-head"><span class="activity-kind">{{.KindLabel}}</span>{{if .ActorName}}<span class="activity-author">{{.ActorName}}</span>{{end}}<time class="activity-meta" datetime="{{.MachineTime}}">{{.DisplayTime}}</time>{{if .ChannelName}}<span class="activity-meta">{{.ChannelName}}</span>{{end}}</span><span class="activity-text{{if .Unavailable}} unavailable{{end}}">{{.Text}}</span>{{if .SourceURL}}</a>{{end}}</div>
+<div class="item-actions">{{if $.ClearedOnly}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=restore" data-clear-button aria-label="Restore this activity">Restore</button>{{else}}<button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=read" data-read-button aria-label="Mark this activity read">Read</button><button type="submit" name="single_id" value="{{.ID}}" formaction="/app/activity/mutate?channel={{$.Channel}}&mutation=clear" data-clear-button aria-label="Clear this activity">Clear</button>{{end}}</div>
+</li>{{end}}</ul>{{else}}<p class="empty">{{if .ClearedOnly}}No cleared activity.{{else if .UnreadOnly}}You’re all caught up.{{else}}No activity yet. New DMs, mentions, thread replies, reactions, app messages, and delivered reminders will appear here.{{end}}</p>{{end}}
+</form>{{if .MoreURL}}<p class="pager"><a href="{{.MoreURL}}">Show more activity</a></p>{{end}}
 </main>{{end}}`
 
 var activityTemplate = mustPage(activityMarkup)
@@ -2069,6 +2094,8 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/read", h.markRead)
 	mux.HandleFunc("GET /app/search", h.search)
 	mux.HandleFunc("GET /app/activity", h.activity)
+	mux.HandleFunc("POST /app/activity/mutate", h.mutateActivity)
+	mux.HandleFunc("POST /app/activity/preferences", h.setActivityPreferences)
 	mux.HandleFunc("POST /app/activity/read", h.acknowledgeActivityReminders)
 	mux.HandleFunc("GET /app/later", h.later)
 	mux.HandleFunc("GET /app/scheduled", h.scheduledMessages)
@@ -3545,109 +3572,234 @@ func (h Handler) activity(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = string(h.Channel)
 	}
-	data := activityData{Channel: channel}
+	kindValue := strings.TrimSpace(r.URL.Query().Get("kind"))
+	kindByValue := map[string]domain.ActivityKind{
+		"dm": domain.ActivityDM, "mention": domain.ActivityMention, "thread": domain.ActivityThread,
+		"reaction": domain.ActivityReaction, "app": domain.ActivityApp, "reminder": domain.ActivityReminder,
+	}
+	var kinds []domain.ActivityKind
+	if kindValue != "" {
+		kind, ok := kindByValue[kindValue]
+		if !ok {
+			h.writePageError(w, http.StatusBadRequest, "That Activity filter is not valid", "Open Activity again and choose one of the available filters.")
+			return
+		}
+		kinds = []domain.ActivityKind{kind}
+	}
+	unreadOnly := r.URL.Query().Get("unread") == "1"
+	clearedOnly := r.URL.Query().Get("cleared") == "1"
+	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
+	page, err := h.Messages.Activity(r.Context(), principal.WorkspaceID, principal.UserID, domain.ActivityQuery{
+		Kinds: kinds, UnreadOnly: unreadOnly, ClearedOnly: clearedOnly,
+		Page: domain.PageRequest{Limit: 50, Cursor: cursor},
+	})
+	if err != nil {
+		if errors.Is(err, domain.ErrInvalidCursor) {
+			h.writePageError(w, http.StatusBadRequest, "That Activity link is no longer valid", "Open Activity again to see the latest items.")
+			return
+		}
+		h.writeStoreError(w, err, "Activity is temporarily unavailable.")
+		return
+	}
+	preferences, err := h.Messages.ActivityPreferences(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your Activity layout is temporarily unavailable.")
+		return
+	}
+	data := activityData{
+		Channel: channel, Kind: kindValue, UnreadOnly: unreadOnly, ClearedOnly: clearedOnly,
+		Layout: string(preferences.Layout),
+	}
 	if sessionCookie, cookieErr := r.Cookie(auth.SessionCookieName); cookieErr == nil && strings.TrimSpace(sessionCookie.Value) != "" {
 		data.CSRFToken = auth.CSRFToken(sessionCookie.Value)
 	}
-	var cursor domain.Cursor
-	for pageIndex := 0; pageIndex < 10; pageIndex++ {
-		page, pageErr := h.Messages.Conversations(r.Context(), principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
-			Limit: conversationWindow, Cursor: cursor, ExcludeArchived: false,
+	names := h.newUserNames(r.Context(), principal)
+	for _, item := range page.Items {
+		view := activityItemView{
+			ID: string(item.ID), KindLabel: activityKindLabel(item), ActorName: names.name(item.ActorID),
+			MachineTime: item.OccurredAt.UTC().Format(time.RFC3339Nano), DisplayTime: formatTime(item.OccurredAt),
+			Unread: item.ReadAt.IsZero(), Cleared: !item.ClearedAt.IsZero(),
+		}
+		if item.ReminderID != "" {
+			view.ActorName = "Reminder"
+			if item.Reminder.ID != "" {
+				view.Text = template.HTML(template.HTMLEscapeString(item.Reminder.Text))
+				view.SourceURL = "/app/later?channel=" + url.QueryEscape(channel) + "&state=completed"
+			}
+		}
+		if item.Message.ID != "" {
+			messageViews := h.newResultViews(r.Context(), principal, []domain.Message{item.Message}, names)
+			if len(messageViews) == 1 {
+				message := messageViews[0]
+				if item.ReminderID == "" {
+					view.Text = message.DisplayText
+				}
+				view.SourceURL = message.Permalink
+				replyThread := string(item.Message.ThreadTimestamp)
+				if replyThread == "" {
+					replyThread = string(domain.NewMessageTimestamp(item.Message.CreatedAt))
+				}
+				view.ReplyURL = appURL(string(item.Message.Conversation), replyThread, "", "", "")
+				view.ChannelName = message.ChannelPrefix + message.ChannelName
+				if item.ReminderID == "" {
+					view.ActorName = message.AuthorName
+				}
+			}
+		}
+		if !item.SourceAvailable || view.Text == "" {
+			view.Text = "This activity’s source is no longer available."
+			view.Unavailable = true
+			view.SourceURL = ""
+		}
+		data.Items = append(data.Items, view)
+	}
+	filterDefinitions := []struct{ value, label string }{
+		{"", "All"}, {"dm", "DMs"}, {"mention", "Mentions"}, {"thread", "Threads"},
+		{"reaction", "Reactions"}, {"app", "Apps"}, {"reminder", "Reminders"},
+	}
+	for _, filter := range filterDefinitions {
+		data.Filters = append(data.Filters, activityFilterView{
+			Label: filter.label, Current: kindValue == filter.value,
+			URL: activityPageURL(channel, filter.value, unreadOnly, clearedOnly, ""),
 		})
-		if pageErr != nil {
-			data.Notice = "Unread conversations are temporarily unavailable."
-			break
-		}
-		for _, conversation := range page.Conversations {
-			if conversation.UnreadCount == 0 {
-				continue
-			}
-			member, memberErr := h.Messages.IsConversationMember(r.Context(), principal.WorkspaceID, principal.UserID, conversation.ID)
-			if memberErr != nil {
-				data.Notice = "Some unread conversations could not be checked."
-				continue
-			}
-			if !member {
-				continue
-			}
-			name, prefix := conversationName(conversation), "#"
-			if conversation.IsDirect || conversation.IsGroupDirect {
-				prefix = ""
-				if participants := h.participantNames(r.Context(), principal, conversation.ID); participants != "" {
-					name = participants
-				}
-			}
-			data.Unread = append(data.Unread, activityConversationView{
-				Name: name, Prefix: prefix, UnreadCount: conversation.UnreadCount,
-				URL: appURL(string(conversation.ID), "", "", "", ""),
-			})
-		}
-		if !page.HasMore || page.NextCursor == "" {
-			break
-		}
-		cursor = page.NextCursor
-		if pageIndex == 9 {
-			data.Notice = strings.TrimSpace(data.Notice + " Activity is limited to the first 1,000 conversations.")
-		}
 	}
-	sort.Slice(data.Unread, func(left, right int) bool {
-		if data.Unread[left].UnreadCount != data.Unread[right].UnreadCount {
-			return data.Unread[left].UnreadCount > data.Unread[right].UnreadCount
-		}
-		return strings.ToLower(data.Unread[left].Name) < strings.ToLower(data.Unread[right].Name)
-	})
-	if principal.HasScope(auth.ScopeSearchRead) {
-		results, searchErr := h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, "<@"+string(principal.UserID)+">", domain.PageRequest{Limit: searchWindow})
-		if searchErr != nil {
-			data.Notice = strings.TrimSpace(data.Notice + " Mentions are temporarily unavailable.")
-		} else {
-			messages := make([]domain.Message, 0, len(results.Messages))
-			for _, message := range results.Messages {
-				if message.AuthorID != principal.UserID {
-					messages = append(messages, message)
-				}
-			}
-			slices.Reverse(messages)
-			data.Mentions = h.newResultViews(r.Context(), principal, messages, h.newUserNames(r.Context(), principal))
-		}
-	} else {
-		data.Notice = strings.TrimSpace(data.Notice + " Your session cannot search mentions.")
-	}
-	reminders, remindersErr := h.Messages.LaterReminders(r.Context(), principal.WorkspaceID, principal.UserID, domain.LaterReminderPersonal, domain.PageRequest{Limit: scheduledWindow})
-	if remindersErr != nil {
-		data.Notice = strings.TrimSpace(data.Notice + " Reminders are temporarily unavailable.")
-	} else {
-		for _, reminder := range reminders.Items {
-			if reminder.LastDeliveredAt.IsZero() {
-				continue
-			}
-			view := activityReminderView{
-				Text: reminder.Text, MachineTime: reminder.LastDeliveredAt.UTC().Format(time.RFC3339),
-				DisplayTime: formatTime(reminder.LastDeliveredAt),
-			}
-			if reminder.SourceTimestamp != "" {
-				sourceTime, parseErr := domain.ParseMessageTimestamp(reminder.SourceTimestamp)
-				if parseErr == nil {
-					boundary := domain.Message{ID: reminder.SourceMessageID, CreatedAt: sourceTime.Add(time.Nanosecond)}
-					before := ""
-					if sourceCursor, cursorErr := domain.NewMessageCursor(boundary); cursorErr == nil {
-						before = string(sourceCursor)
-					}
-					view.SourceURL = appURL(string(reminder.SourceConversation), "", before, messageAnchor(reminder.SourceMessageID), "")
-				}
-			}
-			data.Reminders = append(data.Reminders, view)
-		}
-	}
-	if data.CSRFToken != "" {
-		unreadReminder, unreadErr := h.hasUnacknowledgedReminder(r.Context(), principal)
-		if unreadErr != nil {
-			data.Notice = strings.TrimSpace(data.Notice + " Reminder read state is temporarily unavailable.")
-		} else {
-			data.AcknowledgeReminders = unreadReminder
-		}
+	data.UnreadURL = activityPageURL(channel, kindValue, !unreadOnly, clearedOnly, "")
+	data.ClearedURL = activityPageURL(channel, kindValue, false, true, "")
+	data.ActiveURL = activityPageURL(channel, kindValue, false, false, "")
+	if page.HasMore && page.NextCursor != "" {
+		data.MoreURL = activityPageURL(channel, kindValue, unreadOnly, clearedOnly, page.NextCursor)
 	}
 	h.writeHTML(w, activityTemplate, data, http.StatusOK, "activity rendering unavailable")
+}
+
+func activityKindLabel(item domain.ActivityItem) string {
+	labels := make([]string, 0, len(item.Kinds))
+	for _, kind := range item.Kinds {
+		label := string(kind)
+		switch kind {
+		case domain.ActivityDM:
+			label = "DM"
+		case domain.ActivityMention:
+			label = "Mention"
+		case domain.ActivityThread:
+			label = "Thread"
+		case domain.ActivityReaction:
+			label = "Reaction"
+			if item.ReactionName != "" {
+				label += " :" + item.ReactionName + ":"
+			}
+		case domain.ActivityApp:
+			label = "App"
+		case domain.ActivityReminder:
+			label = "Reminder"
+		}
+		labels = append(labels, label)
+	}
+	return strings.Join(labels, " · ")
+}
+
+func activityPageURL(channel, kind string, unread, cleared bool, cursor domain.Cursor) string {
+	values := url.Values{"channel": {channel}}
+	if kind != "" {
+		values.Set("kind", kind)
+	}
+	if unread {
+		values.Set("unread", "1")
+	}
+	if cleared {
+		values.Set("cleared", "1")
+	}
+	if cursor != "" {
+		values.Set("cursor", string(cursor))
+	}
+	return "/app/activity?" + values.Encode()
+}
+
+func (h Handler) mutateActivity(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBody)
+	if err := r.ParseForm(); err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity action could not be read", "Reload Activity and try again.")
+		return
+	}
+	if !h.requireCSRF(w, r) {
+		return
+	}
+	mutationValue := strings.TrimSpace(r.URL.Query().Get("mutation"))
+	if mutationValue == "" {
+		mutationValue = strings.TrimSpace(r.FormValue("mutation"))
+	}
+	mutation := domain.ActivityMutation(mutationValue)
+	if !mutation.Valid() {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity action is not valid", "Choose Mark read, Clear, or Restore and try again.")
+		return
+	}
+	idValues := r.Form["activity_id"]
+	if single := strings.TrimSpace(r.FormValue("single_id")); single != "" {
+		idValues = []string{single}
+	}
+	ids := make([]domain.ActivityID, 0, len(idValues))
+	seen := make(map[domain.ActivityID]struct{}, len(idValues))
+	for _, value := range idValues {
+		id := domain.ActivityID(strings.TrimSpace(value))
+		if id == "" {
+			continue
+		}
+		if _, duplicate := seen[id]; !duplicate {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		h.writeMutationError(w, r, http.StatusBadRequest, "Select at least one Activity item", "No Activity was changed.")
+		return
+	}
+	if err := h.Messages.MutateActivity(r.Context(), principal.WorkspaceID, principal.UserID, ids, mutation); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			h.writeMutationError(w, r, http.StatusNotFound, "That Activity item is no longer available", "Reload Activity to see the latest items.")
+			return
+		}
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Activity is temporarily unavailable", "No Activity item was changed.")
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	h.redirectMutation(w, r, activityPageURL(
+		channel, strings.TrimSpace(r.FormValue("kind")),
+		r.FormValue("unread") == "1", r.FormValue("cleared") == "1", "",
+	))
+}
+
+func (h Handler) setActivityPreferences(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeChannelsHistory)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "Reload Activity and choose a layout again.")
+	if !ok {
+		return
+	}
+	layout := domain.ActivityLayout(strings.TrimSpace(fields["layout"]))
+	if !layout.Valid() {
+		h.writeMutationError(w, r, http.StatusBadRequest, "That Activity layout is not valid", "Choose Detailed or Dense.")
+		return
+	}
+	if _, err := h.Messages.SetActivityPreferences(r.Context(), principal.WorkspaceID, principal.UserID, layout); err != nil {
+		h.writeMutationError(w, r, http.StatusServiceUnavailable, "Your Activity layout could not be saved", "Reload Activity and try again.")
+		return
+	}
+	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = string(h.Channel)
+	}
+	h.redirectMutation(w, r, activityPageURL(channel, "", false, false, ""))
 }
 
 func (h Handler) acknowledgeActivityReminders(w http.ResponseWriter, r *http.Request) {
@@ -5531,7 +5683,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript, laterLiveScript), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

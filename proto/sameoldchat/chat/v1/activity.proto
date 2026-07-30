@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+import "sameoldchat/chat/v1/messages.proto";
+import "sameoldchat/chat/v1/reminders.proto";
+
+message ActivityItem {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  repeated string kinds = 4;
+  string actor_id = 5;
+  string conversation_id = 6;
+  string message_id = 7;
+  string reminder_id = 8;
+  string reaction_name = 9;
+  int64 occurred_at = 10;
+  int64 read_at = 11;
+  int64 cleared_at = 12;
+  Message message = 13;
+  LaterReminder reminder = 14;
+  bool source_available = 15;
+}
+
+message ActivityRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string kinds = 3;
+  bool unread_only = 4;
+  bool cleared_only = 5;
+  int32 limit = 6;
+  string cursor = 7;
+}
+
+message ActivityPage {
+  repeated ActivityItem items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message MutateActivityRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string activity_ids = 3;
+  string mutation = 4;
+}
+
+message ActivityPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+}
+
+message SetActivityPreferencesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string layout = 3;
+}
+
+message ActivityPreferences {
+  string workspace_id = 1;
+  string user_id = 2;
+  string layout = 3;
+}
+
+service ActivityService {
+  rpc ListActivity(ActivityRequest) returns (ActivityPage);
+  rpc MutateActivity(MutateActivityRequest) returns (MutationResponse);
+  rpc GetActivityPreferences(ActivityPreferencesRequest) returns (ActivityPreferences);
+  rpc SetActivityPreferences(SetActivityPreferencesRequest) returns (ActivityPreferences);
+}

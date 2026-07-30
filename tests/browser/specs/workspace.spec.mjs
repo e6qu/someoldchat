@@ -45,13 +45,75 @@ async function postThroughTheAPI(request, text, threadTimestamp) {
 }
 
 async function postPayloadThroughTheAPI(request, body) {
+  return postPayloadWithToken(request, API_TOKEN, body);
+}
+
+async function postPayloadWithToken(request, token, body) {
   const response = await request.post('/api/chat.postMessage', {
-    headers: { authorization: `Bearer ${API_TOKEN}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     data: body,
   });
   const payload = await response.json();
   expect(payload.ok, JSON.stringify(payload)).toBe(true);
   return payload;
+}
+
+async function installActivityBot(page, request) {
+  await page.goto('/app/developer/apps');
+  const redirectURI = 'https://client.example/browser-oauth-callback';
+  const name = `Activity bot ${Date.now()}`;
+  await page.getByRole('textbox', { name: 'App manifest (JSON)' }).fill(JSON.stringify({
+    display_information: { name },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['channels:join', 'chat:write'] },
+    },
+  }, null, 2));
+  await page.getByRole('button', { name: 'Create app' }).click();
+  await expect(page.getByRole('heading', { name: 'Save these app credentials now' })).toBeVisible();
+  const appID = new URL(page.url()).searchParams.get('app');
+  expect(appID).toBeTruthy();
+  const clientID = (await page.locator('dt:text-is("Client ID") + dd code').textContent()).trim();
+  const clientSecret = (await page.locator('dt:text-is("Client secret") + dd code').textContent()).trim();
+
+  await page.getByRole('link', { name: 'Open install flow' }).click();
+  await expect(page.getByRole('heading', { name: `Authorize ${name}` })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Allow' })).toBeEnabled();
+  const consent = await page.locator('form').evaluate((form) => Object.fromEntries(new FormData(form)));
+  consent.decision = 'approve';
+  // Keep the external HTTPS callback from becoming a browser/network
+  // dependency. The POST is the exact consent form the browser rendered, with
+  // its live CSRF token and session; stopping at the redirect lets the test
+  // exchange the authorization code itself.
+  const authorizationResponse = await request.post('/oauth/v2/authorize', {
+    headers: { cookie: `sameoldchat_session=${SESSION}` },
+    form: consent,
+    maxRedirects: 0,
+  });
+  expect(authorizationResponse.status()).toBe(302);
+  const code = new URL(authorizationResponse.headers().location).searchParams.get('code');
+  expect(code).toBeTruthy();
+
+  const exchange = await request.post('/api/oauth.v2.access', {
+    form: {
+      client_id: clientID,
+      client_secret: clientSecret,
+      code,
+      redirect_uri: redirectURI,
+    },
+  });
+  const installed = await exchange.json();
+  expect(installed.ok, JSON.stringify(installed)).toBe(true);
+  expect(installed.access_token).toMatch(/^xoxb-/);
+  expect(installed.bot_user_id).toBeTruthy();
+
+  const join = await request.post('/api/conversations.join', {
+    headers: { authorization: `Bearer ${installed.access_token}`, 'content-type': 'application/json' },
+    data: { channel: CHANNEL },
+  });
+  const joined = await join.json();
+  expect(joined.ok, JSON.stringify(joined)).toBe(true);
+  return { appID, token: installed.access_token };
 }
 
 async function expectNoSeriousAccessibilityViolations(page) {
@@ -112,6 +174,77 @@ test('[AUTH-01 MSG-01 COMP-01 SEARCH-01] workspace supports the core browser jou
   await expect(page.getByRole('heading', { name: 'Workspace members' })).toBeVisible();
   await page.getByRole('link', { name: 'Back to chat' }).click();
   await expect(page.locator('.channel-title')).toHaveText('# general');
+});
+
+test('[ACTIVITY-01 ACTIVITY-02 ACTIVITY-03 A11Y-01] Activity persists real app mentions and supports keyboard triage', async ({ page, context, request }) => {
+  await signIn(context);
+  let activityAppID;
+  try {
+    const selfMessage = `self activity exclusion ${Date.now()}`;
+    await postThroughTheAPI(request, selfMessage);
+    const activityBot = await installActivityBot(page, request);
+    activityAppID = activityBot.appID;
+    const first = `app mention one ${Date.now()}`;
+    const second = `app mention two ${Date.now()}`;
+    await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${first}` });
+    await postPayloadWithToken(request, activityBot.token, { channel: CHANNEL, text: `<@Udev> ${second}` });
+    await page.goto('/app/activity');
+
+    await expect(page.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'All' })).toHaveAttribute('aria-current', 'page');
+    await expect(page.getByText(selfMessage)).toHaveCount(0);
+    await page.getByRole('link', { name: 'Apps' }).click();
+    await expect(page).toHaveURL(/kind=app/);
+    await expect(page.getByRole('link', { name: 'Apps' })).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('[data-activity-row]', { hasText: first })).toBeVisible();
+    await expect(page.locator('[data-activity-row]', { hasText: second })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Dense' }).click();
+    await expect(page.locator('.activity-list')).toHaveClass(/dense/);
+    await expect(page.getByRole('button', { name: 'Dense' })).toHaveAttribute('aria-pressed', 'true');
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Dense' })).toHaveAttribute('aria-pressed', 'true');
+
+    let rows = page.locator('[data-activity-row]');
+    await expect(rows).toHaveCount(2);
+    await rows.nth(0).focus();
+    await page.keyboard.press('ArrowDown');
+    await expect(rows.nth(1)).toBeFocused();
+    await page.keyboard.press('x');
+    await expect(rows.nth(1).locator('input[type=checkbox]')).toBeChecked();
+    await expect(page.getByText('1 selected')).toBeVisible();
+    await page.keyboard.press('Enter');
+    await expect(page).toHaveURL(/thread=/);
+    await expect(page.locator('form.composer textarea[name="text"]')).toHaveAttribute('placeholder', 'Reply in the thread');
+
+    await page.goBack();
+    rows = page.locator('[data-activity-row]');
+    await rows.nth(0).focus();
+    await page.keyboard.press('r');
+    await expect(rows.nth(0)).not.toHaveClass(/unread/);
+    await rows.nth(0).focus();
+    await page.keyboard.press('c');
+    await expect(page.locator('[data-activity-row]')).toHaveCount(1);
+
+    await page.getByRole('link', { name: 'Unread' }).click();
+    await expect(page.getByRole('link', { name: 'Unread' })).toHaveAttribute('aria-current', 'page');
+    // Opening the source thread advances the conversation read cursor, so the
+    // sibling notification is no longer allowed to stay unread.
+    await expect(page.getByText('You’re all caught up.')).toBeVisible();
+    await page.getByRole('link', { name: 'Cleared' }).click();
+    await expect(page.locator('[data-activity-row]')).toHaveCount(1);
+    await page.getByRole('button', { name: 'Restore this activity' }).click();
+    await expect(page.getByText('No cleared activity.')).toBeVisible();
+    await expectNoSeriousAccessibilityViolations(page);
+  } finally {
+    if (activityAppID) {
+      await page.goto(`/app/developer/apps?app=${encodeURIComponent(activityAppID)}`);
+      const remove = page.getByRole('button', { name: 'Delete app' });
+      if (await remove.isVisible()) {
+        await remove.click();
+      }
+    }
+  }
 });
 
 test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history, and can be cancelled', async ({ page, context }) => {
@@ -633,8 +766,8 @@ test('[COMP-01 NAV-02 NAV-03 APP-05] the composer and workspace honour Slack web
   // navigation-tab shortcut (Activity is the default third tab).
   await page.keyboard.press(activity);
   await expect(page).toHaveURL(/\/app\/activity/);
-  await expect(page.getByRole('heading', { name: 'Unread conversations' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Mentions' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Activity filters' })).toBeVisible();
 });
 
 test('[COMP-02 COMP-03 DRAFT-01 FILE-01] composer formatting, mentions, emoji, drafts, and file preview are functional', async ({ page, context }) => {
