@@ -120,6 +120,11 @@ func main() {
 		}
 	}
 	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: auth.AllScopes()})
+	// Reminder methods are documented as a user-token surface. Keeping a real
+	// user credential beside the broad bot fixture prevents the SDK suites from
+	// "qualifying" reminders with an identity Slack does not advertise for the
+	// method.
+	store.SeedToken(context.Background(), "xoxp-reminder-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: auth.AllScopes()})
 	store.SeedToken(context.Background(), "xoxb-qualification-legacy", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: []string{"chat:write"}})
 	if err := store.CreateAppConfigurationToken(context.Background(), "xoxe.xoxp-qualification", "xoxe-qualification", domain.AppConfigurationToken{WorkspaceID: "T1", UserID: "U1", ExpiresAt: time.Now().UTC().Add(12 * time.Hour)}); err != nil {
 		panic(err)
@@ -222,6 +227,9 @@ func main() {
 	handler.ConfigureSocketMode(socketmode.Service{Store: store, Host: "127.0.0.1:18080"}, appAuthenticator)
 	mux := http.NewServeMux()
 	handler.Register(mux)
+	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
 	rtmHandler, err := realtime.NewRTMHandler(messages, "T1", messages, messages)
 	if err != nil {
@@ -367,7 +375,11 @@ func main() {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	server := &http.Server{Addr: "127.0.0.1:18080", Handler: mux}
+	serverHandler, err := newSDKMethodRecorder(mux, os.Getenv("SAMEOLDCHAT_SDK_COVERAGE_LOG"))
+	if err != nil {
+		panic(err)
+	}
+	server := &http.Server{Addr: "127.0.0.1:18080", Handler: serverHandler}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			panic(err)
@@ -379,6 +391,47 @@ func main() {
 	if err := server.Shutdown(context.Background()); err != nil {
 		panic(err)
 	}
+}
+
+type sdkMethodRecorder struct {
+	next http.Handler
+	path string
+	mu   sync.Mutex
+}
+
+func newSDKMethodRecorder(next http.Handler, path string) (http.Handler, error) {
+	if next == nil {
+		return nil, errors.New("SDK method recorder requires an HTTP handler")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return next, nil
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open SDK coverage log: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		return nil, fmt.Errorf("close SDK coverage log: %w", err)
+	}
+	return &sdkMethodRecorder{next: next, path: path}, nil
+}
+
+func (r *sdkMethodRecorder) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	if method, ok := strings.CutPrefix(request.URL.Path, "/api/"); ok && method != "" && !strings.Contains(method, "/") {
+		r.mu.Lock()
+		file, err := os.OpenFile(r.path, os.O_APPEND|os.O_WRONLY, 0o600)
+		if err == nil {
+			_, err = fmt.Fprintln(file, method)
+			err = errors.Join(err, file.Close())
+		}
+		r.mu.Unlock()
+		if err != nil {
+			http.Error(w, "record SDK method coverage", http.StatusInternalServerError)
+			return
+		}
+	}
+	r.next.ServeHTTP(w, request)
 }
 
 type qualificationResponseSink struct {

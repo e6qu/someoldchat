@@ -1,5 +1,6 @@
 const runtimeURL = Deno.env.get("DENO_SLACK_RUNTIME_URL") ??
   "https://deno.land/x/deno_slack_runtime@1.1.3/mod.ts";
+const coverageLog = Deno.env.get("SAMEOLDCHAT_SDK_COVERAGE_LOG");
 
 async function availablePort(): Promise<number> {
   const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
@@ -109,6 +110,17 @@ try {
   const failure = await waitForCompletion("execution-2");
   if (failure.error !== "qualification failure") {
     throw new Error(`unexpected error completion payload: ${JSON.stringify(completion)}`);
+  }
+  if (coverageLog) {
+    // These requests terminate at this suite's purpose-built receiver rather
+    // than the shared Go fixture. Record them only after the official Deno
+    // runtime emitted both successful HTTP calls and their payloads were
+    // verified, so method coverage remains an observed transport fact.
+    await Deno.writeTextFile(
+      coverageLog,
+      "functions.completeSuccess\nfunctions.completeError\n",
+      { append: true },
+    );
   }
 } finally {
   child.kill("SIGTERM");

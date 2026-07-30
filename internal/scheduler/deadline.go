@@ -83,6 +83,40 @@ func PublishEarliestWakeDeadline(ctx context.Context, source Source, publisher F
 	return PublishWakeDeadline(ctx, source, publisher, fence, workspaces...)
 }
 
+// PublishEarliestProductWakeDeadline publishes the minimum deadline across
+// scheduled messages and first-party reminders. An empty workspace list means
+// the worker serves every workspace; both store reads define an empty workspace
+// as the global queue.
+func PublishEarliestProductWakeDeadline(ctx context.Context, scheduled Source, reminders ReminderSource, publisher FencedDeadlinePublisher, workspaces ...domain.WorkspaceID) error {
+	if scheduled == nil || reminders == nil || publisher == nil {
+		return errors.New("product wake deadline requires scheduled and reminder sources and a publisher")
+	}
+	fence, err := publisher.Fence(ctx)
+	if err != nil {
+		return err
+	}
+	if len(workspaces) == 0 {
+		workspaces = []domain.WorkspaceID{""}
+	}
+	var earliest time.Time
+	for _, workspace := range workspaces {
+		scheduledAt, scheduledErr := scheduled.EarliestScheduledMessage(ctx, workspace)
+		if scheduledErr != nil {
+			return scheduledErr
+		}
+		reminderAt, reminderErr := reminders.EarliestLaterReminder(ctx, workspace)
+		if reminderErr != nil {
+			return reminderErr
+		}
+		for _, candidate := range []time.Time{scheduledAt, reminderAt} {
+			if !candidate.IsZero() && (earliest.IsZero() || candidate.Before(earliest)) {
+				earliest = candidate
+			}
+		}
+	}
+	return publisher.SetWakeDeadline(fence, earliest)
+}
+
 // ActivatorDeadlinePublisher publishes the wake hint to the lifecycle activator
 // over its authenticated control API.
 //

@@ -18,6 +18,8 @@ message AdminUser {
   User user = 1;
   string role = 2;
   bool active = 3;
+  bool restricted = 4;
+  bool ultra_restricted = 5;
 }
 
 message AdminUserPage {
@@ -256,6 +258,8 @@ message WorkspaceMembership {
   string user_id = 2;
   string role = 3;
   bool active = 4;
+  bool restricted = 5;
+  bool ultra_restricted = 6;
 }
 
 // ProvisionExternalUserRequest carries no actor. The operation is the first-login

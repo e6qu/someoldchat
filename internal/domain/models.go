@@ -84,10 +84,18 @@ func (r WorkspaceRole) Rank() int {
 func (r WorkspaceRole) Outranks(other WorkspaceRole) bool { return r.Rank() > other.Rank() }
 
 type WorkspaceMembership struct {
-	WorkspaceID WorkspaceID
-	UserID      UserID
-	Role        WorkspaceRole
-	Active      bool
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	Role            WorkspaceRole
+	Active          bool
+	Restricted      bool
+	UltraRestricted bool
+}
+
+// Guest reports Slack's two guest membership tiers. Restricted is a
+// multi-channel guest and UltraRestricted is a single-channel guest.
+func (membership WorkspaceMembership) Guest() bool {
+	return membership.Restricted || membership.UltraRestricted
 }
 
 type BillableUser struct {
@@ -641,6 +649,44 @@ type Star struct {
 	CreatedAt    time.Time
 }
 
+type SavedItemState string
+
+const (
+	SavedItemInProgress SavedItemState = "in_progress"
+	SavedItemArchived   SavedItemState = "archived"
+	SavedItemCompleted  SavedItemState = "completed"
+)
+
+func (state SavedItemState) Valid() bool {
+	return state == SavedItemInProgress || state == SavedItemArchived || state == SavedItemCompleted
+}
+
+// SavedItem is the private first-party state behind Slack's current Later
+// surface. It is intentionally distinct from Star: Slack does not expose
+// current Later items through the deprecated stars.* API.
+//
+// Message is populated only when the requesting member can still read the
+// source. SourceAvailable is explicit so a deleted or inaccessible source is
+// distinguishable from a malformed empty message without leaking its content.
+type SavedItem struct {
+	ID              SavedItemID
+	WorkspaceID     WorkspaceID
+	UserID          UserID
+	MessageID       MessageID
+	Conversation    ConversationID
+	State           SavedItemState
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Message         Message
+	SourceAvailable bool
+}
+
+type SavedItemPage struct {
+	Items      []SavedItem
+	NextCursor Cursor
+	HasMore    bool
+}
+
 type Bookmark struct {
 	ID           BookmarkID
 	WorkspaceID  WorkspaceID
@@ -732,6 +778,83 @@ type ReminderPage struct {
 	Reminders  []Reminder
 	NextCursor Cursor
 	HasMore    bool
+}
+
+type LaterReminderTarget string
+
+const (
+	LaterReminderPersonal LaterReminderTarget = "personal"
+	LaterReminderChannel  LaterReminderTarget = "channel"
+)
+
+func (target LaterReminderTarget) Valid() bool {
+	return target == LaterReminderPersonal || target == LaterReminderChannel
+}
+
+type ReminderRecurrence string
+
+const (
+	ReminderOnce    ReminderRecurrence = ""
+	ReminderDaily   ReminderRecurrence = "daily"
+	ReminderWeekly  ReminderRecurrence = "weekly"
+	ReminderMonthly ReminderRecurrence = "monthly"
+	ReminderYearly  ReminderRecurrence = "yearly"
+)
+
+func (recurrence ReminderRecurrence) Valid() bool {
+	switch recurrence {
+	case ReminderOnce, ReminderDaily, ReminderWeekly, ReminderMonthly, ReminderYearly:
+		return true
+	default:
+		return false
+	}
+}
+
+// LaterReminder is SameOldChat's private first-party reminder state. It is
+// deliberately separate from Reminder, which preserves Slack's deprecated
+// reminders.* app contract. Slack exposes no app API for current Later.
+//
+// Personal reminders are visible only to UserID. Channel reminders have a
+// Channel and no UserID, and are listed by Creator. SourceMessageID is optional
+// and retains the message selected by "Remind me about this".
+type LaterReminder struct {
+	ID                 LaterReminderID
+	WorkspaceID        WorkspaceID
+	Creator            UserID
+	UserID             UserID
+	Channel            ConversationID
+	SourceMessageID    MessageID
+	SourceConversation ConversationID
+	SourceTimestamp    MessageTimestamp
+	Target             LaterReminderTarget
+	Text               string
+	DueAt              time.Time
+	TimeZone           string
+	Recurrence         ReminderRecurrence
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	CompletedAt        time.Time
+	LastDeliveredAt    time.Time
+	AcknowledgedAt     time.Time
+	FailedAt           time.Time
+	FailureCode        string
+}
+
+type LaterReminderPage struct {
+	Items      []LaterReminder
+	NextCursor Cursor
+	HasMore    bool
+}
+
+type LaterReminderRequest struct {
+	Target          LaterReminderTarget
+	Channel         ConversationID
+	SourceChannel   ConversationID
+	SourceTimestamp MessageTimestamp
+	Text            string
+	DueAt           time.Time
+	TimeZone        string
+	Recurrence      ReminderRecurrence
 }
 
 type ScheduledMessage struct {

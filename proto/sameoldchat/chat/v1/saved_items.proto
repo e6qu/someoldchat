@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package sameoldchat.chat.v1;
+
+option go_package = "github.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1";
+
+import "sameoldchat/chat/v1/conversation_mutations.proto";
+import "sameoldchat/chat/v1/messages.proto";
+
+message SavedItem {
+  string id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string message_id = 4;
+  string conversation_id = 5;
+  string state = 6;
+  int64 created_at_unix_nano = 7;
+  int64 updated_at_unix_nano = 8;
+  Message message = 9;
+  bool source_available = 10;
+}
+
+message SaveForLaterRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string conversation_id = 3;
+  string timestamp = 4;
+}
+
+message SavedItemForMessageRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string message_id = 3;
+}
+
+message SavedItemsForMessagesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  repeated string message_ids = 3;
+}
+
+message SavedItemsForMessagesResponse {
+  repeated SavedItem items = 1;
+}
+
+message SavedItemsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string state = 3;
+  int32 limit = 4;
+  string cursor = 5;
+  bool descending = 6;
+}
+
+message SavedItemPage {
+  repeated SavedItem items = 1;
+  string next_cursor = 2;
+  bool has_more = 3;
+}
+
+message SetSavedItemStateRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string saved_item_id = 3;
+  string state = 4;
+}
+
+message RemoveSavedItemRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string saved_item_id = 3;
+}
+
+service SavedItemsService {
+  rpc SaveForLater(SaveForLaterRequest) returns (SavedItem);
+  rpc SavedItemForMessage(SavedItemForMessageRequest) returns (SavedItem);
+  rpc SavedItemsForMessages(SavedItemsForMessagesRequest) returns (SavedItemsForMessagesResponse);
+  rpc SavedItems(SavedItemsRequest) returns (SavedItemPage);
+  rpc SetSavedItemState(SetSavedItemStateRequest) returns (SavedItem);
+  rpc RemoveSavedItem(RemoveSavedItemRequest) returns (MutationResponse);
+}

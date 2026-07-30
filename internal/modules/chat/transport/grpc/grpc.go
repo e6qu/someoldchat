@@ -36,6 +36,7 @@ type Remote struct {
 	mutations     chatv1.ConversationMutationsServiceClient
 	presence      chatv1.PresenceServiceClient
 	reactions     chatv1.ReactionsServiceClient
+	savedItems    chatv1.SavedItemsServiceClient
 	reminders     chatv1.RemindersServiceClient
 	scheduled     chatv1.ScheduledMessagesServiceClient
 	usergroups    chatv1.UserGroupsServiceClient
@@ -113,6 +114,7 @@ func NewRemote(conn grpc.ClientConnInterface) (Remote, error) {
 		mutations:     chatv1.NewConversationMutationsServiceClient(conn),
 		presence:      chatv1.NewPresenceServiceClient(conn),
 		reactions:     chatv1.NewReactionsServiceClient(conn),
+		savedItems:    chatv1.NewSavedItemsServiceClient(conn),
 		reminders:     chatv1.NewRemindersServiceClient(conn),
 		scheduled:     chatv1.NewScheduledMessagesServiceClient(conn),
 		usergroups:    chatv1.NewUserGroupsServiceClient(conn),
@@ -2535,6 +2537,66 @@ func (r Remote) Stars(ctx context.Context, workspaceID domain.WorkspaceID, userI
 	return page.Stars, page.NextCursor, page.HasMore, nil
 }
 
+func (r Remote) SaveForLater(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.SavedItem, error) {
+	out, err := r.savedItems.SaveForLater(ctx, &chatv1.SaveForLaterRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Timestamp: string(timestamp)})
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return decodeProtoSavedItem(out)
+}
+
+func (r Remote) SavedItemForMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageID domain.MessageID) (domain.SavedItem, error) {
+	out, err := r.savedItems.SavedItemForMessage(ctx, &chatv1.SavedItemForMessageRequest{WorkspaceId: string(workspaceID), UserId: string(userID), MessageId: string(messageID)})
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return decodeProtoSavedItem(out)
+}
+
+func (r Remote) SavedItemsForMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageIDs []domain.MessageID) ([]domain.SavedItem, error) {
+	ids := make([]string, 0, len(messageIDs))
+	for _, id := range messageIDs {
+		ids = append(ids, string(id))
+	}
+	out, err := r.savedItems.SavedItemsForMessages(ctx, &chatv1.SavedItemsForMessagesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), MessageIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.SavedItem, 0, len(out.GetItems()))
+	for _, item := range out.GetItems() {
+		decoded, err := decodeProtoSavedItem(item)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, decoded)
+	}
+	return items, nil
+}
+
+func (r Remote) SavedItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	out, err := r.savedItems.SavedItems(ctx, &chatv1.SavedItemsRequest{WorkspaceId: string(workspaceID), UserId: string(userID), State: string(state), Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending})
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	return decodeProtoSavedItemPage(out)
+}
+
+func (r Remote) SetSavedItemState(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID, state domain.SavedItemState) (domain.SavedItem, error) {
+	out, err := r.savedItems.SetSavedItemState(ctx, &chatv1.SetSavedItemStateRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SavedItemId: string(id), State: string(state)})
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return decodeProtoSavedItem(out)
+}
+
+func (r Remote) RemoveSavedItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID) error {
+	out, err := r.savedItems.RemoveSavedItem(ctx, &chatv1.RemoveSavedItemRequest{WorkspaceId: string(workspaceID), UserId: string(userID), SavedItemId: string(id)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "saved item removal")
+}
+
 func (r Remote) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
 	out, err := r.bookmarks.AddBookmark(ctx, &chatv1.AddBookmarkRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ConversationId: string(conversationID), Title: title, Type: bookmarkType, Link: link, Emoji: emoji, EntityId: entityID, AccessLevel: accessLevel, ParentId: parentID})
 	if err != nil {
@@ -2637,6 +2699,82 @@ func (r Remote) Reminders(ctx context.Context, workspaceID domain.WorkspaceID, u
 		result = append(result, reminder)
 	}
 	return domain.ReminderPage{Reminders: result, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) CreateLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.LaterReminderRequest) (domain.LaterReminder, error) {
+	out, err := r.reminders.CreateLaterReminder(ctx, &chatv1.CreateLaterReminderRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Target: string(request.Target),
+		ChannelId: string(request.Channel), SourceChannelId: string(request.SourceChannel),
+		SourceTimestamp: string(request.SourceTimestamp), Text: request.Text, DueAt: request.DueAt.Unix(),
+		Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+	})
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return decodeProtoLaterReminder(out)
+}
+
+func (r Remote) LaterReminderInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) (domain.LaterReminder, error) {
+	out, err := r.reminders.LaterReminderInfo(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return decodeProtoLaterReminder(out)
+}
+
+func (r Remote) LaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.LaterReminderTarget, request domain.PageRequest) (domain.LaterReminderPage, error) {
+	out, err := r.reminders.LaterReminders(ctx, &chatv1.LaterRemindersRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Target: string(target),
+		Limit: int32(request.Limit), Cursor: string(request.Cursor), Descending: request.Descending,
+	})
+	if err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	items := make([]domain.LaterReminder, 0, len(out.GetReminders()))
+	for _, value := range out.GetReminders() {
+		reminder, decodeErr := decodeProtoLaterReminder(value)
+		if decodeErr != nil {
+			return domain.LaterReminderPage{}, decodeErr
+		}
+		items = append(items, reminder)
+	}
+	return domain.LaterReminderPage{Items: items, NextCursor: domain.Cursor(out.GetNextCursor()), HasMore: out.GetHasMore()}, nil
+}
+
+func (r Remote) UpdateLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID, request domain.LaterReminderRequest) (domain.LaterReminder, error) {
+	out, err := r.reminders.UpdateLaterReminder(ctx, &chatv1.UpdateLaterReminderRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID),
+		Target: string(request.Target), ChannelId: string(request.Channel), Text: request.Text,
+		DueAt: request.DueAt.Unix(), Timezone: request.TimeZone, Recurrence: string(request.Recurrence),
+	})
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return decodeProtoLaterReminder(out)
+}
+
+func (r Remote) AcknowledgeLaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	out, err := r.reminders.AcknowledgeLaterReminders(ctx, &chatv1.AcknowledgeLaterRemindersRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "Later reminder acknowledgement")
+}
+
+func (r Remote) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
+	out, err := r.reminders.CompleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "Later reminder completion")
+}
+
+func (r Remote) DeleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, reminderID domain.LaterReminderID) error {
+	out, err := r.reminders.DeleteLaterReminder(ctx, &chatv1.LaterReminderRequest{WorkspaceId: string(workspaceID), UserId: string(userID), ReminderId: string(reminderID)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "Later reminder deletion")
 }
 
 func (r Remote) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {
@@ -2765,6 +2903,7 @@ var (
 	_ chatv1.MessagesServiceServer                = (*Server)(nil)
 	_ chatv1.PresenceServiceServer                = (*Server)(nil)
 	_ chatv1.ReactionsServiceServer               = (*Server)(nil)
+	_ chatv1.SavedItemsServiceServer              = (*Server)(nil)
 	_ chatv1.BookmarksServiceServer               = (*Server)(nil)
 	_ chatv1.UserGroupsServiceServer              = (*Server)(nil)
 	_ chatv1.CallsServiceServer                   = (*Server)(nil)
@@ -2821,6 +2960,7 @@ func RegisterServer(registrar grpc.ServiceRegistrar, implementation chatapi.Serv
 	chatv1.RegisterAuthServiceServer(registrar, server)
 	chatv1.RegisterEventsServiceServer(registrar, server)
 	chatv1.RegisterReactionsServiceServer(registrar, server)
+	chatv1.RegisterSavedItemsServiceServer(registrar, server)
 	chatv1.RegisterBookmarksServiceServer(registrar, server)
 	chatv1.RegisterMessagesServiceServer(registrar, server)
 	chatv1.RegisterRemindersServiceServer(registrar, server)
@@ -4596,6 +4736,61 @@ func (s *Server) Stars(ctx context.Context, input *chatv1.StarsRequest) (*chatv1
 	return s.starsProto(ctx, input)
 }
 
+func (s *Server) SaveForLater(ctx context.Context, input *chatv1.SaveForLaterRequest) (*chatv1.SavedItem, error) {
+	item, err := s.implementation.SaveForLater(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ConversationID(input.GetConversationId()), domain.MessageTimestamp(input.GetTimestamp()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItem(item), nil
+}
+
+func (s *Server) SavedItemForMessage(ctx context.Context, input *chatv1.SavedItemForMessageRequest) (*chatv1.SavedItem, error) {
+	item, err := s.implementation.SavedItemForMessage(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.MessageID(input.GetMessageId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItem(item), nil
+}
+
+func (s *Server) SavedItemsForMessages(ctx context.Context, input *chatv1.SavedItemsForMessagesRequest) (*chatv1.SavedItemsForMessagesResponse, error) {
+	ids := make([]domain.MessageID, 0, len(input.GetMessageIds()))
+	for _, id := range input.GetMessageIds() {
+		ids = append(ids, domain.MessageID(id))
+	}
+	items, err := s.implementation.SavedItemsForMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), ids)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := make([]*chatv1.SavedItem, 0, len(items))
+	for _, item := range items {
+		result = append(result, encodeProtoSavedItem(item))
+	}
+	return &chatv1.SavedItemsForMessagesResponse{Items: result}, nil
+}
+
+func (s *Server) SavedItems(ctx context.Context, input *chatv1.SavedItemsRequest) (*chatv1.SavedItemPage, error) {
+	page, err := s.implementation.SavedItems(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SavedItemState(input.GetState()), protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItemPage(page), nil
+}
+
+func (s *Server) SetSavedItemState(ctx context.Context, input *chatv1.SetSavedItemStateRequest) (*chatv1.SavedItem, error) {
+	item, err := s.implementation.SetSavedItemState(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SavedItemID(input.GetSavedItemId()), domain.SavedItemState(input.GetState()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoSavedItem(item), nil
+}
+
+func (s *Server) RemoveSavedItem(ctx context.Context, input *chatv1.RemoveSavedItemRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.RemoveSavedItem(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.SavedItemID(input.GetSavedItemId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) AddBookmark(ctx context.Context, input *chatv1.AddBookmarkRequest) (*chatv1.Bookmark, error) {
 	return s.addBookmarkProto(ctx, input)
 }
@@ -4630,6 +4825,34 @@ func (s *Server) CompleteReminder(ctx context.Context, input *chatv1.ReminderReq
 
 func (s *Server) DeleteReminder(ctx context.Context, input *chatv1.ReminderRequest) (*chatv1.MutationResponse, error) {
 	return s.deleteReminderProto(ctx, input)
+}
+
+func (s *Server) CreateLaterReminder(ctx context.Context, input *chatv1.CreateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	return s.createLaterReminderProto(ctx, input)
+}
+
+func (s *Server) LaterReminderInfo(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.LaterReminder, error) {
+	return s.laterReminderInfoProto(ctx, input)
+}
+
+func (s *Server) LaterReminders(ctx context.Context, input *chatv1.LaterRemindersRequest) (*chatv1.LaterReminderPage, error) {
+	return s.laterRemindersProto(ctx, input)
+}
+
+func (s *Server) UpdateLaterReminder(ctx context.Context, input *chatv1.UpdateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	return s.updateLaterReminderProto(ctx, input)
+}
+
+func (s *Server) AcknowledgeLaterReminders(ctx context.Context, input *chatv1.AcknowledgeLaterRemindersRequest) (*chatv1.MutationResponse, error) {
+	return s.acknowledgeLaterRemindersProto(ctx, input)
+}
+
+func (s *Server) CompleteLaterReminder(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	return s.completeLaterReminderProto(ctx, input)
+}
+
+func (s *Server) DeleteLaterReminder(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	return s.deleteLaterReminderProto(ctx, input)
 }
 
 func (s *Server) ScheduleMessage(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
@@ -5456,6 +5679,72 @@ func (s *Server) deleteReminderProto(ctx context.Context, input *chatv1.Reminder
 	return &chatv1.MutationResponse{Ok: true}, nil
 }
 
+func (s *Server) createLaterReminderProto(ctx context.Context, input *chatv1.CreateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	reminder, err := s.implementation.CreateLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderRequest{
+		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
+		SourceChannel: domain.ConversationID(input.GetSourceChannelId()), SourceTimestamp: domain.MessageTimestamp(input.GetSourceTimestamp()),
+		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoLaterReminder(reminder), nil
+}
+
+func (s *Server) laterReminderInfoProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.LaterReminder, error) {
+	reminder, err := s.implementation.LaterReminderInfo(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoLaterReminder(reminder), nil
+}
+
+func (s *Server) laterRemindersProto(ctx context.Context, input *chatv1.LaterRemindersRequest) (*chatv1.LaterReminderPage, error) {
+	page, err := s.implementation.LaterReminders(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderTarget(input.GetTarget()), protoDirectionalPageRequest(input.GetLimit(), input.GetCursor(), input.GetDescending()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	items := make([]*chatv1.LaterReminder, 0, len(page.Items))
+	for _, reminder := range page.Items {
+		items = append(items, encodeProtoLaterReminder(reminder))
+	}
+	return &chatv1.LaterReminderPage{Reminders: items, NextCursor: string(page.NextCursor), HasMore: page.HasMore}, nil
+}
+
+func (s *Server) updateLaterReminderProto(ctx context.Context, input *chatv1.UpdateLaterReminderRequest) (*chatv1.LaterReminder, error) {
+	reminder, err := s.implementation.UpdateLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId()), domain.LaterReminderRequest{
+		Target: domain.LaterReminderTarget(input.GetTarget()), Channel: domain.ConversationID(input.GetChannelId()),
+		Text: input.GetText(), DueAt: timeFromUnix(input.GetDueAt()), TimeZone: input.GetTimezone(),
+		Recurrence: domain.ReminderRecurrence(input.GetRecurrence()),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoLaterReminder(reminder), nil
+}
+
+func (s *Server) acknowledgeLaterRemindersProto(ctx context.Context, input *chatv1.AcknowledgeLaterRemindersRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.AcknowledgeLaterReminders(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) completeLaterReminderProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.CompleteLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
+func (s *Server) deleteLaterReminderProto(ctx context.Context, input *chatv1.LaterReminderRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteLaterReminder(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.LaterReminderID(input.GetReminderId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) scheduleMessageProto(ctx context.Context, input *chatv1.ScheduleMessageRequest) (*chatv1.ScheduledMessage, error) {
 	workspaceID := domain.WorkspaceID(input.GetWorkspaceId())
 	userID := domain.UserID(input.GetUserId())
@@ -5675,20 +5964,20 @@ func encodeProtoUserPage(page domain.UserPage) *chatv1.UserPage {
 }
 
 func encodeProtoWorkspaceMembership(value domain.WorkspaceMembership) *chatv1.WorkspaceMembership {
-	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active}
+	return &chatv1.WorkspaceMembership{WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID), Role: string(value.Role), Active: value.Active, Restricted: value.Restricted, UltraRestricted: value.UltraRestricted}
 }
 
 func decodeProtoWorkspaceMembership(value *chatv1.WorkspaceMembership) (domain.WorkspaceMembership, error) {
 	if value == nil {
 		return domain.WorkspaceMembership{}, errors.New("missing workspace membership")
 	}
-	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive()}, nil
+	return domain.WorkspaceMembership{WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()), Role: domain.WorkspaceRole(value.GetRole()), Active: value.GetActive(), Restricted: value.GetRestricted(), UltraRestricted: value.GetUltraRestricted()}, nil
 }
 
 func encodeProtoAdminUserPage(page domain.AdminUserPage) *chatv1.AdminUserPage {
 	users := make([]*chatv1.AdminUser, 0, len(page.Users))
 	for _, value := range page.Users {
-		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active})
+		users = append(users, &chatv1.AdminUser{User: encodeProtoUser(value.User), Role: string(value.Membership.Role), Active: value.Membership.Active, Restricted: value.Membership.Restricted, UltraRestricted: value.Membership.UltraRestricted})
 	}
 	return &chatv1.AdminUserPage{Users: users, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
 }
@@ -5706,7 +5995,7 @@ func decodeProtoAdminUserPage(value *chatv1.AdminUserPage) (domain.AdminUserPage
 		if err != nil {
 			return domain.AdminUserPage{}, err
 		}
-		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive()}})
+		users = append(users, domain.AdminUser{User: user, Membership: domain.WorkspaceMembership{WorkspaceID: user.WorkspaceID, UserID: user.ID, Role: domain.WorkspaceRole(item.GetRole()), Active: item.GetActive(), Restricted: item.GetRestricted(), UltraRestricted: item.GetUltraRestricted()}})
 	}
 	return domain.AdminUserPage{Users: users, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
 }
@@ -6357,6 +6646,67 @@ func encodeProtoStarPage(items []domain.Star, next domain.Cursor, more bool) *ch
 	return &chatv1.StarPage{Stars: result, NextCursor: string(next), HasMore: more}
 }
 
+func encodeProtoSavedItem(value domain.SavedItem) *chatv1.SavedItem {
+	item := &chatv1.SavedItem{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		MessageId: string(value.MessageID), ConversationId: string(value.Conversation), State: string(value.State),
+		CreatedAtUnixNano: value.CreatedAt.UTC().UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+		SourceAvailable: value.SourceAvailable,
+	}
+	if value.SourceAvailable {
+		item.Message = encodeProtoMessage(value.Message)
+	}
+	return item
+}
+
+func decodeProtoSavedItem(value *chatv1.SavedItem) (domain.SavedItem, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetMessageId() == "" || value.GetConversationId() == "" {
+		return domain.SavedItem{}, errors.New("typed saved item is incomplete")
+	}
+	state := domain.SavedItemState(value.GetState())
+	if !state.Valid() {
+		return domain.SavedItem{}, errors.New("typed saved item state is invalid")
+	}
+	item := domain.SavedItem{
+		ID: domain.SavedItemID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		UserID: domain.UserID(value.GetUserId()), MessageID: domain.MessageID(value.GetMessageId()),
+		Conversation: domain.ConversationID(value.GetConversationId()), State: state,
+		CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
+		SourceAvailable: value.GetSourceAvailable(),
+	}
+	if item.SourceAvailable {
+		message, err := decodeProtoMessage(value.GetMessage())
+		if err != nil {
+			return domain.SavedItem{}, err
+		}
+		item.Message = message
+	}
+	return item, nil
+}
+
+func encodeProtoSavedItemPage(value domain.SavedItemPage) *chatv1.SavedItemPage {
+	items := make([]*chatv1.SavedItem, 0, len(value.Items))
+	for _, item := range value.Items {
+		items = append(items, encodeProtoSavedItem(item))
+	}
+	return &chatv1.SavedItemPage{Items: items, NextCursor: string(value.NextCursor), HasMore: value.HasMore}
+}
+
+func decodeProtoSavedItemPage(value *chatv1.SavedItemPage) (domain.SavedItemPage, error) {
+	if value == nil {
+		return domain.SavedItemPage{}, errors.New("typed saved item page is required")
+	}
+	items := make([]domain.SavedItem, 0, len(value.GetItems()))
+	for _, item := range value.GetItems() {
+		decoded, err := decodeProtoSavedItem(item)
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+		items = append(items, decoded)
+	}
+	return domain.SavedItemPage{Items: items, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+}
+
 func encodeProtoBookmark(value domain.Bookmark) *chatv1.Bookmark {
 	return &chatv1.Bookmark{Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), ConversationId: string(value.Conversation), Title: value.Title, Type: value.Type, Link: value.Link, Emoji: value.Emoji, EntityId: value.EntityID, AccessLevel: value.AccessLevel, ParentId: string(value.ParentID), CreatedAt: value.CreatedAt.UTC().Unix(), UpdatedAt: value.UpdatedAt.UTC().Unix(), UpdatedBy: string(value.UpdatedBy)}
 }
@@ -6431,6 +6781,47 @@ func decodeProtoReminder(value *chatv1.Reminder) (domain.Reminder, error) {
 		result.CompleteAt = time.Unix(value.GetCompleteTs(), 0).UTC()
 	}
 	return result, nil
+}
+
+func encodeProtoLaterReminder(value domain.LaterReminder) *chatv1.LaterReminder {
+	return &chatv1.LaterReminder{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), CreatorId: string(value.Creator),
+		UserId: string(value.UserID), ChannelId: string(value.Channel), SourceMessageId: string(value.SourceMessageID),
+		SourceConversationId: string(value.SourceConversation), SourceTimestamp: string(value.SourceTimestamp),
+		Target: string(value.Target), Text: value.Text,
+		DueAt: unixOrZero(value.DueAt), Timezone: value.TimeZone, Recurrence: string(value.Recurrence),
+		CreatedAt: unixOrZero(value.CreatedAt), UpdatedAt: unixOrZero(value.UpdatedAt),
+		CompletedAt: unixOrZero(value.CompletedAt), LastDeliveredAt: unixOrZero(value.LastDeliveredAt),
+		AcknowledgedAt: unixOrZero(value.AcknowledgedAt), FailedAt: unixOrZero(value.FailedAt), FailureCode: value.FailureCode,
+	}
+}
+
+func decodeProtoLaterReminder(value *chatv1.LaterReminder) (domain.LaterReminder, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetCreatorId() == "" ||
+		value.GetText() == "" || value.GetDueAt() <= 0 || value.GetCreatedAt() <= 0 || value.GetUpdatedAt() <= 0 ||
+		value.GetTimezone() == "" {
+		return domain.LaterReminder{}, errors.New("typed Later reminder is incomplete")
+	}
+	target := domain.LaterReminderTarget(value.GetTarget())
+	recurrence := domain.ReminderRecurrence(value.GetRecurrence())
+	if !target.Valid() || !recurrence.Valid() ||
+		(target == domain.LaterReminderPersonal && (value.GetUserId() == "" || value.GetChannelId() != "")) ||
+		(target == domain.LaterReminderChannel && (value.GetChannelId() == "" || value.GetUserId() != "")) ||
+		((value.GetSourceMessageId() == "") != (value.GetSourceConversationId() == "")) ||
+		((value.GetSourceMessageId() == "") != (value.GetSourceTimestamp() == "")) {
+		return domain.LaterReminder{}, errors.New("typed Later reminder has invalid targeting")
+	}
+	return domain.LaterReminder{
+		ID: domain.LaterReminderID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
+		Creator: domain.UserID(value.GetCreatorId()), UserID: domain.UserID(value.GetUserId()),
+		Channel: domain.ConversationID(value.GetChannelId()), SourceMessageID: domain.MessageID(value.GetSourceMessageId()),
+		SourceConversation: domain.ConversationID(value.GetSourceConversationId()), SourceTimestamp: domain.MessageTimestamp(value.GetSourceTimestamp()),
+		Target: target, Text: value.GetText(),
+		DueAt: timeFromUnix(value.GetDueAt()), TimeZone: value.GetTimezone(), Recurrence: recurrence,
+		CreatedAt: timeFromUnix(value.GetCreatedAt()), UpdatedAt: timeFromUnix(value.GetUpdatedAt()),
+		CompletedAt: timeFromUnix(value.GetCompletedAt()), LastDeliveredAt: timeFromUnix(value.GetLastDeliveredAt()),
+		AcknowledgedAt: timeFromUnix(value.GetAcknowledgedAt()), FailedAt: timeFromUnix(value.GetFailedAt()), FailureCode: value.GetFailureCode(),
+	}, nil
 }
 
 func encodeProtoScheduledMessage(value domain.ScheduledMessage) *chatv1.ScheduledMessage {

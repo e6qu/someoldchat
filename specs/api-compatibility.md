@@ -61,6 +61,13 @@ schema-compatible handler as behavior verification. A higher status includes
 the evidence represented by every lower status, so the report uses
 `<status>-or-better` for those cumulative counts.
 
+`make sdk-qualification` independently records the exact Web API paths emitted
+by the pinned official clients and runs `cmd/sdkcoverage -require-claimed`.
+Every method at `sdk-compatible` or above must therefore be observed in the
+qualification run; success elsewhere in the same large SDK script cannot
+supply method evidence. Deno function-completion methods are recorded only
+after the runtime's requests and payloads pass at that suite's receiver.
+
 Community SDKs, including Go SDKs, MAY be test targets but MUST NOT override an
 official source merely because their behavior differs.
 

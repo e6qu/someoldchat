@@ -35,8 +35,13 @@ make sdk-qualification
 
 The runner starts the test fixture, downloads the exact pinned artifacts into
 a temporary directory, verifies each recorded SHA-256 digest, and runs the
-checked-in suites. It does not modify the repository. The runner requires Go,
-Node.js, npm, Python, pip, curl, Java, Maven, Deno, and tar.
+checked-in suites. The fixture records the exact `/api/{method}` paths emitted
+by those clients and `cmd/sdkcoverage` compares the observed set with every
+method claimed at `sdk-compatible` or above. The comparison is fail-closed:
+every such method must be observed at the shared fixture or, for
+`functions.complete*`, at the Deno runtime suite's verified receiver. The
+runner does not modify the repository. It requires Go, Node.js, npm, Python,
+pip, curl, Java, Maven, Deno, and tar.
 
 The individual suite commands remain useful for debugging:
 

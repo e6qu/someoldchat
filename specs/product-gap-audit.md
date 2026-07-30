@@ -9,7 +9,7 @@ Measured on 2026-07-29:
 
 - 215 of Slack's 310 current catalogued Web API methods are registered; the
   320-entry compatibility ledger separately retains ten legacy methods;
-- 210 current methods are recorded as behavior-compatible, three as
+- 205 current methods are recorded as behavior-compatible, eight as
   SDK-compatible, two as schema-compatible, and none as live-differential
   `verified-against-slack`;
 - the current official Node Web API SDK exercises the product end to end,
@@ -18,11 +18,22 @@ Measured on 2026-07-29:
   file upload that becomes one idempotent `file_share` history message. Socket
   Mode now consumes a real posted message projected after installed-bot
   visibility checks rather than a hand-authored callback fixture;
-- 25 Playwright journeys cover the first-party client in Chromium, Firefox,
-  and WebKit. Automated axe checks cover the desktop workspace, command
-  discovery, and a 320-pixel layout; visual-regression baselines, manual
-  assistive-technology qualification, and comparison against a live Slack
-  client remain absent.
+- the official SDK qualification fixture records the exact Web API method paths
+  emitted by the pinned Node, Python, and Java clients, while the Deno runtime
+  suite records its separately verified completion requests. The fail-closed
+  comparison currently observes all 223 methods claimed at `sdk-compatible` or
+  above (213 current and ten retained legacy methods);
+- the reminder/Later journey now has a live official-source gate: CI fetches the
+  current Slack Help and developer pages and verifies the exact entry-point,
+  organization, privacy, time-zone, recurrence, guest, editability, retirement,
+  and API-separation claims before running local SDK/browser evidence;
+- 27 Playwright scenarios cite 48 of the normative catalog's 101 stable journey
+  IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
+  exercises some part of that journey, not that the whole journey is complete.
+  `make journey-check` now rejects unknown IDs and source-less journey files.
+  Automated axe checks cover the desktop workspace, command discovery, and a
+  320-pixel layout; visual-regression baselines, manual assistive-technology
+  qualification, and comparison against a live Slack client remain absent.
 
 The normative [Slack user-journey catalog](journeys/README.md) records the full
 target separately from this coverage report. A journey omitted from the
@@ -44,6 +55,9 @@ implementation MUST NOT narrow the target.
   topic/purpose editing, archive/unarchive, leave, and direct-conversation
   close behavior;
 - member directory and profile/status/photo-URL editing;
+- private save-for-later state, focused-message `A`, In progress, Archived,
+  Completed, restore/removal, source navigation, and inaccessible-source
+  redaction without conflating current Later with deprecated `stars.*`;
 - desktop and narrow layouts, named mobile navigation, light/dark themes,
   message/composer keyboard navigation, safe Slack-markup formatting controls,
   member mention autocomplete, an emoji picker, per-conversation/thread draft
@@ -60,7 +74,7 @@ implementation MUST NOT narrow the target.
 | --- | --- | --- |
 | P0 | Activity depth | Activity now covers joined unread conversations and explicit mentions, but it does not yet aggregate thread replies, reminders, notification-policy events, clear state, bulk read, layouts, filters, or custom tabs from Slack's current Activity model. |
 | P0 | Composer depth | Formatting, standard emoji, member mention autocomplete, file preview, draft recovery, and browser-time-zone scheduled send work. Custom-emoji browsing, channel autocomplete, pasted-file staging, voice/video clips, and Slack's full shortcuts browser remain. |
-| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, Later/saved-item organization, and reminder delivery/UI remain. |
+| P1 | Saved and scheduled work | Scheduled-message APIs enforce exact-token ownership, ranges, threads, time/quota limits, durable failure state, and multi-workspace worker execution. The client can schedule from channel and thread composers, list pending work, and cancel it without posting early. Current Later has private save/unsave state and In progress/Archived/Completed organization, separate from deprecated app-facing stars. Edit/reschedule, send-now, failure history, Slack's combined Drafts & sent tabs, reminder dates/upcoming filters, channel `/remind`, and reminder delivery/UI remain. The five deprecated `reminders.*` methods are only SDK-compatible: natural-language parsing, recurrence, current targeting rules, delivery, and live outcomes are not falsely counted as behavior evidence. |
 | P1 | Direct-message lifecycle | DMs can be opened from People, but there is no dedicated DM/group-DM section, participant management, or recent-DM navigation matching Slack. |
 | P1 | Notifications and presence | Basic presence/status APIs exist, but the client has no per-conversation notification preferences, status expiry, snooze/DND controls, typing indicators, or presence-aware member affordances. |
 | P1 | Calls and huddles | Calls APIs exist, but there is no first-party call/huddle experience. |
@@ -100,9 +114,10 @@ App-platform work must remain dependency-ordered:
 
 ## Qualification gaps
 
-Official SDK qualification proves that genuine clients can serialize requests
-and parse SameOldChat responses. It does not prove live Slack equivalence. The
-remaining evidence layers are:
+Official SDK qualification now proves, method by method, that genuine clients
+issued a request and parsed SameOldChat's response; a large neighboring test
+can no longer lend SDK evidence to an uncalled method. It still does not prove
+live Slack equivalence. The remaining evidence layers are:
 
 1. pin per-method current argument/response/error schemas, not only the current
    method index;

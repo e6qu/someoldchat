@@ -3649,10 +3649,8 @@ func adminUserResponse(value domain.AdminUser) map[string]any {
 	result["is_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
 	result["is_primary_owner"] = value.Membership.Role == domain.WorkspaceRoleOwner
 	result["is_admin"] = value.Membership.Role == domain.WorkspaceRoleAdmin || value.Membership.Role == domain.WorkspaceRoleOwner
-	// This system models no guest tiers, so both restriction flags are false rather
-	// than absent: the pinned example declares them and a strict decoder needs them.
-	result["is_restricted"] = false
-	result["is_ultra_restricted"] = false
+	result["is_restricted"] = value.Membership.Restricted
+	result["is_ultra_restricted"] = value.Membership.UltraRestricted
 	result["is_bot"] = false
 	result["is_active"] = value.Membership.Active
 	return result
@@ -4594,6 +4592,11 @@ func reminderResponse(reminder domain.Reminder) map[string]any {
 	response := map[string]any{"id": reminder.ID, "creator": reminder.Creator, "user": reminder.User, "text": reminder.Text, "time": reminder.Time.Unix(), "recurring": reminder.Recurring}
 	if !reminder.CompleteAt.IsZero() {
 		response["complete_ts"] = reminder.CompleteAt.Unix()
+	} else if !reminder.Recurring {
+		// Slack's current reminder object includes complete_ts=0 for an active
+		// non-recurring reminder. Omitting the field happened to decode in the
+		// SDKs, but it was not the documented wire object those SDKs model.
+		response["complete_ts"] = int64(0)
 	}
 	return response
 }
@@ -4754,7 +4757,16 @@ func (h Handler) addReminder(w http.ResponseWriter, r *http.Request) {
 		writeDecodeError(w, err)
 		return
 	}
-	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, domain.UserID(strings.TrimSpace(fields["user"])), textValue, when)
+	targetID := domain.UserID(strings.TrimSpace(fields["user"]))
+	// Slack marks the user argument no longer supported for user tokens. Its
+	// current page separately notes a bot-token exception, so preserve that
+	// explicit token distinction instead of accepting the obsolete path for
+	// every credential.
+	if targetID != "" && targetID != principal.UserID && principal.TokenType != "bot" {
+		writeError(w, "cannot_add_others")
+		return
+	}
+	reminder, err := h.Messages.AddReminder(r.Context(), principal.WorkspaceID, principal.UserID, targetID, textValue, when)
 	if err != nil {
 		writeError(w, mapServiceError(err, "user_not_found"))
 		return
@@ -7508,7 +7520,7 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {

@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS user_expirations (user_id TEXT PRIMARY KEY REFERENCES
 CREATE TABLE IF NOT EXISTS workspace_members (
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
  role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+ restricted INTEGER NOT NULL DEFAULT 0, ultra_restricted INTEGER NOT NULL DEFAULT 0,
  PRIMARY KEY (workspace_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS tokens (
@@ -250,6 +251,13 @@ CREATE TABLE IF NOT EXISTS stars (
  PRIMARY KEY (user_id, message_id)
 );
 CREATE INDEX IF NOT EXISTS stars_user_created ON stars(user_id, created_at, message_id);
+CREATE TABLE IF NOT EXISTS saved_items (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+ message_id TEXT NOT NULL REFERENCES messages(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+ UNIQUE (workspace_id, user_id, message_id)
+);
+CREATE INDEX IF NOT EXISTS saved_items_user_state_updated ON saved_items(workspace_id, user_id, state, updated_at, id);
 CREATE TABLE IF NOT EXISTS bookmarks (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
  title TEXT NOT NULL, type TEXT NOT NULL, link TEXT NOT NULL DEFAULT '', emoji TEXT NOT NULL DEFAULT '', entity_id TEXT NOT NULL DEFAULT '',
@@ -263,6 +271,17 @@ CREATE TABLE IF NOT EXISTS reminders (
  recurring INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS reminders_user_due ON reminders(workspace_id, user_id, due_at, id);
+CREATE TABLE IF NOT EXISTS later_reminders (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
+ user_id TEXT NOT NULL DEFAULT '', channel_id TEXT NOT NULL DEFAULT '', source_message_id TEXT NOT NULL DEFAULT '',
+ source_conversation_id TEXT NOT NULL DEFAULT '', source_timestamp TEXT NOT NULL DEFAULT '', target TEXT NOT NULL, text TEXT NOT NULL, due_at INTEGER NOT NULL,
+ timezone TEXT NOT NULL, recurrence TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ completed_at INTEGER NOT NULL DEFAULT 0, last_delivered_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, failed_at INTEGER NOT NULL DEFAULT 0,
+ failure_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0,
+ next_attempt_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS later_reminders_owner_due ON later_reminders(workspace_id, target, user_id, creator_id, due_at, id);
+CREATE INDEX IF NOT EXISTS later_reminders_delivery ON later_reminders(workspace_id, completed_at, failed_at, due_at, id);
 CREATE TABLE IF NOT EXISTS scheduled_messages (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), channel_id TEXT NOT NULL REFERENCES conversations(id),
  author_id TEXT NOT NULL REFERENCES users(id), app_id TEXT NOT NULL DEFAULT '', bot_id TEXT NOT NULL DEFAULT '',
@@ -321,7 +340,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 102
+const schemaVersion = 106
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2161,6 +2180,66 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index scheduled message credentials: %w", err)
 		}
 	}
+	if version < 103 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS saved_items (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id),
+			message_id TEXT NOT NULL REFERENCES messages(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+			state TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			UNIQUE (workspace_id, user_id, message_id)
+		)`); err != nil {
+			return fmt.Errorf("migrate saved items: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS saved_items_user_state_updated ON saved_items(workspace_id, user_id, state, updated_at, id)`); err != nil {
+			return fmt.Errorf("index saved items: %w", err)
+		}
+	}
+	if version < 104 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS later_reminders (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), creator_id TEXT NOT NULL REFERENCES users(id),
+			user_id TEXT NOT NULL DEFAULT '', channel_id TEXT NOT NULL DEFAULT '', source_message_id TEXT NOT NULL DEFAULT '',
+			source_conversation_id TEXT NOT NULL DEFAULT '', source_timestamp TEXT NOT NULL DEFAULT '', target TEXT NOT NULL, text TEXT NOT NULL, due_at INTEGER NOT NULL,
+			timezone TEXT NOT NULL, recurrence TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+			completed_at INTEGER NOT NULL DEFAULT 0, last_delivered_at INTEGER NOT NULL DEFAULT 0, acknowledged_at INTEGER NOT NULL DEFAULT 0, failed_at INTEGER NOT NULL DEFAULT 0,
+			failure_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_until INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+			return fmt.Errorf("migrate first-party Later reminders: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS later_reminders_owner_due ON later_reminders(workspace_id, target, user_id, creator_id, due_at, id)`); err != nil {
+			return fmt.Errorf("index first-party Later reminder owners: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS later_reminders_delivery ON later_reminders(workspace_id, completed_at, failed_at, due_at, id)`); err != nil {
+			return fmt.Errorf("index first-party Later reminder delivery: %w", err)
+		}
+	}
+	if version < 105 {
+		columns, err := s.tableColumns(ctx, db, "workspace_members")
+		if err != nil {
+			return err
+		}
+		for _, column := range []string{
+			"restricted INTEGER NOT NULL DEFAULT 0",
+			"ultra_restricted INTEGER NOT NULL DEFAULT 0",
+		} {
+			name := strings.Fields(column)[0]
+			if !columns[name] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE workspace_members ADD COLUMN `+column); err != nil {
+					return fmt.Errorf("migrate workspace member %s: %w", name, err)
+				}
+			}
+		}
+	}
+	if version < 106 {
+		columns, err := s.tableColumns(ctx, db, "later_reminders")
+		if err != nil {
+			return err
+		}
+		if !columns["acknowledged_at"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE later_reminders ADD COLUMN acknowledged_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate Later reminder acknowledgement: %w", err)
+			}
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2431,7 +2510,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -2614,9 +2693,11 @@ func (s *Store) SetWorkspaceDefaultChannels(ctx context.Context, id domain.Works
 
 func (s *Store) GetWorkspaceMembership(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) (domain.WorkspaceMembership, error) {
 	var value domain.WorkspaceMembership
-	var active int
-	err := s.db.QueryRowContext(ctx, `SELECT workspace_id, user_id, role, active FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&value.WorkspaceID, &value.UserID, &value.Role, &active)
+	var active, restricted, ultraRestricted int
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id, user_id, role, active, restricted, ultra_restricted FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&value.WorkspaceID, &value.UserID, &value.Role, &active, &restricted, &ultraRestricted)
 	value.Active = active != 0
+	value.Restricted = restricted != 0
+	value.UltraRestricted = ultraRestricted != 0
 	return value, translateNotFound(err)
 }
 
@@ -2634,6 +2715,9 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	}
 	if membership.Role != domain.WorkspaceRoleMember && membership.Role != domain.WorkspaceRoleAdmin {
 		return store.InvalidArgument("user membership role must be member or admin")
+	}
+	if (membership.Restricted && membership.UltraRestricted) || (membership.Guest() && membership.Role != domain.WorkspaceRoleMember) {
+		return store.InvalidArgument("guest membership must have exactly one guest tier and the member role")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -2657,7 +2741,7 @@ func (s *Store) CreateUser(ctx context.Context, user domain.User, membership dom
 	if _, err := tx.ExecContext(ctx, `INSERT INTO users (id, workspace_id, email, name, real_name, presence) VALUES (?, ?, ?, ?, ?, ?)`, user.ID, user.WorkspaceID, user.Email, user.Name, user.RealName, user.Presence); err != nil {
 		return classify(err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active) VALUES (?, ?, ?, 1)`, membership.WorkspaceID, membership.UserID, membership.Role); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role, active, restricted, ultra_restricted) VALUES (?, ?, ?, 1, ?, ?)`, membership.WorkspaceID, membership.UserID, membership.Role, boolInt(membership.Restricted), boolInt(membership.UltraRestricted)); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -2858,6 +2942,13 @@ func (s *Store) SetWorkspaceRole(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	defer tx.Rollback()
+	var restricted, ultraRestricted int
+	if err := tx.QueryRowContext(ctx, `SELECT restricted, ultra_restricted FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&restricted, &ultraRestricted); err != nil {
+		return translateNotFound(err)
+	}
+	if (restricted != 0 || ultraRestricted != 0) && role != domain.WorkspaceRoleMember {
+		return store.InvalidArgument("guest membership cannot be promoted")
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE workspace_members SET role = ?, active = 1 WHERE workspace_id = ? AND user_id = ?`, role, workspaceID, userID)
 	if err != nil {
 		return err
@@ -3018,7 +3109,7 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 	if err != nil {
 		return domain.AdminUserPage{}, err
 	}
-	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, m.role, m.active FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
+	query := `SELECT u.id, u.workspace_id, u.email, u.name, u.real_name, u.display_name, u.status_text, u.status_emoji, u.image_24, u.image_32, u.image_48, u.image_72, u.image_192, u.image_512, u.image_1024, u.deleted, u.presence, m.role, m.active, m.restricted, m.ultra_restricted FROM users u JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = u.workspace_id WHERE u.workspace_id = ?`
 	args := []any{workspace}
 	if after != "" {
 		query += ` AND u.id > ?`
@@ -3034,14 +3125,16 @@ func (s *Store) ListAdminUsers(ctx context.Context, workspace domain.WorkspaceID
 	values := make([]domain.AdminUser, 0, request.Limit+1)
 	for rows.Next() {
 		var value domain.AdminUser
-		var deleted, active int
-		if err := rows.Scan(&value.User.ID, &value.User.WorkspaceID, &value.User.Email, &value.User.Name, &value.User.RealName, &value.User.Profile.DisplayName, &value.User.Profile.StatusText, &value.User.Profile.StatusEmoji, &value.User.Profile.Image24, &value.User.Profile.Image32, &value.User.Profile.Image48, &value.User.Profile.Image72, &value.User.Profile.Image192, &value.User.Profile.Image512, &value.User.Profile.Image1024, &deleted, &value.User.Presence, &value.Membership.Role, &active); err != nil {
+		var deleted, active, restricted, ultraRestricted int
+		if err := rows.Scan(&value.User.ID, &value.User.WorkspaceID, &value.User.Email, &value.User.Name, &value.User.RealName, &value.User.Profile.DisplayName, &value.User.Profile.StatusText, &value.User.Profile.StatusEmoji, &value.User.Profile.Image24, &value.User.Profile.Image32, &value.User.Profile.Image48, &value.User.Profile.Image72, &value.User.Profile.Image192, &value.User.Profile.Image512, &value.User.Profile.Image1024, &deleted, &value.User.Presence, &value.Membership.Role, &active, &restricted, &ultraRestricted); err != nil {
 			return domain.AdminUserPage{}, err
 		}
 		value.User.Deleted = deleted != 0
 		value.Membership.WorkspaceID = workspace
 		value.Membership.UserID = value.User.ID
 		value.Membership.Active = active != 0
+		value.Membership.Restricted = restricted != 0
+		value.Membership.UltraRestricted = ultraRestricted != 0
 		values = append(values, value)
 	}
 	if err := rows.Err(); err != nil {
@@ -7038,6 +7131,216 @@ func (s *Store) ListStars(ctx context.Context, workspace domain.WorkspaceID, use
 	return values, next, hasMore, nil
 }
 
+const savedItemColumns = `id, workspace_id, user_id, message_id, conversation_id, state, created_at, updated_at`
+
+func scanSavedItem(row rowScanner) (domain.SavedItem, error) {
+	var item domain.SavedItem
+	var createdAt, updatedAt string
+	if err := row.Scan(&item.ID, &item.WorkspaceID, &item.UserID, &item.MessageID, &item.Conversation, &item.State, &createdAt, &updatedAt); err != nil {
+		return domain.SavedItem{}, err
+	}
+	var err error
+	item.CreatedAt, err = domain.ParseStoredTime(createdAt)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item.UpdatedAt, err = domain.ParseStoredTime(updatedAt)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) CreateSavedItem(ctx context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, bool, error) {
+	if !item.State.Valid() {
+		return domain.SavedItem{}, false, store.InvalidArgument("saved item state is invalid")
+	}
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `INSERT INTO saved_items(id, workspace_id, user_id, message_id, conversation_id, state, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(workspace_id, user_id, message_id) DO NOTHING`,
+		item.ID, item.WorkspaceID, item.UserID, item.MessageID, item.Conversation, item.State,
+		domain.NewStoredTime(item.CreatedAt), domain.NewStoredTime(item.UpdatedAt))
+	if err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	if count == 0 {
+		existing, err := scanSavedItem(tx.QueryRowContext(ctx, `SELECT `+savedItemColumns+` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND message_id = ?`, item.WorkspaceID, item.UserID, item.MessageID))
+		return existing, false, err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SavedItem{}, false, err
+	}
+	return item, true, nil
+}
+
+func (s *Store) GetSavedItem(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID) (domain.SavedItem, error) {
+	item, err := scanSavedItem(s.db.QueryRowContext(ctx, `SELECT `+savedItemColumns+` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	return item, err
+}
+
+func (s *Store) GetSavedItemByMessage(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, message domain.MessageID) (domain.SavedItem, error) {
+	item, err := scanSavedItem(s.db.QueryRowContext(ctx, `SELECT `+savedItemColumns+` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND message_id = ?`, workspace, user, message))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	return item, err
+}
+
+func (s *Store) ListSavedItemsForMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, messages []domain.MessageID) ([]domain.SavedItem, error) {
+	if len(messages) == 0 {
+		return []domain.SavedItem{}, nil
+	}
+	query := `SELECT ` + savedItemColumns + ` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND message_id IN (` + strings.TrimSuffix(strings.Repeat("?,", len(messages)), ",") + `)`
+	args := make([]any, 0, len(messages)+2)
+	args = append(args, workspace, user)
+	for _, message := range messages {
+		args = append(args, message)
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]domain.SavedItem, 0, len(messages))
+	for rows.Next() {
+		item, err := scanSavedItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Store) ListSavedItems(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItemPage{}, store.InvalidArgument("saved item state is invalid")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	query := `SELECT ` + savedItemColumns + ` FROM saved_items WHERE workspace_id = ? AND user_id = ? AND state = ?`
+	args := []any{workspace, user, state}
+	if after != "" {
+		separator := strings.IndexByte(after, 0)
+		if separator < 1 || separator == len(after)-1 {
+			return domain.SavedItemPage{}, domain.ErrInvalidCursor
+		}
+		updatedAt, id := after[:separator], after[separator+1:]
+		query += ` AND (updated_at > ? OR (updated_at = ? AND id > ?))`
+		args = append(args, updatedAt, updatedAt, id)
+	}
+	query += ` ORDER BY updated_at, id LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.SavedItem, 0, request.Limit+1)
+	for rows.Next() {
+		item, err := scanSavedItem(rows)
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	more := len(items) > request.Limit
+	if more {
+		items = items[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		last := items[len(items)-1]
+		next, err = domain.NewListCursor(string(domain.NewStoredTime(last.UpdatedAt)) + "\x00" + string(last.ID))
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+	}
+	return domain.SavedItemPage{Items: items, NextCursor: next, HasMore: more}, nil
+}
+
+func (s *Store) UpdateSavedItem(ctx context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, error) {
+	if !item.State.Valid() {
+		return domain.SavedItem{}, store.InvalidArgument("saved item state is invalid")
+	}
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE saved_items SET state = ?, updated_at = ? WHERE id = ? AND workspace_id = ? AND user_id = ?`,
+		item.State, domain.NewStoredTime(item.UpdatedAt), item.ID, item.WorkspaceID, item.UserID)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	if count != 1 {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.SavedItem{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.SavedItem{}, err
+	}
+	return item, nil
+}
+
+func (s *Store) DeleteSavedItem(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `DELETE FROM saved_items WHERE workspace_id = ? AND user_id = ? AND id = ?`, workspace, user, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CreateBookmark(ctx context.Context, bookmark domain.Bookmark, event events.Event) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -7480,6 +7783,426 @@ func (s *Store) DeleteReminder(ctx context.Context, workspace domain.WorkspaceID
 		return err
 	}
 	return tx.Commit()
+}
+
+const laterReminderColumns = `id, workspace_id, creator_id, user_id, channel_id, source_message_id, source_conversation_id, source_timestamp, target, text, due_at, timezone, recurrence, created_at, updated_at, completed_at, last_delivered_at, acknowledged_at, failed_at, failure_code`
+
+func scanLaterReminder(scanner interface{ Scan(...any) error }) (domain.LaterReminder, error) {
+	var value domain.LaterReminder
+	var due, created, updated, completed, delivered, acknowledged, failed int64
+	if err := scanner.Scan(
+		&value.ID, &value.WorkspaceID, &value.Creator, &value.UserID, &value.Channel,
+		&value.SourceMessageID, &value.SourceConversation, &value.SourceTimestamp, &value.Target, &value.Text,
+		&due, &value.TimeZone, &value.Recurrence, &created, &updated, &completed,
+		&delivered, &acknowledged, &failed, &value.FailureCode,
+	); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	if !value.Target.Valid() || !value.Recurrence.Valid() {
+		return domain.LaterReminder{}, errors.New("stored Later reminder has invalid target or recurrence")
+	}
+	value.DueAt = time.Unix(due, 0).UTC()
+	value.CreatedAt = time.Unix(created, 0).UTC()
+	value.UpdatedAt = time.Unix(updated, 0).UTC()
+	if completed != 0 {
+		value.CompletedAt = time.Unix(completed, 0).UTC()
+	}
+	if delivered != 0 {
+		value.LastDeliveredAt = time.Unix(delivered, 0).UTC()
+	}
+	if acknowledged != 0 {
+		value.AcknowledgedAt = time.Unix(acknowledged, 0).UTC()
+	}
+	if failed != 0 {
+		value.FailedAt = time.Unix(failed, 0).UTC()
+	}
+	return value, nil
+}
+
+func (s *Store) CreateLaterReminder(ctx context.Context, reminder domain.LaterReminder, event events.Event) error {
+	if !reminder.Target.Valid() || !reminder.Recurrence.Valid() {
+		return store.InvalidArgument("later reminder target or recurrence is invalid")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO later_reminders(
+		id, workspace_id, creator_id, user_id, channel_id, source_message_id, source_conversation_id, source_timestamp,
+		target, text, due_at, timezone, recurrence, created_at, updated_at,
+		completed_at, last_delivered_at, acknowledged_at, failed_at, failure_code
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		reminder.ID, reminder.WorkspaceID, reminder.Creator, reminder.UserID, reminder.Channel,
+		reminder.SourceMessageID, reminder.SourceConversation, reminder.SourceTimestamp, reminder.Target, reminder.Text,
+		reminder.DueAt.Unix(), reminder.TimeZone, reminder.Recurrence, reminder.CreatedAt.Unix(),
+		reminder.UpdatedAt.Unix(), unixSeconds(reminder.CompletedAt), unixSeconds(reminder.LastDeliveredAt), unixSeconds(reminder.AcknowledgedAt),
+		unixSeconds(reminder.FailedAt), reminder.FailureCode,
+	); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetLaterReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID) (domain.LaterReminder, error) {
+	value, err := scanLaterReminder(s.db.QueryRowContext(ctx, `SELECT `+laterReminderColumns+`
+		FROM later_reminders
+		WHERE id = ? AND workspace_id = ?
+		  AND ((target = ? AND user_id = ?) OR (target = ? AND creator_id = ?))`,
+		id, workspace, domain.LaterReminderPersonal, user, domain.LaterReminderChannel, user,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.LaterReminder{}, store.ErrNotFound
+	}
+	return value, err
+}
+
+func (s *Store) ListLaterReminders(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, target domain.LaterReminderTarget, request domain.PageRequest) (domain.LaterReminderPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	if !target.Valid() {
+		return domain.LaterReminderPage{}, store.InvalidArgument("later reminder target is invalid")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	ownerColumn := "user_id"
+	if target == domain.LaterReminderChannel {
+		ownerColumn = "creator_id"
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+laterReminderColumns+`
+		FROM later_reminders
+		WHERE workspace_id = ? AND target = ? AND `+ownerColumn+` = ? AND id > ?
+		ORDER BY id LIMIT ?`, workspace, target, user, after, request.Limit+1)
+	if err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.LaterReminder, 0, request.Limit+1)
+	for rows.Next() {
+		value, scanErr := scanLaterReminder(rows)
+		if scanErr != nil {
+			return domain.LaterReminderPage{}, scanErr
+		}
+		items = append(items, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	page := domain.LaterReminderPage{Items: items, HasMore: len(items) > request.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(page.Items[len(page.Items)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) UpdateLaterReminder(ctx context.Context, reminder domain.LaterReminder, event events.Event) (domain.LaterReminder, error) {
+	if reminder.Target != domain.LaterReminderPersonal || !reminder.Recurrence.Valid() {
+		return domain.LaterReminder{}, store.InvalidArgument("only personal Later reminders can be edited")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE later_reminders
+		SET text = ?, due_at = ?, timezone = ?, recurrence = ?, updated_at = ?,
+		    last_delivered_at = 0, acknowledged_at = 0, failed_at = 0, failure_code = '', lease_owner = '', lease_until = 0, next_attempt_at = 0
+		WHERE id = ? AND workspace_id = ? AND target = ? AND user_id = ? AND (lease_until = 0 OR lease_until <= ?)`,
+		reminder.Text, reminder.DueAt.Unix(), reminder.TimeZone, reminder.Recurrence,
+		reminder.UpdatedAt.Unix(), reminder.ID, reminder.WorkspaceID, domain.LaterReminderPersonal, reminder.Creator, s.now().Unix(),
+	)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	if count != 1 {
+		return domain.LaterReminder{}, store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return s.GetLaterReminder(ctx, reminder.WorkspaceID, reminder.Creator, reminder.ID)
+}
+
+func (s *Store) AcknowledgeLaterReminders(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, acknowledged time.Time, event events.Event) error {
+	if workspace == "" || user == "" || acknowledged.IsZero() {
+		return store.InvalidArgument("Later reminder acknowledgement is incomplete")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE later_reminders
+		SET acknowledged_at = last_delivered_at, updated_at = ?
+		WHERE workspace_id = ? AND target = ? AND user_id = ?
+		  AND last_delivered_at > acknowledged_at`,
+		acknowledged.UTC().Unix(), workspace, domain.LaterReminderPersonal, user)
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed > 0 {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) CompleteLaterReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, completed time.Time, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE later_reminders
+		SET completed_at = CASE WHEN completed_at = 0 THEN ? ELSE completed_at END,
+		    updated_at = CASE WHEN completed_at = 0 THEN ? ELSE updated_at END
+		WHERE id = ? AND workspace_id = ? AND target = ? AND user_id = ? AND (lease_until = 0 OR lease_until <= ?)`,
+		completed.Unix(), completed.Unix(), id, workspace, domain.LaterReminderPersonal, user, s.now().Unix(),
+	)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) DeleteLaterReminder(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, event events.Event) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := s.now().Unix()
+	result, err := tx.ExecContext(ctx, `DELETE FROM later_reminders
+		WHERE id = ? AND workspace_id = ?
+		  AND ((target = ? AND user_id = ?) OR (target = ? AND creator_id = ?))
+		  AND (lease_until = 0 OR lease_until <= ?)`,
+		id, workspace, domain.LaterReminderPersonal, user, domain.LaterReminderChannel, user, now,
+	)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count != 1 {
+		return store.ErrNotFound
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) EarliestLaterReminder(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	var dueAt sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, `SELECT MIN(CASE WHEN next_attempt_at > due_at THEN next_attempt_at ELSE due_at END)
+		FROM later_reminders
+		WHERE (? = '' OR workspace_id = ?) AND completed_at = 0 AND failed_at = 0`, workspace, workspace).Scan(&dueAt); err != nil {
+		return time.Time{}, err
+	}
+	if !dueAt.Valid || dueAt.Int64 == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(dueAt.Int64, 0).UTC(), nil
+}
+
+func (s *Store) ClaimDueLaterReminders(ctx context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration, now time.Time) ([]domain.LaterReminder, error) {
+	if owner == "" || limit <= 0 || lease <= 0 || now.IsZero() {
+		return nil, store.InvalidArgument("Later reminder claim requires owner, positive limit, lease, and current time")
+	}
+	now = now.UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT `+laterReminderColumns+`
+		FROM later_reminders
+		WHERE (? = '' OR workspace_id = ?) AND completed_at = 0 AND failed_at = 0
+		  AND due_at <= ? AND (lease_until = 0 OR lease_until <= ?)
+		  AND (next_attempt_at = 0 OR next_attempt_at <= ?)
+		ORDER BY due_at, id LIMIT ?`, workspace, workspace, now.Unix(), now.Unix(), now.Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.LaterReminder, 0, limit)
+	for rows.Next() {
+		value, scanErr := scanLaterReminder(rows)
+		if scanErr != nil {
+			rows.Close()
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	expires := scheduledUnixSecondCeil(now.Add(lease))
+	for _, reminder := range values {
+		result, updateErr := tx.ExecContext(ctx, `UPDATE later_reminders
+			SET lease_owner = ?, lease_until = ?
+			WHERE id = ? AND completed_at = 0 AND failed_at = 0 AND (lease_until = 0 OR lease_until <= ?)`,
+			owner, expires, reminder.ID, now.Unix())
+		if updateErr != nil {
+			return nil, updateErr
+		}
+		changed, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return nil, rowsErr
+		}
+		if changed != 1 {
+			return nil, store.ErrLeaseConflict
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return values, nil
+}
+
+func (s *Store) RenewLaterReminder(ctx context.Context, owner string, id domain.LaterReminderID, lease time.Duration, now time.Time) error {
+	if owner == "" || lease <= 0 || now.IsZero() {
+		return store.InvalidArgument("Later reminder renewal requires owner, lease, and current time")
+	}
+	now = now.UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE later_reminders SET lease_until = ?
+		WHERE id = ? AND lease_owner = ? AND completed_at = 0 AND failed_at = 0 AND lease_until > ?`,
+		scheduledUnixSecondCeil(now.Add(lease)), id, owner, now.Unix())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	return nil
+}
+
+func (s *Store) MarkLaterReminderDelivered(ctx context.Context, owner string, id domain.LaterReminderID, deliveredAt, nextDue time.Time, event events.Event) error {
+	if owner == "" || deliveredAt.IsZero() {
+		return store.InvalidArgument("Later reminder delivery requires owner and delivery time")
+	}
+	deliveredAt = deliveredAt.UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var result sql.Result
+	if nextDue.IsZero() {
+		result, err = tx.ExecContext(ctx, `UPDATE later_reminders
+			SET completed_at = ?, last_delivered_at = ?, updated_at = ?, lease_owner = '', lease_until = 0, next_attempt_at = 0
+			WHERE id = ? AND lease_owner = ? AND recurrence = '' AND completed_at = 0 AND failed_at = 0 AND lease_until > ?`,
+			deliveredAt.Unix(), deliveredAt.Unix(), deliveredAt.Unix(), id, owner, deliveredAt.Unix())
+	} else {
+		nextDue = nextDue.UTC()
+		result, err = tx.ExecContext(ctx, `UPDATE later_reminders
+			SET due_at = ?, last_delivered_at = ?, updated_at = ?, lease_owner = '', lease_until = 0, next_attempt_at = 0
+			WHERE id = ? AND lease_owner = ? AND recurrence <> '' AND due_at < ? AND completed_at = 0 AND failed_at = 0 AND lease_until > ?`,
+			nextDue.Unix(), deliveredAt.Unix(), deliveredAt.Unix(), id, owner, nextDue.Unix(), deliveredAt.Unix())
+	}
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) MarkLaterReminderFailed(ctx context.Context, owner string, id domain.LaterReminderID, failureCode string, failedAt time.Time, event events.Event) error {
+	if owner == "" || failureCode == "" || failedAt.IsZero() {
+		return store.InvalidArgument("Later reminder failure requires owner, code, and failure time")
+	}
+	failedAt = failedAt.UTC()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE later_reminders
+		SET failed_at = ?, failure_code = ?, updated_at = ?, lease_owner = '', lease_until = 0, next_attempt_at = 0
+		WHERE id = ? AND lease_owner = ? AND completed_at = 0 AND failed_at = 0 AND lease_until > ?`,
+		failedAt.Unix(), failureCode, failedAt.Unix(), id, owner, failedAt.Unix())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ReleaseLaterReminder(ctx context.Context, owner string, id domain.LaterReminderID, next, now time.Time) error {
+	if owner == "" || next.IsZero() || now.IsZero() {
+		return store.InvalidArgument("Later reminder release requires owner, retry time, and current time")
+	}
+	now = now.UTC()
+	result, err := s.db.ExecContext(ctx, `UPDATE later_reminders
+		SET lease_owner = '', lease_until = 0, next_attempt_at = ?
+		WHERE id = ? AND lease_owner = ? AND completed_at = 0 AND failed_at = 0 AND lease_until > ?`,
+		scheduledUnixSecondCeil(next), id, owner, now.Unix())
+	if err != nil {
+		return err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed != 1 {
+		return store.ErrLeaseConflict
+	}
+	return nil
 }
 
 func (s *Store) CreateScheduledMessage(ctx context.Context, value domain.ScheduledMessage, event events.Event) error {

@@ -8,6 +8,7 @@ const clientOptions = {
 	...(process.env.SAMEOLDCHAT_SDK_DEBUG === "1" ? { logLevel: LogLevel.DEBUG } : {}),
 };
 const client = new WebClient(token, clientOptions);
+const reminderClient = new WebClient("xoxp-reminder-qualification", clientOptions);
 const appClient = new WebClient(process.env.SAMEOLDCHAT_APP_TOKEN ?? "xapp-test", clientOptions);
 const configurationClient = new WebClient(process.env.SAMEOLDCHAT_CONFIGURATION_TOKEN ?? "xoxe.xoxp-qualification", clientOptions);
 
@@ -169,6 +170,19 @@ const createdListItem = await client.apiCall("slackLists.items.create", {
 });
 assert.equal(createdListItem.ok, true);
 assert.match(createdListItem.item.id, /^Rec/);
+const listItemInfo = await client.apiCall("slackLists.items.info", {
+	list_id: createdList.list.id,
+	id: createdListItem.item.id,
+});
+assert.equal(listItemInfo.ok, true);
+assert.equal(listItemInfo.item.id, createdListItem.item.id);
+const updatedList = await client.apiCall("slackLists.update", {
+	id: createdList.list.id,
+	name: "SDK qualification list updated",
+	todo_mode: true,
+});
+assert.equal(updatedList.ok, true);
+assert.equal(updatedList.list.name, "SDK qualification list updated");
 const listedItems = await client.apiCall("slackLists.items.list", { list_id: createdList.list.id, limit: 10 });
 assert.equal(listedItems.ok, true);
 assert.equal(listedItems.items.length, 1);
@@ -180,6 +194,24 @@ assert.equal((await client.apiCall("slackLists.access.set", {
 	list_id: createdList.list.id,
 	access_level: "read",
 	channel_ids: ["C1"],
+})).ok, true);
+assert.equal((await client.apiCall("slackLists.access.delete", {
+	list_id: createdList.list.id,
+	channel_ids: ["C1"],
+})).ok, true);
+const listItemTwo = await client.apiCall("slackLists.items.create", {
+	list_id: createdList.list.id,
+	initial_fields: [{ column_id: "title", value: "second row" }],
+});
+const listItemThree = await client.apiCall("slackLists.items.create", {
+	list_id: createdList.list.id,
+	initial_fields: [{ column_id: "title", value: "third row" }],
+});
+assert.equal(listItemTwo.ok, true);
+assert.equal(listItemThree.ok, true);
+assert.equal((await client.apiCall("slackLists.items.deleteMultiple", {
+	list_id: createdList.list.id,
+	ids: [listItemTwo.item.id, listItemThree.item.id],
 })).ok, true);
 const startedListDownload = await client.apiCall("slackLists.download.start", { list_id: createdList.list.id, include_archived: true });
 assert.equal(startedListDownload.ok, true);
@@ -708,21 +740,36 @@ assert.equal(rtm.ok, true);
 assert.equal(typeof rtm.url, "string");
 assert.equal(rtm.team.id, "T1");
 assert.equal(rtm.self.id, "U1");
-const reminder = await client.reminders.add({
+// reminders.* is a deprecated user-token surface. Exercise the official
+// client's real request and response types with that identity rather than the
+// suite's broad bot token, and keep known behavioral gaps executable.
+const reminder = await reminderClient.reminders.add({
 	text: "reminder qualification",
 	time: Math.floor(Date.now() / 1000) + 3600,
 });
 assert.equal(reminder.ok, true);
 assert.equal(typeof reminder.reminder.id, "string");
-const reminders = await client.reminders.list();
+assert.equal(reminder.reminder.creator, "U1");
+assert.equal(reminder.reminder.user, "U1");
+assert.equal(reminder.reminder.recurring, false);
+assert.equal(reminder.reminder.complete_ts, 0);
+await assert.rejects(
+	reminderClient.reminders.add({ text: "not another user's reminder", time: 300, user: "U2" }),
+	(error) => error?.data?.error === "cannot_add_others",
+);
+await assert.rejects(
+	reminderClient.reminders.add({ text: "documented natural language", time: "in 15 minutes" }),
+	(error) => error?.data?.error === "cannot_parse",
+);
+const reminders = await reminderClient.reminders.list();
 assert.equal(reminders.ok, true);
 assert.equal(reminders.reminders.length, 1);
-const reminderInfo = await client.reminders.info({ reminder: reminder.reminder.id });
+const reminderInfo = await reminderClient.reminders.info({ reminder: reminder.reminder.id });
 assert.equal(reminderInfo.ok, true);
 assert.equal(reminderInfo.reminder.id, reminder.reminder.id);
-const completedReminder = await client.reminders.complete({ reminder: reminder.reminder.id });
+const completedReminder = await reminderClient.reminders.complete({ reminder: reminder.reminder.id });
 assert.equal(completedReminder.ok, true);
-const deletedReminder = await client.reminders.delete({ reminder: reminder.reminder.id });
+const deletedReminder = await reminderClient.reminders.delete({ reminder: reminder.reminder.id });
 assert.equal(deletedReminder.ok, true);
 const createdCanvas = await client.canvases.create({
 	title: "SDK qualification canvas",

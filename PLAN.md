@@ -263,7 +263,7 @@ order:
    developer workspace.
 
 Current sweep status (2026-07-29): the normative catalog and stable-ID mapping
-for all 25 first-party browser journeys are in place; Slack web keyboard and
+for all 27 first-party browser journeys are in place; Slack web keyboard and
 slash-command discovery/escaping semantics are corrected; and the journeys now
 qualify in Chromium, Firefox, and WebKit with representative automated WCAG
 checks. Visual baselines, manual assistive-technology evidence, complete
@@ -271,9 +271,70 @@ API/SDK-to-journey mapping, and live-Slack differential runs remain explicit
 work rather than inferred compatibility. Scheduled send now preserves
 channel/thread context and the browser's local time zone, stays out of history
 until delivery, and has a real pending
-list and cancellation journey. Drafts/Sent aggregation, scheduled edit,
-reschedule/send-now and failure history, Later, and reminder execution remain
-the next stateful client slice.
+list and cancellation journey. Current Later is now a private first-party
+saved-item model—not an alias over deprecated `stars.*`—with save/unsave,
+focused-message `A`, In progress, Archived, Completed, restore/removal,
+inaccessible-source redaction, live reconciliation, portable persistence, and
+local/distributed composition parity. Slack exposes no current Later Web API,
+so official SDK qualification remains evidence for the deliberately separate
+legacy `stars.*` and `reminders.*` contracts rather than being mislabeled as
+Later evidence. Drafts/Sent aggregation, scheduled edit, reschedule/send-now
+and failure history, reminder dates/delivery, and Later reminder filtering
+remain the next stateful client slice.
+
+The reminder contract audit also corrected a false evidence claim. Current
+Slack Help puts personal reminder creation and management in Later and message
+actions; current `/remind` documentation covers channel reminders and a private
+channel-reminder list, with channel edits performed by delete-and-recreate.
+Slack's five deprecated `reminders.*` app methods remain a separate legacy
+surface. They are now recorded as `sdk-compatible`, not
+`behavior-compatible`, until natural-language parsing, recurrence, targeting,
+delivery, retirement behavior, and controlled live outcomes have their own
+evidence.
+
+UI evidence is now measured against the normative catalog rather than counted
+from test files: 28 Playwright scenarios cite 51 of 101 stable journey IDs.
+`make journey-check` rejects duplicate/unknown IDs and any journey file that
+loses its observation date or official Slack source. The remaining IDs are
+printed as an explicit browser gap list; a citation is not promoted
+to full compatibility without the domain, transport, accessibility, visual,
+and differential layers required by the catalog.
+
+SDK evidence is now measured at the HTTP boundary too. The pinned official
+Node, Python, and Java clients record every `/api/{method}` path they actually
+request, and the Deno runtime records its two verified function-completion
+requests at its own receiver. `make sdk-qualification` fails if any operation
+claimed at `sdk-compatible` or above is absent. The current result is 223 of
+223 claimed methods observed (213 current plus ten retained legacy methods);
+this proves SDK serialization/decoding only, not live Slack equivalence.
+
+The reminder/Later contract is also checked upstream on every SDK CI run.
+`make external-contract-qualification` fetches the current official Slack Help
+and developer pages and fails if their text no longer supports the journey's
+entry points, organization, privacy, local-time default, recurrence, guest,
+editability, retirement, or Later-versus-app-API separation. This detects
+documentation drift; controlled live-workspace behavior and visual comparison
+remain distinct evidence layers.
+
+The first-party reminder slice now has a durable model separate from deprecated
+`reminders.*`, message `M` presets/custom time, Later CRUD and filtering,
+reserved `/remind` parsing including named weekdays, private channel-reminder
+listing, guest enforcement, worker delivery/recurrence/retry/failure fencing,
+Activity/source projection, durable Later/Activity badge acknowledgement, and
+combined scheduled/reminder lifecycle wake publication. The real browser
+journey runs in all three engines; deterministic memory, SQL, service, web, and
+local-versus-gRPC evidence covers delivery state that cannot safely wait for a
+wall clock in CI. Live-workspace parsing/presentation comparison,
+deterministic deployed-worker browser delivery, and undocumented month-end
+recurrence remain explicit gaps.
+
+The same source refresh exposed that the 2026 Activity journey is much broader
+than the current client. SameOldChat currently projects unread conversations,
+mentions, and reminders, but does not yet implement the durable notification
+classes, layouts, filters/custom views, clear/restore, per-item actions, or
+Activity-local keyboard triage required by `ACTIVITY-01` through `ACTIVITY-03`.
+Those omissions remain named gaps rather than being hidden behind a passing
+reminder test.
 
 Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison

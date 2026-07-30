@@ -41,6 +41,7 @@ service.invalid_external_upload
 service.invalid_file
 service.invalid_integration_logs
 service.invalid_invite_request
+service.invalid_later_reminder
 service.invalid_list
 service.invalid_message
 service.invalid_message_stream
@@ -71,6 +72,7 @@ service.missing_stream_recipient_user
 service.not_in_conversation
 service.not_workspace_admin
 service.oauth_app_mismatch
+service.reminder_time_in_past
 service.scheduled_time_in_past
 service.scheduled_time_too_far
 service.scheduled_too_many

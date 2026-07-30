@@ -1029,6 +1029,51 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "first-party Later reminder lifecycle",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				created, err := chat.CreateLaterReminder(ctx, "T1", "U1", domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "water the plants",
+					DueAt: time.Now().UTC().Add(time.Hour), TimeZone: "Europe/Bucharest",
+				})
+				if err != nil {
+					return nil, err
+				}
+				info, err := chat.LaterReminderInfo(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.LaterReminders(ctx, "T1", "U1", domain.LaterReminderPersonal, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				updated, err := chat.UpdateLaterReminder(ctx, "T1", "U1", created.ID, domain.LaterReminderRequest{
+					Target: domain.LaterReminderPersonal, Text: "water every plant",
+					DueAt: time.Now().UTC().Add(2 * time.Hour), TimeZone: "Europe/Bucharest",
+					Recurrence: domain.ReminderWeekly,
+				})
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.AcknowledgeLaterReminders(ctx, "T1", "U1"); err != nil {
+					return nil, err
+				}
+				if err := chat.CompleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				completed, err := chat.LaterReminderInfo(ctx, "T1", "U1", created.ID)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteLaterReminder(ctx, "T1", "U1", created.ID); err != nil {
+					return nil, err
+				}
+				return []any{
+					info.Text, info.Target, info.TimeZone, len(page.Items), page.HasMore,
+					updated.Text, updated.Recurrence, !completed.CompletedAt.IsZero(),
+				}, nil
+			},
+		},
+		{
 			name: "lists",
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
 				list, err := chat.CreateList(ctx, "T1", "U1", "Groceries", "", "[]", "", false, false)
@@ -1114,6 +1159,43 @@ func parityCases() []parityCase {
 					names = append(names, reaction.Name)
 				}
 				return []any{names, reactionsMore, len(pins), pinsMore, len(stars), starsMore}, nil
+			},
+		},
+		{
+			name: "private Later saved-item lifecycle",
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				message, err := chat.Post(ctx, "T1", "U1", "C1", "save me for later", "", "")
+				if err != nil {
+					return nil, err
+				}
+				saved, err := chat.SaveForLater(ctx, "T1", "U1", "C1", timestampOf(message))
+				if err != nil {
+					return nil, err
+				}
+				byMessage, err := chat.SavedItemForMessage(ctx, "T1", "U1", message.ID)
+				if err != nil {
+					return nil, err
+				}
+				byMessages, err := chat.SavedItemsForMessages(ctx, "T1", "U1", []domain.MessageID{message.ID})
+				if err != nil {
+					return nil, err
+				}
+				page, err := chat.SavedItems(ctx, "T1", "U1", domain.SavedItemInProgress, domain.PageRequest{Limit: 10})
+				if err != nil {
+					return nil, err
+				}
+				completed, err := chat.SetSavedItemState(ctx, "T1", "U1", saved.ID, domain.SavedItemCompleted)
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.RemoveSavedItem(ctx, "T1", "U1", saved.ID); err != nil {
+					return nil, err
+				}
+				return []any{
+					saved.State, saved.SourceAvailable, saved.Message.Text,
+					byMessage.ID == saved.ID, len(byMessages), len(page.Items), page.HasMore,
+					completed.State,
+				}, nil
 			},
 		},
 		{

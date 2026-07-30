@@ -604,23 +604,21 @@ func TestSQLiteBackfillRateIsLinear(t *testing.T) {
 		return elapsed
 	}
 	// Package tests run in separate processes and may contend for the same
-	// runner. Contention can inflate one sample arbitrarily, so compare the
-	// fastest of three measurements at each size. A quadratic implementation
-	// cannot shed its extra work in a quiet sample, while a linear one is no
-	// longer failed by another package briefly taking the disk or CPU.
-	var small, large time.Duration
+	// runner. Contention can inflate either half of a sample arbitrarily, so
+	// compare the median of three paired ratios. Pairing preserves the runner
+	// conditions better than combining independently fastest measurements, and
+	// the median tolerates one disturbed pair without allowing a consistently
+	// quadratic implementation through.
+	ratios := make([]float64, 0, 3)
 	for sample := 0; sample < 3; sample++ {
 		measuredSmall := measure(10000)
 		measuredLarge := measure(20000)
-		if small == 0 || measuredSmall < small {
-			small = measuredSmall
-		}
-		if large == 0 || measuredLarge < large {
-			large = measuredLarge
-		}
+		ratios = append(ratios, float64(measuredLarge)/float64(measuredSmall))
 	}
-	if large > 3*small {
-		t.Fatalf("doubling the rows multiplied the time by %.1f (%s -> %s); the pass is not linear", float64(large)/float64(small), small, large)
+	sort.Float64s(ratios)
+	median := ratios[len(ratios)/2]
+	if median > 3 {
+		t.Fatalf("doubling the rows had a median time multiplier of %.1f (paired samples %.1f, %.1f, %.1f); the pass is not linear", median, ratios[0], ratios[1], ratios[2])
 	}
 }
 

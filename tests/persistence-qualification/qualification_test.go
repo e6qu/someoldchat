@@ -323,6 +323,44 @@ func publishedWaveOneRepositoryContract(t *testing.T, open opener) {
 		t.Fatalf("stars after remove=%+v err=%v", stars, err)
 	}
 
+	savedItem := domain.SavedItem{
+		ID: domain.SavedItemID("saved-wave-one-" + suffix), WorkspaceID: workspaceID, UserID: userID,
+		MessageID: message.ID, Conversation: conversationID, State: domain.SavedItemInProgress,
+		CreatedAt: now, UpdatedAt: now, Message: message, SourceAvailable: true,
+	}
+	createdSaved, created, err := repository.CreateSavedItem(ctx, savedItem, event("saved", "saved_item.created", string(savedItem.ID)))
+	if err != nil || !created || createdSaved.ID != savedItem.ID || createdSaved.SourceAvailable || createdSaved.Message.ID != "" {
+		t.Fatalf("create saved item=%+v created=%v err=%v", createdSaved, created, err)
+	}
+	duplicateSaved, created, err := repository.CreateSavedItem(ctx, savedItem, event("saved-duplicate", "saved_item.created", string(savedItem.ID)))
+	if err != nil || created || duplicateSaved.ID != savedItem.ID {
+		t.Fatalf("idempotent saved item=%+v created=%v err=%v", duplicateSaved, created, err)
+	}
+	savedPage, err := repository.ListSavedItems(ctx, workspaceID, userID, domain.SavedItemInProgress, domain.PageRequest{Limit: 1})
+	if err != nil || len(savedPage.Items) != 1 || savedPage.Items[0].ID != savedItem.ID || savedPage.HasMore {
+		t.Fatalf("saved page=%+v err=%v", savedPage, err)
+	}
+	savedByMessage, err := repository.GetSavedItemByMessage(ctx, workspaceID, userID, message.ID)
+	if err != nil || savedByMessage.ID != savedItem.ID {
+		t.Fatalf("saved by message=%+v err=%v", savedByMessage, err)
+	}
+	savedBatch, err := repository.ListSavedItemsForMessages(ctx, workspaceID, userID, []domain.MessageID{message.ID})
+	if err != nil || len(savedBatch) != 1 || savedBatch[0].ID != savedItem.ID {
+		t.Fatalf("saved batch=%+v err=%v", savedBatch, err)
+	}
+	savedItem.State = domain.SavedItemCompleted
+	savedItem.UpdatedAt = now.Add(time.Minute)
+	updatedSaved, err := repository.UpdateSavedItem(ctx, savedItem, event("saved-update", "saved_item.changed", string(savedItem.ID)))
+	if err != nil || updatedSaved.State != domain.SavedItemCompleted {
+		t.Fatalf("updated saved item=%+v err=%v", updatedSaved, err)
+	}
+	if err := repository.DeleteSavedItem(ctx, workspaceID, userID, savedItem.ID, event("saved-delete", "saved_item.removed", string(savedItem.ID))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetSavedItem(ctx, workspaceID, userID, savedItem.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted saved item err=%v", err)
+	}
+
 	bookmark := domain.Bookmark{ID: domain.BookmarkID("B-wave-one-" + suffix), WorkspaceID: workspaceID, Conversation: conversationID, Title: "Project link", Type: "link", Link: "https://example.com/project", CreatedAt: now, UpdatedAt: now, UpdatedBy: userID}
 	if err := repository.CreateBookmark(ctx, bookmark, event("bookmark", "bookmark.created", string(bookmark.ID))); err != nil {
 		t.Fatal(err)

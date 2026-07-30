@@ -39,6 +39,8 @@ var (
 	ErrInvalidPresence             = errors.New("user presence is invalid")
 	ErrInvalidSnooze               = errors.New("snooze duration must be between 1 and 1440 minutes")
 	ErrInvalidReminder             = errors.New("reminder text, user, and time are required")
+	ErrInvalidLaterReminder        = errors.New("Later reminder arguments are invalid")
+	ErrReminderTimeInPast          = errors.New("reminder time is in the past")
 	ErrScheduledTimeInPast         = errors.New("scheduled message time is in the past")
 	ErrScheduledTimeTooFar         = errors.New("scheduled message time is more than 120 days away")
 	ErrScheduledTooMany            = errors.New("too many messages are scheduled in the channel window")
@@ -3706,6 +3708,155 @@ func (m Messages) Stars(ctx context.Context, workspaceID domain.WorkspaceID, use
 	return m.Store.ListStars(ctx, workspaceID, userID, request)
 }
 
+func savedItemPayload(topic string, item domain.SavedItem) events.Payload {
+	return events.NewPayload(topic,
+		events.String("saved_item_id", string(item.ID)),
+		events.String("message_id", string(item.MessageID)),
+		events.String("channel_id", string(item.Conversation)),
+		events.String("user_id", string(item.UserID)),
+		events.String("state", string(item.State)),
+	)
+}
+
+// SaveForLater implements Slack's current private Later state. It must not call
+// AddStar: Slack retired that relationship in 2023 and current Later items are
+// neither written nor returned through the deprecated stars.* methods.
+func (m Messages) SaveForLater(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, timestamp domain.MessageTimestamp) (domain.SavedItem, error) {
+	message, err := m.messageForTimestamp(ctx, workspaceID, userID, conversationID, timestamp)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	id, err := domain.NewSavedItemID()
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	now := time.Now().UTC()
+	item := domain.SavedItem{
+		ID: id, WorkspaceID: workspaceID, UserID: userID, MessageID: message.ID,
+		Conversation: conversationID, State: domain.SavedItemInProgress,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	event, err := newEvent(workspaceID, userID, savedItemPayload("saved_item.created", item), now)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item, _, err = m.Store.CreateSavedItem(ctx, item, event)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item.Message = message
+	item.SourceAvailable = !message.Deleted
+	return item, nil
+}
+
+func (m Messages) SavedItemForMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageID domain.MessageID) (domain.SavedItem, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SavedItem{}, err
+	}
+	item, err := m.Store.GetSavedItemByMessage(ctx, workspaceID, userID, messageID)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return m.savedItemWithSource(ctx, item)
+}
+
+func (m Messages) SavedItemsForMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, messageIDs []domain.MessageID) ([]domain.SavedItem, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return nil, err
+	}
+	if len(messageIDs) > 200 {
+		return nil, store.InvalidArgument("too many saved item message ids")
+	}
+	return m.Store.ListSavedItemsForMessages(ctx, workspaceID, userID, messageIDs)
+}
+
+func (m Messages) SavedItems(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItemPage{}, store.InvalidArgument("saved item state is invalid")
+	}
+	page, err := m.Store.ListSavedItems(ctx, workspaceID, userID, state, request)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	for index := range page.Items {
+		page.Items[index], err = m.savedItemWithSource(ctx, page.Items[index])
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+	}
+	return page, nil
+}
+
+func (m Messages) SetSavedItemState(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID, state domain.SavedItemState) (domain.SavedItem, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.SavedItem{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItem{}, store.InvalidArgument("saved item state is invalid")
+	}
+	item, err := m.Store.GetSavedItem(ctx, workspaceID, userID, id)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	if item.State == state {
+		return m.savedItemWithSource(ctx, item)
+	}
+	item.State = state
+	item.UpdatedAt = time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, savedItemPayload("saved_item.changed", item), item.UpdatedAt)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	item, err = m.Store.UpdateSavedItem(ctx, item, event)
+	if err != nil {
+		return domain.SavedItem{}, err
+	}
+	return m.savedItemWithSource(ctx, item)
+}
+
+func (m Messages) RemoveSavedItem(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.SavedItemID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	item, err := m.Store.GetSavedItem(ctx, workspaceID, userID, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, savedItemPayload("saved_item.removed", item), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteSavedItem(ctx, workspaceID, userID, id, event)
+}
+
+func (m Messages) savedItemWithSource(ctx context.Context, item domain.SavedItem) (domain.SavedItem, error) {
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	if err := m.authorizeConversation(ctx, item.WorkspaceID, item.UserID, item.Conversation); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return item, nil
+		}
+		return domain.SavedItem{}, err
+	}
+	message, err := m.Store.GetMessage(ctx, item.MessageID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return item, nil
+		}
+		return domain.SavedItem{}, err
+	}
+	if message.WorkspaceID != item.WorkspaceID || message.Conversation != item.Conversation || message.Deleted {
+		return item, nil
+	}
+	item.Message = message
+	item.SourceAvailable = true
+	return item, nil
+}
+
 func (m Messages) AddBookmark(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, title, bookmarkType, link, emoji, entityID, accessLevel, parentID string) (domain.Bookmark, error) {
 	if err := m.authorizeConversation(ctx, workspaceID, userID, conversationID); err != nil {
 		return domain.Bookmark{}, err
@@ -3852,6 +4003,190 @@ func (m Messages) DeleteReminder(ctx context.Context, workspaceID domain.Workspa
 		return err
 	}
 	return m.Store.DeleteReminder(ctx, workspaceID, userID, reminderID, event)
+}
+
+func (m Messages) CreateLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.LaterReminderRequest) (domain.LaterReminder, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	normalized, err := m.normalizeLaterReminderRequest(ctx, workspaceID, userID, request)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	id, err := domain.NewLaterReminderID()
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	now := time.Now().UTC()
+	reminder := domain.LaterReminder{
+		ID: id, WorkspaceID: workspaceID, Creator: userID, Target: normalized.Target,
+		Channel: normalized.Channel, Text: normalized.Text, DueAt: normalized.DueAt,
+		TimeZone: normalized.TimeZone, Recurrence: normalized.Recurrence,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if normalized.Target == domain.LaterReminderPersonal {
+		reminder.UserID = userID
+	}
+	if normalized.SourceTimestamp != "" {
+		message, messageErr := m.messageForTimestamp(ctx, workspaceID, userID, normalized.SourceChannel, normalized.SourceTimestamp)
+		if messageErr != nil {
+			return domain.LaterReminder{}, messageErr
+		}
+		reminder.SourceMessageID = message.ID
+		reminder.SourceConversation = message.Conversation
+		reminder.SourceTimestamp = normalized.SourceTimestamp
+	}
+	event, err := newEvent(workspaceID, userID, laterReminderPayload("later_reminder.created", reminder), now)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	if err := m.Store.CreateLaterReminder(ctx, reminder, event); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return reminder, nil
+}
+
+func (m Messages) LaterReminderInfo(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) (domain.LaterReminder, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return m.Store.GetLaterReminder(ctx, workspaceID, userID, id)
+}
+
+func (m Messages) LaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, target domain.LaterReminderTarget, request domain.PageRequest) (domain.LaterReminderPage, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	if !target.Valid() {
+		return domain.LaterReminderPage{}, ErrInvalidLaterReminder
+	}
+	return m.Store.ListLaterReminders(ctx, workspaceID, userID, target, request)
+}
+
+func (m Messages) UpdateLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID, request domain.LaterReminderRequest) (domain.LaterReminder, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return domain.LaterReminder{}, err
+	}
+	current, err := m.Store.GetLaterReminder(ctx, workspaceID, userID, id)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	if current.Target != domain.LaterReminderPersonal || request.Target != domain.LaterReminderPersonal {
+		return domain.LaterReminder{}, ErrInvalidLaterReminder
+	}
+	normalized, err := m.normalizeLaterReminderRequest(ctx, workspaceID, userID, request)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	current.Text = normalized.Text
+	current.DueAt = normalized.DueAt
+	current.TimeZone = normalized.TimeZone
+	current.Recurrence = normalized.Recurrence
+	current.UpdatedAt = time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, laterReminderPayload("later_reminder.changed", current), current.UpdatedAt)
+	if err != nil {
+		return domain.LaterReminder{}, err
+	}
+	return m.Store.UpdateLaterReminder(ctx, current, event)
+}
+
+func (m Messages) AcknowledgeLaterReminders(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"later_reminder.acknowledged",
+		events.String("user_id", string(userID)),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.AcknowledgeLaterReminders(ctx, workspaceID, userID, now, event)
+}
+
+func (m Messages) CompleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, events.NewPayload(
+		"later_reminder.completed",
+		events.String("reminder_id", string(id)),
+		events.String("user_id", string(userID)),
+	), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.CompleteLaterReminder(ctx, workspaceID, userID, id, now, event)
+}
+
+func (m Messages) DeleteLaterReminder(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.LaterReminderID) error {
+	if err := m.authorizeWorkspace(ctx, workspaceID, userID); err != nil {
+		return err
+	}
+	reminder, err := m.Store.GetLaterReminder(ctx, workspaceID, userID, id)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, userID, laterReminderPayload("later_reminder.deleted", reminder), now)
+	if err != nil {
+		return err
+	}
+	return m.Store.DeleteLaterReminder(ctx, workspaceID, userID, id, event)
+}
+
+func (m Messages) normalizeLaterReminderRequest(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.LaterReminderRequest) (domain.LaterReminderRequest, error) {
+	request.Text = strings.TrimSpace(request.Text)
+	request.TimeZone = strings.TrimSpace(request.TimeZone)
+	request.DueAt = request.DueAt.UTC()
+	if !request.Target.Valid() || !request.Recurrence.Valid() || request.Text == "" || len(request.Text) > 3000 || request.DueAt.IsZero() {
+		return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+	}
+	if !request.DueAt.After(time.Now().UTC()) {
+		return domain.LaterReminderRequest{}, ErrReminderTimeInPast
+	}
+	if request.TimeZone == "" {
+		request.TimeZone = "UTC"
+	}
+	if _, err := time.LoadLocation(request.TimeZone); err != nil {
+		return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+	}
+	switch request.Target {
+	case domain.LaterReminderPersonal:
+		if request.Channel != "" {
+			return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+		}
+		if (request.SourceChannel == "") != (request.SourceTimestamp == "") {
+			return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+		}
+	case domain.LaterReminderChannel:
+		if request.Channel == "" || request.SourceChannel != "" || request.SourceTimestamp != "" {
+			return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+		}
+		membership, err := m.activeWorkspaceMembership(ctx, workspaceID, userID)
+		if err != nil {
+			return domain.LaterReminderRequest{}, err
+		}
+		if membership.Guest() {
+			return domain.LaterReminderRequest{}, ErrInvalidLaterReminder
+		}
+		if err := m.requireConversationMembership(ctx, workspaceID, userID, request.Channel); err != nil {
+			return domain.LaterReminderRequest{}, err
+		}
+	}
+	return request, nil
+}
+
+func laterReminderPayload(topic string, reminder domain.LaterReminder) events.Payload {
+	return events.NewPayload(
+		topic,
+		events.String("reminder_id", string(reminder.ID)),
+		events.String("target", string(reminder.Target)),
+		events.String("user_id", string(reminder.UserID)),
+		events.String("channel_id", string(reminder.Channel)),
+	)
 }
 
 func (m Messages) ScheduleMessage(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, channel domain.ConversationID, text string, postAt time.Time) (domain.ScheduledMessage, error) {

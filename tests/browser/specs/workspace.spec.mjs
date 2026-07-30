@@ -150,6 +150,117 @@ test('[SCHED-01 SCHED-02 A11Y-01] scheduled send persists, stays out of history,
   await expect(page.getByText('You have no scheduled messages.')).toBeVisible();
 });
 
+test('[LATER-01 LATER-02 LATER-03 A11Y-01] Later saves privately and supports every current state', async ({ page, context, request }) => {
+  await signIn(context);
+  const text = `later browser qualification ${Date.now()}`;
+  await postThroughTheAPI(request, text);
+  await page.goto('/app');
+
+  const message = page.locator('.message', { hasText: text });
+  await message.focus();
+  await page.keyboard.press('a');
+  await expect(message.getByRole('button', { name: 'Remove from Later' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(message).toBeFocused();
+
+  await page.getByRole('link', { name: 'Later' }).click();
+  await expect(page.getByRole('heading', { name: 'Later', exact: true, level: 1 })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'In progress' })).toHaveAttribute('aria-current', 'page');
+  let item = page.locator('.later-item', { hasText: text });
+  await expect(item.getByRole('link', { name: '#general' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+  await item.getByRole('link', { name: '#general' }).click();
+  await expect(page.locator('.message', { hasText: text })).toBeVisible();
+  await page.getByRole('link', { name: 'Later' }).click();
+  item = page.locator('.later-item', { hasText: text });
+
+  await item.getByRole('button', { name: 'Mark complete' }).click();
+  await expect(page.getByRole('status')).toHaveText('Saved item moved.');
+  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+  await page.getByRole('link', { name: 'Completed' }).click();
+  item = page.locator('.later-item', { hasText: text });
+  await expect(item).toBeVisible();
+
+  await item.getByRole('button', { name: 'Move to in progress' }).click();
+  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+  await page.getByRole('link', { name: 'In progress' }).click();
+  item = page.locator('.later-item', { hasText: text });
+  await item.getByRole('button', { name: 'Archive' }).click();
+  await page.getByRole('link', { name: 'Archived' }).click();
+  item = page.locator('.later-item', { hasText: text });
+  await expect(item).toBeVisible();
+
+  await item.getByRole('button', { name: 'Remove from Later' }).click();
+  await expect(page.getByRole('status')).toHaveText('Message removed from Later.');
+  await expect(page.locator('.later-item', { hasText: text })).toHaveCount(0);
+});
+
+test('[REMIND-01 REMIND-02 REMIND-03 A11Y-01] reminders use the message shortcut, Later lifecycle, and built-in slash command', async ({ page, context, request }) => {
+  await signIn(context);
+  const sourceText = `reminder source ${Date.now()}`;
+  await postThroughTheAPI(request, sourceText);
+  await page.goto('/app');
+
+  const source = page.locator('.message', { hasText: sourceText });
+  await source.focus();
+  await page.keyboard.press('m');
+  const reminderMenu = source.locator('[data-reminder-menu]');
+  await expect(reminderMenu).toHaveAttribute('open', '');
+  await Promise.all([
+    page.waitForURL(/\/app\/later\?.*changed=reminder/),
+    reminderMenu.getByRole('button', { name: 'In 20 minutes' }).click(),
+  ]);
+  await expect(page.getByRole('status')).toHaveText('Reminder saved.');
+  let reminder = page.locator('.later-item', { hasText: 'Message reminder' });
+  await expect(reminder.getByRole('link', { name: 'View source message' })).toBeVisible();
+  await expect(reminder.getByRole('button', { name: 'Mark complete' })).toBeVisible();
+
+  await reminder.getByText('Edit', { exact: true }).click();
+  const tomorrow = await page.evaluate(() => {
+    const value = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    const pad = (part) => String(part).padStart(2, '0');
+    return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
+  });
+  const description = `weekly reminder ${Date.now()}`;
+  await reminder.getByLabel('Description').fill(description);
+  await reminder.getByLabel('Date').fill(tomorrow);
+  await reminder.getByLabel('Time').fill('12:30');
+  await reminder.getByLabel('Repeat').selectOption('weekly');
+  await reminder.getByRole('button', { name: 'Save changes' }).click();
+  await expect(page.getByRole('status')).toHaveText('Reminder saved.');
+  reminder = page.locator('.later-item', { hasText: description });
+  await expect(reminder).toContainText('Repeats weekly');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await reminder.getByRole('button', { name: 'Mark complete' }).click();
+  await expect(page.getByRole('status')).toHaveText('Reminder completed.');
+  await page.getByRole('link', { name: 'Completed' }).click();
+  reminder = page.locator('.later-item', { hasText: description });
+  await expect(reminder).toContainText('Completed');
+  await reminder.getByRole('button', { name: 'Delete reminder' }).click();
+  await expect(page.getByRole('status')).toHaveText('Reminder deleted.');
+  await expect(page.locator('.later-item', { hasText: description })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  const channelReminder = `channel reminder ${Date.now()}`;
+  const composer = page.locator('form.composer textarea[name="text"]');
+  await composer.fill(`/remind #general ${channelReminder} every Thursday at 9am`);
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
+  const channelItem = page.locator('.later-item', { hasText: channelReminder });
+  await expect(channelItem.getByRole('link', { name: '#general' })).toBeVisible();
+  await expect(channelItem.getByRole('button', { name: 'Delete reminder' })).toBeVisible();
+  await expect(channelItem).toContainText('Repeats weekly');
+  await expect(channelItem.getByRole('button', { name: 'Mark complete' })).toHaveCount(0);
+  await expect(channelItem.getByText('Edit', { exact: true })).toHaveCount(0);
+
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(page.locator('.message-text', { hasText: channelReminder })).toHaveCount(0);
+  await composer.fill('/remind list');
+  await page.getByRole('button', { name: 'Send' }).click();
+  await expect(page).toHaveURL(/\/app\/later\?.*filter=channel-reminders/);
+  await expect(page.locator('.later-item', { hasText: channelReminder })).toBeVisible();
+});
+
 test('[A11Y-01 A11Y-02 A11Y-03] workspace and command discovery pass WCAG AA automation', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');
@@ -577,16 +688,19 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01] composer formatting, mentions, emoji, d
 
 test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions honour Slack keyboard navigation', async ({ page, context, request }) => {
   await signIn(context);
-  const first = await postThroughTheAPI(request, `keyboard first ${Date.now()}`);
-  const second = await postThroughTheAPI(request, `keyboard second ${Date.now()}`);
-  const last = await postThroughTheAPI(request, `keyboard last ${Date.now()}`);
+  const firstText = `keyboard first ${Date.now()}`;
+  const secondText = `keyboard second ${Date.now()}`;
+  const lastText = `keyboard last ${Date.now()}`;
+  const first = await postThroughTheAPI(request, firstText);
+  const second = await postThroughTheAPI(request, secondText);
+  const last = await postThroughTheAPI(request, lastText);
   await page.goto('/app');
 
   const composer = page.locator('form.composer textarea[name="text"]');
   await composer.fill('');
   await composer.press('ArrowUp');
-  const lastMessage = page.locator('.message', { hasText: `keyboard last` });
-  const secondMessage = page.locator('.message', { hasText: `keyboard second` });
+  const lastMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
+  const secondMessage = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: secondText }) });
   await expect(lastMessage).toBeFocused();
 
   await page.keyboard.press('ArrowUp');
@@ -623,8 +737,9 @@ test('[MSG-01 MSG-02 MSG-03 MSG-04 ACT-01 ACT-02] message reading and actions ho
   await threadRoot.focus();
   await page.keyboard.press('ArrowLeft');
   await expect(page).not.toHaveURL(/thread=/);
+  await page.waitForLoadState('domcontentloaded');
 
-  const returned = page.locator('.message', { hasText: `keyboard last` });
+  const returned = page.locator('.message').filter({ has: page.locator('.message-text', { hasText: lastText }) });
   await returned.focus();
   await page.keyboard.press('Delete');
   await expect(returned.getByRole('button', { name: 'Delete this message' })).toBeFocused();
@@ -778,7 +893,7 @@ test('[MSG-03 MSG-04] a member can edit and delete their own message in place', 
   const editor = target.getByRole('textbox', { name: 'Edit your message' });
   const changed = `edited in browser ${Date.now()}`;
   await editor.fill(changed);
-  await target.getByRole('button', { name: 'Save' }).click();
+  await target.getByRole('button', { name: 'Save changes', exact: true }).click();
   await expect(page.locator('.message', { hasText: changed })).toHaveCount(1);
   await expect(page.locator('.message', { hasText: original })).toHaveCount(0);
 

@@ -689,6 +689,54 @@ func TestReminderTimeAcceptsTheRelativeFormAndNamesWhatItCannotParse(t *testing.
 	}
 }
 
+func TestReminderUserTokenRejectsObsoleteOtherUserAndReturnsCompleteTimestamp(t *testing.T) {
+	_, repository := testHandlerWithStore()
+	granted := make(map[auth.Scope]struct{})
+	for _, scope := range defaultTestScopes() {
+		granted[scope] = struct{}{}
+	}
+	authenticator, err := auth.NewStatic("user-token", auth.Principal{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: granted,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: repository}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	call := func(body string) *httptest.ResponseRecorder {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodPost, "/api/reminders.add", strings.NewReader(body))
+		request.Header.Set("Authorization", "Bearer user-token")
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		return response
+	}
+	if envelope := decodeEnvelope(t, call("text=private&time=300&user=U2")); envelope.OK || envelope.Error != "cannot_add_others" {
+		t.Fatalf("other-user reminder body=%+v, want cannot_add_others", envelope)
+	}
+	response := call("text=private&time=300")
+	var created struct {
+		OK       bool `json:"ok"`
+		Reminder struct {
+			Creator    string `json:"creator"`
+			User       string `json:"user"`
+			CompleteTS *int64 `json:"complete_ts"`
+		} `json:"reminder"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode response %q: %v", response.Body, err)
+	}
+	if !created.OK || created.Reminder.Creator != "U1" || created.Reminder.User != "U1" ||
+		created.Reminder.CompleteTS == nil || *created.Reminder.CompleteTS != 0 {
+		t.Fatalf("reminder shape=%+v, want self-owned active non-recurring reminder", created)
+	}
+}
+
 // usergroups.users.update read an absent `users` as the empty list, so a request
 // that omitted the required argument emptied the group and reported success.
 func TestUserGroupUsersUpdateRequiresItsMandatoryArguments(t *testing.T) {
@@ -1011,7 +1059,14 @@ func TestParseSlackTimestampRejectsWhatIsNotATimestamp(t *testing.T) {
 // which the pinned 200 example carries — even though the admin projection already
 // existed and was already used by the web UI.
 func TestAdminUsersListReturnsTheAdminProjection(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, repository := testHandlerWithStore()
+	guest := domain.User{ID: "UG", WorkspaceID: "T1", Email: "guest@example.com", Name: "guest"}
+	if err := repository.CreateUser(context.Background(), guest, domain.WorkspaceMembership{
+		WorkspaceID: "T1", UserID: guest.ID, Role: domain.WorkspaceRoleMember,
+		Active: true, UltraRestricted: true,
+	}, events.Event{ID: "E-admin-guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
 	response := callAPI(t, handler, http.MethodGet, "/api/admin.users.list?team_id=T1", "")
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
@@ -1030,5 +1085,17 @@ func TestAdminUsersListReturnsTheAdminProjection(t *testing.T) {
 		if _, present := body.Users[0][field]; !present {
 			t.Errorf("admin.users.list omits %s", field)
 		}
+	}
+	var foundGuest bool
+	for _, user := range body.Users {
+		if user["id"] == "UG" {
+			foundGuest = true
+			if user["is_restricted"] != false || user["is_ultra_restricted"] != true {
+				t.Errorf("guest flags=%v/%v, want false/true", user["is_restricted"], user["is_ultra_restricted"])
+			}
+		}
+	}
+	if !foundGuest {
+		t.Fatal("admin.users.list omitted the guest")
 	}
 }

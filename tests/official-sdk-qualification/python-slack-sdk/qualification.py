@@ -12,6 +12,10 @@ client = WebClient(
     token=os.environ.get("SAMEOLDCHAT_API_TOKEN", "xoxb-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
+reminder_client = WebClient(
+    token="xoxp-reminder-qualification",
+    base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
+)
 
 assert client.api_test()["ok"] is True
 identity = client.auth_test()
@@ -538,18 +542,32 @@ assert rtm["ok"] is True
 assert isinstance(rtm["url"], str)
 assert rtm["team"]["id"] == "T1"
 assert rtm["self"]["id"] == "U1"
-reminder = client.reminders_add(text="reminder qualification", time=int(time.time()) + 3600)
+reminder = reminder_client.reminders_add(text="reminder qualification", time=int(time.time()) + 3600)
 assert reminder["ok"] is True
 assert isinstance(reminder["reminder"]["id"], str)
-reminders = client.reminders_list()
+assert reminder["reminder"]["creator"] == "U1"
+assert reminder["reminder"]["user"] == "U1"
+assert reminder["reminder"]["recurring"] is False
+assert reminder["reminder"]["complete_ts"] == 0
+try:
+    reminder_client.reminders_add(text="not another user's reminder", time=300, user="U2")
+    raise AssertionError("reminders.add accepted another user for a user token")
+except SlackApiError as error:
+    assert error.response["error"] == "cannot_add_others"
+try:
+    reminder_client.reminders_add(text="documented natural language", time="in 15 minutes")
+    raise AssertionError("known natural-language reminder gap unexpectedly disappeared")
+except SlackApiError as error:
+    assert error.response["error"] == "cannot_parse"
+reminders = reminder_client.reminders_list()
 assert reminders["ok"] is True
 assert len(reminders["reminders"]) == 1
-reminder_info = client.reminders_info(reminder=reminder["reminder"]["id"])
+reminder_info = reminder_client.reminders_info(reminder=reminder["reminder"]["id"])
 assert reminder_info["ok"] is True
 assert reminder_info["reminder"]["id"] == reminder["reminder"]["id"]
-completed_reminder = client.reminders_complete(reminder=reminder["reminder"]["id"])
+completed_reminder = reminder_client.reminders_complete(reminder=reminder["reminder"]["id"])
 assert completed_reminder["ok"] is True
-deleted_reminder = client.reminders_delete(reminder=reminder["reminder"]["id"])
+deleted_reminder = reminder_client.reminders_delete(reminder=reminder["reminder"]["id"])
 assert deleted_reminder["ok"] is True
 created_canvas = client.canvases_create(
     title="SDK qualification canvas",

@@ -109,9 +109,9 @@ client socket for its whole lifetime. See [WebSockets](#websockets) below.
 
 The image should be immutable (prefer a digest), contain `/readyz`, and start the server without migrations or other work that is not required for serving requests. `application_task_role_arn` is deliberately required: the application’s AWS permissions must be explicit.
 
-The worker is not scaled with the HTTP tier. It executes scheduled messages and
-delivers installed-app events for every workspace from the shared PostgreSQL
-store, including while the request tier is at zero. Build
+The worker is not scaled with the HTTP tier. It executes scheduled messages,
+personal and channel reminders, and installed-app events for every workspace
+from the shared PostgreSQL store, including while the request tier is at zero. Build
 `Dockerfile.worker` from the repository root and pin `worker_image` by digest.
 `worker_command` is validated to select PostgreSQL, the multi-workspace
 `slack-events` mode, and a unique lease owner. The service is a singleton and

@@ -75,8 +75,12 @@ type Store struct {
 	remoteFileShares              map[domain.FileID][]domain.ConversationID
 	dnd                           map[domain.UserID]domain.DoNotDisturb
 	stars                         map[domain.UserID]map[domain.MessageID]domain.Star
+	savedItems                    map[domain.SavedItemID]domain.SavedItem
 	bookmarks                     map[domain.BookmarkID]domain.Bookmark
 	reminders                     map[domain.ReminderID]domain.Reminder
+	laterReminders                map[domain.LaterReminderID]domain.LaterReminder
+	laterReminderLeases           map[domain.LaterReminderID]memoryLease
+	laterReminderNextAttempt      map[domain.LaterReminderID]time.Time
 	scheduled                     map[domain.ScheduledMessageID]domain.ScheduledMessage
 	scheduledLeases               map[domain.ScheduledMessageID]memoryLease
 	scheduledDelivered            map[domain.ScheduledMessageID]bool
@@ -163,7 +167,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), reminders: make(map[domain.ReminderID]domain.Reminder), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -831,6 +835,9 @@ func (s *Store) CreateUser(_ context.Context, user domain.User, membership domai
 	if membership.Role != domain.WorkspaceRoleMember && membership.Role != domain.WorkspaceRoleAdmin {
 		return store.InvalidArgument("user membership role must be member or admin")
 	}
+	if (membership.Restricted && membership.UltraRestricted) || (membership.Guest() && membership.Role != domain.WorkspaceRoleMember) {
+		return store.InvalidArgument("guest membership must have exactly one guest tier and the member role")
+	}
 	if _, exists := s.workspaces[user.WorkspaceID]; !exists {
 		return store.ErrNotFound
 	}
@@ -1010,6 +1017,9 @@ func (s *Store) SetWorkspaceRole(_ context.Context, workspaceID domain.Workspace
 	membership, ok := s.members[key]
 	if !ok {
 		return store.ErrNotFound
+	}
+	if membership.Guest() && role != domain.WorkspaceRoleMember {
+		return store.InvalidArgument("guest membership cannot be promoted")
 	}
 	membership.Role, membership.Active = role, true
 	s.members[key] = membership
@@ -3603,6 +3613,143 @@ func (s *Store) ListStars(_ context.Context, workspace domain.WorkspaceID, user 
 	return values, next, hasMore, nil
 }
 
+func savedItemKey(value domain.SavedItem) string {
+	return string(domain.NewStoredTime(value.UpdatedAt)) + "\x00" + string(value.ID)
+}
+
+func (s *Store) CreateSavedItem(_ context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, bool, error) {
+	if !item.State.Valid() {
+		return domain.SavedItem{}, false, store.InvalidArgument("saved item state is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	message, err := s.messageLocked(item.MessageID)
+	if err != nil || message.WorkspaceID != item.WorkspaceID || message.Conversation != item.Conversation {
+		return domain.SavedItem{}, false, store.ErrNotFound
+	}
+	for _, existing := range s.savedItems {
+		if existing.WorkspaceID == item.WorkspaceID && existing.UserID == item.UserID && existing.MessageID == item.MessageID {
+			return existing, false, nil
+		}
+	}
+	if _, exists := s.savedItems[item.ID]; exists {
+		return domain.SavedItem{}, false, store.ErrAlreadyExists
+	}
+	item.Message = domain.Message{}
+	item.SourceAvailable = false
+	s.savedItems[item.ID] = item
+	s.outbox = append(s.outbox, event)
+	return item, true, nil
+}
+
+func (s *Store) GetSavedItem(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID) (domain.SavedItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	item, exists := s.savedItems[id]
+	if !exists || item.WorkspaceID != workspace || item.UserID != user {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	return item, nil
+}
+
+func (s *Store) GetSavedItemByMessage(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, message domain.MessageID) (domain.SavedItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.savedItems {
+		if item.WorkspaceID == workspace && item.UserID == user && item.MessageID == message {
+			return item, nil
+		}
+	}
+	return domain.SavedItem{}, store.ErrNotFound
+}
+
+func (s *Store) ListSavedItemsForMessages(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, messages []domain.MessageID) ([]domain.SavedItem, error) {
+	wanted := make(map[domain.MessageID]struct{}, len(messages))
+	for _, message := range messages {
+		wanted[message] = struct{}{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.SavedItem, 0, len(messages))
+	for _, item := range s.savedItems {
+		if item.WorkspaceID != workspace || item.UserID != user {
+			continue
+		}
+		if _, ok := wanted[item.MessageID]; ok {
+			items = append(items, item)
+		}
+	}
+	return items, nil
+}
+
+func (s *Store) ListSavedItems(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, state domain.SavedItemState, request domain.PageRequest) (domain.SavedItemPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	if !state.Valid() {
+		return domain.SavedItemPage{}, store.InvalidArgument("saved item state is invalid")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.SavedItemPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.SavedItem, 0, request.Limit+1)
+	for _, item := range s.savedItems {
+		if item.WorkspaceID != workspace || item.UserID != user || item.State != state || after != "" && savedItemKey(item) <= after {
+			continue
+		}
+		values = appendSorted(values, item, request.Limit+1, func(left, right domain.SavedItem) bool {
+			return savedItemKey(left) < savedItemKey(right)
+		})
+	}
+	more := len(values) > request.Limit
+	if more {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		next, err = domain.NewListCursor(savedItemKey(values[len(values)-1]))
+		if err != nil {
+			return domain.SavedItemPage{}, err
+		}
+	}
+	return domain.SavedItemPage{Items: values, NextCursor: next, HasMore: more}, nil
+}
+
+func (s *Store) UpdateSavedItem(_ context.Context, item domain.SavedItem, event events.Event) (domain.SavedItem, error) {
+	if !item.State.Valid() {
+		return domain.SavedItem{}, store.InvalidArgument("saved item state is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, exists := s.savedItems[item.ID]
+	if !exists || existing.WorkspaceID != item.WorkspaceID || existing.UserID != item.UserID {
+		return domain.SavedItem{}, store.ErrNotFound
+	}
+	if existing.MessageID != item.MessageID || existing.Conversation != item.Conversation || existing.CreatedAt != item.CreatedAt {
+		return domain.SavedItem{}, store.ErrConflict
+	}
+	existing.State = item.State
+	existing.UpdatedAt = item.UpdatedAt
+	s.savedItems[item.ID] = existing
+	s.outbox = append(s.outbox, event)
+	return existing, nil
+}
+
+func (s *Store) DeleteSavedItem(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.SavedItemID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, exists := s.savedItems[id]
+	if !exists || item.WorkspaceID != workspace || item.UserID != user {
+		return store.ErrNotFound
+	}
+	delete(s.savedItems, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
 func (s *Store) CreateBookmark(_ context.Context, bookmark domain.Bookmark, event events.Event) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3762,6 +3909,301 @@ func (s *Store) DeleteReminder(_ context.Context, workspace domain.WorkspaceID, 
 	delete(s.reminders, id)
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) CreateLaterReminder(_ context.Context, reminder domain.LaterReminder, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !reminder.Target.Valid() || !reminder.Recurrence.Valid() || reminder.ID == "" || reminder.WorkspaceID == "" || reminder.Creator == "" || reminder.Text == "" || reminder.DueAt.IsZero() {
+		return store.InvalidArgument("later reminder is incomplete")
+	}
+	creator, ok := s.users[reminder.Creator]
+	if !ok || creator.WorkspaceID != reminder.WorkspaceID || creator.Deleted {
+		return store.ErrNotFound
+	}
+	switch reminder.Target {
+	case domain.LaterReminderPersonal:
+		user, ok := s.users[reminder.UserID]
+		if !ok || user.WorkspaceID != reminder.WorkspaceID || user.Deleted || reminder.Channel != "" {
+			return store.ErrNotFound
+		}
+	case domain.LaterReminderChannel:
+		conversation, ok := s.conversations[reminder.Channel]
+		if !ok || conversation.WorkspaceID != reminder.WorkspaceID || reminder.UserID != "" {
+			return store.ErrNotFound
+		}
+	}
+	if reminder.SourceMessageID != "" {
+		message, ok := memoryMessageByID(s.messages[reminder.SourceConversation], reminder.SourceMessageID)
+		if !ok || message.WorkspaceID != reminder.WorkspaceID || domain.NewMessageTimestamp(message.CreatedAt) != reminder.SourceTimestamp {
+			return store.ErrNotFound
+		}
+	}
+	if _, exists := s.laterReminders[reminder.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	s.laterReminders[reminder.ID] = reminder
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID) (domain.LaterReminder, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	reminder, ok := s.laterReminders[id]
+	if !ok || !laterReminderOwnedBy(reminder, workspace, user) {
+		return domain.LaterReminder{}, store.ErrNotFound
+	}
+	return reminder, nil
+}
+
+func (s *Store) ListLaterReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, target domain.LaterReminderTarget, request domain.PageRequest) (domain.LaterReminderPage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	if !target.Valid() {
+		return domain.LaterReminderPage{}, store.InvalidArgument("later reminder target is invalid")
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.LaterReminderPage{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.LaterReminder, 0, request.Limit+1)
+	for _, reminder := range s.laterReminders {
+		if reminder.Target != target || !laterReminderOwnedBy(reminder, workspace, user) || string(reminder.ID) <= after {
+			continue
+		}
+		values = appendSorted(values, reminder, request.Limit+1, func(left, right domain.LaterReminder) bool { return left.ID < right.ID })
+	}
+	page := domain.LaterReminderPage{Items: values, HasMore: len(values) > request.Limit}
+	if page.HasMore {
+		page.Items = page.Items[:request.Limit]
+		page.NextCursor, err = domain.NewListCursor(string(page.Items[len(page.Items)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) UpdateLaterReminder(_ context.Context, reminder domain.LaterReminder, event events.Event) (domain.LaterReminder, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.laterReminders[reminder.ID]
+	activeLease, leased := s.laterReminderLeases[reminder.ID]
+	if !ok || !laterReminderOwnedBy(current, reminder.WorkspaceID, reminder.Creator) || current.Target != domain.LaterReminderPersonal ||
+		(leased && activeLease.Expires.After(time.Now().UTC())) {
+		return domain.LaterReminder{}, store.ErrNotFound
+	}
+	if reminder.Target != current.Target || reminder.UserID != current.UserID || reminder.SourceMessageID != current.SourceMessageID || reminder.SourceConversation != current.SourceConversation || reminder.SourceTimestamp != current.SourceTimestamp || reminder.Text == "" || reminder.DueAt.IsZero() || !reminder.Recurrence.Valid() {
+		return domain.LaterReminder{}, store.InvalidArgument("later reminder update is invalid")
+	}
+	reminder.CreatedAt = current.CreatedAt
+	reminder.LastDeliveredAt = time.Time{}
+	reminder.AcknowledgedAt = time.Time{}
+	reminder.FailedAt = time.Time{}
+	reminder.FailureCode = ""
+	s.laterReminders[reminder.ID] = reminder
+	delete(s.laterReminderLeases, reminder.ID)
+	delete(s.laterReminderNextAttempt, reminder.ID)
+	s.outbox = append(s.outbox, event)
+	return reminder, nil
+}
+
+func (s *Store) AcknowledgeLaterReminders(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, acknowledged time.Time, event events.Event) error {
+	if workspace == "" || user == "" || acknowledged.IsZero() {
+		return store.InvalidArgument("Later reminder acknowledgement is incomplete")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	found := false
+	for id, reminder := range s.laterReminders {
+		if reminder.WorkspaceID != workspace || reminder.Target != domain.LaterReminderPersonal || reminder.UserID != user || reminder.LastDeliveredAt.IsZero() || !reminder.LastDeliveredAt.After(reminder.AcknowledgedAt) {
+			continue
+		}
+		reminder.AcknowledgedAt = reminder.LastDeliveredAt
+		reminder.UpdatedAt = acknowledged.UTC()
+		s.laterReminders[id] = reminder
+		found = true
+	}
+	if found {
+		s.outbox = append(s.outbox, event)
+	}
+	return nil
+}
+
+func (s *Store) CompleteLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, completed time.Time, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reminder, ok := s.laterReminders[id]
+	activeLease, leased := s.laterReminderLeases[id]
+	if !ok || !laterReminderOwnedBy(reminder, workspace, user) || reminder.Target != domain.LaterReminderPersonal ||
+		(leased && activeLease.Expires.After(time.Now().UTC())) {
+		return store.ErrNotFound
+	}
+	if reminder.CompletedAt.IsZero() {
+		reminder.CompletedAt = completed
+		reminder.UpdatedAt = completed
+		s.laterReminders[id] = reminder
+		s.outbox = append(s.outbox, event)
+	}
+	return nil
+}
+
+func (s *Store) DeleteLaterReminder(_ context.Context, workspace domain.WorkspaceID, user domain.UserID, id domain.LaterReminderID, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reminder, ok := s.laterReminders[id]
+	activeLease, leased := s.laterReminderLeases[id]
+	if !ok || !laterReminderOwnedBy(reminder, workspace, user) || (leased && activeLease.Expires.After(time.Now().UTC())) {
+		return store.ErrNotFound
+	}
+	delete(s.laterReminders, id)
+	delete(s.laterReminderLeases, id)
+	delete(s.laterReminderNextAttempt, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) EarliestLaterReminder(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var earliest time.Time
+	for id, reminder := range s.laterReminders {
+		if (workspace != "" && reminder.WorkspaceID != workspace) || !reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() {
+			continue
+		}
+		deadline := reminder.DueAt.UTC()
+		if next := s.laterReminderNextAttempt[id]; next.After(deadline) {
+			deadline = next
+		}
+		if earliest.IsZero() || deadline.Before(earliest) {
+			earliest = deadline
+		}
+	}
+	return earliest, nil
+}
+
+func (s *Store) ClaimDueLaterReminders(_ context.Context, workspace domain.WorkspaceID, owner string, limit int, lease time.Duration, now time.Time) ([]domain.LaterReminder, error) {
+	if owner == "" || limit <= 0 || lease <= 0 || now.IsZero() {
+		return nil, store.InvalidArgument("Later reminder claim requires owner, positive limit, lease, and current time")
+	}
+	now = now.UTC()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	values := make([]domain.LaterReminder, 0, len(s.laterReminders))
+	for id, reminder := range s.laterReminders {
+		if (workspace != "" && reminder.WorkspaceID != workspace) || reminder.DueAt.After(now) ||
+			!reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() || s.laterReminderNextAttempt[id].After(now) {
+			continue
+		}
+		active, exists := s.laterReminderLeases[id]
+		if exists && active.Expires.After(now) {
+			continue
+		}
+		values = append(values, reminder)
+	}
+	sort.Slice(values, func(left, right int) bool {
+		return values[left].DueAt.Before(values[right].DueAt) ||
+			(values[left].DueAt.Equal(values[right].DueAt) && values[left].ID < values[right].ID)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	for _, reminder := range values {
+		s.laterReminderLeases[reminder.ID] = memoryLease{Owner: owner, Expires: now.Add(lease)}
+	}
+	return values, nil
+}
+
+func (s *Store) RenewLaterReminder(_ context.Context, owner string, id domain.LaterReminderID, lease time.Duration, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active, ok := s.laterReminderLeases[id]
+	if owner == "" || lease <= 0 || now.IsZero() || !ok || active.Owner != owner || !active.Expires.After(now.UTC()) {
+		return store.ErrLeaseConflict
+	}
+	active.Expires = now.UTC().Add(lease)
+	s.laterReminderLeases[id] = active
+	return nil
+}
+
+func (s *Store) MarkLaterReminderDelivered(_ context.Context, owner string, id domain.LaterReminderID, deliveredAt, nextDue time.Time, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active, ok := s.laterReminderLeases[id]
+	reminder, exists := s.laterReminders[id]
+	deliveredAt = deliveredAt.UTC()
+	if !ok || !exists || active.Owner != owner || !active.Expires.After(deliveredAt) || !reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() {
+		return store.ErrLeaseConflict
+	}
+	if reminder.Recurrence == domain.ReminderOnce {
+		if !nextDue.IsZero() {
+			return store.InvalidArgument("one-time Later reminder cannot have a next delivery")
+		}
+		reminder.CompletedAt = deliveredAt
+	} else {
+		if nextDue.IsZero() || !nextDue.After(reminder.DueAt) {
+			return store.InvalidArgument("recurring Later reminder requires a later delivery")
+		}
+		reminder.DueAt = nextDue.UTC()
+	}
+	reminder.LastDeliveredAt = deliveredAt
+	reminder.UpdatedAt = deliveredAt
+	s.laterReminders[id] = reminder
+	delete(s.laterReminderLeases, id)
+	delete(s.laterReminderNextAttempt, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) MarkLaterReminderFailed(_ context.Context, owner string, id domain.LaterReminderID, failureCode string, failedAt time.Time, event events.Event) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active, ok := s.laterReminderLeases[id]
+	reminder, exists := s.laterReminders[id]
+	failedAt = failedAt.UTC()
+	if failureCode == "" || !ok || !exists || active.Owner != owner || !active.Expires.After(failedAt) || !reminder.CompletedAt.IsZero() || !reminder.FailedAt.IsZero() {
+		return store.ErrLeaseConflict
+	}
+	reminder.FailedAt = failedAt
+	reminder.FailureCode = failureCode
+	reminder.UpdatedAt = failedAt
+	s.laterReminders[id] = reminder
+	delete(s.laterReminderLeases, id)
+	delete(s.laterReminderNextAttempt, id)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ReleaseLaterReminder(_ context.Context, owner string, id domain.LaterReminderID, next, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active, ok := s.laterReminderLeases[id]
+	if owner == "" || next.IsZero() || now.IsZero() || !ok || active.Owner != owner || !active.Expires.After(now.UTC()) {
+		return store.ErrLeaseConflict
+	}
+	delete(s.laterReminderLeases, id)
+	s.laterReminderNextAttempt[id] = next.UTC()
+	return nil
+}
+
+func laterReminderOwnedBy(reminder domain.LaterReminder, workspace domain.WorkspaceID, user domain.UserID) bool {
+	if reminder.WorkspaceID != workspace {
+		return false
+	}
+	if reminder.Target == domain.LaterReminderPersonal {
+		return reminder.UserID == user
+	}
+	return reminder.Target == domain.LaterReminderChannel && reminder.Creator == user
+}
+
+func memoryMessageByID(messages []domain.Message, id domain.MessageID) (domain.Message, bool) {
+	for _, message := range messages {
+		if message.ID == id {
+			return message, true
+		}
+	}
+	return domain.Message{}, false
 }
 
 func (s *Store) CreateScheduledMessage(_ context.Context, value domain.ScheduledMessage, event events.Event) error {

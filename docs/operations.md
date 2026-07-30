@@ -205,12 +205,20 @@ one `member_joined_channel` event per invited user), each with a distinct
 idempotency key. The request includes `X-Slack-Request-Timestamp`,
 `X-Slack-Signature`, and that key as `Idempotency-Key`.
 
-The same process executes due scheduled messages in both delivery formats.
-`record` is explicitly workspace-scoped; `slack-events` claims due schedules
-across every workspace. Scheduled records retain the creating credential's
+The same process executes due scheduled messages and first-party Later/channel
+reminders in both delivery formats. `record` is explicitly workspace-scoped;
+`slack-events` claims due schedules and reminders across every workspace.
+Scheduled records retain the creating credential's
 one-way hash, app/bot attribution, thread parent, and terminal delivered or
 failed state. Permanent posting failures are recorded once rather than retried
 forever; transient failures retain their fenced lease and retry path.
+
+When workers are stopped as part of a lifecycle profile, configure both
+`-wake-deadline-url`/`SAMEOLDCHAT_WAKE_DEADLINE_URL` and
+`-wake-deadline-token`/`SAMEOLDCHAT_WAKE_DEADLINE_TOKEN`. After each cycle the
+worker publishes the fenced minimum of scheduled-message and reminder due
+times. Supplying only one coordinate is a configuration error. The ECS module
+keeps its worker always on, so it does not require this optional publication.
 
 Schema 102 cannot reconstruct the exact bearer credential or app identity for
 schedules created by an older release, because the old schema never stored

@@ -48,6 +48,40 @@ func TestPostMessageRejectsForeignUser(t *testing.T) {
 	}
 }
 
+func TestGuestCanCreatePersonalButNotChannelReminder(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	if err := s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	guest := domain.User{ID: "UG", WorkspaceID: "T1", Email: "guest@example.com", Name: "guest"}
+	membership := domain.WorkspaceMembership{
+		WorkspaceID: "T1", UserID: guest.ID, Role: domain.WorkspaceRoleMember,
+		Active: true, Restricted: true,
+	}
+	if err := s.CreateUser(ctx, guest, membership, events.Event{ID: "E-guest", WorkspaceID: "T1", Topic: "user.created", CreatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedConversationMember("C1", guest.ID); err != nil {
+		t.Fatal(err)
+	}
+	messages := Messages{Store: s}
+	due := time.Now().UTC().Add(time.Hour)
+	if _, err := messages.CreateLaterReminder(ctx, "T1", guest.ID, domain.LaterReminderRequest{
+		Target: domain.LaterReminderPersonal, Text: "private", DueAt: due, TimeZone: "UTC",
+	}); err != nil {
+		t.Fatalf("personal reminder: %v", err)
+	}
+	if _, err := messages.CreateLaterReminder(ctx, "T1", guest.ID, domain.LaterReminderRequest{
+		Target: domain.LaterReminderChannel, Channel: "C1", Text: "public", DueAt: due, TimeZone: "UTC",
+	}); !errors.Is(err, ErrInvalidLaterReminder) {
+		t.Fatalf("channel reminder error=%v, want %v", err, ErrInvalidLaterReminder)
+	}
+}
+
 func TestPostMessageRejectsArchivedConversation(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})

@@ -89,6 +89,19 @@ Each automated test SHOULD include the relevant journey ID in its title or
 metadata. A test that only asserts HTML text, a route status, or a mocked
 callback does not qualify an end-to-end journey.
 
+`make journey-check` treats the catalog and browser citations as data: stable
+IDs must be unique, each numbered journey file must retain a dated official
+Slack source, and a browser test cannot cite an ID the normative catalog does
+not define. Its browser coverage report is intentionally a gap report, not a
+compatibility score; citing an ID does not by itself satisfy the evidence table
+above.
+
+For claims whose upstream wording is stable enough to probe,
+`make external-contract-qualification` fetches the current official pages and
+checks the exact behavioral assertions. It is deliberately additive to the
+catalog gate: a reachable link is not evidence that the page still describes
+the behavior our Markdown attributes to it.
+
 ## Catalog
 
 - [Authentication and workspace entry](00-authentication-and-workspaces.md)

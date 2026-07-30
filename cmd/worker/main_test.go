@@ -50,6 +50,22 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
 
+func TestWorkerRejectsHalfConfiguredWakePublication(t *testing.T) {
+	t.Setenv("SAMEOLDCHAT_WAKE_DEADLINE_URL", "")
+	t.Setenv("SAMEOLDCHAT_WAKE_DEADLINE_TOKEN", "")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for name, args := range map[string][]string{
+		"URL only":   {"-delivery-format", "record", "-wake-deadline-url", "https://activator.example.test"},
+		"token only": {"-delivery-format", "record", "-wake-deadline-token", "secret"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if code := run(context.Background(), logger, args); code != exitConfiguration {
+				t.Fatalf("exit code=%d, want configuration failure %d", code, exitConfiguration)
+			}
+		})
+	}
+}
+
 // An ephemeral message is defined as visible to exactly one user and its payload
 // carries that user's text, blocks and attachments. The record delivery format
 // ships the durable record itself and never decodes the payload, so it has no

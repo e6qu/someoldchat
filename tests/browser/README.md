@@ -1,6 +1,6 @@
 # Browser qualification
 
-This suite runs 26 seeded journeys in Chromium, Firefox, and WebKit and
+This suite runs 28 seeded journeys in Chromium, Firefox, and WebKit and
 exercises behavior that server-side tests cannot observe: session-authenticated
 workspace entry, public-channel preview and joining, message posting with the
 advertised Enter and Shift+Enter behavior, Slack-style search shortcuts,
@@ -11,7 +11,13 @@ members. It also exercises message editing and deletion, private channel
 creation and duplicate-name errors, named mobile navigation, thread reflow,
 drawer focus containment, contextual mutation failures, unread bookkeeping,
 live delivery, history pagination, search-result positioning, JSON-authored
-blocks, attachments, and link previews, and draft preservation. It also
+blocks, attachments, and link previews, and draft preservation. The current
+Slack Later journey is exercised through focused-message `A`, private
+save/unsave state, In progress, Completed, Archived, restore, source navigation,
+and removal. It also
+exercises message-reminder `M`, preset and custom local times, personal
+reminder editing/completion/deletion, `/remind` channel creation, and the
+private `/remind list` projection. It also
 schedules a message in the browser's local time zone, verifies that the
 pending item does not appear in channel history, reviews it on the Scheduled
 surface, and cancels it. It signs out through the application UI,

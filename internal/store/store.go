@@ -476,6 +476,13 @@ type Store interface {
 	AddStar(context.Context, domain.Star, events.Event) error
 	RemoveStar(context.Context, domain.Star, events.Event) error
 	ListStars(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.Star, domain.Cursor, bool, error)
+	CreateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, bool, error)
+	GetSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID) (domain.SavedItem, error)
+	GetSavedItemByMessage(context.Context, domain.WorkspaceID, domain.UserID, domain.MessageID) (domain.SavedItem, error)
+	ListSavedItemsForMessages(context.Context, domain.WorkspaceID, domain.UserID, []domain.MessageID) ([]domain.SavedItem, error)
+	ListSavedItems(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemState, domain.PageRequest) (domain.SavedItemPage, error)
+	UpdateSavedItem(context.Context, domain.SavedItem, events.Event) (domain.SavedItem, error)
+	DeleteSavedItem(context.Context, domain.WorkspaceID, domain.UserID, domain.SavedItemID, events.Event) error
 	CreateBookmark(context.Context, domain.Bookmark, events.Event) error
 	GetBookmark(context.Context, domain.WorkspaceID, domain.ConversationID, domain.BookmarkID) (domain.Bookmark, error)
 	ListBookmarks(context.Context, domain.WorkspaceID, domain.ConversationID) ([]domain.Bookmark, error)
@@ -486,6 +493,19 @@ type Store interface {
 	ListReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) (domain.ReminderPage, error)
 	CompleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, time.Time, events.Event) error
 	DeleteReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.ReminderID, events.Event) error
+	CreateLaterReminder(context.Context, domain.LaterReminder, events.Event) error
+	GetLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID) (domain.LaterReminder, error)
+	ListLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderTarget, domain.PageRequest) (domain.LaterReminderPage, error)
+	UpdateLaterReminder(context.Context, domain.LaterReminder, events.Event) (domain.LaterReminder, error)
+	AcknowledgeLaterReminders(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
+	CompleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, time.Time, events.Event) error
+	DeleteLaterReminder(context.Context, domain.WorkspaceID, domain.UserID, domain.LaterReminderID, events.Event) error
+	EarliestLaterReminder(context.Context, domain.WorkspaceID) (time.Time, error)
+	ClaimDueLaterReminders(context.Context, domain.WorkspaceID, string, int, time.Duration, time.Time) ([]domain.LaterReminder, error)
+	RenewLaterReminder(context.Context, string, domain.LaterReminderID, time.Duration, time.Time) error
+	MarkLaterReminderDelivered(context.Context, string, domain.LaterReminderID, time.Time, time.Time, events.Event) error
+	MarkLaterReminderFailed(context.Context, string, domain.LaterReminderID, string, time.Time, events.Event) error
+	ReleaseLaterReminder(context.Context, string, domain.LaterReminderID, time.Time, time.Time) error
 	CreateScheduledMessage(context.Context, domain.ScheduledMessage, events.Event) error
 	CreateScheduledMessageWithinLimit(context.Context, domain.ScheduledMessage, time.Duration, int, events.Event) error
 	ListScheduledMessages(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, domain.PageRequest) (domain.ScheduledMessagePage, error)

@@ -5,6 +5,8 @@ set -eu
 root=$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)
 work=$(mktemp -d "${TMPDIR:-/tmp}/sameoldchat-sdk-qualification.XXXXXX")
 fixture_pid=""
+coverage_log="$work/sdk-methods.log"
+export SAMEOLDCHAT_SDK_COVERAGE_LOG="$coverage_log"
 
 cleanup() {
 	status=$?
@@ -44,7 +46,7 @@ start_fixture() {
 	fixture_pid=$!
 	ready=0
 	for _ in $(seq 1 40); do
-		if curl -fsS "http://127.0.0.1:18080/api/api.test?token=xoxb-test" >/dev/null 2>&1; then
+		if curl -fsS "http://127.0.0.1:18080/qualification/ready" >/dev/null 2>&1; then
 			ready=1
 			break
 		fi
@@ -136,3 +138,10 @@ mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" depend
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ mvn -q -f "$root/tests/official-sdk-qualification/java-slack-api/pom.xml" exec:java
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ SAMEOLDCHAT_QUALIFICATION_URL=http://127.0.0.1:18080 java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.SocketModeQualification
 SAMEOLDCHAT_API_URL=http://127.0.0.1:18080/api/ java -cp "$root/tests/official-sdk-qualification/java-slack-api/target/classes:$(cat "$work/java-classpath")" sameoldchat.qualification.BoltQualification
+
+# The suite used to prove only that a large script exited successfully. Compare
+# the exact Web API paths emitted by the pinned official clients with the
+# method-level evidence claimed by the compatibility ledger. The comparison is
+# fail-closed: no method may remain SDK-compatible merely because another
+# method happened to pass in the same large script.
+(cd "$root" && GOCACHE="$root/.cache/go-build" go run ./cmd/sdkcoverage -input "$coverage_log" -require-claimed)
