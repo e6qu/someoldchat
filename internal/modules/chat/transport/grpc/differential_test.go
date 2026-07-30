@@ -1041,7 +1041,27 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
-				return []any{away.Presence, updated.Profile}, nil
+				start := time.Unix(4102448400, 0).UTC()
+				scheduled, err := chat.ScheduleUserStatus(ctx, "T1", "U1", "Lunch", ":sandwich:", start, start.Add(time.Hour))
+				if err != nil {
+					return nil, err
+				}
+				edited, err := chat.UpdateScheduledUserStatus(ctx, "T1", "U1", scheduled.ID, "Deep work", ":dart:", start.Add(time.Hour), start.Add(2*time.Hour))
+				if err != nil {
+					return nil, err
+				}
+				statuses, err := chat.ScheduledUserStatuses(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.DeleteScheduledUserStatus(ctx, "T1", "U1", scheduled.ID); err != nil {
+					return nil, err
+				}
+				remaining, err := chat.ScheduledUserStatuses(ctx, "T1", "U1")
+				if err != nil {
+					return nil, err
+				}
+				return []any{away.Presence, updated.Profile, edited.StatusText, edited.StatusEmoji, edited.StartsAt.Unix(), len(statuses), len(remaining)}, nil
 			},
 		},
 		{

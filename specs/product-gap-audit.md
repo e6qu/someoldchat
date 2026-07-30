@@ -24,13 +24,13 @@ Measured on 2026-07-30:
   comparison currently observes all 225 methods claimed at `sdk-compatible` or
   above (215 current and ten retained legacy methods);
 - all 102 stable journey IDs have an individually checked source-map row. The
-  live official-source gate currently makes 106 representative assertions
+  live official-source gate currently makes 108 representative assertions
   explicitly citing 47 of those IDs across authentication, navigation,
   conversations, messaging, search, files, apps, OAuth, presence, huddles,
   canvases, lists, workflows, administration, Slack Connect, accessibility,
   Activity, and reminders before local evidence runs. The remaining 55 IDs are
   printed as upstream-text evidence gaps rather than inheriting coverage;
-- 34 Playwright scenarios cite 68 of the normative catalog's 102 stable journey
+- 34 Playwright scenarios cite 69 of the normative catalog's 102 stable journey
   IDs and run in Chromium, Firefox, and WebKit. A citation means the scenario
   exercises some part of that journey, not that the whole journey is complete.
   `make journey-check` rejects unknown IDs, missing or duplicate per-journey
@@ -66,6 +66,7 @@ implementation MUST NOT narrow the target.
   topic/purpose editing, archive/unarchive, leave, and direct-conversation
   close behavior;
 - member directory, profile/status/photo-URL editing, durable status expiry,
+  up-to-five future statuses with edit/cancel and atomic timed activation,
   manual active/away selection, and presence-aware member affordances;
 - private save-for-later state, focused-message `A`, In progress, Archived,
   Completed, restore/removal, source navigation, and inaccessible-source

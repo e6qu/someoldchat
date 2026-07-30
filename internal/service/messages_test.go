@@ -1734,6 +1734,48 @@ func TestSetUserProfileNormalizesAndPersists(t *testing.T) {
 	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: string(make([]byte, 101))}); err != ErrInvalidProfile {
 		t.Fatalf("oversized profile err=%v", err)
 	}
+	if _, err := messages.SetUserProfile(context.Background(), "T1", "U1", domain.UserProfile{StatusText: "Unknown emoji", StatusEmoji: ":not_a_workspace_emoji:"}); !errors.Is(err, ErrInvalidProfile) {
+		t.Fatalf("unknown status emoji err=%v", err)
+	}
+}
+
+func TestScheduledStatusesFollowSlackCreateEditCancelAndFiveItemContracts(t *testing.T) {
+	ctx := context.Background()
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	messages := Messages{Store: s}
+	start := time.Now().UTC().Truncate(time.Second).Add(2 * time.Hour)
+	first, err := messages.ScheduleUserStatus(ctx, "T1", "U1", " Focus time ", " :dart: ", start, start.Add(time.Hour))
+	if err != nil || first.StatusText != "Focus time" || first.StatusEmoji != ":dart:" {
+		t.Fatalf("scheduled=%+v err=%v", first, err)
+	}
+	for index := 1; index < 5; index++ {
+		at := start.Add(time.Duration(index) * time.Hour)
+		if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Future", ":calendar:", at, at.Add(30*time.Minute)); err != nil {
+			t.Fatalf("schedule %d: %v", index+1, err)
+		}
+	}
+	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Sixth", ":six:", start.Add(10*time.Hour), start.Add(11*time.Hour)); !errors.Is(err, ErrScheduledStatusLimit) {
+		t.Fatalf("sixth scheduled status err=%v", err)
+	}
+	updated, err := messages.UpdateScheduledUserStatus(ctx, "T1", "U1", first.ID, "Deep work", ":headphones:", start.Add(15*time.Minute), start.Add(2*time.Hour))
+	if err != nil || updated.StatusText != "Deep work" || !updated.StartsAt.Equal(start.Add(15*time.Minute)) {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	if err := messages.DeleteScheduledUserStatus(ctx, "T1", "U1", first.ID); err != nil {
+		t.Fatal(err)
+	}
+	values, err := messages.ScheduledUserStatuses(ctx, "T1", "U1")
+	if err != nil || len(values) != 4 {
+		t.Fatalf("scheduled statuses=%+v err=%v", values, err)
+	}
+	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Past", ":clock:", time.Now().Add(-time.Minute), time.Now().Add(time.Hour)); !errors.Is(err, ErrInvalidScheduledStatus) {
+		t.Fatalf("past scheduled status err=%v", err)
+	}
+	if _, err := messages.ScheduleUserStatus(ctx, "T1", "U1", "Unknown emoji", ":not_a_workspace_emoji:", start.Add(20*time.Hour), start.Add(21*time.Hour)); !errors.Is(err, ErrInvalidScheduledStatus) {
+		t.Fatalf("unknown scheduled status emoji err=%v", err)
+	}
 }
 
 func TestScheduleMessageWithBlocksPersistsNormalizedPayload(t *testing.T) {

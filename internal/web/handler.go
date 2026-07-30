@@ -351,6 +351,16 @@ type membersData struct {
 	CanEditProfile bool
 	CanMessage     bool
 	MoreMembersURL string
+	Scheduled      []scheduledStatusView
+	DraftScheduled scheduledStatusView
+}
+
+type scheduledStatusView struct {
+	ID          string
+	StatusText  string
+	StatusEmoji string
+	StartsAt    int64
+	EndsAt      int64
 }
 
 type directMessagesData struct {
@@ -1493,7 +1503,7 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
 .person h3{font-size:16px;margin:0}
 .person p{margin:5px 0;color:var(--muted)}
 .person button{border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--text);padding:5px 10px}
-.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}.status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px 9px}.profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.availability-form{margin:0 0 18px;padding:12px;border:1px solid var(--line);border-radius:8px}.availability-form label{display:flex;align-items:end;gap:8px}.availability-form select{min-width:150px}
+.presence{display:inline-block;width:9px;height:9px;border:2px solid var(--muted);border-radius:50%;margin-right:5px;vertical-align:middle}.presence.active{border-color:var(--ok);background:var(--ok)}.presence.auto{border-style:dashed}.status-suggestions{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.status-suggestions button,.secondary{border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--text);padding:7px 9px}.profile-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.availability-form{margin:0 0 18px;padding:12px;border:1px solid var(--line);border-radius:8px}.availability-form label{display:flex;align-items:end;gap:8px}.availability-form select{min-width:150px}.scheduled-statuses{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}.scheduled-status{margin:12px 0;padding:12px;border:1px solid var(--line);border-radius:8px}.scheduled-status h4{margin:0}.scheduled-actions{display:flex;gap:8px;align-items:center}.danger{border:1px solid var(--danger);color:var(--danger);border-radius:5px;background:transparent;padding:8px 12px;font-weight:700}
 @media(max-width:720px){.grid{grid-template-columns:minmax(0,1fr)}.layout{padding:20px 14px}}
 </style>{{end}}
 {{define "content"}}
@@ -1522,7 +1532,29 @@ const membersMarkup = `{{define "title"}}People · SameOldChat{{end}}
         <input type="hidden" name="status_expiration" value="{{.StatusExpires}}" data-status-expiration>
         <label class="field" for="avatar_url">Profile photo URL<input id="avatar_url" type="url" maxlength="2048" name="avatar_url" value="{{.AvatarURL}}" placeholder="https://example.com/avatar.jpg"><small>Leave blank to use your initial.</small></label>
         <div class="profile-actions"><button class="save" type="submit">Save changes</button>{{if .Profile.StatusText}}<button class="secondary" type="submit" name="clear_status" value="true">Clear status</button>{{end}}</div>
-      </form>{{else}}<p class="muted">Your current permissions allow viewing profiles but not changing yours.</p>{{end}}
+      </form>
+      <section class="scheduled-statuses" aria-labelledby="scheduled-statuses-heading">
+        <h3 id="scheduled-statuses-heading">Scheduled</h3>
+        <p class="muted">Schedule up to five statuses. You can edit or cancel one until it starts.</p>
+        <form class="scheduled-status" method="post" action="/app/status/schedule">
+          <input type="hidden" name="_csrf" value="{{.CSRFToken}}">
+          <h4>Schedule a status</h4>
+          <label class="field" for="scheduled_status_text">Status<input id="scheduled_status_text" name="status_text" maxlength="100" value="{{.DraftScheduled.StatusText}}"></label>
+          <label class="field" for="scheduled_status_emoji">Emoji<input id="scheduled_status_emoji" name="status_emoji" maxlength="64" value="{{.DraftScheduled.StatusEmoji}}" placeholder=":calendar:"></label>
+          <label class="field" for="scheduled_starts_local">Start<input id="scheduled_starts_local" type="datetime-local" data-unix-local required></label><input type="hidden" name="starts_at" value="{{.DraftScheduled.StartsAt}}" data-unix-value>
+          <label class="field" for="scheduled_ends_local">End<input id="scheduled_ends_local" type="datetime-local" data-unix-local required></label><input type="hidden" name="ends_at" value="{{.DraftScheduled.EndsAt}}" data-unix-value>
+          <button class="save" type="submit">Save scheduled status</button>
+        </form>
+        {{range .Scheduled}}<form class="scheduled-status" method="post" action="/app/status/scheduled/update">
+          <input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="id" value="{{.ID}}">
+          <label class="field" for="scheduled-text-{{.ID}}">Status<input id="scheduled-text-{{.ID}}" name="status_text" maxlength="100" value="{{.StatusText}}"></label>
+          <label class="field" for="scheduled-emoji-{{.ID}}">Emoji<input id="scheduled-emoji-{{.ID}}" name="status_emoji" maxlength="64" value="{{.StatusEmoji}}"></label>
+          <label class="field" for="scheduled-start-{{.ID}}">Start<input id="scheduled-start-{{.ID}}" type="datetime-local" data-unix-local required></label><input type="hidden" name="starts_at" value="{{.StartsAt}}" data-unix-value>
+          <label class="field" for="scheduled-end-{{.ID}}">End<input id="scheduled-end-{{.ID}}" type="datetime-local" data-unix-local required></label><input type="hidden" name="ends_at" value="{{.EndsAt}}" data-unix-value>
+          <div class="scheduled-actions"><button class="save" type="submit">Save</button><button class="danger" type="submit" formaction="/app/status/scheduled/delete" formnovalidate>Cancel status</button></div>
+        </form>{{else}}<p class="muted">No scheduled statuses.</p>{{end}}
+      </section>
+      {{else}}<p class="muted">Your current permissions allow viewing profiles but not changing yours.</p>{{end}}
     </section>
     <section class="card" aria-labelledby="people-heading">
       <h2 id="people-heading">Workspace members</h2>
@@ -1544,6 +1576,7 @@ var hidden=document.querySelector('[data-status-expiration]');
 var local=document.querySelector('[data-status-expiration-local]');
 function localValue(date){var offset=date.getTimezoneOffset()*60000;return new Date(date.getTime()-offset).toISOString().slice(0,16)}
 if(hidden&&local){var current=Number(hidden.value||0);if(current>0)local.value=localValue(new Date(current*1000));local.addEventListener('change',function(){if(!local.value){hidden.value='0';return}var selected=new Date(local.value);hidden.value=isNaN(selected.getTime())?'':String(Math.floor(selected.getTime()/1000))})}
+Array.prototype.forEach.call(document.querySelectorAll('form.scheduled-status'),function(form){var locals=form.querySelectorAll('[data-unix-local]');var values=form.querySelectorAll('[data-unix-value]');Array.prototype.forEach.call(locals,function(local,index){var value=values[index];if(!value)return;var current=Number(value.value||0);if(current>0)local.value=localValue(new Date(current*1000));local.addEventListener('change',function(){if(!local.value){value.value='';return}var selected=new Date(local.value);value.value=isNaN(selected.getTime())?'':String(Math.floor(selected.getTime()/1000))})})});
 Array.prototype.forEach.call(document.querySelectorAll('[data-status-text]'),function(button){button.addEventListener('click',function(){var text=document.getElementById('status_text');var emoji=document.getElementById('status_emoji');if(text)text.value=button.getAttribute('data-status-text')||'';if(emoji)emoji.value=button.getAttribute('data-status-emoji')||'';if(text)text.focus()})});
 Array.prototype.forEach.call(document.querySelectorAll('[data-status-expires]'),function(node){var value=Number(node.getAttribute('data-status-expires')||0);if(value>0){var date=new Date(value*1000);node.dateTime=date.toISOString();node.textContent=new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short'}).format(date)}});
 })();</script>{{end}}`
@@ -2714,6 +2747,9 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/developer/apps/app-token", h.issueDeveloperAppToken)
 	mux.HandleFunc("POST /app/profile", h.setProfile)
 	mux.HandleFunc("POST /app/presence", h.setPresence)
+	mux.HandleFunc("POST /app/status/schedule", h.scheduleStatus)
+	mux.HandleFunc("POST /app/status/scheduled/update", h.updateScheduledStatus)
+	mux.HandleFunc("POST /app/status/scheduled/delete", h.deleteScheduledStatus)
 	mux.HandleFunc("POST /app/join", h.joinConversation)
 	mux.HandleFunc("POST /app/message", h.postMessage)
 	mux.HandleFunc("POST /app/draft", h.saveDraft)
@@ -5217,7 +5253,7 @@ func (h Handler) members(w http.ResponseWriter, r *http.Request) {
 		h.writeAuthError(w, err)
 		return
 	}
-	h.renderMembers(w, r, principal, nil, "", http.StatusOK)
+	h.renderMembers(w, r, principal, nil, nil, "", http.StatusOK)
 }
 
 func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
@@ -5303,7 +5339,7 @@ func (h Handler) directMessages(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusOK, "direct message rendering unavailable")
 }
 
-func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal auth.Principal, submitted *domain.UserProfile, message string, status int) {
+func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal auth.Principal, submitted *domain.UserProfile, submittedScheduled *scheduledStatusView, message string, status int) {
 	cursor := domain.Cursor(strings.TrimSpace(r.URL.Query().Get("cursor")))
 	page, err := h.Messages.Users(r.Context(), principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: memberWindow, Cursor: cursor})
 	if err != nil {
@@ -5317,6 +5353,11 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 	current, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, principal.UserID)
 	if err != nil {
 		h.writeStoreError(w, err, "Your profile is temporarily unavailable.")
+		return
+	}
+	scheduledStatuses, err := h.Messages.ScheduledUserStatuses(r.Context(), principal.WorkspaceID, principal.UserID)
+	if err != nil {
+		h.writeStoreError(w, err, "Your scheduled statuses are temporarily unavailable.")
 		return
 	}
 	sessionCookie, err := r.Cookie(auth.SessionCookieName)
@@ -5351,6 +5392,25 @@ func (h Handler) renderMembers(w http.ResponseWriter, r *http.Request, principal
 		Error:          message,
 		CanEditProfile: principal.HasScope(auth.ScopeUsersWrite),
 		CanMessage:     principal.HasScope(auth.ScopeChannelsManage),
+		Scheduled:      make([]scheduledStatusView, 0, len(scheduledStatuses)),
+	}
+	for _, value := range scheduledStatuses {
+		data.Scheduled = append(data.Scheduled, scheduledStatusView{
+			ID: string(value.ID), StatusText: value.StatusText, StatusEmoji: value.StatusEmoji,
+			StartsAt: value.StartsAt.Unix(), EndsAt: value.EndsAt.Unix(),
+		})
+	}
+	if submittedScheduled != nil {
+		if submittedScheduled.ID == "" {
+			data.DraftScheduled = *submittedScheduled
+		} else {
+			for index := range data.Scheduled {
+				if data.Scheduled[index].ID == submittedScheduled.ID {
+					data.Scheduled[index] = *submittedScheduled
+					break
+				}
+			}
+		}
 	}
 	if page.HasMore && page.NextCursor != "" {
 		data.MoreMembersURL = "/app/members?" + url.Values{"cursor": {string(page.NextCursor)}}.Encode()
@@ -5388,7 +5448,7 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		} else {
 			seconds, parseErr := strconv.ParseInt(expiration, 10, 64)
 			if parseErr != nil || seconds <= time.Now().UTC().Unix() {
-				h.renderMembers(w, r, principal, &profile, "Your profile was not saved. Choose a future time for the status to clear.", http.StatusBadRequest)
+				h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. Choose a future time for the status to clear.", http.StatusBadRequest)
 				return
 			}
 			profile.StatusExpiration = time.Unix(seconds, 0).UTC()
@@ -5408,10 +5468,110 @@ func (h Handler) setProfile(w http.ResponseWriter, r *http.Request) {
 		// A rejected save keeps every submitted value and says which limit it
 		// crossed, instead of answering with a bare status line.
 		if errors.Is(err, service.ErrInvalidProfile) {
-			h.renderMembers(w, r, principal, &profile, "Your profile was not saved. A display name is at most 80 characters, a status at most 100, a status emoji at most 64, and the profile photo URL at most 2048.", http.StatusBadRequest)
+			h.renderMembers(w, r, principal, &profile, nil, "Your profile was not saved. A display name is at most 80 characters, a status at most 100, the status emoji must be a workspace emoji of at most 64 characters, and the profile photo URL at most 2048.", http.StatusBadRequest)
 			return
 		}
-		h.renderMembers(w, r, principal, &profile, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
+		h.renderMembers(w, r, principal, &profile, nil, "Your profile could not be saved because the workspace store is temporarily unavailable. Try again.", http.StatusServiceUnavailable)
+		return
+	}
+	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
+}
+
+func scheduledStatusTimes(fields map[string]string) (time.Time, time.Time, error) {
+	startSeconds, startErr := strconv.ParseInt(strings.TrimSpace(fields["starts_at"]), 10, 64)
+	endSeconds, endErr := strconv.ParseInt(strings.TrimSpace(fields["ends_at"]), 10, 64)
+	if startErr != nil || endErr != nil || startSeconds <= 0 || endSeconds <= 0 {
+		return time.Time{}, time.Time{}, service.ErrInvalidScheduledStatus
+	}
+	return time.Unix(startSeconds, 0).UTC(), time.Unix(endSeconds, 0).UTC(), nil
+}
+
+func scheduledStatusSubmission(fields map[string]string) scheduledStatusView {
+	value := scheduledStatusView{
+		ID: strings.TrimSpace(fields["id"]), StatusText: fields["status_text"], StatusEmoji: fields["status_emoji"],
+	}
+	value.StartsAt, _ = strconv.ParseInt(strings.TrimSpace(fields["starts_at"]), 10, 64)
+	value.EndsAt, _ = strconv.ParseInt(strings.TrimSpace(fields["ends_at"]), 10, 64)
+	return value
+}
+
+func (h Handler) scheduleStatus(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The scheduled status could not be read. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	submitted := scheduledStatusSubmission(fields)
+	startsAt, endsAt, err := scheduledStatusTimes(fields)
+	if err == nil {
+		_, err = h.Messages.ScheduleUserStatus(r.Context(), principal.WorkspaceID, principal.UserID, fields["status_text"], fields["status_emoji"], startsAt, endsAt)
+	}
+	if errors.Is(err, service.ErrInvalidScheduledStatus) {
+		h.renderMembers(w, r, principal, nil, &submitted, "The status was not scheduled. Choose a future start and a later end, and enter a valid workspace emoji and status of at most 100 characters.", http.StatusBadRequest)
+		return
+	}
+	if errors.Is(err, service.ErrScheduledStatusLimit) {
+		h.renderMembers(w, r, principal, nil, &submitted, "The status was not scheduled. Slack allows up to five scheduled statuses; edit or cancel one first.", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		h.writeStoreError(w, err, "The status could not be scheduled right now.")
+		return
+	}
+	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
+}
+
+func (h Handler) updateScheduledStatus(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The scheduled status could not be read. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	submitted := scheduledStatusSubmission(fields)
+	startsAt, endsAt, err := scheduledStatusTimes(fields)
+	if err == nil {
+		_, err = h.Messages.UpdateScheduledUserStatus(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledStatusID(strings.TrimSpace(fields["id"])), fields["status_text"], fields["status_emoji"], startsAt, endsAt)
+	}
+	if errors.Is(err, service.ErrInvalidScheduledStatus) {
+		h.renderMembers(w, r, principal, nil, &submitted, "The scheduled status was not updated. Choose a future start, a later end, and a valid workspace emoji.", http.StatusBadRequest)
+		return
+	}
+	if errors.Is(err, store.ErrNotFound) {
+		h.renderMembers(w, r, principal, nil, nil, "That scheduled status no longer exists. It may already have started or been cancelled.", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		h.writeStoreError(w, err, "The scheduled status could not be updated right now.")
+		return
+	}
+	http.Redirect(w, r, "/app/members", http.StatusSeeOther)
+}
+
+func (h Handler) deleteScheduledStatus(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeUsersWrite)
+	if err != nil {
+		h.writeAuthError(w, err)
+		return
+	}
+	fields, ok := h.decodeMutation(w, r, "The scheduled status could not be read. Reload the page and try again.")
+	if !ok {
+		return
+	}
+	err = h.Messages.DeleteScheduledUserStatus(r.Context(), principal.WorkspaceID, principal.UserID, domain.ScheduledStatusID(strings.TrimSpace(fields["id"])))
+	if errors.Is(err, store.ErrNotFound) {
+		h.renderMembers(w, r, principal, nil, nil, "That scheduled status no longer exists. It may already have started or been cancelled.", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		h.writeStoreError(w, err, "The scheduled status could not be cancelled right now.")
 		return
 	}
 	http.Redirect(w, r, "/app/members", http.StatusSeeOther)

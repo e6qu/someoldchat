@@ -113,13 +113,32 @@ type UserProfile struct {
 	StatusText       string
 	StatusEmoji      string
 	StatusExpiration time.Time
-	Image24          string
-	Image32          string
-	Image48          string
-	Image72          string
-	Image192         string
-	Image512         string
-	Image1024        string
+	// ActiveScheduledStatusID is internal lifecycle fencing. It is deliberately
+	// absent from Slack Web API profile JSON.
+	ActiveScheduledStatusID ScheduledStatusID
+	Image24                 string
+	Image32                 string
+	Image48                 string
+	Image72                 string
+	Image192                string
+	Image512                string
+	Image1024               string
+}
+
+// ScheduledStatus is a first-party Slack client feature, not a Slack Web API
+// resource. Slack lets a member keep at most five future statuses, edit or
+// cancel them before they start, and chooses the resulting current-status
+// expiration from the scheduled end time.
+type ScheduledStatus struct {
+	ID          ScheduledStatusID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	StatusText  string
+	StatusEmoji string
+	StartsAt    time.Time
+	EndsAt      time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type User struct {

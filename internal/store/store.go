@@ -159,6 +159,7 @@ var (
 	ErrConflict                  = errors.New("state conflict")
 	ErrBookmarkLimit             = errors.New("bookmark limit reached")
 	ErrScheduledMessageLimit     = errors.New("scheduled message channel window limit reached")
+	ErrScheduledStatusLimit      = errors.New("scheduled status limit reached")
 	ErrSocketModeConnectionLimit = errors.New("Socket Mode connection limit reached")
 	// ErrMessageTimestampTaken reports that another message in the same
 	// conversation already owns the microsecond the new message was given.
@@ -285,7 +286,15 @@ type Store interface {
 	// expected deadline still matches may clear it and publish the event.
 	DueUserStatuses(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.User, error)
 	EarliestUserStatusExpiration(context.Context, domain.WorkspaceID) (time.Time, error)
-	ExpireUserStatus(context.Context, domain.WorkspaceID, domain.UserID, time.Time, time.Time, events.Event) (bool, error)
+	ExpireUserStatus(context.Context, domain.WorkspaceID, domain.UserID, time.Time, domain.ScheduledStatusID, time.Time, events.Event) (bool, error)
+	CreateScheduledStatus(context.Context, domain.ScheduledStatus) error
+	GetScheduledStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledStatusID) (domain.ScheduledStatus, error)
+	ListScheduledStatuses(context.Context, domain.WorkspaceID, domain.UserID) ([]domain.ScheduledStatus, error)
+	UpdateScheduledStatus(context.Context, domain.ScheduledStatus) error
+	DeleteScheduledStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledStatusID) error
+	DueScheduledStatuses(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.ScheduledStatus, error)
+	EarliestScheduledStatusStart(context.Context, domain.WorkspaceID) (time.Time, error)
+	ActivateScheduledStatus(context.Context, domain.WorkspaceID, domain.UserID, domain.ScheduledStatusID, time.Time, time.Time, events.Event) (bool, error)
 	SetUserPresence(context.Context, domain.WorkspaceID, domain.UserID, domain.Presence, events.Event) (domain.User, error)
 	SetUserExpiration(context.Context, domain.WorkspaceID, domain.UserID, time.Time, events.Event) error
 	SetUserDeleted(context.Context, domain.WorkspaceID, domain.UserID, bool, events.Event) error

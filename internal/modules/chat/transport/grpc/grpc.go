@@ -1782,6 +1782,52 @@ func (r Remote) SetUserProfile(ctx context.Context, workspaceID domain.Workspace
 	return decodeProtoUser(out)
 }
 
+func (r Remote) ScheduleUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, statusText, statusEmoji string, startsAt, endsAt time.Time) (domain.ScheduledStatus, error) {
+	out, err := r.presence.ScheduleUserStatus(ctx, &chatv1.ScheduleUserStatusRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), StatusText: statusText, StatusEmoji: statusEmoji,
+		StartsAt: unixOrZero(startsAt), EndsAt: unixOrZero(endsAt),
+	})
+	if err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	return decodeProtoScheduledStatus(out)
+}
+
+func (r Remote) ScheduledUserStatuses(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID) ([]domain.ScheduledStatus, error) {
+	out, err := r.presence.ScheduledUserStatuses(ctx, &chatv1.ScheduledUserStatusesRequest{WorkspaceId: string(workspaceID), UserId: string(userID)})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.ScheduledStatus, 0, len(out.GetStatuses()))
+	for _, value := range out.GetStatuses() {
+		decoded, err := decodeProtoScheduledStatus(value)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, decoded)
+	}
+	return values, nil
+}
+
+func (r Remote) UpdateScheduledUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID, statusText, statusEmoji string, startsAt, endsAt time.Time) (domain.ScheduledStatus, error) {
+	out, err := r.presence.UpdateScheduledUserStatus(ctx, &chatv1.UpdateScheduledUserStatusRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Id: string(id), StatusText: statusText, StatusEmoji: statusEmoji,
+		StartsAt: unixOrZero(startsAt), EndsAt: unixOrZero(endsAt),
+	})
+	if err != nil {
+		return domain.ScheduledStatus{}, err
+	}
+	return decodeProtoScheduledStatus(out)
+}
+
+func (r Remote) DeleteScheduledUserStatus(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, id domain.ScheduledStatusID) error {
+	out, err := r.presence.DeleteScheduledUserStatus(ctx, &chatv1.DeleteScheduledUserStatusRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Id: string(id)})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "scheduled status deletion")
+}
+
 func (r Remote) SetUserPresence(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, presence domain.Presence) (domain.User, error) {
 	in := &chatv1.SetUserPresenceRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Presence: string(presence)}
 	out, err := r.presence.SetUserPresence(ctx, in)
@@ -5388,6 +5434,41 @@ func (s *Server) SetUserProfile(ctx context.Context, input *chatv1.SetUserProfil
 	return s.setUserProfileProto(ctx, input)
 }
 
+func (s *Server) ScheduleUserStatus(ctx context.Context, input *chatv1.ScheduleUserStatusRequest) (*chatv1.ScheduledStatus, error) {
+	value, err := s.implementation.ScheduleUserStatus(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetStatusText(), input.GetStatusEmoji(), time.Unix(input.GetStartsAt(), 0).UTC(), time.Unix(input.GetEndsAt(), 0).UTC())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoScheduledStatus(value), nil
+}
+
+func (s *Server) ScheduledUserStatuses(ctx context.Context, input *chatv1.ScheduledUserStatusesRequest) (*chatv1.ScheduledUserStatusesResponse, error) {
+	values, err := s.implementation.ScheduledUserStatuses(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.ScheduledUserStatusesResponse{Statuses: make([]*chatv1.ScheduledStatus, 0, len(values))}
+	for _, value := range values {
+		result.Statuses = append(result.Statuses, encodeProtoScheduledStatus(value))
+	}
+	return result, nil
+}
+
+func (s *Server) UpdateScheduledUserStatus(ctx context.Context, input *chatv1.UpdateScheduledUserStatusRequest) (*chatv1.ScheduledStatus, error) {
+	value, err := s.implementation.UpdateScheduledUserStatus(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ScheduledStatusID(input.GetId()), input.GetStatusText(), input.GetStatusEmoji(), time.Unix(input.GetStartsAt(), 0).UTC(), time.Unix(input.GetEndsAt(), 0).UTC())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoScheduledStatus(value), nil
+}
+
+func (s *Server) DeleteScheduledUserStatus(ctx context.Context, input *chatv1.DeleteScheduledUserStatusRequest) (*chatv1.MutationResponse, error) {
+	if err := s.implementation.DeleteScheduledUserStatus(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.ScheduledStatusID(input.GetId())); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.MutationResponse{Ok: true}, nil
+}
+
 func (s *Server) SetUserPresence(ctx context.Context, input *chatv1.SetUserPresenceRequest) (*chatv1.User, error) {
 	return s.setUserPresenceProto(ctx, input)
 }
@@ -6369,7 +6450,29 @@ func encodeProtoProfile(value domain.UserProfile) *chatv1.UserProfile {
 	if !value.StatusExpiration.IsZero() {
 		result.StatusExpiration = value.StatusExpiration.UTC().Unix()
 	}
+	result.ActiveScheduledStatusId = string(value.ActiveScheduledStatusID)
 	return result
+}
+
+func encodeProtoScheduledStatus(value domain.ScheduledStatus) *chatv1.ScheduledStatus {
+	return &chatv1.ScheduledStatus{
+		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), UserId: string(value.UserID),
+		StatusText: value.StatusText, StatusEmoji: value.StatusEmoji,
+		StartsAt: unixOrZero(value.StartsAt), EndsAt: unixOrZero(value.EndsAt),
+		CreatedAtUnixNano: value.CreatedAt.UTC().UnixNano(), UpdatedAtUnixNano: value.UpdatedAt.UTC().UnixNano(),
+	}
+}
+
+func decodeProtoScheduledStatus(value *chatv1.ScheduledStatus) (domain.ScheduledStatus, error) {
+	if value == nil || value.GetId() == "" || value.GetWorkspaceId() == "" || value.GetUserId() == "" || value.GetStartsAt() <= 0 || value.GetEndsAt() <= 0 || value.GetCreatedAtUnixNano() <= 0 || value.GetUpdatedAtUnixNano() <= 0 {
+		return domain.ScheduledStatus{}, errors.New("typed scheduled status is incomplete")
+	}
+	return domain.ScheduledStatus{
+		ID: domain.ScheduledStatusID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()), UserID: domain.UserID(value.GetUserId()),
+		StatusText: value.GetStatusText(), StatusEmoji: value.GetStatusEmoji(),
+		StartsAt: timeFromUnix(value.GetStartsAt()), EndsAt: timeFromUnix(value.GetEndsAt()),
+		CreatedAt: time.Unix(0, value.GetCreatedAtUnixNano()).UTC(), UpdatedAt: time.Unix(0, value.GetUpdatedAtUnixNano()).UTC(),
+	}, nil
 }
 
 // maxSeamPage bounds what one request may make the server allocate on the
@@ -7520,16 +7623,17 @@ func decodeProtoUser(value *chatv1.User) (domain.User, error) {
 		Name:        value.GetName(),
 		RealName:    value.GetRealName(),
 		Profile: domain.UserProfile{
-			DisplayName: profile.GetDisplayName(),
-			StatusText:  profile.GetStatusText(),
-			StatusEmoji: profile.GetStatusEmoji(),
-			Image24:     profile.GetImage_24(),
-			Image32:     profile.GetImage_32(),
-			Image48:     profile.GetImage_48(),
-			Image72:     profile.GetImage_72(),
-			Image192:    profile.GetImage_192(),
-			Image512:    profile.GetImage_512(),
-			Image1024:   profile.GetImage_1024(),
+			DisplayName:             profile.GetDisplayName(),
+			StatusText:              profile.GetStatusText(),
+			StatusEmoji:             profile.GetStatusEmoji(),
+			Image24:                 profile.GetImage_24(),
+			Image32:                 profile.GetImage_32(),
+			Image48:                 profile.GetImage_48(),
+			Image72:                 profile.GetImage_72(),
+			Image192:                profile.GetImage_192(),
+			Image512:                profile.GetImage_512(),
+			Image1024:               profile.GetImage_1024(),
+			ActiveScheduledStatusID: domain.ScheduledStatusID(profile.GetActiveScheduledStatusId()),
 		},
 		Presence: presence,
 		Deleted:  value.GetDeleted(),

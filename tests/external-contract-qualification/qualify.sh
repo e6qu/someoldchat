@@ -219,6 +219,10 @@ assert_contains "$work/status.html" 'away after 10 minutes of desktop inactivity
 	'[STATUS-02] automatic availability transition' "$status_url"
 assert_contains "$work/status.html" 'schedule up to five statuses at a time' \
 	'[STATUS-03] future statuses have a five-item first-party limit' "$status_url"
+assert_contains "$work/status.html" 'Choose a start and end time' \
+	'[STATUS-03] scheduled status duration has explicit start and end instants' "$status_url"
+assert_contains "$work/status.html" 'view, edit, or cancel a status before it starts' \
+	'[STATUS-03] scheduled statuses remain manageable before their start' "$status_url"
 assert_contains "$work/users-profile-set.html" 'status_expiration' \
 	'[STATUS-01] users.profile.set carries the Unix status expiration' "$profile_set_url"
 assert_contains "$work/user-presence.html" 'Either auto or away' \

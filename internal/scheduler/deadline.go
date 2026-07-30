@@ -155,6 +155,43 @@ func PublishEarliestProductWakeDeadlineWithStatuses(ctx context.Context, schedul
 	return publisher.SetWakeDeadline(fence, earliest)
 }
 
+// PublishEarliestProductWakeDeadlineComplete includes every durable product
+// timer, including the start of a future custom status.
+func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled Source, reminders ReminderSource, statuses StatusSource, futureStatuses ScheduledStatusSource, publisher FencedDeadlinePublisher, workspaces ...domain.WorkspaceID) error {
+	if scheduled == nil || reminders == nil || statuses == nil || futureStatuses == nil || publisher == nil {
+		return errors.New("product wake deadline requires all timer sources and a publisher")
+	}
+	fence, err := publisher.Fence(ctx)
+	if err != nil {
+		return err
+	}
+	if len(workspaces) == 0 {
+		workspaces = []domain.WorkspaceID{""}
+	}
+	var earliest time.Time
+	for _, workspace := range workspaces {
+		candidates := make([]time.Time, 0, 4)
+		for _, read := range []func() (time.Time, error){
+			func() (time.Time, error) { return scheduled.EarliestScheduledMessage(ctx, workspace) },
+			func() (time.Time, error) { return reminders.EarliestLaterReminder(ctx, workspace) },
+			func() (time.Time, error) { return statuses.EarliestUserStatusExpiration(ctx, workspace) },
+			func() (time.Time, error) { return futureStatuses.EarliestScheduledStatusStart(ctx, workspace) },
+		} {
+			value, err := read()
+			if err != nil {
+				return err
+			}
+			candidates = append(candidates, value)
+		}
+		for _, candidate := range candidates {
+			if !candidate.IsZero() && (earliest.IsZero() || candidate.Before(earliest)) {
+				earliest = candidate
+			}
+		}
+	}
+	return publisher.SetWakeDeadline(fence, earliest)
+}
+
 // ActivatorDeadlinePublisher publishes the wake hint to the lifecycle activator
 // over its authenticated control API.
 //

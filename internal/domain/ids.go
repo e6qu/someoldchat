@@ -27,6 +27,7 @@ type LaterReminderID string
 type ActivityID string
 type SavedItemID string
 type ScheduledMessageID string
+type ScheduledStatusID string
 type UserGroupID string
 type InviteRequestID string
 type AppID string
@@ -160,6 +161,11 @@ func NewScheduledMessageID() (ScheduledMessageID, error) {
 		return "", err
 	}
 	return ScheduledMessageID("Q" + strings.ToUpper(value[1:])), nil
+}
+
+func NewScheduledStatusID() (ScheduledStatusID, error) {
+	value, err := PublicID("scheduled_status_")
+	return ScheduledStatusID(value), err
 }
 
 func NewUserGroupID() (UserGroupID, error) {

@@ -137,6 +137,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 	var scheduledWorker scheduler.Worker
 	var reminderWorker scheduler.ReminderWorker
 	var statusWorker scheduler.StatusWorker
+	var scheduledStatusWorker scheduler.ScheduledStatusWorker
 	var appEventProcessor slackapp.EventProcessor
 	if *deliveryFormat == "record" {
 		worker, err = outbox.NewWorker(runtime.OutboxSource, *owner, *limit, *lease, delivery)
@@ -165,6 +166,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure status worker", "error", err)
 		return exitConfiguration
 	}
+	scheduledStatusWorker, err = scheduler.NewScheduledStatusWorker(runtime.Store, *limit)
+	if err != nil {
+		logger.Error("configure scheduled status worker", "error", err)
+		return exitConfiguration
+	}
 	var deadlinePublisher scheduler.FencedDeadlinePublisher
 	if *wakeDeadlineURL != "" {
 		deadlinePublisher, err = scheduler.NewActivatorDeadlinePublisher(*wakeDeadlineURL, *wakeDeadlineToken, nil)
@@ -178,9 +184,9 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			return nil
 		}
 		if workspaceID == "" {
-			return scheduler.PublishEarliestProductWakeDeadlineWithStatuses(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, deadlinePublisher)
+			return scheduler.PublishEarliestProductWakeDeadlineComplete(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, runtime.Store, deadlinePublisher)
 		}
-		return scheduler.PublishEarliestProductWakeDeadlineWithStatuses(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, deadlinePublisher, workspaceID)
+		return scheduler.PublishEarliestProductWakeDeadlineComplete(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, runtime.Store, deadlinePublisher, workspaceID)
 	}
 	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -198,6 +204,10 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if reminderErr != nil {
 				logger.Error("reminder execution failed", "count", reminderCount, "error", reminderErr)
 			}
+			scheduledStatusCount, scheduledStatusErr := scheduledStatusWorker.RunOnce(cycleContext, "")
+			if scheduledStatusErr != nil {
+				logger.Error("scheduled status execution failed", "count", scheduledStatusCount, "error", scheduledStatusErr)
+			}
 			statusCount, statusErr := statusWorker.RunOnce(cycleContext, "")
 			if statusErr != nil {
 				logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
@@ -206,7 +216,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if deadlineErr != nil {
 				logger.Error("wake deadline publication failed", "error", deadlineErr)
 			}
-			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || statusCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, statusErr, deadlineErr)
+			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, statusErr, deadlineErr)
 		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
@@ -224,6 +234,11 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, reminderErr)
 			logger.Error("reminder execution failed", "count", reminderCount, "error", reminderErr)
 		}
+		scheduledStatusCount, scheduledStatusErr := scheduledStatusWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if scheduledStatusErr != nil {
+			failures = errors.Join(failures, scheduledStatusErr)
+			logger.Error("scheduled status execution failed", "count", scheduledStatusCount, "error", scheduledStatusErr)
+		}
 		statusCount, statusErr := statusWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
 		if statusErr != nil {
 			failures = errors.Join(failures, statusErr)
@@ -234,7 +249,7 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, deadlineErr)
 			logger.Error("wake deadline publication failed", "error", deadlineErr)
 		}
-		return count > 0 || scheduledCount > 0 || reminderCount > 0 || statusCount > 0, failures
+		return count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0, failures
 	}
 	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
 }

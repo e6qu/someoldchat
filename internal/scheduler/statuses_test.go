@@ -76,7 +76,7 @@ func TestStatusWorkerLeavesReplacementStatusAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	changed, err := source.ExpireUserStatus(ctx, "T1", "U1", observed[0].Profile.StatusExpiration, due, expirationEvent)
+	changed, err := source.ExpireUserStatus(ctx, "T1", "U1", observed[0].Profile.StatusExpiration, observed[0].Profile.ActiveScheduledStatusID, due, expirationEvent)
 	if err != nil || changed {
 		t.Fatalf("stale expiration changed=%t err=%v", changed, err)
 	}

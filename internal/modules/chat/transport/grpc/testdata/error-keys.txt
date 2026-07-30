@@ -53,6 +53,7 @@ service.invalid_profile
 service.invalid_reaction
 service.invalid_reminder
 service.invalid_remote_file
+service.invalid_scheduled_status
 service.invalid_search
 service.invalid_snooze
 service.invalid_stream_chunks
@@ -73,6 +74,7 @@ service.not_in_conversation
 service.not_workspace_admin
 service.oauth_app_mismatch
 service.reminder_time_in_past
+service.scheduled_status_limit
 service.scheduled_time_in_past
 service.scheduled_time_too_far
 service.scheduled_too_many
@@ -90,5 +92,6 @@ store.lease_conflict
 store.message_timestamp_taken
 store.not_found
 store.scheduled_message_limit
+store.scheduled_status_limit
 store.socket_mode_connection_limit
 store.transient
