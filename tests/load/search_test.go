@@ -116,7 +116,9 @@ func TestSearchPaginationIsCompleteWhileMessagesArrive(t *testing.T) {
 	seen := make(map[domain.MessageID]int)
 	cursor := domain.Cursor("")
 	for pages := 0; pages < (seeded+arriving)/pageSize+8; pages++ {
-		page, err := repository.SearchMessages(ctx, "T1", "U1", "needle", domain.PageRequest{Limit: pageSize, Cursor: cursor})
+		page, err := repository.SearchMessages(ctx, "T1", "U1", domain.MessageSearch{
+			Terms: []string{"needle"}, Page: domain.PageRequest{Limit: pageSize, Cursor: cursor},
+		})
 		if err != nil {
 			close(stop)
 			writing.Wait()
@@ -174,7 +176,9 @@ func TestSearchNeverLeaksPrivateConversationsToNonMembers(t *testing.T) {
 	// Positive control: a member must actually find these messages, otherwise
 	// the leak assertion below would hold for a search that returns nothing.
 	repository.SeedConversationMember("C2", "U1")
-	control, err := repository.SearchMessages(ctx, "T1", "U1", "needle", domain.PageRequest{Limit: 50})
+	control, err := repository.SearchMessages(ctx, "T1", "U1", domain.MessageSearch{
+		Terms: []string{"needle"}, Page: domain.PageRequest{Limit: 50},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +229,9 @@ func TestSearchNeverLeaksPrivateConversationsToNonMembers(t *testing.T) {
 					return
 				default:
 				}
-				page, err := repository.SearchMessages(ctx, "T1", "U2", "needle", domain.PageRequest{Limit: 50})
+				page, err := repository.SearchMessages(ctx, "T1", "U2", domain.MessageSearch{
+					Terms: []string{"needle"}, Page: domain.PageRequest{Limit: 50},
+				})
 				if err != nil {
 					return
 				}

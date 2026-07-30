@@ -199,7 +199,8 @@ CREATE TABLE IF NOT EXISTS pins (
 CREATE TABLE IF NOT EXISTS files (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id),
  name TEXT NOT NULL, title TEXT NOT NULL, mime_type TEXT NOT NULL, blob_key TEXT NOT NULL UNIQUE,
- size INTEGER NOT NULL, created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, public_token TEXT NOT NULL DEFAULT ''
+ size INTEGER NOT NULL, created_at TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, public_token TEXT NOT NULL DEFAULT '',
+ name_folded TEXT NOT NULL DEFAULT '', title_folded TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS external_uploads (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), uploader_id TEXT NOT NULL REFERENCES users(id),
@@ -388,7 +389,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 110
+const schemaVersion = 111
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2371,6 +2372,31 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 		}
 		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS closed_direct_conversations_conversation ON closed_direct_conversations(conversation_id, user_id)`); err != nil {
 			return fmt.Errorf("index closed direct conversations: %w", err)
+		}
+	}
+	if version < 111 {
+		for _, target := range foldedColumns {
+			if target.table != "files" {
+				continue
+			}
+			existing, err := s.tableColumns(ctx, db, target.table)
+			if err != nil {
+				return err
+			}
+			if !existing[target.folded] {
+				if _, err := db.ExecContext(ctx, `ALTER TABLE files ADD COLUMN `+target.folded+` TEXT NOT NULL DEFAULT ''`); err != nil {
+					return fmt.Errorf("migrate files.%s: %w", target.folded, err)
+				}
+			}
+			name := target.table + "." + target.folded
+			if err := registerBackfills(ctx, db, []string{name}); err != nil {
+				return err
+			}
+			if freshDatabase {
+				if _, err := db.ExecContext(ctx, `UPDATE schema_backfills SET done = 1 WHERE name = ?`, name); err != nil {
+					return fmt.Errorf("complete empty backfill %s: %w", name, err)
+				}
+			}
 		}
 	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
@@ -10270,8 +10296,25 @@ func (s *Store) CreateFile(ctx context.Context, file domain.File, event events.E
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, name_folded, title_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt), domain.FoldSearchText(file.Name), domain.FoldSearchText(file.Title)); err != nil {
 		return err
+	}
+	seen := make(map[domain.ConversationID]struct{}, len(file.SharedChannels))
+	for _, conversationID := range file.SharedChannels {
+		if _, duplicate := seen[conversationID]; duplicate {
+			continue
+		}
+		seen[conversationID] = struct{}{}
+		result, err := tx.ExecContext(ctx, `INSERT INTO file_shares(file_id, conversation_id)
+			SELECT ?, id FROM conversations WHERE id = ? AND workspace_id = ?`, file.ID, conversationID, file.WorkspaceID)
+		if err != nil {
+			return err
+		}
+		if changed, err := result.RowsAffected(); err != nil {
+			return err
+		} else if changed != 1 {
+			return store.ErrNotFound
+		}
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
@@ -10513,6 +10556,154 @@ func (s *Store) ListFiles(ctx context.Context, workspace domain.WorkspaceID, req
 		}
 	}
 	return page, nil
+}
+
+func (s *Store) ListVisibleFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return domain.FilePage{}, err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token
+		FROM files f WHERE f.workspace_id = ? AND f.deleted = 0 AND ` + visibleFilePredicate("f")
+	args := []any{workspace, user, user}
+	if after != "" {
+		query += ` AND f.id > ?`
+		args = append(args, after)
+	}
+	query += ` ORDER BY f.id LIMIT ?`
+	args = append(args, request.Limit+1)
+	values, err := s.readFiles(ctx, query, args...)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	hasMore := len(values) > request.Limit
+	if hasMore {
+		values = values[:request.Limit]
+	}
+	if err := s.hydrateFileShares(ctx, values); err != nil {
+		return domain.FilePage{}, err
+	}
+	page := domain.FilePage{Files: values, HasMore: hasMore}
+	if hasMore {
+		page.NextCursor, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return page, err
+}
+
+func (s *Store) SearchFiles(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, search domain.FileSearch) (domain.FilePage, error) {
+	if search.Count <= 0 || search.Page <= 0 || search.Page > 100 {
+		return domain.FilePage{}, store.InvalidArgument("file search page is invalid")
+	}
+	where := `f.workspace_id = ? AND f.deleted = 0 AND ` + visibleFilePredicate("f")
+	args := []any{workspace, user, user}
+	for _, term := range search.Terms {
+		where += ` AND (f.name_folded LIKE ? ESCAPE '\' OR f.title_folded LIKE ? ESCAPE '\')`
+		pattern := "%" + escapeLikeTerm(domain.FoldSearchText(term)) + "%"
+		args = append(args, pattern, pattern)
+	}
+	for _, term := range search.ExcludedTerms {
+		where += ` AND f.name_folded NOT LIKE ? ESCAPE '\' AND f.title_folded NOT LIKE ? ESCAPE '\'`
+		pattern := "%" + escapeLikeTerm(domain.FoldSearchText(term)) + "%"
+		args = append(args, pattern, pattern)
+	}
+	if search.Uploader != "" {
+		where += ` AND f.uploader_id = ?`
+		args = append(args, search.Uploader)
+	}
+	if search.ExcludedUploader != "" {
+		where += ` AND f.uploader_id <> ?`
+		args = append(args, search.ExcludedUploader)
+	}
+	if search.Conversation != "" {
+		where += ` AND EXISTS (SELECT 1 FROM file_shares fs_search WHERE fs_search.file_id = f.id AND fs_search.conversation_id = ?)`
+		args = append(args, search.Conversation)
+	}
+	if search.ExcludedConversation != "" {
+		where += ` AND NOT EXISTS (SELECT 1 FROM file_shares fs_excluded WHERE fs_excluded.file_id = f.id AND fs_excluded.conversation_id = ?)`
+		args = append(args, search.ExcludedConversation)
+	}
+	if search.FileType != "" {
+		kind := strings.TrimPrefix(domain.FoldSearchText(search.FileType), ".")
+		where += ` AND (f.name_folded LIKE ? ESCAPE '\' OR f.mime_type LIKE ? ESCAPE '\')`
+		args = append(args, "%."+escapeLikeTerm(kind), "%"+escapeLikeTerm(kind)+"%")
+	}
+	if !search.After.IsZero() {
+		where += ` AND f.created_at >= ?`
+		args = append(args, domain.NewStoredTime(search.After))
+	}
+	if !search.Before.IsZero() {
+		where += ` AND f.created_at < ?`
+		args = append(args, domain.NewStoredTime(search.Before))
+	}
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM files f WHERE `+where, args...).Scan(&total); err != nil {
+		return domain.FilePage{}, err
+	}
+	direction := "ASC"
+	if search.Direction == domain.SearchDirectionDescending {
+		direction = "DESC"
+	}
+	query := `SELECT f.id, f.workspace_id, f.uploader_id, f.name, f.title, f.mime_type, f.blob_key, f.size, f.created_at, f.deleted, f.public_token
+		FROM files f WHERE ` + where + ` ORDER BY f.created_at ` + direction + `, f.id ` + direction + ` LIMIT ? OFFSET ?`
+	queryArgs := append(append([]any(nil), args...), search.Count, (search.Page-1)*search.Count)
+	values, err := s.readFiles(ctx, query, queryArgs...)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	if err := s.hydrateFileShares(ctx, values); err != nil {
+		return domain.FilePage{}, err
+	}
+	return domain.FilePage{Files: values, HasMore: search.Page*search.Count < total, Total: total}, nil
+}
+
+func visibleFilePredicate(alias string) string {
+	return `(` + alias + `.uploader_id = ? OR EXISTS (
+		SELECT 1 FROM file_shares fs_visible
+		JOIN conversations c_visible ON c_visible.id = fs_visible.conversation_id
+		WHERE fs_visible.file_id = ` + alias + `.id
+		AND (c_visible.is_private = 0 OR EXISTS (
+			SELECT 1 FROM conversation_members cm_visible
+			WHERE cm_visible.conversation_id = c_visible.id AND cm_visible.user_id = ?
+		))
+	))`
+}
+
+func (s *Store) readFiles(ctx context.Context, query string, args ...any) ([]domain.File, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.File, 0)
+	for rows.Next() {
+		var file domain.File
+		var created string
+		var deleted int
+		if err := rows.Scan(&file.ID, &file.WorkspaceID, &file.Uploader, &file.Name, &file.Title, &file.MIMEType, &file.BlobKey, &file.Size, &created, &deleted, &file.PublicToken); err != nil {
+			return nil, err
+		}
+		file.CreatedAt, err = domain.ParseStoredTime(created)
+		if err != nil {
+			return nil, err
+		}
+		file.Deleted = deleted != 0
+		values = append(values, file)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) hydrateFileShares(ctx context.Context, files []domain.File) error {
+	for index := range files {
+		shares, err := s.listFileShares(ctx, files[index].WorkspaceID, files[index].ID)
+		if err != nil {
+			return err
+		}
+		files[index].SharedChannels = shares
+	}
+	return nil
 }
 
 func (s *Store) WalkBlobReferences(ctx context.Context, workspace domain.WorkspaceID, visit func(string) error) error {
@@ -11430,42 +11621,97 @@ func (s *Store) ListAuthoredMessages(ctx context.Context, workspace domain.Works
 	return page, err
 }
 
-func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
-	if err := store.CheckAscendingPage(request); err != nil {
+func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID, user domain.UserID, search domain.MessageSearch) (domain.MessagePage, error) {
+	if err := store.CheckPage(search.Page); err != nil {
 		return domain.MessagePage{}, err
 	}
-	terms := strings.Fields(domain.FoldSearchText(query))
-	if len(terms) == 0 {
+	if len(search.Terms) == 0 && search.Conversation == "" && search.Author == "" && search.WithUser == "" && search.After.IsZero() && search.Before.IsZero() && !search.ThreadOnly && !search.HasFiles && !search.HasPins && !search.HasReactions && search.SavedBy == "" {
 		return domain.MessagePage{}, store.InvalidArgument("search query must not be empty")
 	}
 	querySQL := `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls FROM messages m JOIN conversations c ON c.id = m.conversation WHERE m.workspace_id = ? AND m.deleted = 0 AND (c.is_private = 0 OR EXISTS (SELECT 1 FROM conversation_members cm WHERE cm.conversation_id = m.conversation AND cm.user_id = ?))`
 	args := []any{workspace, user}
-	for _, term := range terms {
+	for _, term := range search.Terms {
 		querySQL += ` AND m.text_folded LIKE ? ESCAPE '\'`
-		args = append(args, "%"+escapeLikeTerm(term)+"%")
+		args = append(args, "%"+escapeLikeTerm(domain.FoldSearchText(term))+"%")
+	}
+	for _, term := range search.ExcludedTerms {
+		querySQL += ` AND m.text_folded NOT LIKE ? ESCAPE '\'`
+		args = append(args, "%"+escapeLikeTerm(domain.FoldSearchText(term))+"%")
+	}
+	if search.Conversation != "" {
+		querySQL += ` AND m.conversation = ?`
+		args = append(args, search.Conversation)
+	}
+	if search.ExcludedConversation != "" {
+		querySQL += ` AND m.conversation <> ?`
+		args = append(args, search.ExcludedConversation)
+	}
+	if search.Author != "" {
+		querySQL += ` AND m.author_id = ?`
+		args = append(args, search.Author)
+	}
+	if search.ExcludedAuthor != "" {
+		querySQL += ` AND m.author_id <> ?`
+		args = append(args, search.ExcludedAuthor)
+	}
+	if search.WithUser != "" {
+		querySQL += ` AND EXISTS (SELECT 1 FROM conversation_members cm_with WHERE cm_with.conversation_id = m.conversation AND cm_with.user_id = ?)`
+		args = append(args, search.WithUser)
+	}
+	if !search.After.IsZero() {
+		querySQL += ` AND m.created_at >= ?`
+		args = append(args, domain.NewStoredTime(search.After))
+	}
+	if !search.Before.IsZero() {
+		querySQL += ` AND m.created_at < ?`
+		args = append(args, domain.NewStoredTime(search.Before))
+	}
+	if search.ThreadOnly {
+		querySQL += ` AND m.thread_timestamp <> ''`
+	}
+	if search.HasFiles {
+		querySQL += ` AND EXISTS (SELECT 1 FROM message_files mf_search WHERE mf_search.message_id = m.id)`
+	}
+	if search.HasPins {
+		querySQL += ` AND EXISTS (SELECT 1 FROM pins p_search WHERE p_search.message_id = m.id)`
+	}
+	if search.HasReactions {
+		querySQL += ` AND EXISTS (SELECT 1 FROM reactions r_search WHERE r_search.message_id = m.id)`
+	}
+	if search.SavedBy != "" {
+		querySQL += ` AND EXISTS (SELECT 1 FROM saved_items si_search WHERE si_search.message_id = m.id AND si_search.user_id = ?)`
+		args = append(args, search.SavedBy)
 	}
 	countSQL := strings.Replace(querySQL, `SELECT m.id, m.workspace_id, m.conversation, m.author_id, m.app_id, m.text, m.blocks, m.attachments, m.metadata, m.stream_state, m.thread_timestamp, m.created_at, m.deleted, m.unfurls`, `SELECT COUNT(*)`, 1)
 	var total int
 	if err := s.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
 		return domain.MessagePage{}, err
 	}
-	if request.Cursor != "" {
-		createdAt, id, err := domain.DecodeMessageCursor(request.Cursor)
+	if search.Page.Cursor != "" {
+		createdAt, id, err := domain.DecodeMessageCursor(search.Page.Cursor)
 		if err != nil {
 			return domain.MessagePage{}, err
 		}
 		created := domain.NewStoredTime(createdAt)
-		querySQL += ` AND (m.created_at > ? OR (m.created_at = ? AND m.id > ?))`
+		operator := ">"
+		if search.Page.Descending {
+			operator = "<"
+		}
+		querySQL += ` AND (m.created_at ` + operator + ` ? OR (m.created_at = ? AND m.id ` + operator + ` ?))`
 		args = append(args, created, created, id)
 	}
-	querySQL += ` ORDER BY m.created_at, m.id LIMIT ?`
-	args = append(args, request.Limit+1)
+	direction := "ASC"
+	if search.Page.Descending {
+		direction = "DESC"
+	}
+	querySQL += ` ORDER BY m.created_at ` + direction + `, m.id ` + direction + ` LIMIT ?`
+	args = append(args, search.Page.Limit+1)
 	rows, err := s.db.QueryContext(ctx, querySQL, args...)
 	if err != nil {
 		return domain.MessagePage{}, err
 	}
 	defer rows.Close()
-	values := make([]domain.Message, 0, request.Limit+1)
+	values := make([]domain.Message, 0, search.Page.Limit+1)
 	for rows.Next() {
 		var message domain.Message
 		var created, attachments, unfurls string
@@ -11488,9 +11734,9 @@ func (s *Store) SearchMessages(ctx context.Context, workspace domain.WorkspaceID
 	if err := rows.Err(); err != nil {
 		return domain.MessagePage{}, err
 	}
-	hasMore := len(values) > request.Limit
+	hasMore := len(values) > search.Page.Limit
 	if hasMore {
-		values = values[:request.Limit]
+		values = values[:search.Page.Limit]
 	}
 	if err := s.hydrateMessageFiles(ctx, values); err != nil {
 		return domain.MessagePage{}, err
@@ -12033,7 +12279,7 @@ func (s *Store) CompleteExternalUploads(ctx context.Context, completions []domai
 			return store.ErrConflict
 		}
 		file := files[index]
-		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt)); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO files(id, workspace_id, uploader_id, name, title, mime_type, blob_key, size, created_at, deleted, name_folded, title_folded) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, file.ID, file.WorkspaceID, file.Uploader, file.Name, file.Title, file.MIMEType, file.BlobKey, file.Size, domain.NewStoredTime(file.CreatedAt), domain.FoldSearchText(file.Name), domain.FoldSearchText(file.Title)); err != nil {
 			return classify(err)
 		}
 		for _, channel := range channels {

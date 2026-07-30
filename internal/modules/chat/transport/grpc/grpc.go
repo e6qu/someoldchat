@@ -537,7 +537,15 @@ func (r Remote) History(ctx context.Context, workspaceID domain.WorkspaceID, use
 }
 
 func (r Remote) Search(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, query string, request domain.PageRequest) (domain.MessagePage, error) {
-	in := &chatv1.SearchRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Query: query, Limit: int32(request.Limit), Cursor: string(request.Cursor)}
+	return r.SearchMessages(ctx, workspaceID, userID, domain.MessageSearchRequest{Query: query, Page: request})
+}
+
+func (r Remote) SearchMessages(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.MessageSearchRequest) (domain.MessagePage, error) {
+	in := &chatv1.SearchRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Query: request.Query,
+		Limit: int32(request.Page.Limit), Cursor: string(request.Page.Cursor),
+		ConversationId: string(request.Conversation), Sort: string(request.Sort), Direction: string(request.Direction),
+	}
 	out, err := r.messages.Search(ctx, in)
 	if err != nil {
 		return domain.MessagePage{}, err
@@ -1067,6 +1075,19 @@ func (r Remote) DeleteFileComment(ctx context.Context, workspaceID domain.Worksp
 func (r Remote) Files(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.PageRequest) (domain.FilePage, error) {
 	in := &chatv1.FilesRequest{WorkspaceId: string(workspaceID), UserId: string(userID), Limit: int32(request.Limit), Cursor: string(request.Cursor)}
 	out, err := r.files.Files(ctx, in)
+	if err != nil {
+		return domain.FilePage{}, err
+	}
+	return decodeProtoFilePage(out)
+}
+
+func (r Remote) SearchFiles(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, request domain.FileSearchRequest) (domain.FilePage, error) {
+	in := &chatv1.SearchFilesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), Query: request.Query,
+		Count: int32(request.Count), Page: int32(request.Page), Sort: string(request.Sort), Direction: string(request.Direction),
+		ConversationId: string(request.Conversation),
+	}
+	out, err := r.files.SearchFiles(ctx, in)
 	if err != nil {
 		return domain.FilePage{}, err
 	}
@@ -4698,6 +4719,18 @@ func (s *Server) Files(ctx context.Context, input *chatv1.FilesRequest) (*chatv1
 	return s.filesProto(ctx, input)
 }
 
+func (s *Server) SearchFiles(ctx context.Context, input *chatv1.SearchFilesRequest) (*chatv1.FilePage, error) {
+	page, err := s.implementation.SearchFiles(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.FileSearchRequest{
+		Query: input.GetQuery(), Count: int(input.GetCount()), Page: int(input.GetPage()),
+		Sort: domain.SearchSort(input.GetSort()), Direction: domain.SearchDirection(input.GetDirection()),
+		Conversation: domain.ConversationID(input.GetConversationId()),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeProtoFilePage(page), nil
+}
+
 func (s *Server) AddRemoteFile(ctx context.Context, input *chatv1.AddRemoteFileRequest) (*chatv1.RemoteFile, error) {
 	value, err := s.implementation.AddRemoteFile(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.RemoteFile{ExternalID: input.GetExternalId(), Title: input.GetTitle(), FileType: input.GetFileType(), ExternalURL: input.GetExternalUrl(), PreviewImage: input.GetPreviewImage(), IndexableContents: input.GetIndexableContents()})
 	if err != nil {
@@ -5416,8 +5449,12 @@ func (s *Server) searchProto(ctx context.Context, input *chatv1.SearchRequest) (
 	// store.ErrNotFound — so the caller derived a different HTTP status depending
 	// on the composition. Delegating makes the two identical for every input
 	// rather than for the inputs a test happens to cover.
-	request := protoPageRequest(input.GetLimit(), input.GetCursor())
-	page, err := s.implementation.Search(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetQuery(), request)
+	request := domain.MessageSearchRequest{
+		Query: input.GetQuery(), Conversation: domain.ConversationID(input.GetConversationId()),
+		Sort: domain.SearchSort(input.GetSort()), Direction: domain.SearchDirection(input.GetDirection()),
+		Page: protoPageRequest(input.GetLimit(), input.GetCursor()),
+	}
+	page, err := s.implementation.SearchMessages(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), request)
 	if err != nil {
 		return nil, mapError(err)
 	}
@@ -6803,7 +6840,7 @@ func encodeProtoFilePage(page domain.FilePage) *chatv1.FilePage {
 	for _, file := range page.Files {
 		files = append(files, encodeProtoFile(file))
 	}
-	return &chatv1.FilePage{Files: files, NextCursor: string(page.NextCursor), HasMore: page.HasMore}
+	return &chatv1.FilePage{Files: files, NextCursor: string(page.NextCursor), HasMore: page.HasMore, Total: int32(page.Total)}
 }
 
 func decodeProtoFilePage(value *chatv1.FilePage) (domain.FilePage, error) {
@@ -6818,7 +6855,7 @@ func decodeProtoFilePage(value *chatv1.FilePage) (domain.FilePage, error) {
 		}
 		files = append(files, file)
 	}
-	return domain.FilePage{Files: files, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore()}, nil
+	return domain.FilePage{Files: files, NextCursor: domain.Cursor(value.GetNextCursor()), HasMore: value.GetHasMore(), Total: int(value.GetTotal())}, nil
 }
 
 func encodeProtoRemoteFile(value domain.RemoteFile) *chatv1.RemoteFile {

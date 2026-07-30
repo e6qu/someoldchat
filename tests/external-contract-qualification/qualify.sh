@@ -36,6 +36,9 @@ convert_dm_url='https://slack.com/help/articles/217555437-Convert-a-group-direct
 close_dm_api_url='https://docs.slack.dev/reference/methods/conversations.close/'
 message_url='https://slack.com/help/articles/201457107-Send-and-read-messages'
 search_url='https://slack.com/help/articles/202528808-Search-in-Slack'
+search_messages_url='https://docs.slack.dev/reference/methods/search.messages/'
+search_files_url='https://docs.slack.dev/reference/methods/search.files/'
+search_all_url='https://docs.slack.dev/reference/methods/search.all/'
 file_url='https://slack.com/help/articles/201330736-Add-files-to-Slack'
 slash_url='https://docs.slack.dev/interactivity/implementing-slash-commands/'
 manifest_url='https://docs.slack.dev/reference/app-manifest/'
@@ -69,6 +72,9 @@ fetch "$convert_dm_url" "$work/convert-dm.html"
 fetch "$close_dm_api_url" "$work/conversations-close.html"
 fetch "$message_url" "$work/messages.html"
 fetch "$search_url" "$work/search.html"
+fetch "$search_messages_url" "$work/search-messages.html"
+fetch "$search_files_url" "$work/search-files.html"
+fetch "$search_all_url" "$work/search-all.html"
 fetch "$file_url" "$work/files.html"
 fetch "$slash_url" "$work/slash.html"
 fetch "$manifest_url" "$work/manifest.html"
@@ -149,8 +155,28 @@ assert_contains "$work/scheduling-api.html" 'Messages can only be scheduled up t
 	'[SCHED-01] the public scheduling window is 120 days' "$schedule_api_url"
 assert_contains "$work/search.html" 'switch between result types' \
 	'[SEARCH-01] desktop search result types' "$search_url"
+assert_contains "$work/search.html" 'select a recent search if you' \
+	'[SEARCH-01] search exposes recent-query suggestions' "$search_url"
 assert_contains "$work/search.html" 'in:#team-marketing from:@Sara' \
 	'[SEARCH-02] search modifiers can be combined' "$search_url"
+assert_contains "$work/search.html" 'using hasmy::eyes:' \
+	'[SEARCH-02] search distinguishes reactions added by the current member' "$search_url"
+assert_contains "$work/search.html" 'partial word with at least three characters' \
+	'[SEARCH-02] search supports documented prefix matching' "$search_url"
+assert_contains "$work/search.html" 'Messages , Files , People , Channels , or Canvases' \
+	'[SEARCH-01 SEARCH-02] search switches among current result types' "$search_url"
+assert_contains "$work/search.html" 'typing ⌘ F on a Mac' \
+	'[SEARCH-03] macOS current-conversation search shortcut' "$search_url"
+assert_contains "$work/search.html" 'Ctrl F on Windows or Linux' \
+	'[SEARCH-03] Windows and Linux current-conversation search shortcut' "$search_url"
+assert_contains "$work/search-messages.html" 'User token:' \
+	'[SEARCH-01] search.messages is a user-token method' "$search_messages_url"
+assert_contains "$work/search-messages.html" 'Maximum of 100' \
+	'[SEARCH-02] search.messages page size is bounded at 100' "$search_messages_url"
+assert_contains "$work/search-files.html" 'max count value is 100' \
+	'[SEARCH-02 FILE-04] search.files count and page bounds' "$search_files_url"
+assert_contains "$work/search-all.html" 'search both messages and files in a single call' \
+	'[SEARCH-01 FILE-04] search.all combines the two legacy result collections' "$search_all_url"
 assert_contains "$work/files.html" 'files up to 1GB in size' \
 	'[FILE-03] current hosted file size limit' "$file_url"
 assert_contains "$work/files.html" 'Drag and drop up to 10 files' \

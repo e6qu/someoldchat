@@ -387,7 +387,9 @@ func searchFoldsUnicodeIdentically(t *testing.T, open opener) {
 	}
 	assertMessage := func(query string) {
 		t.Helper()
-		page, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, query, domain.PageRequest{Limit: 10})
+		page, err := f.repository.SearchMessages(ctx, f.workspaceID, f.userID, domain.MessageSearch{
+			Terms: []string{query}, Page: domain.PageRequest{Limit: 10},
+		})
 		if err != nil {
 			t.Fatalf("message search %q: %v", query, err)
 		}

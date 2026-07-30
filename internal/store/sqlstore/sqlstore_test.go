@@ -1328,7 +1328,10 @@ func TestSQLiteRoundTrip(t *testing.T) {
 	if _, err := s.GetFile(context.Background(), file.ID); err != store.ErrNotFound {
 		t.Fatalf("deleted file err=%v", err)
 	}
-	search, err := s.SearchMessages(context.Background(), "T1", "U1", "hello", domain.PageRequest{Limit: 10})
+	search, err := s.SearchMessages(context.Background(), "T1", "U1", domain.MessageSearch{
+		Terms: []string{"hello"}, Direction: domain.SearchDirectionAscending,
+		Page: domain.PageRequest{Limit: 10},
+	})
 	if err != nil || len(search.Messages) != 1 || search.Messages[0].ID != want.ID {
 		t.Fatalf("search=%+v err=%v", search, err)
 	}
@@ -1364,6 +1367,57 @@ func TestSQLiteConversationUnreadCountFollowsReadCursor(t *testing.T) {
 	page, err = s.ListConversations(ctx, "T1", "U1", domain.ConversationListRequest{Limit: 10})
 	if err != nil || page.Conversations[0].UnreadCount != 0 {
 		t.Fatalf("read page=%+v err=%v", page, err)
+	}
+}
+
+func TestSQLiteSearchPersistsFoldedFilesAndViewerVisibilityAcrossReopen(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "search.sqlite")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, user := range []domain.User{{ID: "U1", WorkspaceID: "T1"}, {ID: "U2", WorkspaceID: "T1"}} {
+		if err := s.SeedUser(ctx, user); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, conversation := range []domain.Conversation{
+		{ID: "C1", WorkspaceID: "T1", Name: "general"},
+		{ID: "C2", WorkspaceID: "T1", Name: "secret", IsPrivate: true},
+	} {
+		if err := s.SeedConversation(ctx, conversation); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.SeedConversationMember(ctx, "C2", "U2"); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []domain.File{
+		{ID: "F1", WorkspaceID: "T1", Uploader: "U2", Name: "ÄPFEL-plan.pdf", Title: "Launch", MIMEType: "application/pdf", BlobKey: "public", SharedChannels: []domain.ConversationID{"C1"}, CreatedAt: time.Unix(10, 0).UTC()},
+		{ID: "F2", WorkspaceID: "T1", Uploader: "U2", Name: "äpfel-secret.pdf", Title: "Secret", MIMEType: "application/pdf", BlobKey: "private", SharedChannels: []domain.ConversationID{"C2"}, CreatedAt: time.Unix(20, 0).UTC()},
+	} {
+		if err := s.CreateFile(ctx, file, events.Event{ID: domain.EventID("E" + string(file.ID)), WorkspaceID: "T1", Topic: "file.created", CreatedAt: file.CreatedAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	page, err := s.SearchFiles(ctx, "T1", "U1", domain.FileSearch{
+		Terms: []string{"äpfel"}, FileType: "pdf", Sort: domain.SearchSortTimestamp,
+		Direction: domain.SearchDirectionDescending, Count: 10, Page: 1,
+	})
+	if err != nil || page.Total != 1 || len(page.Files) != 1 || page.Files[0].ID != "F1" || len(page.Files[0].SharedChannels) != 1 {
+		t.Fatalf("file search=%+v err=%v", page, err)
 	}
 }
 

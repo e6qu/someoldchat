@@ -477,6 +477,33 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name:  "typed message and file search preserve filters and totals",
+			blobs: true,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				if _, err := chat.Post(ctx, "T1", "U1", "C1", "search parity message", "", ""); err != nil {
+					return nil, err
+				}
+				messages, err := chat.SearchMessages(ctx, "T1", "U1", domain.MessageSearchRequest{
+					Query: "parity in:C1", Sort: domain.SearchSortTimestamp, Direction: domain.SearchDirectionDescending,
+					Page: domain.PageRequest{Limit: 10},
+				})
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.UploadFile(ctx, "T1", "U1", "parity.txt", "Parity notes", "text/plain", 5, bytes.NewReader([]byte("notes"))); err != nil {
+					return nil, err
+				}
+				files, err := chat.SearchFiles(ctx, "T1", "U1", domain.FileSearchRequest{
+					Query: "parity type:text", Sort: domain.SearchSortTimestamp, Direction: domain.SearchDirectionDescending,
+					Count: 10, Page: 1,
+				})
+				if err != nil {
+					return nil, err
+				}
+				return []any{len(messages.Messages), messages.Total, len(files.Files), files.Total, files.Files[0].Name}, nil
+			},
+		},
+		{
 			name:         "history rejects an undecodable cursor",
 			wantSentinel: domain.ErrInvalidCursor,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {

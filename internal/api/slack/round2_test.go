@@ -40,8 +40,12 @@ func errorCode(t *testing.T, result *httptest.ResponseRecorder) string {
 }
 
 func getAPI(handler http.Handler, target string) *httptest.ResponseRecorder {
+	return getAPIWithToken(handler, target, "token")
+}
+
+func getAPIWithToken(handler http.Handler, target, token string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, target, nil)
-	request.Header.Set("Authorization", "Bearer token")
+	request.Header.Set("Authorization", "Bearer "+token)
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, request)
 	return result
@@ -622,7 +626,7 @@ func TestPostMessageWithoutAChannelNamesTheChannel(t *testing.T) {
 // stars.list answered `fatal_error`, and six operations answered `invalid_cursor`
 // which their own enums do not declare.
 func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
-	handler, _ := testHandlerWithStore()
+	handler, repository := testHandlerWithStore()
 	cases := []struct{ target, want string }{
 		{"/api/users.list", "invalid_cursor"},
 		{"/api/conversations.members?channel=C1", "invalid_cursor"},
@@ -634,7 +638,6 @@ func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
 		{"/api/conversations.history?channel=C1", "invalid_arg_name"},
 		{"/api/reactions.get?channel=C1&timestamp=1", "invalid_arg_name"},
 		{"/api/chat.scheduledMessages.list", "invalid_arg_name"},
-		{"/api/search.messages?query=x", "invalid_arg_name"},
 	}
 	for _, item := range cases {
 		separator := "?"
@@ -645,6 +648,10 @@ func TestTamperedCursorsAreRefusedWithADeclaredCode(t *testing.T) {
 		if code := errorCode(t, result); code != item.want {
 			t.Errorf("%s: want %q, got %q", item.target, item.want, code)
 		}
+	}
+	searchHandler := userSearchHandler(t, repository)
+	if code := errorCode(t, getAPIWithToken(searchHandler, "/api/search.messages?query=x&cursor=%21%21%21%21", "user-token")); code != "invalid_arg_name" {
+		t.Errorf("search.messages: want invalid_arg_name, got %q", code)
 	}
 }
 

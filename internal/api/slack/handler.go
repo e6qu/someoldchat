@@ -347,6 +347,10 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/calls.participants.remove", h.removeCallParticipants)
 	mux.HandleFunc("GET /api/search.messages", h.searchMessages)
 	mux.HandleFunc("POST /api/search.messages", h.searchMessages)
+	mux.HandleFunc("GET /api/search.files", h.searchFiles)
+	mux.HandleFunc("POST /api/search.files", h.searchFiles)
+	mux.HandleFunc("GET /api/search.all", h.searchAll)
+	mux.HandleFunc("POST /api/search.all", h.searchAll)
 	mux.HandleFunc("GET /api/files.info", h.fileInfo)
 	mux.HandleFunc("POST /api/files.info", h.fileInfo)
 	mux.HandleFunc("POST /api/files.delete", h.deleteFile)
@@ -4916,42 +4920,168 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	if principal.TokenType == "bot" || principal.BotID != "" {
+		writeError(w, "not_allowed_token_type")
+		return
+	}
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	query := strings.TrimSpace(fields["query"])
-	if query == "" {
-		writeError(w, "invalid_arg_name")
-		return
-	}
-	limit, err := clampLimit(fields["count"], 20, 100)
+	arguments, err := decodeSearchArguments(fields, true)
 	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
-	pageNumber, err := pageNumber(fields["page"])
-	if err != nil || pageNumber > 100 {
-		if err == nil {
-			err = decodeFailure("invalid_arg_name", "page must be no greater than 100")
-		}
+	page, err := h.searchMessagePage(r.Context(), principal, arguments)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	response, err := h.searchMessageEnvelope(r.Context(), principal, arguments, page)
+	if err != nil {
+		writeError(w, "fatal_error")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "query": arguments.query, "messages": response,
+		"has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)},
+	})
+}
+
+func (h Handler) searchFiles(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if principal.TokenType == "bot" || principal.BotID != "" {
+		writeError(w, "not_allowed_token_type")
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
 		writeDecodeError(w, err)
 		return
 	}
+	arguments, err := decodeSearchArguments(fields, false)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	page, err := h.Messages.SearchFiles(r.Context(), principal.WorkspaceID, principal.UserID, domain.FileSearchRequest{
+		Query: arguments.query, Count: arguments.count, Page: arguments.page,
+		Sort: arguments.sort, Direction: arguments.direction,
+	})
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": arguments.query, "files": searchFileEnvelope(arguments, page)})
+}
+
+func (h Handler) searchAll(w http.ResponseWriter, r *http.Request) {
+	principal, err := h.authenticate(r, auth.ScopeSearchRead)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if principal.TokenType == "bot" || principal.BotID != "" {
+		writeError(w, "not_allowed_token_type")
+		return
+	}
+	fields, err := decodeFields(w, r)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	arguments, err := decodeSearchArguments(fields, false)
+	if err != nil {
+		writeDecodeError(w, err)
+		return
+	}
+	messagePage, err := h.searchMessagePage(r.Context(), principal, arguments)
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	messageEnvelope, err := h.searchMessageEnvelope(r.Context(), principal, arguments, messagePage)
+	if err != nil {
+		writeError(w, "fatal_error")
+		return
+	}
+	filePage, err := h.Messages.SearchFiles(r.Context(), principal.WorkspaceID, principal.UserID, domain.FileSearchRequest{
+		Query: arguments.query, Count: arguments.count, Page: arguments.page,
+		Sort: arguments.sort, Direction: arguments.direction,
+	})
+	if err != nil {
+		writeError(w, mapServiceError(err, "fatal_error"))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "query": arguments.query,
+		"messages": messageEnvelope, "files": searchFileEnvelope(arguments, filePage),
+	})
+}
+
+type searchArguments struct {
+	query       string
+	count, page int
+	cursor      domain.Cursor
+	sort        domain.SearchSort
+	direction   domain.SearchDirection
+	highlight   bool
+}
+
+func decodeSearchArguments(fields map[string]string, allowCursor bool) (searchArguments, error) {
+	query := strings.TrimSpace(fields["query"])
+	if query == "" {
+		return searchArguments{}, decodeFailure("no_query", "query is required")
+	}
+	count, err := clampLimit(fields["count"], 20, 100)
+	if err != nil {
+		return searchArguments{}, err
+	}
+	page, err := pageNumber(fields["page"])
+	if err != nil || page > 100 {
+		return searchArguments{}, decodeFailure("invalid_arg_name", "page must be between 1 and 100")
+	}
+	sortOrder, direction, err := domain.NormalizeSearchOrder(fields["sort"], fields["sort_dir"])
+	if err != nil {
+		return searchArguments{}, decodeFailure("invalid_arg_name", err.Error())
+	}
+	highlight, err := parseBoolField(fields["highlight"])
+	if err != nil {
+		return searchArguments{}, decodeFailure("invalid_arg_name", "highlight must be a boolean")
+	}
+	var cursor domain.Cursor
 	rawCursor := strings.TrimSpace(fields["cursor"])
 	if rawCursor == "*" {
 		rawCursor = ""
 	}
-	cursor, err := decodeMessageCursor(rawCursor, "invalid_arg_name")
-	if err != nil {
-		writeDecodeError(w, err)
-		return
+	if rawCursor != "" && !allowCursor {
+		return searchArguments{}, decodeFailure("invalid_arg_name", "cursor is not supported by this search method")
 	}
+	if allowCursor {
+		cursor, err = decodeMessageCursor(rawCursor, "invalid_arg_name")
+		if err != nil {
+			return searchArguments{}, err
+		}
+	}
+	return searchArguments{query: query, count: count, page: page, cursor: cursor, sort: sortOrder, direction: direction, highlight: highlight}, nil
+}
+
+func (h Handler) searchMessagePage(ctx context.Context, principal auth.Principal, arguments searchArguments) (domain.MessagePage, error) {
+	cursor := arguments.cursor
 	var page domain.MessagePage
-	for current := 1; current <= pageNumber; current++ {
-		page, err = h.Messages.Search(r.Context(), principal.WorkspaceID, principal.UserID, query, domain.PageRequest{Limit: limit, Cursor: cursor})
-		if err != nil || current == pageNumber {
+	var err error
+	for current := 1; current <= arguments.page; current++ {
+		page, err = h.Messages.SearchMessages(ctx, principal.WorkspaceID, principal.UserID, domain.MessageSearchRequest{
+			Query: arguments.query, Sort: arguments.sort, Direction: arguments.direction,
+			Page: domain.PageRequest{Limit: arguments.count, Cursor: cursor},
+		})
+		if err != nil || current == arguments.page {
 			break
 		}
 		if !page.HasMore {
@@ -4961,19 +5091,18 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		cursor = page.NextCursor
 	}
-	if err != nil {
-		writeError(w, mapServiceError(err, "fatal_error"))
-		return
-	}
+	return page, err
+}
+
+func (h Handler) searchMessageEnvelope(ctx context.Context, principal auth.Principal, arguments searchArguments, page domain.MessagePage) (map[string]any, error) {
 	matches := make([]map[string]any, 0, len(page.Messages))
 	for _, message := range page.Messages {
 		match := messageResponse(message)
-		conversation, infoErr := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, message.Conversation)
-		author, userErr := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, message.AuthorID)
-		permalink, linkErr := h.Messages.Permalink(r.Context(), principal.WorkspaceID, principal.UserID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt))
+		conversation, infoErr := h.Messages.ConversationInfo(ctx, principal.WorkspaceID, principal.UserID, message.Conversation)
+		author, userErr := h.Messages.UserInfo(ctx, principal.WorkspaceID, principal.UserID, message.AuthorID)
+		permalink, linkErr := h.Messages.Permalink(ctx, principal.WorkspaceID, principal.UserID, message.Conversation, domain.NewMessageTimestamp(message.CreatedAt))
 		if infoErr != nil || userErr != nil || linkErr != nil {
-			writeError(w, "fatal_error")
-			return
+			return nil, errors.New("search result hydration failed")
 		}
 		match["channel"] = conversationResponse(conversation)
 		match["team"] = principal.WorkspaceID
@@ -4983,16 +5112,37 @@ func (h Handler) searchMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	pageCount := 0
 	if page.Total > 0 {
-		pageCount = (page.Total + limit - 1) / limit
+		pageCount = (page.Total + arguments.count - 1) / arguments.count
 	}
 	first, last := 0, 0
 	if len(matches) > 0 {
-		first = (pageNumber-1)*limit + 1
+		first = (arguments.page-1)*arguments.count + 1
 		last = first + len(matches) - 1
 	}
-	pagination := map[string]any{"first": first, "last": last, "page": pageNumber, "per_page": limit, "page_count": pageCount, "total_count": page.Total}
-	paging := map[string]any{"count": limit, "page": pageNumber, "pages": pageCount, "total": page.Total}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "query": query, "messages": map[string]any{"matches": matches, "total": page.Total, "pagination": pagination, "paging": paging}, "has_more": page.HasMore, "response_metadata": map[string]string{"next_cursor": string(page.NextCursor)}})
+	pagination := map[string]any{"first": first, "last": last, "page": arguments.page, "per_page": arguments.count, "page_count": pageCount, "total_count": page.Total}
+	paging := map[string]any{"count": arguments.count, "page": arguments.page, "pages": pageCount, "total": page.Total}
+	return map[string]any{"matches": matches, "total": page.Total, "pagination": pagination, "paging": paging}, nil
+}
+
+func searchFileEnvelope(arguments searchArguments, page domain.FilePage) map[string]any {
+	matches := make([]map[string]any, 0, len(page.Files))
+	for _, file := range page.Files {
+		matches = append(matches, fileResponse(file))
+	}
+	pageCount := 0
+	if page.Total > 0 {
+		pageCount = (page.Total + arguments.count - 1) / arguments.count
+	}
+	first, last := 0, 0
+	if len(matches) > 0 {
+		first = (arguments.page-1)*arguments.count + 1
+		last = first + len(matches) - 1
+	}
+	return map[string]any{
+		"matches": matches, "total": page.Total,
+		"pagination": map[string]any{"first": first, "last": last, "page": arguments.page, "per_page": arguments.count, "page_count": pageCount, "total_count": page.Total},
+		"paging":     map[string]any{"count": arguments.count, "page": arguments.page, "pages": pageCount, "total": page.Total},
+	}
 }
 
 func (h Handler) remoteFileAdd(w http.ResponseWriter, r *http.Request) {

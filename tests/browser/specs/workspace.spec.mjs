@@ -631,6 +631,56 @@ test('[FILE-01 FILE-03 FILE-05] a file upload becomes a real message and an auth
   expect(Buffer.concat(chunks).toString()).toBe('browser file contents');
 });
 
+test('[SEARCH-01 SEARCH-02 SEARCH-03 FILE-04 A11Y-01] typed search is scoped, filterable, and backed by real files', async ({ page, context, request }) => {
+  await signIn(context);
+  const needle = `typed-search-${Date.now()}`;
+  const message = `${needle} release candidate`;
+  const fileTitle = `${needle} notes`;
+  await postThroughTheAPI(request, message);
+
+  await page.goto('/app');
+  await page.getByText('Attach a file', { exact: true }).click();
+  await page.getByLabel('Title (optional)').fill(fileTitle);
+  await page.locator('#upload-file').setInputFiles({
+    name: `${needle}.txt`,
+    mimeType: 'text/plain',
+    buffer: Buffer.from(`file contents for ${needle}`),
+  });
+  await page.getByRole('button', { name: 'Upload and send' }).click();
+  await expect(page.locator('.message-file', { hasText: fileTitle })).toBeVisible();
+
+  const { primary } = await slackModifiers(page);
+  const composer = page.locator('form.composer textarea[name="text"]');
+  await composer.fill('draft survives current-conversation search');
+  await composer.press(`${primary}+f`);
+  await expect(page).toHaveURL(/\/app\/search\?.*scope=channel/);
+  await expect(page.getByText('Searching only this conversation.')).toBeVisible();
+  const query = page.getByRole('searchbox', { name: 'Search the workspace' });
+  await expect(query).toBeFocused();
+  await query.fill(needle);
+  await query.press('Enter');
+  await expect(page.locator('.result', { hasText: message })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Search the whole workspace' })).toBeVisible();
+  await page.getByRole('link', { name: 'Back to chat' }).click();
+  await expect(composer).toHaveValue('draft survives current-conversation search');
+  await page.goBack();
+  await expect(page.locator('.result', { hasText: message })).toBeVisible();
+
+  await page.getByLabel('Sort').selectOption('oldest');
+  await page.getByRole('button', { name: 'Apply filters' }).click();
+  await expect(page).toHaveURL(/order=oldest/);
+  await expect(page.locator('.result', { hasText: message })).toBeVisible();
+
+  await page.getByRole('link', { name: 'Files', exact: true }).click();
+  await expect(page.locator('.result', { hasText: fileTitle })).toContainText('text/plain');
+  await expectNoSeriousAccessibilityViolations(page);
+
+  await page.goto('/app/search?q=sameoldchat&type=people&channel=Cdev');
+  await expect(page.locator('.result', { hasText: 'SameOldChat' })).toBeVisible();
+  await page.goto('/app/search?q=general&type=channels&channel=Cdev');
+  await expect(page.getByRole('link', { name: '# general' })).toBeVisible();
+});
+
 test('[APP-01 APP-02 APP-09] developer app console creates, validates, edits, and deletes a real app', async ({ page, context }) => {
   await signIn(context);
   await page.goto('/app');

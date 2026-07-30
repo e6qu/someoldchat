@@ -2050,14 +2050,15 @@ func TestHistoryPostForm(t *testing.T) {
 }
 
 func TestSearchMessages(t *testing.T) {
-	handler := testHandler()
+	_, repository := testHandlerWithStore()
+	handler := userSearchHandler(t, repository)
 	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=searchable hello"))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	post.Header.Set("Authorization", "Bearer token")
+	post.Header.Set("Authorization", "Bearer user-token")
 	posted := httptest.NewRecorder()
 	handler.ServeHTTP(posted, post)
 	search := httptest.NewRequest(http.MethodGet, "/api/search.messages?query=hello", nil)
-	search.Header.Set("Authorization", "Bearer token")
+	search.Header.Set("Authorization", "Bearer user-token")
 	result := httptest.NewRecorder()
 	handler.ServeHTTP(result, search)
 	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), "searchable hello") {
@@ -2084,6 +2085,75 @@ func TestSearchMessages(t *testing.T) {
 	if channel, ok := payload.Messages.Matches[0]["channel"].(map[string]any); !ok || channel["id"] != "C1" {
 		t.Fatalf("search match omitted its channel object: %s", result.Body)
 	}
+}
+
+func TestSearchAllAndFilesUseOfficialUserTokenAndPagingContracts(t *testing.T) {
+	_, repository := testHandlerWithStore()
+	handler := userSearchHandler(t, repository)
+	file := domain.File{ID: "FSEARCH", WorkspaceID: "T1", Uploader: "U1", Name: "searchable.txt", Title: "Searchable notes", MIMEType: "text/plain", BlobKey: "searchable", CreatedAt: time.Unix(1_700_000_100, 0).UTC()}
+	if err := repository.CreateFile(context.Background(), file, events.Event{ID: "EFSEARCH", WorkspaceID: "T1", Topic: "file.created", CreatedAt: file.CreatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	post := httptest.NewRequest(http.MethodPost, "/api/chat.postMessage", strings.NewReader("channel=C1&text=searchable message"))
+	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	post.Header.Set("Authorization", "Bearer user-token")
+	posted := httptest.NewRecorder()
+	handler.ServeHTTP(posted, post)
+	if posted.Code != http.StatusOK {
+		t.Fatalf("post status=%d body=%s", posted.Code, posted.Body)
+	}
+	for _, target := range []string{
+		"/api/search.files?query=searchable&count=1&page=1&sort=timestamp&sort_dir=desc",
+		"/api/search.all?query=searchable&count=1&page=1&sort=timestamp&sort_dir=desc",
+	} {
+		result := getAPIWithToken(handler, target, "user-token")
+		if result.Code != http.StatusOK {
+			t.Fatalf("%s status=%d body=%s", target, result.Code, result.Body)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(result.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		files, ok := payload["files"].(map[string]any)
+		if !ok || files["total"].(float64) != 1 || len(files["matches"].([]any)) != 1 {
+			t.Fatalf("%s files envelope=%v", target, payload["files"])
+		}
+		if strings.Contains(target, "search.all") {
+			messages, ok := payload["messages"].(map[string]any)
+			if !ok || messages["total"].(float64) < 1 || len(messages["matches"].([]any)) != 1 {
+				t.Fatalf("%s messages envelope=%v", target, payload["messages"])
+			}
+		}
+	}
+	if code := errorCode(t, getAPIWithToken(handler, "/api/search.files", "user-token")); code != "no_query" {
+		t.Fatalf("missing query code=%q, want no_query", code)
+	}
+	if code := errorCode(t, getAPIWithToken(handler, "/api/search.all?query=x&sort=unknown", "user-token")); code != "invalid_arg_name" {
+		t.Fatalf("invalid sort code=%q, want invalid_arg_name", code)
+	}
+	botHandler := testHandler()
+	if code := errorCode(t, getAPI(botHandler, "/api/search.messages?query=x")); code != "not_allowed_token_type" {
+		t.Fatalf("bot search code=%q, want not_allowed_token_type", code)
+	}
+}
+
+func userSearchHandler(t *testing.T, repository *memory.Store) http.Handler {
+	t.Helper()
+	scopes := make(map[auth.Scope]struct{}, len(auth.AllScopes()))
+	for _, scope := range auth.AllScopes() {
+		scopes[auth.Scope(scope)] = struct{}{}
+	}
+	authenticator, err := auth.NewStatic("user-token", auth.Principal{WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: scopes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler, err := NewHandler(service.Messages{Store: repository}, authenticator)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	handler.Register(mux)
+	return mux
 }
 
 func TestFileMessageResponseMatchesSlackFileShareShape(t *testing.T) {

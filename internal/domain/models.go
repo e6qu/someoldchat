@@ -1482,6 +1482,8 @@ type FilePage struct {
 	Files      []File
 	NextCursor Cursor
 	HasMore    bool
+	// Total is populated by search reads. Ordinary file listings leave it zero.
+	Total int
 }
 
 type RemoteFile struct {

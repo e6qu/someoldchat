@@ -178,8 +178,23 @@ operations:
     status: behavior-compatible
     provenance: slack-api-specs-openapi
   - method: search.messages
-    status: behavior-compatible
+    status: sdk-compatible
     provenance: slack-api-specs-openapi
+    reference: https://docs.slack.dev/reference/methods/search.messages/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+      - specs/journeys/05-search-and-activity.md
+    deviations:
+      - Relevance scoring is deterministic but has not been compared with Slack's ranking model.
+      - Highlight markers, every reaction-specific modifier, and live indexing-delay behavior remain unqualified.
+    audit:
+      downgraded_from: behavior-compatible
+      reason: The previous claim covered substring matching and response decoding, not Slack's current modifier, token-type, sorting, ranking, and highlighting behavior.
+      evidence:
+        - https://docs.slack.dev/reference/methods/search.messages/
+        - internal/api/slack/handler.go
   - method: users.info
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1232,13 +1247,27 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/rtm.start/
   - method: search.all
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/search.all/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - Remote files and Slack's private relevance ranking are not yet represented.
+      - Highlight-marker behavior has not been differentially qualified.
   - method: search.files
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/search.files/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+      - tests/official-sdk-qualification/java-slack-api/src/main/java/sameoldchat/qualification/Qualification.java
+    deviations:
+      - Remote files and Slack's private relevance ranking are not yet represented.
+      - Highlight-marker behavior has not been differentially qualified.
   - method: team.billing.info
     status: unimplemented
     provenance: slack-reference
