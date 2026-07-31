@@ -236,6 +236,50 @@ func TestWorkflowBuilderStagesEditsOverAPublishedRevision(t *testing.T) {
 	}
 }
 
+func TestWorkflowBuilderDiscardsStagedChanges(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+
+	staged := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"2"}, "title": {"Incident triage v2"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"save"},
+	}.Encode(), false)
+	if staged.Code != http.StatusSeeOther {
+		t.Fatalf("staged save=%d: %s", staged.Code, staged.Body)
+	}
+	page := get(t, mux, staged.Header().Get("Location"))
+	requireContains(t, "staged workflow", page.Body.String(), "Incident triage v2", "Discard changes")
+
+	discarded := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"3"}, "title": {"Incident triage v2"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"discard"},
+	}.Encode(), false)
+	if discarded.Code != http.StatusSeeOther {
+		t.Fatalf("discard=%d: %s", discarded.Code, discarded.Body)
+	}
+	page = get(t, mux, discarded.Header().Get("Location"))
+	requireContains(t, "discarded workflow", page.Body.String(), "Staged changes discarded", "Incident triage", "published version 2")
+	if strings.Contains(page.Body.String(), "Discard changes") || strings.Contains(page.Body.String(), "your staged changes are not yet published") {
+		t.Fatalf("discarded workflow still reports staged changes: %s", page.Body)
+	}
+
+	staleDiscard := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"3"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"discard"},
+	}.Encode(), false)
+	if staleDiscard.Code != http.StatusConflict {
+		t.Fatalf("stale discard=%d: %s", staleDiscard.Code, staleDiscard.Body)
+	}
+	requireContains(t, "stale discard", staleDiscard.Body.String(), "The workflow was not saved", "It changed elsewhere")
+}
+
 func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	response := postForm(t, mux, "/app/workflows/create", url.Values{

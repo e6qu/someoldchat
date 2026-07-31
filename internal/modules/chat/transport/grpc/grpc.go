@@ -2324,6 +2324,17 @@ func (r Remote) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceID,
 	return decodeWorkflowDefinition(out), err
 }
 
+func (r Remote) DiscardWorkflowStagedChanges(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, expectedVersion uint64) error {
+	out, err := r.workflows.DiscardWorkflowStagedChanges(ctx, &chatv1.WorkflowDiscardStagedRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+		ExpectedVersion: expectedVersion,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "discard workflow staged changes")
+}
+
 func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition, expectedVersion uint64, publish bool) (domain.WorkflowDefinition, error) {
 	out, err := r.workflows.UpdateWorkflow(ctx, &chatv1.WorkflowMutationRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Workflow: encodeWorkflowDefinition(value),
@@ -4834,6 +4845,16 @@ func (s *Server) GetWorkflow(ctx context.Context, input *chatv1.WorkflowGetReque
 		return nil, mapError(err)
 	}
 	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) DiscardWorkflowStagedChanges(ctx context.Context, input *chatv1.WorkflowDiscardStagedRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	if err := s.implementation.DiscardWorkflowStagedChanges(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetExpectedVersion(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {

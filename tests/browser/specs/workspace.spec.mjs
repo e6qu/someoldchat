@@ -1902,6 +1902,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByRole('heading', { name: 'Start incident triage' })).toBeVisible();
   await page.getByRole('button', { name: 'Run' }).click();
   await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  const runURL = page.url();
   await expect(page.getByRole('heading', { name: 'Workflow run' })).toBeVisible();
   await expect(page.getByText('running', { exact: true })).toBeVisible();
   await page.reload();
@@ -1912,10 +1913,18 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('Staged changes saved')).toBeVisible();
   await expect(page.getByText('your staged changes are not yet published')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Incident workflow staged' })).toBeVisible();
+  await page.getByRole('button', { name: 'Discard changes' }).click();
+  await expect(page.getByText('Staged changes discarded')).toBeVisible();
+  await expect(page.getByRole('heading', { name: workflowName })).toBeVisible();
+  await expect(page.getByText('your staged changes are not yet published')).toHaveCount(0);
   await page.getByRole('button', { name: 'Unpublish' }).click();
   await expect(page.getByText('Workflow unpublished')).toBeVisible();
   await expect(page.getByText('disabled', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run' })).toHaveCount(0);
+  await page.goto(runURL);
+  await expect(page.getByText('cancelled', { exact: true })).toBeVisible();
+  await expect(page.getByText('workflow_unpublished')).toBeVisible();
+  await page.getByRole('link', { name: '← Workflow' }).click();
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByText('Workflow published')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run' })).toBeVisible();

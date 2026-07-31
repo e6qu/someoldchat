@@ -215,6 +215,42 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	return value, nil
 }
 
+// DiscardWorkflowStagedChanges reverts a published workflow's draft to its
+// published revision. The owner reads the live (staged) head; this operation
+// throws those staged edits away and realigns the head to what is currently
+// running, so the builder no longer reports pending changes.
+func (m Messages) DiscardWorkflowStagedChanges(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID, expectedVersion uint64) error {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return err
+	}
+	if current.OwnerID != actor {
+		return store.ErrNotFound
+	}
+	if current.Status != domain.WorkflowPublished || current.Version == current.PublishedVersion {
+		return ErrInvalidWorkflowStep
+	}
+	if expectedVersion != current.Version {
+		return store.ErrConflict
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.staged_discarded",
+		events.String("workflow_id", string(current.ID)),
+		events.Int("version", int64(current.PublishedVersion)),
+	), now)
+	if err != nil {
+		return err
+	}
+	changed, err := m.Store.DiscardWorkflowStagedChanges(ctx, workspaceID, workflowID, expectedVersion, event)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return store.ErrConflict
+	}
+	return nil
+}
+
 func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err

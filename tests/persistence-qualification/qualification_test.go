@@ -503,6 +503,62 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		t.Fatalf("completed workflow step=%+v err=%v", storedStep, err)
 	}
 
+	// Staged edits can be discarded: the head reverts to the published revision.
+	published, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil || published.Status != domain.WorkflowPublished || published.Version != published.PublishedVersion {
+		t.Fatalf("published head=%+v err=%v", published, err)
+	}
+	stagedWorkflow := published
+	stagedWorkflow.Title = "Staged and discarded"
+	stagedWorkflow.UpdatedAt = now.Add(5 * time.Second)
+	if err := repository.UpdateWorkflow(ctx, stagedWorkflow, published.Version, event("staged", "workflow.updated", stagedWorkflow.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	stagedHead, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil || stagedHead.Title != "Staged and discarded" || stagedHead.Version == stagedHead.PublishedVersion {
+		t.Fatalf("staged head=%+v err=%v", stagedHead, err)
+	}
+	discarded, err := repository.DiscardWorkflowStagedChanges(ctx, workspaceID, workflowID, stagedHead.Version, event("discard", "workflow.staged_discarded", stagedWorkflow.UpdatedAt))
+	if err != nil || !discarded {
+		t.Fatalf("discard changed=%v err=%v", discarded, err)
+	}
+	afterDiscard, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil || afterDiscard.Title != workflow.Title || afterDiscard.Version != workflow.PublishedVersion {
+		t.Fatalf("after discard=%+v err=%v", afterDiscard, err)
+	}
+
+	// Unpublishing cancels running runs and their executing steps atomically.
+	cancellableRun := domain.WorkflowRun{
+		ID: domain.WorkflowRunID("Wx-cancel-" + suffix), WorkflowID: workflowID, WorkflowVersion: 2,
+		TriggerID: triggerID, WorkspaceID: workspaceID, AppID: workflow.AppID, ActorID: userID,
+		Status: domain.WorkflowRunRunning, Inputs: `{}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	cancellableStep := domain.WorkflowStep{
+		ID: domain.WorkflowStepID("Fx-cancel-" + suffix), WorkflowRunID: cancellableRun.ID,
+		WorkspaceID: workspaceID, AppID: workflow.AppID, UserID: userID, FunctionID: "FnCancel",
+		EditID: "triage", Status: domain.WorkflowStepExecuting, Inputs: `{}`, Outputs: `{}`,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflowRun(ctx, cancellableRun, &cancellableStep, []events.Event{
+		event("cancel-run", "workflow.run_started", now),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	unpublished := workflow
+	unpublished.Status = domain.WorkflowDisabled
+	unpublished.UpdatedAt = now.Add(6 * time.Second)
+	if err := repository.UpdateWorkflow(ctx, unpublished, afterDiscard.Version, event("unpublish", "workflow.unpublished", unpublished.UpdatedAt)); err != nil {
+		t.Fatal(err)
+	}
+	cancelledRun, err := repository.GetWorkflowRun(ctx, workspaceID, cancellableRun.ID)
+	if err != nil || cancelledRun.Status != domain.WorkflowRunCancelled || cancelledRun.Error != "workflow_unpublished" {
+		t.Fatalf("run after unpublish=%+v err=%v", cancelledRun, err)
+	}
+	cancelledStep, err := repository.GetWorkflowStep(ctx, workspaceID, cancellableStep.ID)
+	if err != nil || cancelledStep.Status != domain.WorkflowStepCancelled {
+		t.Fatalf("step after unpublish=%+v err=%v", cancelledStep, err)
+	}
+
 	occurrence := now.Add(time.Hour)
 	scheduledTrigger := domain.WorkflowTrigger{
 		ID: domain.WorkflowTriggerID("Ft-scheduled-" + suffix), WorkflowID: workflowID, WorkspaceID: workspaceID,

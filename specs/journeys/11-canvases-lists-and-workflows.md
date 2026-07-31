@@ -115,11 +115,13 @@ tokens, trigger conflicts, and concurrent publishing are explicit.
   other app and from RTM.
 - Shared memory, SQLite, PostgreSQL, and dqlite persistence qualification covers
   workflow revisions, triggers, permissions, featured workflows, execution
-  idempotency, step advancement, and terminal state. SQLite additionally closes
+  idempotency, step advancement, terminal state, staged-change discard, and
+  run/step cancellation on unpublish. SQLite additionally closes
   and reopens the database before asserting the workflow and run.
 - The first-party Playwright journey creates and installs a remote-function
   app, creates a two-step draft, publishes it, creates a link trigger, starts
-  one durable execution, reloads the run, creates a webhook trigger, invokes
+  one durable execution, reloads the run, stages and discards edits, unpublishes
+  and observes the cancelled run, creates a webhook trigger, invokes
   its secret URL over real HTTP, observes the indistinguishable 404 for a wrong
   secret, and checks accessibility.
 - Deterministic service, scheduler, memory, SQLite, PostgreSQL, and dqlite
@@ -161,16 +163,21 @@ The local and generated gRPC seams expose the same workflow,
 trigger, run, permission, featured-workflow, step-list, and completion
 operations. App-owned function executions are automatically dispatched through
 Events API or Socket Mode without a manifest event subscription, matching
-Slack's no-scope delivery contract.
+Slack's no-scope delivery contract. Unpublishing cancels every running run and
+executing step atomically in the disabling transaction, stamping both with the
+`workflow_unpublished` error so late completions are rejected. Staged edits
+can be discarded from the builder: the head reverts to the published revision,
+the staged revision rows are pruned, and the next update publishes from the
+realigned version.
 
 This is not full Slack Workflow Builder parity. Workflow managers, find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions, typed
 variable mapping, form and button steps, branches, templates and AI creation,
 icons, copy/delete, drag reordering, trigger-change rules, schedule frequency
 variants beyond hourly/daily/weekly/monthly (named weekdays, month-end
-semantics), trigger inputs wired to step variables, discarding staged changes,
+semantics), trigger inputs wired to step variables,
 per-step change tracking, activity dashboards, async workflow
-and form-response CSV export, cancellation of already-running executions on unpublish,
+and form-response CSV export,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain
 verified gaps. Current callback snapshots
