@@ -2369,6 +2369,88 @@ func (r Remote) WorkflowStepChanges(ctx context.Context, workspaceID domain.Work
 	return decodeWorkflowStepChanges(out.GetChanges()), nil
 }
 
+func (r Remote) DuplicateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	out, err := r.workflows.DuplicateWorkflow(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	return decodeWorkflowDefinition(out), err
+}
+
+func (r Remote) DeleteWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, expectedVersion uint64) error {
+	out, err := r.workflows.DeleteWorkflow(ctx, &chatv1.WorkflowDeleteRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+		ExpectedVersion: expectedVersion,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "delete workflow")
+}
+
+func (r Remote) SubmitWorkflowForm(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, runID domain.WorkflowRunID, stepID domain.WorkflowStepID, inputs string) error {
+	out, err := r.workflows.SubmitWorkflowForm(ctx, &chatv1.WorkflowFormSubmitRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), RunId: string(runID),
+		StepId: string(stepID), Inputs: inputs,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "submit workflow form")
+}
+
+func (r Remote) CompleteWorkflowButton(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, runID domain.WorkflowRunID, stepID domain.WorkflowStepID) error {
+	out, err := r.workflows.CompleteWorkflowButton(ctx, &chatv1.WorkflowButtonRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), RunId: string(runID), StepId: string(stepID),
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "complete workflow button")
+}
+
+func (r Remote) WorkflowRunInteraction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, runID domain.WorkflowRunID) (domain.WorkflowInteraction, error) {
+	out, err := r.workflows.WorkflowRunInteraction(ctx, &chatv1.WorkflowRunGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowRunId: string(runID),
+	})
+	if err != nil {
+		return domain.WorkflowInteraction{}, err
+	}
+	return decodeWorkflowInteraction(out), nil
+}
+
+func decodeWorkflowInteraction(value *chatv1.WorkflowInteraction) domain.WorkflowInteraction {
+	if value == nil {
+		return domain.WorkflowInteraction{}
+	}
+	interaction := domain.WorkflowInteraction{
+		StepID: domain.WorkflowStepID(value.GetStepId()), Kind: value.GetKind(),
+		Title: value.GetTitle(), Label: value.GetLabel(),
+	}
+	for _, field := range value.GetFields() {
+		interaction.Fields = append(interaction.Fields, domain.WorkflowInteractionField{
+			Name: field.GetName(), Label: field.GetLabel(),
+		})
+	}
+	return interaction
+}
+
+func (r Remote) WorkflowActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowActivity, error) {
+	out, err := r.workflows.WorkflowActivity(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	recent := make([]domain.WorkflowRun, 0, len(out.GetRecentRuns()))
+	for _, run := range out.GetRecentRuns() {
+		recent = append(recent, decodeWorkflowRun(run))
+	}
+	return domain.WorkflowActivity{
+		Queued: int(out.GetQueued()), Running: int(out.GetRunning()), Completed: int(out.GetCompleted()),
+		Failed: int(out.GetFailed()), Cancelled: int(out.GetCancelled()), RecentRuns: recent,
+	}, nil
+}
+
 func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition, expectedVersion uint64, publish bool) (domain.WorkflowDefinition, error) {
 	out, err := r.workflows.UpdateWorkflow(ctx, &chatv1.WorkflowMutationRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Workflow: encodeWorkflowDefinition(value),
@@ -4900,6 +4982,83 @@ func (s *Server) WorkflowStepChanges(ctx context.Context, input *chatv1.Workflow
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepChangesResponse{Changes: encodeWorkflowStepChanges(changes)}, nil
+}
+
+func (s *Server) DuplicateWorkflow(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowDefinition, error) {
+	value, err := s.implementation.DuplicateWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) DeleteWorkflow(ctx context.Context, input *chatv1.WorkflowDeleteRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	if err := s.implementation.DeleteWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetExpectedVersion(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) WorkflowActivity(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowActivitySummary, error) {
+	activity, err := s.implementation.WorkflowActivity(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	recent := make([]*chatv1.WorkflowRun, 0, len(activity.RecentRuns))
+	for _, run := range activity.RecentRuns {
+		recent = append(recent, encodeWorkflowRun(run))
+	}
+	return &chatv1.WorkflowActivitySummary{
+		Queued: int32(activity.Queued), Running: int32(activity.Running), Completed: int32(activity.Completed),
+		Failed: int32(activity.Failed), Cancelled: int32(activity.Cancelled), RecentRuns: recent,
+	}, nil
+}
+
+func (s *Server) SubmitWorkflowForm(ctx context.Context, input *chatv1.WorkflowFormSubmitRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	if err := s.implementation.SubmitWorkflowForm(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowRunID(input.GetRunId()), domain.WorkflowStepID(input.GetStepId()), input.GetInputs(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) CompleteWorkflowButton(ctx context.Context, input *chatv1.WorkflowButtonRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	if err := s.implementation.CompleteWorkflowButton(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowRunID(input.GetRunId()), domain.WorkflowStepID(input.GetStepId()),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) WorkflowRunInteraction(ctx context.Context, input *chatv1.WorkflowRunGetRequest) (*chatv1.WorkflowInteraction, error) {
+	interaction, err := s.implementation.WorkflowRunInteraction(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowRunID(input.GetWorkflowRunId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	fields := make([]*chatv1.WorkflowInteractionField, 0, len(interaction.Fields))
+	for _, field := range interaction.Fields {
+		fields = append(fields, &chatv1.WorkflowInteractionField{Name: field.Name, Label: field.Label})
+	}
+	return &chatv1.WorkflowInteraction{
+		StepId: string(interaction.StepID), Kind: interaction.Kind, Title: interaction.Title,
+		Label: interaction.Label, Fields: fields,
+	}, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {

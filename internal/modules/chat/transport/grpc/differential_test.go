@@ -207,6 +207,105 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}}))
 }
 
+func seedFormParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedWorkflowParity(t, target)
+	now := time.Unix(1_700_000_200, 0).UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: "WfForm", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "form-workflow",
+		Title: "Form workflow", InputSchema: `{}`,
+		Steps: `[
+			{"id":"intake","type":"form","form":{"title":"Intake","inputs":{"name":"Name"}}},
+			{"id":"approve","type":"button","button":{"label":"Approve"}},
+			{"id":"triage","type":"function","function_id":"triage","title":"Triage"}
+		]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
+		ID: "evt_form_workflow", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now,
+	}))
+	trigger := domain.WorkflowTrigger{
+		ID: "FtForm", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run form",
+		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+		ID: "evt_form_trigger", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
+	}))
+	run := domain.WorkflowRun{
+		ID: "WxForm", WorkflowID: workflow.ID, WorkflowVersion: 1, TriggerID: trigger.ID,
+		WorkspaceID: "T1", AppID: "A1", ActorID: "U1", ConversationID: "C1",
+		Status: domain.WorkflowRunRunning, Inputs: `{}`, Outputs: `{}`, CurrentStep: 0,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	waiting := domain.WorkflowStep{
+		ID: "FxForm", WorkflowRunID: run.ID, WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+		EditID: "intake", Status: domain.WorkflowStepWaiting, Inputs: `{}`, Outputs: `{}`,
+		StepName: "Intake", CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflowRun(context.Background(), run, &waiting, []events.Event{{
+		ID: "evt_form_run", WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now,
+	}}))
+}
+
+func seedBranchParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedWorkflowParity(t, target)
+	now := time.Unix(1_700_000_100, 0).UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: "WfBranch", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "branch-workflow",
+		Title: "Branched workflow", InputSchema: `{}`,
+		Steps: `[
+			{"id":"triage","type":"function","function_id":"triage","title":"Classify"},
+			{"id":"triage-2","type":"function","function_id":"triage","title":"Escalate","condition":{"source":"inputs.severity","operator":"equals","value":"high"}},
+			{"id":"triage-3","type":"function","function_id":"triage","title":"Log","condition":{"source":"steps.triage.outputs.result","operator":"contains","value":"ok"}}
+		]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
+		ID: "evt_branch_workflow", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now,
+	}))
+	trigger := domain.WorkflowTrigger{
+		ID: "FtBranch", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run branches",
+		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+		ID: "evt_branch_trigger", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
+	}))
+	seedRun := func(runID domain.WorkflowRunID, inputs string, currentStep int, executing domain.WorkflowStep, completed *domain.WorkflowStep) {
+		run := domain.WorkflowRun{
+			ID: runID, WorkflowID: workflow.ID, WorkflowVersion: 1, TriggerID: trigger.ID,
+			WorkspaceID: "T1", AppID: "A1", ActorID: "U1", ConversationID: "C1",
+			Status: domain.WorkflowRunRunning, Inputs: inputs, Outputs: `{}`, CurrentStep: currentStep,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		requireSeed(t, target.CreateWorkflowRun(context.Background(), run, &executing, []events.Event{{
+			ID: domain.EventID("evt_" + strings.ToLower(string(runID)) + "_started"), WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now,
+		}}))
+		if completed != nil {
+			requireSeed(t, target.SetWorkflowStep(context.Background(), *completed, events.Event{
+				ID: domain.EventID("evt_" + strings.ToLower(string(runID)) + "_first"), WorkspaceID: "T1", Topic: "function_executed", CreatedAt: now,
+			}))
+		}
+	}
+	seedRun("WxBranchHigh", `{"severity":"high"}`, 1,
+		domain.WorkflowStep{
+			ID: "FxBranchHigh", WorkflowRunID: "WxBranchHigh", WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+			FunctionID: "FnBranch", EditID: "triage-2", Status: domain.WorkflowStepExecuting,
+			Inputs: `{}`, Outputs: `{}`, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+		},
+		&domain.WorkflowStep{
+			ID: "FxBranchHighFirst", WorkflowRunID: "WxBranchHigh", WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+			FunctionID: "FnBranch", EditID: "triage", Status: domain.WorkflowStepCompleted,
+			Inputs: `{}`, Outputs: `{"result":"ok"}`, CreatedAt: now, UpdatedAt: now,
+		})
+	seedRun("WxBranchLow", `{"severity":"low"}`, 0,
+		domain.WorkflowStep{
+			ID: "FxBranchLow", WorkflowRunID: "WxBranchLow", WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+			FunctionID: "FnBranch", EditID: "triage", Status: domain.WorkflowStepExecuting,
+			Inputs: `{"severity":"low"}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+		}, nil)
+}
+
 func newParity(t *testing.T, testCase parityCase) parity {
 	t.Helper()
 	seed := testCase.seed
@@ -326,6 +425,150 @@ func parityCases() []parityCase {
 		return domain.NewMessageTimestamp(message.CreatedAt)
 	}
 	return []parityCase{
+		{
+			name: "form and button steps resume across the composition seam",
+			seed: seedFormParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// The run view reports the form the run is parked on.
+				before, err := chat.WorkflowRunInteraction(ctx, "T1", "U2", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				fieldNames := make([]string, 0, len(before.Fields))
+				for _, field := range before.Fields {
+					fieldNames = append(fieldNames, field.Name)
+				}
+				// A member submits it and the run advances to the approval
+				// button, which the same member then clicks to reach triage.
+				if err := chat.SubmitWorkflowForm(ctx, "T1", "U2", "WxForm", "FxForm", `{"name":"Ada"}`); err != nil {
+					return nil, err
+				}
+				button, err := chat.WorkflowRunInteraction(ctx, "T1", "U1", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				if err := chat.CompleteWorkflowButton(ctx, "T1", "U2", "WxForm", button.StepID); err != nil {
+					return nil, err
+				}
+				run, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				// Once advanced past both interactive steps, the run no longer
+				// reports an interaction.
+				after, err := chat.WorkflowRunInteraction(ctx, "T1", "U1", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					before.Kind, before.Title, fieldNames, before.StepID,
+					button.Kind, button.Label,
+					run.Status, run.CurrentStep, after.Kind,
+				}, nil
+			},
+		},
+		{
+			name: "workflow branches route completed runs across the composition seam",
+			seed: seedBranchParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// The severity=high run is executing its escalate step; when it
+				// completes, the log step's condition on the first step's
+				// outputs holds, so the run advances to it.
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxBranchHigh", `{"result":"escalated"}`, ""); err != nil {
+					return nil, err
+				}
+				highRun, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxBranchHigh")
+				if err != nil {
+					return nil, err
+				}
+				// The severity=low run is still on its first step; completing
+				// it with outputs the log condition rejects skips both
+				// remaining steps and finishes the run.
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxBranchLow", `{"result":"bad"}`, ""); err != nil {
+					return nil, err
+				}
+				lowRun, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxBranchLow")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					highRun.Status, highRun.CurrentStep,
+					lowRun.Status, lowRun.CurrentStep,
+				}, nil
+			},
+		},
+		{
+			name: "workflow activity summarizes runs across the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				before, err := chat.WorkflowActivity(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.WorkflowActivity(ctx, "T1", "U2", "WfParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner activity error=%v, want ErrNotFound", err)
+				}
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxParity", `{"result":"done"}`, ""); err != nil {
+					return nil, err
+				}
+				after, err := chat.WorkflowActivity(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				recentIDs := func(activity domain.WorkflowActivity) []string {
+					ids := make([]string, 0, len(activity.RecentRuns))
+					for _, run := range activity.RecentRuns {
+						ids = append(ids, string(run.ID)+":"+string(run.Status))
+					}
+					return ids
+				}
+				return []any{
+					before.Queued, before.Running, before.Completed, before.Failed, before.Cancelled, recentIDs(before),
+					after.Queued, after.Running, after.Completed, after.Failed, after.Cancelled, recentIDs(after),
+				}, nil
+			},
+		},
+		{
+			name: "workflow duplication and deletion survive the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				duplicate, err := chat.DuplicateWorkflow(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.DuplicateWorkflow(ctx, "T1", "U2", "WfParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner duplicate error=%v, want ErrNotFound", err)
+				}
+				if err := chat.DeleteWorkflow(ctx, "T1", "U1", duplicate.ID, 99); !errors.Is(err, storepkg.ErrConflict) {
+					return nil, fmt.Errorf("stale delete error=%v, want ErrConflict", err)
+				}
+				if err := chat.DeleteWorkflow(ctx, "T1", "U2", duplicate.ID, duplicate.Version); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner delete error=%v, want ErrNotFound", err)
+				}
+				if err := chat.DeleteWorkflow(ctx, "T1", "U1", duplicate.ID, duplicate.Version); err != nil {
+					return nil, err
+				}
+				if _, err := chat.GetWorkflow(ctx, "T1", "U1", duplicate.ID); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("deleted duplicate error=%v, want ErrNotFound", err)
+				}
+				// Deleting a published workflow cancels its running run inside
+				// the same transaction, then the workflow, its trigger, and the
+				// run all stop existing.
+				if err := chat.DeleteWorkflow(ctx, "T1", "U1", "WfParity", 1); err != nil {
+					return nil, err
+				}
+				if _, err := chat.GetWorkflow(ctx, "T1", "U1", "WfParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("deleted workflow error=%v, want ErrNotFound", err)
+				}
+				if _, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("deleted run error=%v, want ErrNotFound", err)
+				}
+				return []any{
+					duplicate.Title, duplicate.CallbackID, string(duplicate.Status),
+					duplicate.Version, duplicate.PublishedVersion, duplicate.Steps,
+				}, nil
+			},
+		},
 		{
 			name: "workflow permissions discovery and completion survive the composition seam",
 			seed: seedWorkflowParity,
@@ -500,6 +743,14 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				weekdays, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					WorkflowID: "WfParity", Title: "Weekdays", Type: "scheduled",
+					Config:  `{"start_time":"2026-01-05T09:00:00Z","timezone":"UTC","frequency":{"type":"weekly","weekdays":["mon","wed"]}}`,
+					Enabled: true,
+				}, 0)
+				if err != nil {
+					return nil, err
+				}
 				if _, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 					WorkflowID: "WfParity", Title: "On message", Type: "message",
 					Config: `{"channel_ids":["C1"]}`, Enabled: true,
@@ -522,7 +773,7 @@ func parityCases() []parityCase {
 					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, service.ErrWebhookTriggerSecret),
 					hookRun.Status, hookRun.ActorID,
 					autoRun.Status, autoRun.ID == autoReplay.ID,
-					!scheduled.NextRunAt.IsZero(),
+					!scheduled.NextRunAt.IsZero(), weekdays.Config, weekdays.NextRunAt.Format(time.RFC3339),
 					started, again,
 				}, nil
 			},

@@ -3276,10 +3276,14 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /app/workflows/create", h.createWorkflow)
 	mux.HandleFunc("GET /app/workflows/{workflowID}", h.workflow)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/update", h.updateWorkflow)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/copy", h.duplicateWorkflow)
+	mux.HandleFunc("POST /app/workflows/{workflowID}/delete", h.deleteWorkflow)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers", h.createWorkflowTrigger)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers/{triggerID}", h.updateWorkflowTrigger)
 	mux.HandleFunc("POST /app/workflows/{workflowID}/triggers/{triggerID}/run", h.runWorkflow)
 	mux.HandleFunc("GET /app/workflows/runs/{runID}", h.workflowRun)
+	mux.HandleFunc("POST /app/workflows/runs/submit/{runID}", h.submitWorkflowForm)
+	mux.HandleFunc("POST /app/workflows/runs/click/{runID}", h.completeWorkflowButton)
 	mux.HandleFunc("GET /app/apps", h.workspaceApps)
 	mux.HandleFunc("GET /app/apps/{appID}", h.appHome)
 	mux.HandleFunc("POST /app/apps/{appID}/action", h.appHomeAction)
@@ -8916,7 +8920,7 @@ func (h Handler) requestChannel(r *http.Request) domain.ConversationID {
 // another. The administration page keeps it, because every form there redirects
 // to itself.
 var workspaceContentSecurityPolicy = "default-src 'none'; script-src " +
-	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup), " ") +
+	strings.Join(inlineScriptHashes(themeBootstrap, themeToggleScript, progressiveEnhancementScript, searchSuggestionsScript, developerAppsScript, appOptionsScript, laterLiveScript, activityMarkup, draftsAndSentMarkup, membersMarkup, workflowsMarkup, workflowMarkup, workflowRunMarkup), " ") +
 	"; style-src 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // entryContentSecurityPolicy covers the two pages a signed-out visitor reaches:

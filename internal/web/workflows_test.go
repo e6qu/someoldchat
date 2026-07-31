@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -36,6 +38,32 @@ func seedWorkflowApp(t *testing.T) (*http.ServeMux, string) {
 		t.Fatal(err)
 	}
 	return mux, auth.CSRFToken("session")
+}
+
+func TestWorkflowPagesAgreeWithTheContentSecurityPolicy(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	for _, target := range []string{"/app/workflows", workflowURL} {
+		response := get(t, mux, target)
+		policy := response.Header().Get("Content-Security-Policy")
+		if policy == "" {
+			t.Fatalf("%s carries no content security policy", target)
+		}
+		bodies := inlineScriptBodies(response.Body.String())
+		if len(bodies) == 0 {
+			t.Fatalf("%s renders no inline script", target)
+		}
+		for _, body := range bodies {
+			digest := sha256.Sum256([]byte(body))
+			hash := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+			if !strings.Contains(policy, hash) {
+				t.Fatalf("%s serves an inline script the policy blocks: %s", target, hash)
+			}
+		}
+	}
 }
 
 func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {
@@ -140,6 +168,38 @@ func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T)
 	}
 	page := get(t, mux, scheduled.Header().Get("Location"))
 	requireContains(t, "scheduled trigger", page.Body.String(), "Every morning", "Every 1 daily · Europe/Helsinki", "Next run")
+
+	weekdays := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Weekday sync"}, "type": {"scheduled"},
+		"schedule_start": {"2030-05-06T09:00"}, "schedule_timezone": {"UTC"},
+		"schedule_frequency": {"weekly"}, "schedule_interval": {"1"},
+		"schedule_weekday_mon": {"1"}, "schedule_weekday_wed": {"1"},
+	}.Encode(), false)
+	if weekdays.Code != http.StatusSeeOther {
+		t.Fatalf("weekday trigger=%d: %s", weekdays.Code, weekdays.Body)
+	}
+	page = get(t, mux, weekdays.Header().Get("Location"))
+	requireContains(t, "weekday trigger", page.Body.String(), "Weekday sync", "Every week on mon, wed · UTC")
+
+	monthEnd := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Month end"}, "type": {"scheduled"},
+		"schedule_start": {"2030-01-15T09:00"}, "schedule_timezone": {"UTC"},
+		"schedule_frequency": {"monthly"}, "schedule_day": {"31"},
+	}.Encode(), false)
+	if monthEnd.Code != http.StatusSeeOther {
+		t.Fatalf("month-end trigger=%d: %s", monthEnd.Code, monthEnd.Body)
+	}
+	page = get(t, mux, monthEnd.Header().Get("Location"))
+	requireContains(t, "month-end trigger", page.Body.String(), "Month end", "Every month on day 31 · UTC")
+
+	invalidDay := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Broken day"}, "type": {"scheduled"},
+		"schedule_start": {"2030-01-15T09:00"}, "schedule_timezone": {"UTC"},
+		"schedule_frequency": {"monthly"}, "schedule_day": {"32"},
+	}.Encode(), false)
+	if invalidDay.Code != http.StatusBadRequest {
+		t.Fatalf("invalid day=%d: %s", invalidDay.Code, invalidDay.Body)
+	}
 
 	broken := postForm(t, mux, workflowURL+"/triggers", url.Values{
 		"_csrf": {csrf}, "title": {"Broken"}, "type": {"scheduled"},
@@ -325,6 +385,158 @@ func TestWorkflowBuilderMarksPerStepChangesAgainstThePublishedRevision(t *testin
 	}
 }
 
+func TestWorkflowBuilderShowsRunActivityToTheOwner(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	page := get(t, mux, workflowURL)
+	requireContains(t, "empty activity", page.Body.String(), "Run activity", "No runs yet")
+	postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+	triggered := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Start incident triage"}, "type": {"link"},
+	}.Encode(), false)
+	page = get(t, mux, triggered.Header().Get("Location"))
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+	if len(trigger) != 2 || len(key) != 2 {
+		t.Fatalf("run form missing: %s", page.Body)
+	}
+	started := postForm(t, mux, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
+		"_csrf": {csrf}, "idempotency_key": {key[1]},
+	}.Encode(), false)
+	if started.Code != http.StatusSeeOther {
+		t.Fatalf("run=%d: %s", started.Code, started.Body)
+	}
+	page = get(t, mux, workflowURL)
+	requireContains(t, "running activity", page.Body.String(), "Run activity", "<b>1</b> running", "Start incident triage", `data-activity-run`)
+	runLink := regexp.MustCompile(`href="(/app/workflows/runs/Wx[0-9a-f]+)"`).FindStringSubmatch(page.Body.String())
+	if len(runLink) != 2 {
+		t.Fatalf("activity run link missing: %s", page.Body)
+	}
+
+	unpublished := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"2"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"unpublish"},
+	}.Encode(), false)
+	if unpublished.Code != http.StatusSeeOther {
+		t.Fatalf("unpublish=%d: %s", unpublished.Code, unpublished.Body)
+	}
+	page = get(t, mux, workflowURL)
+	requireContains(t, "cancelled activity", page.Body.String(), "<b>0</b> running", "<b>1</b> cancelled")
+}
+
+func TestWorkflowBuilderRunsFormAndButtonSteps(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Interactive"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	published := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Interactive"}, "input_schema": {`{}`},
+		"step_type_1": {"form"}, "form_1": {`{"title":"Intake","inputs":{"name":"Name"}}`},
+		"step_type_2": {"button"}, "button_label_2": {"Approve"},
+		"step_type_3": {"function"}, "step_3": {"notify"},
+		"action": {"publish"},
+	}.Encode(), false)
+	if published.Code != http.StatusSeeOther {
+		t.Fatalf("publish=%d: %s", published.Code, published.Body)
+	}
+	triggered := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Run"}, "type": {"link"},
+	}.Encode(), false)
+	page := get(t, mux, triggered.Header().Get("Location"))
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+	if len(trigger) != 2 || len(key) != 2 {
+		t.Fatalf("run form missing: %s", page.Body)
+	}
+	started := postForm(t, mux, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
+		"_csrf": {csrf}, "idempotency_key": {key[1]},
+	}.Encode(), false)
+	runURL := started.Header().Get("Location")
+	runPage := get(t, mux, runURL)
+	requireContains(t, "form step", runPage.Body.String(), "Intake", `name="field_name"`, `name="step_id"`, "Submit")
+	stepID := regexp.MustCompile(`name="step_id" value="([^"]+)"`).FindStringSubmatch(runPage.Body.String())
+	if len(stepID) != 2 {
+		t.Fatalf("step id missing: %s", runPage.Body)
+	}
+
+	submitted := postForm(t, mux, "/app/workflows/runs/submit/"+strings.TrimPrefix(runURL, "/app/workflows/runs/"), url.Values{
+		"_csrf": {csrf}, "step_id": {stepID[1]}, "field_name": {"Ada"},
+	}.Encode(), false)
+	if submitted.Code != http.StatusSeeOther {
+		t.Fatalf("submit=%d: %s", submitted.Code, submitted.Body)
+	}
+	runPage = get(t, mux, runURL)
+	requireContains(t, "button step", runPage.Body.String(), "Approve", "Confirm")
+	buttonStep := regexp.MustCompile(`name="step_id" value="([^"]+)"`).FindStringSubmatch(runPage.Body.String())
+	clicked := postForm(t, mux, "/app/workflows/runs/click/"+strings.TrimPrefix(runURL, "/app/workflows/runs/"), url.Values{
+		"_csrf": {csrf}, "step_id": {buttonStep[1]},
+	}.Encode(), false)
+	if clicked.Code != http.StatusSeeOther {
+		t.Fatalf("click=%d: %s", clicked.Code, clicked.Body)
+	}
+	runPage = get(t, mux, runURL)
+	requireContains(t, "advanced run", runPage.Body.String(), "running", "An app function is running")
+}
+
+func TestWorkflowBuilderCopiesAndDeletesAWorkflow(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+		"callback_id": {"incident-triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+
+	copied := postForm(t, mux, workflowURL+"/copy", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if copied.Code != http.StatusSeeOther {
+		t.Fatalf("copy=%d: %s", copied.Code, copied.Body)
+	}
+	copyURL := strings.Split(copied.Header().Get("Location"), "?")[0]
+	if copyURL == workflowURL {
+		t.Fatalf("copy redirected to the source workflow: %s", copied.Header().Get("Location"))
+	}
+	page := get(t, mux, copied.Header().Get("Location"))
+	requireContains(t, "copied workflow", page.Body.String(), "Workflow copied", "Incident triage (copy)", "draft")
+
+	version := regexp.MustCompile(`name="version" value="(\d+)"`).FindStringSubmatch(page.Body.String())
+	if len(version) != 2 {
+		t.Fatalf("copy page missing delete version: %s", page.Body)
+	}
+	stale := postForm(t, mux, copyURL+"/delete", url.Values{
+		"_csrf": {csrf}, "version": {"99"},
+	}.Encode(), false)
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale delete=%d: %s", stale.Code, stale.Body)
+	}
+	missing := postForm(t, mux, "/app/workflows/Wfmissing/delete", url.Values{
+		"_csrf": {csrf}, "version": {"1"},
+	}.Encode(), false)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing workflow delete=%d: %s", missing.Code, missing.Body)
+	}
+
+	deleted := postForm(t, mux, copyURL+"/delete", url.Values{
+		"_csrf": {csrf}, "version": {version[1]},
+	}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete=%d: %s", deleted.Code, deleted.Body)
+	}
+	directory := get(t, mux, deleted.Header().Get("Location"))
+	requireContains(t, "directory after delete", directory.Body.String(), "Workflow deleted", "Incident triage")
+	if strings.Contains(directory.Body.String(), "Incident triage (copy)") {
+		t.Fatalf("deleted copy still listed: %s", directory.Body)
+	}
+	if gone := get(t, mux, copyURL); gone.Code != http.StatusNotFound {
+		t.Fatalf("deleted workflow page=%d", gone.Code)
+	}
+}
+
 func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	response := postForm(t, mux, "/app/workflows/create", url.Values{
@@ -336,11 +548,46 @@ func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	requireContains(t, "invalid function", response.Body.String(), "The workflow was not created", "Choose a function belonging to the selected app")
 }
 
+func TestWorkflowBuilderSavesAndRendersStepMappings(t *testing.T) {
+	options := []workflowFunctionOption{{AppID: "A1", CallbackID: "triage", Title: "Triage"}}
+	encoded, err := encodeWorkflowSteps(map[string]string{
+		"step_count": "2", "step_1": "triage", "step_2": "triage",
+		"mapping_2": `{"item":"inputs.item","prev":"steps.triage.outputs.x"}`,
+	}, options, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := decodeWorkflowSteps(encoded)
+	if len(steps) != 2 || steps[0].Mapping != "" || steps[1].Mapping != `{"item":"inputs.item","prev":"steps.triage.outputs.x"}` {
+		t.Fatalf("round-tripped steps=%+v from %s", steps, encoded)
+	}
+	if _, err := encodeWorkflowSteps(map[string]string{
+		"step_1": "triage", "mapping_1": `not json`,
+	}, options, "A1"); err == nil {
+		t.Fatal("malformed mapping was accepted")
+	}
+
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Mapped triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	saved := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Mapped triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "mapping_1": {`{"item":"inputs.item"}`}, "action": {"publish"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("mapped publish=%d: %s", saved.Code, saved.Body)
+	}
+	page := get(t, mux, saved.Header().Get("Location"))
+	requireContains(t, "rendered mapping", page.Body.String(), `name="mapping_1" value="{&#34;item&#34;:&#34;inputs.item&#34;}"`)
+}
+
 func TestWorkflowBuilderPreservesLongStepListsAndUsesRunPermissions(t *testing.T) {
-	callbacks := make([]string, 12)
+	callbacks := make([]workflowDecodedStep, 12)
 	fields := map[string]string{"step_count": "12"}
 	for index := range callbacks {
-		callbacks[index] = "triage"
+		callbacks[index] = workflowDecodedStep{Callback: "triage"}
 		fields["step_"+strconv.Itoa(index+1)] = "triage"
 	}
 	slots := workflowSlots(callbacks)
@@ -364,4 +611,45 @@ func TestWorkflowBuilderPreservesLongStepListsAndUsesRunPermissions(t *testing.T
 	if !workflowPermissionAllows(domain.AutomationPermission{PermissionType: "named_entities", TeamIDs: []domain.WorkspaceID{"T1"}}, principal, "U1") {
 		t.Fatal("workspace-named member was denied a run action")
 	}
+}
+
+func TestWorkflowBuilderSavesAndRendersStepConditions(t *testing.T) {
+	options := []workflowFunctionOption{{AppID: "A1", CallbackID: "triage", Title: "Triage"}}
+	encoded, err := encodeWorkflowSteps(map[string]string{
+		"step_count": "2", "step_1": "triage", "step_2": "triage",
+		"condition_source_2": "inputs.severity", "condition_operator_2": "equals", "condition_value_2": "high",
+	}, options, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := decodeWorkflowSteps(encoded)
+	if len(steps) != 2 || steps[1].ConditionSource != "inputs.severity" ||
+		steps[1].ConditionOperator != "equals" || steps[1].ConditionValue != "high" {
+		t.Fatalf("round-tripped steps=%+v from %s", steps, encoded)
+	}
+	if steps[0].ConditionSource != "" {
+		t.Fatalf("unconditional step gained a condition: %+v", steps[0])
+	}
+	if _, err := encodeWorkflowSteps(map[string]string{
+		"step_1": "triage", "condition_source_1": "inputs.severity",
+	}, options, "A1"); err == nil {
+		t.Fatal("condition source without an operator was accepted")
+	}
+
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Conditional triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	saved := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Conditional triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "condition_source_1": {"inputs.severity"},
+		"condition_operator_1": {"equals"}, "condition_value_1": {"high"}, "action": {"publish"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("conditional publish=%d: %s", saved.Code, saved.Body)
+	}
+	page := get(t, mux, saved.Header().Get("Location"))
+	requireContains(t, "rendered condition", page.Body.String(),
+		`name="condition_source_1" value="inputs.severity"`, `name="condition_value_1" value="high"`, `option value="equals" selected`)
 }

@@ -237,6 +237,7 @@ type WorkflowStepStatus string
 const (
 	WorkflowStepConfigured WorkflowStepStatus = "configured"
 	WorkflowStepExecuting  WorkflowStepStatus = "executing"
+	WorkflowStepWaiting    WorkflowStepStatus = "waiting"
 	WorkflowStepCompleted  WorkflowStepStatus = "completed"
 	WorkflowStepFailed     WorkflowStepStatus = "failed"
 	WorkflowStepCancelled  WorkflowStepStatus = "cancelled"

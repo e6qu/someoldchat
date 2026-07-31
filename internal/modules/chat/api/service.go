@@ -144,6 +144,12 @@ type Service interface {
 	GetWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) (domain.WorkflowDefinition, error)
 	DiscardWorkflowStagedChanges(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, uint64) error
 	WorkflowStepChanges(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) ([]domain.WorkflowStepChange, error)
+	DuplicateWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) (domain.WorkflowDefinition, error)
+	DeleteWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID, uint64) error
+	WorkflowActivity(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) (domain.WorkflowActivity, error)
+	SubmitWorkflowForm(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID, domain.WorkflowStepID, string) error
+	CompleteWorkflowButton(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID, domain.WorkflowStepID) error
+	WorkflowRunInteraction(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID) (domain.WorkflowInteraction, error)
 	UpdateWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowDefinition, uint64, bool) (domain.WorkflowDefinition, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	SetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTrigger, uint64) (domain.WorkflowTrigger, error)

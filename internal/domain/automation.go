@@ -72,6 +72,34 @@ type WorkflowStepChange struct {
 	Change     WorkflowStepChangeType
 }
 
+// WorkflowActivity is the run dashboard for one workflow: a count per
+// terminal and in-flight status plus the most recent runs, newest first.
+// Slack's builder shows the same activity view to the workflow's managers.
+type WorkflowActivity struct {
+	Queued     int
+	Running    int
+	Completed  int
+	Failed     int
+	Cancelled  int
+	RecentRuns []WorkflowRun
+}
+
+// WorkflowInteraction describes the human input a running workflow is parked
+// on, if any. Kind is empty when the run is not waiting on a form or button.
+type WorkflowInteraction struct {
+	StepID WorkflowStepID
+	Kind   string
+	Title  string
+	Label  string
+	Fields []WorkflowInteractionField
+}
+
+// WorkflowInteractionField is one named input a form step collects.
+type WorkflowInteractionField struct {
+	Name  string
+	Label string
+}
+
 type WorkflowTriggerType string
 
 const (

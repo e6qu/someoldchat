@@ -370,12 +370,20 @@ type Store interface {
 	DeleteView(context.Context, domain.WorkspaceID, domain.UserID, domain.ViewID, bool, events.Event) error
 	SetWorkflowStep(context.Context, domain.WorkflowStep, events.Event) error
 	GetWorkflowStep(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.WorkflowStep, error)
+	// ListWorkflowRunSteps returns one run's step executions in creation
+	// order.
+	ListWorkflowRunSteps(context.Context, domain.WorkspaceID, domain.WorkflowRunID) ([]domain.WorkflowStep, error)
 	CreateWorkflow(context.Context, domain.WorkflowDefinition, events.Event) error
 	UpdateWorkflow(context.Context, domain.WorkflowDefinition, uint64, events.Event) error
 	// DiscardWorkflowStagedChanges reverts the head row to the published
 	// revision and realigns Version with PublishedVersion. The expectedVersion
 	// is the staged version being discarded.
 	DiscardWorkflowStagedChanges(context.Context, domain.WorkspaceID, domain.WorkflowID, uint64, events.Event) (bool, error)
+	// DeleteWorkflow removes a workflow with its revisions, triggers, runs,
+	// and steps in one transaction, cancelling every running execution with
+	// the workflow_unpublished error first. It reports false when the expected
+	// version moved underneath the caller.
+	DeleteWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID, uint64, events.Event) (bool, error)
 	GetWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID) (domain.WorkflowDefinition, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)
@@ -396,6 +404,9 @@ type Store interface {
 	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.WorkflowRunID) (domain.WorkflowRun, error)
 	GetWorkflowRunByIdempotency(context.Context, domain.WorkspaceID, string) (domain.WorkflowRun, error)
 	ListWorkflowRuns(context.Context, domain.WorkspaceID, domain.WorkflowID, domain.PageRequest) ([]domain.WorkflowRun, bool, domain.Cursor, error)
+	// SummarizeWorkflowRuns reports the per-status run counts for one workflow
+	// and its latest runs, newest first, bounded by the given limit.
+	SummarizeWorkflowRuns(context.Context, domain.WorkspaceID, domain.WorkflowID, int) (domain.WorkflowActivity, error)
 	SetAutomationPermission(context.Context, domain.AutomationPermission, events.Event) error
 	GetAutomationPermission(context.Context, domain.WorkspaceID, string, string) (domain.AutomationPermission, error)
 	SetFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.FeaturedWorkflow, events.Event) error

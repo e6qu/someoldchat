@@ -100,6 +100,25 @@ Existing run history remains attributable to the version executed.
 Permissions, plan restrictions, removed functions, schema drift, revoked app
 tokens, trigger conflicts, and concurrent publishing are explicit.
 
+## WORKFLOW-04 — Route runs with conditional steps
+
+A step can be gated by a condition comparing a variable — a run input
+(`inputs.<name>`) or an earlier step's output (`steps.<id>.outputs.<name>`) —
+with equals, does not equal, contains, is greater than, or is less than a
+value. Execution skips a step whose condition fails and completes the run when
+no remaining step's condition holds, so a workflow branches without a separate
+editor. Conditions only read earlier steps, so a forward or self reference is a
+definition error caught at save.
+
+## WORKFLOW-05 — Collect input with interactive steps
+
+A form step parks a run until a workspace member fills in and submits the
+configured fields, and a button step parks it until a member clicks the
+confirmation. The run view renders the pending form or button to any member,
+and submitting or clicking completes the step through the same advance path as
+a function completion, carrying the form's values forward as the step's outputs
+for later steps and conditions to read.
+
 ## Evidence
 
 - The first-party HTTP journey creates a durable canvas, reloads it, atomically
@@ -171,15 +190,22 @@ the staged revision rows are pruned, and the next update publishes from the
 realigned version. While staged edits exist, the builder labels each step
 against the published revision positionally — added, changed, or removed — and
 lists the steps that no longer appear in the head, so the owner sees exactly
-what publishing would change.
+what publishing would change. A workflow can be copied into a new draft and
+deleted, with deletion cancelling every running execution in the same
+transaction that removes the workflow and its derived records. The owner's
+builder shows a run activity dashboard counting runs by status and listing the
+newest first. Scheduled triggers accept named weekdays and an explicit
+month-end day. A step can be gated by a condition over the run's inputs or an
+earlier step's outputs; each step's inputs can be mapped from those same
+variables; and form and button steps pause a run until a workspace member
+submits the form or clicks the confirmation, resuming through the same advance
+path as a function completion.
 
 This is not full Slack Workflow Builder parity. Workflow managers, find/use/copy
-permissions, plan/admin policy, Slack built-in and connector functions, typed
-variable mapping, form and button steps, branches, templates and AI creation,
-icons, copy/delete, drag reordering, trigger-change rules, schedule frequency
-variants beyond hourly/daily/weekly/monthly (named weekdays, month-end
-semantics), trigger inputs wired to step variables,
-activity dashboards, async workflow
+permissions, plan/admin policy, Slack built-in and connector functions,
+templates and AI creation,
+icons, drag reordering, trigger-change rules,
+async workflow
 and form-response CSV export,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain
@@ -199,6 +225,8 @@ credential design rather than fabricate the field.
 | WORKFLOW-01 | [Build a workflow](https://slack.com/help/articles/17542172840595-Build-a-workflow--Create-a-workflow-in-Slack/) | Link, webhook, schedule, list, message, join, and reaction triggers start published workflows under their documented conditions. |
 | WORKFLOW-02 | [function_executed](https://docs.slack.dev/reference/events/function_executed/) | Function callbacks carry `Wx`/`Fx` identities, function/input snapshots, and the applicable bot access token. |
 | WORKFLOW-03 | [Build a workflow](https://slack.com/help/articles/17542172840595-Build-a-workflow--Create-a-workflow-in-Slack/) | The builder configures triggers, ordered steps, variables, buttons, managers, access, metadata, and publication. |
+| WORKFLOW-04 | [Build a workflow](https://slack.com/help/articles/17542172840595-Build-a-workflow--Create-a-workflow-in-Slack/) | A step runs only when its condition over a run input or an earlier step's output holds. |
+| WORKFLOW-05 | [Build a workflow](https://slack.com/help/articles/17542172840595-Build-a-workflow--Create-a-workflow-in-Slack/) | Form and button steps pause a run for a member's input and resume on submit or click. |
 
 Sources checked 2026-07-31:
 

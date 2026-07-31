@@ -2520,6 +2520,24 @@ func (s *Store) GetWorkflowStep(_ context.Context, workspace domain.WorkspaceID,
 	return value, nil
 }
 
+func (s *Store) ListWorkflowRunSteps(_ context.Context, workspace domain.WorkspaceID, runID domain.WorkflowRunID) ([]domain.WorkflowStep, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowStep, 0)
+	for _, value := range s.workflowSteps {
+		if value.WorkspaceID == workspace && value.WorkflowRunID == runID {
+			values = append(values, value)
+		}
+	}
+	slices.SortFunc(values, func(left, right domain.WorkflowStep) int {
+		if ordering := left.CreatedAt.Compare(right.CreatedAt); ordering != 0 {
+			return ordering
+		}
+		return strings.Compare(string(left.ID), string(right.ID))
+	})
+	return values, nil
+}
+
 func (s *Store) CreateWorkflow(_ context.Context, value domain.WorkflowDefinition, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.OwnerID == "" ||
 		value.Title == "" || value.Status == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
@@ -2587,6 +2605,69 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 	}
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) DeleteWorkflow(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
+	if workflowID == "" || workspace == "" || expectedVersion == 0 {
+		return false, store.InvalidArgument("invalid workflow deletion")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflows[workflowID]
+	if !exists || current.WorkspaceID != workspace {
+		return false, store.ErrNotFound
+	}
+	if current.Version != expectedVersion {
+		return false, store.ErrConflict
+	}
+	for runID, run := range s.workflowRuns {
+		if run.WorkflowID != workflowID || run.WorkspaceID != workspace {
+			continue
+		}
+		if run.Status == domain.WorkflowRunRunning {
+			run.Status = domain.WorkflowRunCancelled
+			run.Error = "workflow_unpublished"
+			run.CompletedAt = event.CreatedAt
+			run.UpdatedAt = event.CreatedAt
+			s.workflowRuns[runID] = run
+		}
+		delete(s.workflowRuns, runID)
+		for stepID, step := range s.workflowSteps {
+			if step.WorkflowRunID != runID {
+				continue
+			}
+			if step.Status == domain.WorkflowStepExecuting {
+				step.Status = domain.WorkflowStepCancelled
+				step.Error = "workflow_unpublished"
+				step.UpdatedAt = event.CreatedAt
+				s.workflowSteps[stepID] = step
+			}
+			delete(s.workflowSteps, stepID)
+		}
+	}
+	for triggerID, trigger := range s.workflowTriggers {
+		if trigger.WorkflowID != workflowID || trigger.WorkspaceID != workspace {
+			continue
+		}
+		delete(s.workflowTriggers, triggerID)
+		for conversation, featured := range s.featuredWorkflows {
+			remaining := make([]domain.FeaturedWorkflow, 0, len(featured))
+			for _, entry := range featured {
+				if entry.TriggerID != triggerID {
+					remaining = append(remaining, entry)
+				}
+			}
+			if len(remaining) == 0 {
+				delete(s.featuredWorkflows, conversation)
+			} else {
+				s.featuredWorkflows[conversation] = remaining
+			}
+		}
+	}
+	delete(s.workflowRevisions, workflowID)
+	delete(s.workflows, workflowID)
+	s.outbox = append(s.outbox, event)
+	return true, nil
 }
 
 func (s *Store) DiscardWorkflowStagedChanges(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
@@ -2858,7 +2939,8 @@ func (s *Store) CreateWorkflowRun(_ context.Context, value domain.WorkflowRun, f
 	}
 	if firstStep != nil {
 		if firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
-			firstStep.AppID == "" || firstStep.UserID == "" || firstStep.Status != domain.WorkflowStepExecuting ||
+			firstStep.AppID == "" || firstStep.UserID == "" ||
+			(firstStep.Status != domain.WorkflowStepExecuting && firstStep.Status != domain.WorkflowStepWaiting) ||
 			firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero() {
 			return store.InvalidArgument("invalid first workflow step")
 		}
@@ -2889,12 +2971,14 @@ func (s *Store) AdvanceWorkflowRun(_ context.Context, completed domain.WorkflowS
 		return store.ErrConflict
 	}
 	currentExecution, exists := s.workflowSteps[completed.ID]
-	if !exists || currentExecution.WorkflowRunID != value.ID || currentExecution.Status != domain.WorkflowStepExecuting {
+	if !exists || currentExecution.WorkflowRunID != value.ID ||
+		(currentExecution.Status != domain.WorkflowStepExecuting && currentExecution.Status != domain.WorkflowStepWaiting) {
 		return store.ErrConflict
 	}
 	if next != nil {
 		if next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
-			next.AppID == "" || next.UserID == "" || next.Status != domain.WorkflowStepExecuting ||
+			next.AppID == "" || next.UserID == "" ||
+			(next.Status != domain.WorkflowStepExecuting && next.Status != domain.WorkflowStepWaiting) ||
 			next.CreatedAt.IsZero() || next.UpdatedAt.IsZero() {
 			return store.InvalidArgument("invalid next workflow step")
 		}
@@ -2963,6 +3047,41 @@ func (s *Store) ListWorkflowRuns(_ context.Context, workspace domain.WorkspaceID
 		next, err = domain.NewListCursor(string(values[len(values)-1].ID))
 	}
 	return values, more, next, err
+}
+
+func (s *Store) SummarizeWorkflowRuns(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, limit int) (domain.WorkflowActivity, error) {
+	if workspace == "" || workflowID == "" || limit < 1 {
+		return domain.WorkflowActivity{}, store.InvalidArgument("invalid workflow run summary")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	activity := domain.WorkflowActivity{}
+	recent := make([]domain.WorkflowRun, 0, limit+1)
+	for _, run := range s.workflowRuns {
+		if run.WorkspaceID != workspace || run.WorkflowID != workflowID {
+			continue
+		}
+		switch run.Status {
+		case domain.WorkflowRunQueued:
+			activity.Queued++
+		case domain.WorkflowRunRunning:
+			activity.Running++
+		case domain.WorkflowRunCompleted:
+			activity.Completed++
+		case domain.WorkflowRunFailed:
+			activity.Failed++
+		case domain.WorkflowRunCancelled:
+			activity.Cancelled++
+		}
+		recent = appendSorted(recent, run, limit+1, func(left, right domain.WorkflowRun) bool {
+			return left.ID > right.ID
+		})
+	}
+	if len(recent) > limit {
+		recent = recent[:limit]
+	}
+	activity.RecentRuns = recent
+	return activity, nil
 }
 
 func automationPermissionKey(workspace domain.WorkspaceID, resourceType, resourceID string) string {

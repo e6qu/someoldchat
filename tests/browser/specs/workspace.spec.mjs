@@ -1890,7 +1890,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByRole('heading', { name: workflowName })).toBeVisible();
   await expect(page.getByText('draft', { exact: true })).toBeVisible();
 
-  await page.getByLabel('Step 2').selectOption('notify');
+  await page.locator('select[name="step_2"]').selectOption('notify');
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByText('Workflow published')).toBeVisible();
   await expect(page.getByText('published', { exact: true })).toBeVisible();
@@ -1929,6 +1929,10 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await page.reload();
   await expect(page.getByText('An app function is running. Reload to see its latest durable state.')).toBeVisible();
   await page.getByRole('link', { name: '← Workflow' }).click();
+  // The owner sees the workflow's run dashboard with the in-flight run.
+  await expect(page.getByRole('heading', { name: 'Run activity' })).toBeVisible();
+  await expect(page.locator('.activity-counts').getByText('1 running')).toBeVisible();
+  await expect(page.locator('[data-activity-run]')).toHaveCount(1);
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Incident workflow staged');
   await page.getByRole('button', { name: 'Save staged changes' }).click();
   await expect(page.getByText('Staged changes saved')).toBeVisible();
@@ -1942,6 +1946,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('Workflow unpublished')).toBeVisible();
   await expect(page.getByText('disabled', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run' })).toHaveCount(0);
+  await expect(page.locator('.activity-counts').getByText('1 cancelled')).toBeVisible();
   await page.goto(runURL);
   await expect(page.getByText('cancelled', { exact: true })).toBeVisible();
   await expect(page.getByText('workflow_unpublished')).toBeVisible();
@@ -1960,6 +1965,145 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   expect(await invoked.text()).toBe('ok');
   const denied = await request.post(webhookURL.replace(/[0-9a-f]+$/, '0'.repeat(48)), { data: {} });
   expect(denied.status()).toBe(404);
+
+  // A weekly schedule can name its weekdays, and the trigger summary shows
+  // the named days rather than a bare interval.
+  await page.getByLabel('Trigger name').fill('Weekday digest');
+  await page.getByLabel('Trigger type').selectOption('scheduled');
+  await page.getByLabel('Starts at').fill('2030-05-06T09:00');
+  await page.getByLabel('Repeats').selectOption('weekly');
+  await page.getByLabel('Mon', { exact: true }).check();
+  await page.getByLabel('Wed', { exact: true }).check();
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  await expect(page.getByText('Every week on mon, wed · UTC')).toBeVisible();
+
+  // A workflow can be duplicated from the builder as a new draft and deleted
+  // again: the copy lands on its own builder page, and deleting it returns to
+  // the directory without it.
+  await page.getByRole('button', { name: 'Copy workflow' }).click();
+  await expect(page.getByText('Workflow copied')).toBeVisible();
+  await expect(page.getByRole('heading', { name: workflowName + ' (copy)' })).toBeVisible();
+  await expect(page.getByText('draft', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete workflow' }).click();
+  await expect(page.getByText('Workflow deleted')).toBeVisible();
+  await expect(page.getByRole('link', { name: workflowName + ' (copy)' })).toHaveCount(0);
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
+test('[WORKFLOW-04] a step with a condition only runs when the condition holds', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-branch-callback';
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: `Branch tools ${Date.now()}` },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['chat:write'] },
+    },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      triage: {
+        title: 'Triage request',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+      notify: {
+        title: 'Notify channel',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  await page.getByLabel('Name').fill(`Branched workflow ${Date.now()}`);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('First step').selectOption('triage');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+
+  await page.getByLabel('Step 1 condition source').fill('inputs.go');
+  await page.getByLabel('Step 1 condition operator').selectOption('equals');
+  await page.getByLabel('Step 1 condition value').fill('yes');
+  await page.getByLabel('Input metadata (JSON object; syntax validation only)').fill('{"type":"object"}');
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+
+  await page.getByLabel('Trigger name').fill('Run branches');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+
+  // Without the input the condition needs, the only step is skipped and the
+  // run completes without executing anything.
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page.getByText('completed', { exact: true })).toBeVisible();
+
+  // With the input set, the condition holds and the second step executes.
+  await page.getByRole('link', { name: '← Workflow' }).click();
+  await page.getByLabel('Inputs (JSON)').fill('{"go":"yes"}');
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page.getByText('running', { exact: true })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
+test('[WORKFLOW-05] a form step pauses for input and a button step confirms', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-form-callback';
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: `Form tools ${Date.now()}` },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['chat:write'] },
+    },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      confirm: {
+        title: 'Send confirmation',
+        input_parameters: { properties: {}, required: [] },
+        output_parameters: { properties: {}, required: [] },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  await page.getByLabel('Name').fill(`Interactive workflow ${Date.now()}`);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('First step').selectOption('confirm');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+
+  await page.getByLabel('Step 1 type').selectOption('form');
+  await page.getByLabel('Step 1 form definition').fill('{"title":"Intake","inputs":{"name":"Name"}}');
+  await page.locator('select[name="step_type_2"]').selectOption('button');
+  await page.getByLabel('Step 2 button label').fill('Approve');
+  await page.locator('select[name="step_type_3"]').selectOption('function');
+  await page.locator('select[name="step_3"]').selectOption('confirm');
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+
+  await page.getByLabel('Trigger name').fill('Run interactive');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+
+  // The form step parks the run; submit it and the run advances to the button.
+  await expect(page.getByRole('heading', { name: 'Intake' })).toBeVisible();
+  await page.getByLabel('Name').fill('Ada');
+  await page.getByRole('button', { name: 'Submit' }).click();
+  await expect(page).toHaveURL(/notice=/);
+  // Submitting the form advances the run to its button step.
+  await expect(page.getByText('Approve')).toBeVisible();
+
+  // The button step waits for confirmation; clicking it advances to the
+  // function step.
+  await page.getByRole('button', { name: 'Confirm' }).click();
+  await expect(page.getByText('Confirmed')).toBeVisible();
+  await expect(page.getByText('running', { exact: true })).toBeVisible();
   await expectNoSeriousAccessibilityViolations(page);
 });
 

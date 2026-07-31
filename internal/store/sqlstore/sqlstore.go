@@ -5514,6 +5514,24 @@ func (s *Store) GetWorkflowStep(ctx context.Context, workspace domain.WorkspaceI
 	return value, translateNotFound(err)
 }
 
+func (s *Store) ListWorkflowRunSteps(ctx context.Context, workspace domain.WorkspaceID, runID domain.WorkflowRunID) ([]domain.WorkflowStep, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowStepColumns+` FROM workflow_steps
+		WHERE workspace_id = ? AND workflow_run_id = ? ORDER BY created_at, id`, workspace, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowStep, 0)
+	for rows.Next() {
+		value, scanErr := scanWorkflowStep(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, input_schema, steps, status, version, published_version, created_at, updated_at`
 
 func scanWorkflow(row interface{ Scan(...any) error }) (domain.WorkflowDefinition, error) {
@@ -5687,6 +5705,74 @@ func (s *Store) DiscardWorkflowStagedChanges(ctx context.Context, workspace doma
 		WHERE workflow_id = ? AND workspace_id = ? AND version > ?`,
 		workflowID, workspace, publishedVersion); err != nil {
 		return false, err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+// DeleteWorkflow removes the workflow and every record derived from it in one
+// transaction: featured trigger entries, executing steps, runs, triggers,
+// revisions, and finally the head row. Running executions are cancelled with
+// the workflow_unpublished error before their rows go away so a concurrent
+// reader never sees a run vanish mid-flight.
+func (s *Store) DeleteWorkflow(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
+	if workflowID == "" || workspace == "" || expectedVersion == 0 {
+		return false, store.InvalidArgument("invalid workflow deletion")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var version uint64
+	if err := tx.QueryRowContext(ctx, `SELECT version FROM workflows WHERE id = ? AND workspace_id = ?`,
+		workflowID, workspace).Scan(&version); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, store.ErrNotFound
+		}
+		return false, err
+	}
+	if version != expectedVersion {
+		return false, store.ErrConflict
+	}
+	if err := cancelRunningWorkflowRuns(ctx, tx, workflowID, workspace, event.CreatedAt); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM featured_workflows WHERE workspace_id = ?
+		AND trigger_id IN (SELECT id FROM workflow_triggers WHERE workspace_id = ? AND workflow_id = ?)`,
+		workspace, workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_steps WHERE workspace_id = ?
+		AND workflow_run_id IN (SELECT id FROM workflow_runs WHERE workspace_id = ? AND workflow_id = ?)`,
+		workspace, workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_runs WHERE workspace_id = ? AND workflow_id = ?`,
+		workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_triggers WHERE workspace_id = ? AND workflow_id = ?`,
+		workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_revisions WHERE workspace_id = ? AND workflow_id = ?`,
+		workspace, workflowID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM workflows WHERE workspace_id = ? AND id = ? AND version = ?`,
+		workspace, workflowID, expectedVersion)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, store.ErrConflict
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return false, err
@@ -6028,7 +6114,8 @@ func (s *Store) CreateWorkflowRun(ctx context.Context, value domain.WorkflowRun,
 		return store.ErrNotFound
 	}
 	if firstStep != nil && (firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
-		firstStep.AppID == "" || firstStep.UserID == "" || firstStep.Status != domain.WorkflowStepExecuting ||
+		firstStep.AppID == "" || firstStep.UserID == "" ||
+		(firstStep.Status != domain.WorkflowStepExecuting && firstStep.Status != domain.WorkflowStepWaiting) ||
 		firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero()) {
 		return store.InvalidArgument("invalid first workflow step")
 	}
@@ -6070,7 +6157,8 @@ func (s *Store) AdvanceWorkflowRun(ctx context.Context, completed domain.Workflo
 		return store.InvalidArgument("invalid workflow run advance")
 	}
 	if next != nil && (next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
-		next.AppID == "" || next.UserID == "" || next.Status != domain.WorkflowStepExecuting ||
+		next.AppID == "" || next.UserID == "" ||
+		(next.Status != domain.WorkflowStepExecuting && next.Status != domain.WorkflowStepWaiting) ||
 		next.CreatedAt.IsZero() || next.UpdatedAt.IsZero()) {
 		return store.InvalidArgument("invalid next workflow step")
 	}
@@ -6082,10 +6170,10 @@ func (s *Store) AdvanceWorkflowRun(ctx context.Context, completed domain.Workflo
 	stepResult, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET
 		app_id = ?, user_id = ?, function_id = ?, status = ?, inputs = ?, outputs = ?, error = ?,
 		step_name = ?, image_url = ?, updated_at = ?
-		WHERE id = ? AND workflow_run_id = ? AND workspace_id = ? AND status = ?`,
+		WHERE id = ? AND workflow_run_id = ? AND workspace_id = ? AND status IN (?, ?)`,
 		completed.AppID, completed.UserID, completed.FunctionID, completed.Status, completed.Inputs, completed.Outputs,
 		completed.Error, completed.StepName, completed.ImageURL, completed.UpdatedAt.UTC().UnixNano(),
-		completed.ID, value.ID, value.WorkspaceID, domain.WorkflowStepExecuting)
+		completed.ID, value.ID, value.WorkspaceID, domain.WorkflowStepExecuting, domain.WorkflowStepWaiting)
 	if err != nil {
 		return classify(err)
 	}
@@ -6197,6 +6285,60 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, workspace domain.Workspace
 		next, err = domain.NewListCursor(string(values[len(values)-1].ID))
 	}
 	return values, more, next, err
+}
+
+func (s *Store) SummarizeWorkflowRuns(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, limit int) (domain.WorkflowActivity, error) {
+	if workspace == "" || workflowID == "" || limit < 1 {
+		return domain.WorkflowActivity{}, store.InvalidArgument("invalid workflow run summary")
+	}
+	activity := domain.WorkflowActivity{}
+	counts, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM workflow_runs
+		WHERE workspace_id = ? AND workflow_id = ? GROUP BY status`, workspace, workflowID)
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	defer counts.Close()
+	for counts.Next() {
+		var status domain.WorkflowRunStatus
+		var count int
+		if err := counts.Scan(&status, &count); err != nil {
+			return domain.WorkflowActivity{}, err
+		}
+		switch status {
+		case domain.WorkflowRunQueued:
+			activity.Queued = count
+		case domain.WorkflowRunRunning:
+			activity.Running = count
+		case domain.WorkflowRunCompleted:
+			activity.Completed = count
+		case domain.WorkflowRunFailed:
+			activity.Failed = count
+		case domain.WorkflowRunCancelled:
+			activity.Cancelled = count
+		}
+	}
+	if err := counts.Err(); err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowRunColumns+` FROM workflow_runs
+		WHERE workspace_id = ? AND workflow_id = ? ORDER BY id DESC LIMIT ?`, workspace, workflowID, limit)
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	defer rows.Close()
+	recent := make([]domain.WorkflowRun, 0, limit)
+	for rows.Next() {
+		value, scanErr := scanWorkflowRun(rows)
+		if scanErr != nil {
+			return domain.WorkflowActivity{}, scanErr
+		}
+		recent = append(recent, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	activity.RecentRuns = recent
+	return activity, nil
 }
 
 func automationPermissionJSON(value domain.AutomationPermission) (string, string, string, string, error) {
