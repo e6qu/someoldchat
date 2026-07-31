@@ -178,7 +178,7 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}))
 	workflow := domain.WorkflowDefinition{
 		ID: "WfParity", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "triage-workflow",
-		Title: "Triage workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+		Title: "Triage workflow", Icon: "🚨", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage request"}]`,
 		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
@@ -429,8 +429,14 @@ func parityCases() []parityCase {
 			name: "form and button steps resume across the composition seam",
 			seed: seedFormParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				// The run view reports the form the run is parked on.
+				// The run view reports the form the run is parked on, and a
+				// member can open that run view to reach it (run views are
+				// workspace-shareable, matching the interaction audience).
 				before, err := chat.WorkflowRunInteraction(ctx, "T1", "U2", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				memberRun, err := chat.GetWorkflowRun(ctx, "T1", "U2", "WxForm")
 				if err != nil {
 					return nil, err
 				}
@@ -460,10 +466,29 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The owner exports the run history and the submitted form
+				// fields; a member is refused.
+				runExport, err := chat.WorkflowRunExport(ctx, "T1", "U1", "WfForm")
+				if err != nil {
+					return nil, err
+				}
+				formExport, err := chat.WorkflowFormResponseExport(ctx, "T1", "U1", "WfForm")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.WorkflowRunExport(ctx, "T1", "U2", "WfForm"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("member run export error=%v, want ErrNotFound", err)
+				}
+				formValues := make([]string, 0, len(formExport))
+				for _, response := range formExport {
+					formValues = append(formValues, response.FormTitle+":"+response.Field+"="+response.Value)
+				}
 				return []any{
+					memberRun.ID == "WxForm",
 					before.Kind, before.Title, fieldNames, before.StepID,
 					button.Kind, button.Label,
 					run.Status, run.CurrentStep, after.Kind,
+					len(runExport), formValues,
 				}, nil
 			},
 		},
@@ -564,7 +589,7 @@ func parityCases() []parityCase {
 					return nil, fmt.Errorf("deleted run error=%v, want ErrNotFound", err)
 				}
 				return []any{
-					duplicate.Title, duplicate.CallbackID, string(duplicate.Status),
+					duplicate.Title, duplicate.CallbackID, string(duplicate.Status), duplicate.Icon,
 					duplicate.Version, duplicate.PublishedVersion, duplicate.Steps,
 				}, nil
 			},
@@ -636,6 +661,14 @@ func parityCases() []parityCase {
 				triggers, err := chat.ListWorkflowTriggers(ctx, "T1", "U1", published.ID)
 				if err != nil {
 					return nil, err
+				}
+				// The workflow is published, so its trigger can be toggled but
+				// not reconfigured: a title change is rejected with ErrConflict.
+				if _, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					ID: trigger.ID, WorkflowID: published.ID, Title: "Renamed", Type: trigger.Type,
+					Config: trigger.Config, Enabled: trigger.Enabled,
+				}, trigger.Version); !errors.Is(err, storepkg.ErrConflict) {
+					return nil, fmt.Errorf("published trigger reconfigure error=%v, want ErrConflict", err)
 				}
 				run, err := chat.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"item":"request"}`, "workflow-parity")
 				if err != nil {

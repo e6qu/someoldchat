@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workflow_run_id 
 CREATE TABLE IF NOT EXISTS workflows (
  id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
  owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
- description TEXT NOT NULL DEFAULT '', input_schema TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]',
+ description TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT '', input_schema TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]',
  status TEXT NOT NULL, version INTEGER NOT NULL, published_version INTEGER NOT NULL DEFAULT 0,
  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
@@ -176,7 +176,7 @@ CREATE INDEX IF NOT EXISTS workflows_workspace_id ON workflows(workspace_id, id)
 CREATE TABLE IF NOT EXISTS workflow_revisions (
  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), version INTEGER NOT NULL, title TEXT NOT NULL,
- description TEXT NOT NULL DEFAULT '', callback_id TEXT NOT NULL DEFAULT '',
+ description TEXT NOT NULL DEFAULT '', icon TEXT NOT NULL DEFAULT '', callback_id TEXT NOT NULL DEFAULT '',
  input_schema TEXT NOT NULL DEFAULT '{}',
  steps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at INTEGER NOT NULL,
  PRIMARY KEY (workflow_id, version)
@@ -470,7 +470,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 123
+const schemaVersion = 124
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2762,6 +2762,20 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("backfill workflow revision metadata: %w", err)
 		}
 	}
+	if version < 124 {
+		for _, table := range []string{"workflows", "workflow_revisions"} {
+			columns, err := s.tableColumns(ctx, db, table)
+			if err != nil {
+				return fmt.Errorf("inspect %s: %w", table, err)
+			}
+			if _, exists := columns["icon"]; exists {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE `+table+` ADD COLUMN icon TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate %s icon: %w", table, err)
+			}
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -3032,7 +3046,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflow_steps" && table != "workflow_triggers" && table != "workflow_revisions" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflows" && table != "workflow_steps" && table != "workflow_triggers" && table != "workflow_revisions" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -5532,13 +5546,13 @@ func (s *Store) ListWorkflowRunSteps(ctx context.Context, workspace domain.Works
 	return values, rows.Err()
 }
 
-const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, input_schema, steps, status, version, published_version, created_at, updated_at`
+const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, icon, input_schema, steps, status, version, published_version, created_at, updated_at`
 
 func scanWorkflow(row interface{ Scan(...any) error }) (domain.WorkflowDefinition, error) {
 	var value domain.WorkflowDefinition
 	var created, updated int64
 	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.AppID, &value.OwnerID, &value.CallbackID, &value.Title,
-		&value.Description, &value.InputSchema, &value.Steps, &value.Status, &value.Version, &value.PublishedVersion,
+		&value.Description, &value.Icon, &value.InputSchema, &value.Steps, &value.Status, &value.Version, &value.PublishedVersion,
 		&created, &updated); err != nil {
 		return domain.WorkflowDefinition{}, err
 	}
@@ -5561,19 +5575,19 @@ func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	}
 	defer tx.Rollback()
 	_, err = tx.ExecContext(ctx, `INSERT INTO workflows(
-		id, workspace_id, app_id, owner_id, callback_id, title, description, input_schema, steps, status,
+		id, workspace_id, app_id, owner_id, callback_id, title, description, icon, input_schema, steps, status,
 		version, published_version, created_at, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		value.ID, value.WorkspaceID, value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description,
-		value.InputSchema, value.Steps, value.Status, value.Version, value.PublishedVersion,
+		value.Icon, value.InputSchema, value.Steps, value.Status, value.Version, value.PublishedVersion,
 		value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
 	if err != nil {
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
-		workflow_id, workspace_id, version, title, description, callback_id, input_schema, steps, status, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Description,
-		value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		workflow_id, workspace_id, version, title, description, icon, callback_id, input_schema, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Description,
+		value.Icon, value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -5592,10 +5606,10 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 	}
 	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `UPDATE workflows SET
-		app_id = ?, owner_id = ?, callback_id = ?, title = ?, description = ?, input_schema = ?, steps = ?,
+		app_id = ?, owner_id = ?, callback_id = ?, title = ?, description = ?, icon = ?, input_schema = ?, steps = ?,
 		status = ?, version = ?, published_version = ?, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND version = ?`,
-		value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description, value.InputSchema, value.Steps,
+		value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description, value.Icon, value.InputSchema, value.Steps,
 		value.Status, expectedVersion+1, value.PublishedVersion, value.UpdatedAt.UTC().UnixNano(),
 		value.ID, value.WorkspaceID, expectedVersion)
 	if err != nil {
@@ -5617,9 +5631,9 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		return store.ErrConflict
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
-		workflow_id, workspace_id, version, title, description, callback_id, input_schema, steps, status, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Description,
-		value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		workflow_id, workspace_id, version, title, description, icon, callback_id, input_schema, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Description,
+		value.Icon, value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if value.Status == domain.WorkflowDisabled {
@@ -5680,16 +5694,16 @@ func (s *Store) DiscardWorkflowStagedChanges(ctx context.Context, workspace doma
 	if publishedVersion == 0 || publishedVersion == expectedVersion {
 		return false, store.InvalidArgument("workflow has no staged changes to discard")
 	}
-	var title, description, callbackID, inputSchema, steps string
-	if err := tx.QueryRowContext(ctx, `SELECT title, description, callback_id, input_schema, steps
+	var title, description, icon, callbackID, inputSchema, steps string
+	if err := tx.QueryRowContext(ctx, `SELECT title, description, icon, callback_id, input_schema, steps
 		FROM workflow_revisions WHERE workflow_id = ? AND workspace_id = ? AND version = ?`,
-		workflowID, workspace, publishedVersion).Scan(&title, &description, &callbackID, &inputSchema, &steps); err != nil {
+		workflowID, workspace, publishedVersion).Scan(&title, &description, &icon, &callbackID, &inputSchema, &steps); err != nil {
 		return false, err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE workflows SET
-		title = ?, description = ?, callback_id = ?, input_schema = ?, steps = ?, version = published_version, updated_at = ?
+		title = ?, description = ?, icon = ?, callback_id = ?, input_schema = ?, steps = ?, version = published_version, updated_at = ?
 		WHERE id = ? AND workspace_id = ? AND version = ?`,
-		title, description, callbackID, inputSchema, steps, event.CreatedAt.UTC().UnixNano(),
+		title, description, icon, callbackID, inputSchema, steps, event.CreatedAt.UTC().UnixNano(),
 		workflowID, workspace, expectedVersion)
 	if err != nil {
 		return false, err
@@ -5817,7 +5831,7 @@ func (s *Store) ListWorkflows(ctx context.Context, workspace domain.WorkspaceID,
 }
 
 func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowRevision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workflow_id, workspace_id, version, title, description, callback_id, input_schema, steps, status, created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT workflow_id, workspace_id, version, title, description, icon, callback_id, input_schema, steps, status, created_at
 		FROM workflow_revisions WHERE workspace_id = ? AND workflow_id = ? ORDER BY version`, workspace, workflowID)
 	if err != nil {
 		return nil, err
@@ -5828,7 +5842,7 @@ func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.Work
 		var value domain.WorkflowRevision
 		var created int64
 		if err := rows.Scan(&value.WorkflowID, &value.WorkspaceID, &value.Version, &value.Title, &value.Description,
-			&value.CallbackID, &value.InputSchema, &value.Steps, &value.Status, &created); err != nil {
+			&value.Icon, &value.CallbackID, &value.InputSchema, &value.Steps, &value.Status, &created); err != nil {
 			return nil, err
 		}
 		value.CreatedAt = time.Unix(0, created).UTC()

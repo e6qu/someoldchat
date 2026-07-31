@@ -405,10 +405,7 @@ API and Socket Mode.
 
 The same pass keeps the remaining boundary explicit. Workflow managers,
 find/use/copy permissions, plan and admin policy, built-in and connector
-functions, icons,
-drag reordering, trigger-change rules,
-asynchronous CSV
-exports, multi-org permission
+functions, asynchronous CSV exports at scale, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
 limits, and controlled live-Slack outcomes remain.
 `function_executed.bot_access_token` is also
@@ -471,6 +468,23 @@ completion. Each new operation crosses the gRPC seam with a differential parity
 case, and the workspace content security policy now allowlists the workflow
 pages' own inline scripts (a prior gap that had silently disabled their
 progressive enhancement).
+
+The smaller builder slices pass then rounds out the day-to-day builder surface
+and the defects found on the way. Workflow run views are workspace-shareable,
+so a member can open the run a form or button step is parked on — the
+interactive-steps feature was unreachable for members until this aligned with
+the interaction audience. Steps reorder in place with up/down controls that
+swap every field between adjacent slots (kept outside the step's label, since a
+label wrapping both a select and a button is invalid and broke the option's
+enabled state). A workflow carries an icon through its head, its published
+revisions, the staged-edit projection, the duplicate and discard paths, the
+gRPC seam, and the builder and directory views. A published workflow's trigger
+is locked to enable/disable — reconfiguring it requires unpublishing, matching
+Slack, and a webhook's secret is no longer rotated by a rename that can no
+longer happen. The owner exports the run history and every submitted form
+field as CSV through new seam operations. Each operation has a differential
+parity case and the schema gains the icon columns through an idempotent
+migration.
 
 The trigger-worker pass then replaced the configuration-only scheduled,
 webhook, message, reaction, join, and list trigger types with durable

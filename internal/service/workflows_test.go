@@ -539,6 +539,57 @@ func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestWorkflowExportsReturnRunsAndFormResponses(t *testing.T) {
+	ctx, _, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Interactive", InputSchema: `{}`,
+		Steps: `[
+			{"type":"form","id":"intake","form":{"title":"Intake","inputs":{"name":"Name"}}},
+			{"function_id":"notify","title":"Notify"}
+		]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "export-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err := messages.Store.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 1 {
+		t.Fatalf("executions=%+v err=%v", executions, err)
+	}
+	if err := messages.SubmitWorkflowForm(ctx, "T1", "U2", run.ID, executions[0].ID, `{"name":"Ada"}`); err != nil {
+		t.Fatal(err)
+	}
+
+	runs, err := messages.WorkflowRunExport(ctx, "T1", "U1", workflow.ID)
+	if err != nil || len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("run export=%+v err=%v", runs, err)
+	}
+	responses, err := messages.WorkflowFormResponseExport(ctx, "T1", "U1", workflow.ID)
+	if err != nil || len(responses) != 1 || responses[0].FormTitle != "Intake" ||
+		responses[0].Field != "name" || responses[0].Value != "Ada" || responses[0].RunID != run.ID {
+		t.Fatalf("form export=%+v err=%v", responses, err)
+	}
+	if _, err := messages.WorkflowRunExport(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member run export error=%v, want ErrNotFound", err)
+	}
+	if _, err := messages.WorkflowFormResponseExport(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member form export error=%v, want ErrNotFound", err)
+	}
+}
+
 func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {
 	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
 	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
@@ -564,10 +615,14 @@ func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {
 	}
 
 	// A form step parks the run waiting. A member (not the owner) can submit,
-	// the same audience Slack grants a form link.
+	// the same audience Slack grants a form link — and the member can open the
+	// run view to reach it, which is why run views are workspace-shareable.
 	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "interactive-run")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := messages.GetWorkflowRun(ctx, "T1", "U2", run.ID); err != nil {
+		t.Fatalf("member could not open the run view: %v", err)
 	}
 	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
 	if err != nil || len(executions) != 1 || executions[0].Status != domain.WorkflowStepWaiting {

@@ -18,6 +18,7 @@ type WorkflowDefinition struct {
 	CallbackID       string
 	Title            string
 	Description      string
+	Icon             string
 	InputSchema      string
 	Steps            string
 	Status           WorkflowStatus
@@ -33,6 +34,7 @@ type WorkflowRevision struct {
 	Version     uint64
 	Title       string
 	Description string
+	Icon        string
 	CallbackID  string
 	InputSchema string
 	Steps       string
@@ -98,6 +100,17 @@ type WorkflowInteraction struct {
 type WorkflowInteractionField struct {
 	Name  string
 	Label string
+}
+
+// WorkflowFormResponse is one submitted field of one form step in one run: the
+// unit a form-response CSV export is built from.
+type WorkflowFormResponse struct {
+	RunID           WorkflowRunID
+	WorkflowVersion uint64
+	FormTitle       string
+	Field           string
+	Value           string
+	SubmittedAt     time.Time
 }
 
 type WorkflowTriggerType string

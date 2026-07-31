@@ -1884,16 +1884,29 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await page.getByLabel('Name').fill(workflowName);
   await page.getByLabel('Owning app').selectOption(installed.appID);
   await page.getByLabel('Description').fill('Classify an incident and notify the team');
+  await page.getByLabel('Icon (emoji or short text)').fill('🚨');
   await page.getByLabel('First step').selectOption('triage');
   await page.getByLabel('Workflow reference').fill('incident-triage');
   await page.getByRole('button', { name: 'Create workflow' }).click();
   await expect(page.getByRole('heading', { name: workflowName })).toBeVisible();
   await expect(page.getByText('draft', { exact: true })).toBeVisible();
+  // The icon travels with the workflow and shows on its builder page.
+  await expect(page.locator('.wf-icon')).toHaveText('🚨');
 
   await page.locator('select[name="step_2"]').selectOption('notify');
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByText('Workflow published')).toBeVisible();
   await expect(page.getByText('published', { exact: true })).toBeVisible();
+
+  // Steps reorder in place: moving a step up swaps every field between the
+  // two slots, and moving it back restores the order. Nothing is persisted
+  // until a save, so the published order below is unchanged.
+  await page.getByRole('button', { name: 'Move step 2 up' }).click();
+  await expect(page.locator('select[name="step_1"]')).toHaveValue('notify');
+  await expect(page.locator('select[name="step_2"]')).toHaveValue('triage');
+  await page.getByRole('button', { name: 'Move step 1 down' }).click();
+  await expect(page.locator('select[name="step_1"]')).toHaveValue('triage');
+  await expect(page.locator('select[name="step_2"]')).toHaveValue('notify');
 
   // A staged edit is labeled against the published revision step by step:
   // replacing step 2 marks it changed, truncating the head marks the removed
@@ -2075,6 +2088,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.getByLabel('Owning app').selectOption(installed.appID);
   await page.getByLabel('First step').selectOption('confirm');
   await page.getByRole('button', { name: 'Create workflow' }).click();
+  const workflowPath = new URL(page.url()).pathname;
 
   await page.getByLabel('Step 1 type').selectOption('form');
   await page.getByLabel('Step 1 form definition').fill('{"title":"Intake","inputs":{"name":"Name"}}');
@@ -2104,6 +2118,18 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Confirmed')).toBeVisible();
   await expect(page.getByText('running', { exact: true })).toBeVisible();
+
+  // The owner downloads the submitted form fields and the run history as CSV.
+  const session = { cookie: `sameoldchat_session=${SESSION}` };
+  const formCSV = await request.get(`/app/workflows/export/form-responses/${workflowPath.split('/').pop()}`, { headers: session });
+  expect(formCSV.status()).toBe(200);
+  const formBody = await formCSV.text();
+  expect(formBody).toContain('Intake');
+  expect(formBody).toContain('name');
+  expect(formBody).toContain('Ada');
+  const runsCSV = await request.get(`/app/workflows/export/runs/${workflowPath.split('/').pop()}`, { headers: session });
+  expect(runsCSV.status()).toBe(200);
+  expect(await runsCSV.text()).toContain('running');
   await expectNoSeriousAccessibilityViolations(page);
 });
 

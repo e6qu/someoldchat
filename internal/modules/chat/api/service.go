@@ -150,6 +150,8 @@ type Service interface {
 	SubmitWorkflowForm(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID, domain.WorkflowStepID, string) error
 	CompleteWorkflowButton(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID, domain.WorkflowStepID) error
 	WorkflowRunInteraction(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID) (domain.WorkflowInteraction, error)
+	WorkflowRunExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) ([]domain.WorkflowRun, error)
+	WorkflowFormResponseExport(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) ([]domain.WorkflowFormResponse, error)
 	UpdateWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowDefinition, uint64, bool) (domain.WorkflowDefinition, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	SetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTrigger, uint64) (domain.WorkflowTrigger, error)

@@ -224,6 +224,44 @@ func TestScheduledWorkflowTriggerComputesAndClearsNextRun(t *testing.T) {
 	}
 }
 
+func TestPublishedWorkflowTriggerIsToggleOnly(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The seed workflow is published, so the trigger can be toggled but not
+	// reconfigured: changing its type, title, or config is rejected.
+	disabled, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: trigger.Config, Enabled: false,
+	}, trigger.Version)
+	if err != nil || disabled.Enabled {
+		t.Fatalf("toggle=%+v err=%v", disabled, err)
+	}
+	for _, edit := range []domain.WorkflowTrigger{
+		{ID: trigger.ID, WorkflowID: workflow.ID, Title: "Renamed", Type: "link", Config: trigger.Config, Enabled: true},
+		{ID: trigger.ID, WorkflowID: workflow.ID, Title: "Run", Type: "shortcut", Config: trigger.Config, Enabled: true},
+		{ID: trigger.ID, WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{"x":1}`, Enabled: true},
+	} {
+		if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", edit, disabled.Version); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("published reconfigure %+v error=%v, want ErrConflict", edit, err)
+		}
+	}
+	// Unpublishing unlocks the trigger again.
+	unpublished := workflow
+	unpublished.Status = domain.WorkflowDisabled
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", unpublished, workflow.Version, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Renamed", Type: "link", Config: trigger.Config, Enabled: true,
+	}, disabled.Version); err != nil {
+		t.Fatalf("unpublished reconfigure err=%v", err)
+	}
+}
+
 func TestWebhookWorkflowTriggerSecretLifecycle(t *testing.T) {
 	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
 	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
@@ -245,10 +283,16 @@ func TestWebhookWorkflowTriggerSecretLifecycle(t *testing.T) {
 	if _, err := messages.WebhookTriggerURL(ctx, "T1", "U2", trigger.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("non-owner webhook URL error=%v, want ErrNotFound", err)
 	}
-	// Enable/disable and rename edits preserve the URL: rotation is a deliberate
-	// act, not a side effect of every update.
+	// Enable/disable preserves the URL: rotation is a deliberate act, not a
+	// side effect of every update. On a published workflow the trigger is
+	// otherwise locked — renaming it is rejected, matching Slack.
+	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Renamed hook", Type: "webhook", Config: trigger.Config, Enabled: true,
+	}, trigger.Version); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("published trigger rename error=%v, want ErrConflict", err)
+	}
 	updated, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
-		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Renamed hook", Type: "webhook", Config: `{}`, Enabled: false,
+		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Hook", Type: "webhook", Config: trigger.Config, Enabled: false,
 	}, trigger.Version)
 	if err != nil {
 		t.Fatal(err)
@@ -264,7 +308,7 @@ func TestWebhookWorkflowTriggerSecretLifecycle(t *testing.T) {
 		t.Fatalf("disabled trigger error=%v, want ErrConflict", err)
 	}
 	if _, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
-		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Renamed hook", Type: "webhook", Config: updated.Config, Enabled: true,
+		ID: trigger.ID, WorkflowID: workflow.ID, Title: "Hook", Type: "webhook", Config: updated.Config, Enabled: true,
 	}, updated.Version); err != nil {
 		t.Fatal(err)
 	}
