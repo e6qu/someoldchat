@@ -168,7 +168,10 @@ executing step atomically in the disabling transaction, stamping both with the
 `workflow_unpublished` error so late completions are rejected. Staged edits
 can be discarded from the builder: the head reverts to the published revision,
 the staged revision rows are pruned, and the next update publishes from the
-realigned version.
+realigned version. While staged edits exist, the builder labels each step
+against the published revision positionally — added, changed, or removed — and
+lists the steps that no longer appear in the head, so the owner sees exactly
+what publishing would change.
 
 This is not full Slack Workflow Builder parity. Workflow managers, find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions, typed
@@ -176,7 +179,7 @@ variable mapping, form and button steps, branches, templates and AI creation,
 icons, copy/delete, drag reordering, trigger-change rules, schedule frequency
 variants beyond hourly/daily/weekly/monthly (named weekdays, month-end
 semantics), trigger inputs wired to step variables,
-per-step change tracking, activity dashboards, async workflow
+activity dashboards, async workflow
 and form-response CSV export,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain

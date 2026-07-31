@@ -280,6 +280,51 @@ func TestWorkflowBuilderDiscardsStagedChanges(t *testing.T) {
 	requireContains(t, "stale discard", staleDiscard.Body.String(), "The workflow was not saved", "It changed elsewhere")
 }
 
+func TestWorkflowBuilderMarksPerStepChangesAgainstThePublishedRevision(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "step_2": {"notify"}, "action": {"publish"},
+	}.Encode(), false)
+
+	replaced := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"2"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "step_2": {"triage"}, "action": {"save"},
+	}.Encode(), false)
+	if replaced.Code != http.StatusSeeOther {
+		t.Fatalf("staged save=%d: %s", replaced.Code, replaced.Body)
+	}
+	page := get(t, mux, replaced.Header().Get("Location"))
+	requireContains(t, "changed step", page.Body.String(), `data-step-change="2"`, "changed")
+
+	truncated := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"3"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"save"},
+	}.Encode(), false)
+	if truncated.Code != http.StatusSeeOther {
+		t.Fatalf("staged truncate=%d: %s", truncated.Code, truncated.Body)
+	}
+	page = get(t, mux, truncated.Header().Get("Location"))
+	requireContains(t, "removed step", page.Body.String(), "Removed from the published version", "Notify channel · notify", `data-removed-step="2"`)
+
+	restored := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"4"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "step_2": {"triage"}, "step_3": {"notify"}, "action": {"save"},
+	}.Encode(), false)
+	if restored.Code != http.StatusSeeOther {
+		t.Fatalf("staged restore=%d: %s", restored.Code, restored.Body)
+	}
+	page = get(t, mux, restored.Header().Get("Location"))
+	requireContains(t, "added step", page.Body.String(), `data-step-change="2"`, "changed", `data-step-change="3"`, "added")
+	if strings.Contains(page.Body.String(), `data-removed-step`) {
+		t.Fatalf("restored workflow still lists removed steps: %s", page.Body)
+	}
+}
+
 func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	response := postForm(t, mux, "/app/workflows/create", url.Values{

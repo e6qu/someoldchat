@@ -64,6 +64,22 @@ message WorkflowDiscardStagedRequest {
   uint64 expected_version = 4;
 }
 
+message WorkflowStepChange {
+  int32 position = 1;
+  string function_id = 2;
+  string change = 3;
+}
+
+message WorkflowStepChangesRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_id = 3;
+}
+
+message WorkflowStepChangesResponse {
+  repeated WorkflowStepChange changes = 1;
+}
+
 message WorkflowListRequest {
   string workspace_id = 1;
   string user_id = 2;
@@ -267,6 +283,7 @@ service WorkflowsService {
   rpc CreateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc GetWorkflow(WorkflowGetRequest) returns (WorkflowDefinition);
   rpc DiscardWorkflowStagedChanges(WorkflowDiscardStagedRequest) returns (WorkflowStepMutationResponse);
+  rpc WorkflowStepChanges(WorkflowStepChangesRequest) returns (WorkflowStepChangesResponse);
   rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);

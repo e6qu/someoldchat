@@ -44,6 +44,10 @@ func seedWorkflowTriggerWorld(t *testing.T) (context.Context, *memory.Store, Mes
 				"title":"Triage incident","description":"Classifies one incident",
 				"input_parameters":{"properties":{},"required":[]},
 				"output_parameters":{"properties":{},"required":[]}
+			},"notify":{
+				"title":"Notify channel","description":"Posts the result",
+				"input_parameters":{"properties":{},"required":[]},
+				"output_parameters":{"properties":{},"required":[]}
 			}}
 		}`,
 	}, domain.OAuthClient{ID: "client", SecretHash: "secret", AppID: "A1"}); err != nil {

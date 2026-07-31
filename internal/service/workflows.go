@@ -251,6 +251,78 @@ func (m Messages) DiscardWorkflowStagedChanges(ctx context.Context, workspaceID 
 	return nil
 }
 
+// WorkflowStepChanges reports the step-level differences between a published
+// workflow's staged draft and its published revision. Only the owner reads the
+// live head, so only the owner can observe the changes; a member receives
+// ErrNotFound just as they do from the discard operation. A workflow with no
+// staged edits has no changes to report.
+func (m Messages) WorkflowStepChanges(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowStepChange, error) {
+	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
+		return nil, err
+	}
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if current.OwnerID != actor {
+		return nil, store.ErrNotFound
+	}
+	if current.Status != domain.WorkflowPublished || current.Version == current.PublishedVersion {
+		return nil, nil
+	}
+	revisions, err := m.Store.ListWorkflowRevisions(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	var published domain.WorkflowRevision
+	for _, revision := range revisions {
+		if revision.Version == current.PublishedVersion {
+			published = revision
+			break
+		}
+	}
+	if published.Version != current.PublishedVersion {
+		return nil, nil
+	}
+	return diffWorkflowSteps(published.Steps, current.Steps), nil
+}
+
+// diffWorkflowSteps compares two step lists positionally. Each slot is judged
+// against the published revision's step at the same index, so inserting a step
+// above another marks every later position as changed until the next publish
+// realigns them; the builder labels each numbered slot with exactly this.
+func diffWorkflowSteps(publishedRaw, headRaw string) []domain.WorkflowStepChange {
+	published := decodeWorkflowStepFunctions(publishedRaw)
+	head := decodeWorkflowStepFunctions(headRaw)
+	var changes []domain.WorkflowStepChange
+	for index := 0; index < max(len(published), len(head)); index++ {
+		position := index + 1
+		switch {
+		case index >= len(head):
+			changes = append(changes, domain.WorkflowStepChange{
+				Position: position, FunctionID: published[index].FunctionID, Change: domain.WorkflowStepChangeRemoved,
+			})
+		case index >= len(published):
+			changes = append(changes, domain.WorkflowStepChange{
+				Position: position, FunctionID: head[index].FunctionID, Change: domain.WorkflowStepChangeAdded,
+			})
+		case head[index].FunctionID != published[index].FunctionID:
+			changes = append(changes, domain.WorkflowStepChange{
+				Position: position, FunctionID: head[index].FunctionID, Change: domain.WorkflowStepChangeChanged,
+			})
+		}
+	}
+	return changes
+}
+
+func decodeWorkflowStepFunctions(raw string) []workflowFunctionDefinition {
+	var steps []workflowFunctionDefinition
+	if json.Unmarshal([]byte(raw), &steps) != nil {
+		return nil
+	}
+	return steps
+}
+
 func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return nil, false, "", err

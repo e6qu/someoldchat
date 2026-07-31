@@ -351,6 +351,7 @@ func parityCases() []parityCase {
 				// while the published revision the run pinned stays live.
 				staged := published
 				staged.Title = "Staged workflow"
+				staged.Steps = `[{"function_id":"triage","title":"Triage request"},{"function_id":"triage","title":"Triage request"}]`
 				staged, err = chat.UpdateWorkflow(ctx, "T1", "U1", staged, published.Version, false)
 				if err != nil {
 					return nil, err
@@ -359,10 +360,23 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// Per-step change tracking labels the appended step as added, and
+				// hides the staged draft from anyone who is not the owner.
+				changes, err := chat.WorkflowStepChanges(ctx, "T1", "U1", staged.ID)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.WorkflowStepChanges(ctx, "T1", "U2", staged.ID); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner step changes error=%v, want ErrNotFound", err)
+				}
 				if err := chat.DiscardWorkflowStagedChanges(ctx, "T1", "U1", staged.ID, staged.Version); err != nil {
 					return nil, err
 				}
 				discarded, err := chat.GetWorkflow(ctx, "T1", "U1", staged.ID)
+				if err != nil {
+					return nil, err
+				}
+				changesAfterDiscard, err := chat.WorkflowStepChanges(ctx, "T1", "U1", staged.ID)
 				if err != nil {
 					return nil, err
 				}
@@ -433,7 +447,10 @@ func parityCases() []parityCase {
 				return []any{
 					created.Status, loaded.Title, published.Status, published.Version,
 					staged.Status, staged.Version != staged.PublishedVersion, ownerView.Title,
+					ownerView.Steps,
+					len(changes), changes[0].Position, string(changes[0].Change),
 					discarded.Title, discarded.Version == discarded.PublishedVersion,
+					len(changesAfterDiscard),
 					len(workflows), more, len(triggers), triggers[0].Type,
 					run.Status, storedRun.Status, storedRun.WorkflowVersion,
 					initialFunction.PermissionType,
