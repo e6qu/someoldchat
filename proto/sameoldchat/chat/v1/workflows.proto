@@ -71,6 +71,15 @@ message WorkflowDeleteRequest {
   uint64 expected_version = 4;
 }
 
+message WorkflowActivitySummary {
+  int32 queued = 1;
+  int32 running = 2;
+  int32 completed = 3;
+  int32 failed = 4;
+  int32 cancelled = 5;
+  repeated WorkflowRun recent_runs = 6;
+}
+
 message WorkflowStepChange {
   int32 position = 1;
   string function_id = 2;
@@ -293,6 +302,7 @@ service WorkflowsService {
   rpc WorkflowStepChanges(WorkflowStepChangesRequest) returns (WorkflowStepChangesResponse);
   rpc DuplicateWorkflow(WorkflowGetRequest) returns (WorkflowDefinition);
   rpc DeleteWorkflow(WorkflowDeleteRequest) returns (WorkflowStepMutationResponse);
+  rpc WorkflowActivity(WorkflowGetRequest) returns (WorkflowActivitySummary);
   rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);

@@ -401,6 +401,9 @@ type Store interface {
 	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.WorkflowRunID) (domain.WorkflowRun, error)
 	GetWorkflowRunByIdempotency(context.Context, domain.WorkspaceID, string) (domain.WorkflowRun, error)
 	ListWorkflowRuns(context.Context, domain.WorkspaceID, domain.WorkflowID, domain.PageRequest) ([]domain.WorkflowRun, bool, domain.Cursor, error)
+	// SummarizeWorkflowRuns reports the per-status run counts for one workflow
+	// and its latest runs, newest first, bounded by the given limit.
+	SummarizeWorkflowRuns(context.Context, domain.WorkspaceID, domain.WorkflowID, int) (domain.WorkflowActivity, error)
 	SetAutomationPermission(context.Context, domain.AutomationPermission, events.Event) error
 	GetAutomationPermission(context.Context, domain.WorkspaceID, string, string) (domain.AutomationPermission, error)
 	SetFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.FeaturedWorkflow, events.Event) error

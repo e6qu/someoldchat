@@ -327,6 +327,37 @@ func parityCases() []parityCase {
 	}
 	return []parityCase{
 		{
+			name: "workflow activity summarizes runs across the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				before, err := chat.WorkflowActivity(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.WorkflowActivity(ctx, "T1", "U2", "WfParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner activity error=%v, want ErrNotFound", err)
+				}
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxParity", `{"result":"done"}`, ""); err != nil {
+					return nil, err
+				}
+				after, err := chat.WorkflowActivity(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				recentIDs := func(activity domain.WorkflowActivity) []string {
+					ids := make([]string, 0, len(activity.RecentRuns))
+					for _, run := range activity.RecentRuns {
+						ids = append(ids, string(run.ID)+":"+string(run.Status))
+					}
+					return ids
+				}
+				return []any{
+					before.Queued, before.Running, before.Completed, before.Failed, before.Cancelled, recentIDs(before),
+					after.Queued, after.Running, after.Completed, after.Failed, after.Cancelled, recentIDs(after),
+				}, nil
+			},
+		},
+		{
 			name: "workflow duplication and deletion survive the composition seam",
 			seed: seedWorkflowParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {

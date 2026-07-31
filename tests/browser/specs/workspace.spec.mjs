@@ -1929,6 +1929,10 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await page.reload();
   await expect(page.getByText('An app function is running. Reload to see its latest durable state.')).toBeVisible();
   await page.getByRole('link', { name: '← Workflow' }).click();
+  // The owner sees the workflow's run dashboard with the in-flight run.
+  await expect(page.getByRole('heading', { name: 'Run activity' })).toBeVisible();
+  await expect(page.locator('.activity-counts').getByText('1 running')).toBeVisible();
+  await expect(page.locator('[data-activity-run]')).toHaveCount(1);
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Incident workflow staged');
   await page.getByRole('button', { name: 'Save staged changes' }).click();
   await expect(page.getByText('Staged changes saved')).toBeVisible();
@@ -1942,6 +1946,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('Workflow unpublished')).toBeVisible();
   await expect(page.getByText('disabled', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run' })).toHaveCount(0);
+  await expect(page.locator('.activity-counts').getByText('1 cancelled')).toBeVisible();
   await page.goto(runURL);
   await expect(page.getByText('cancelled', { exact: true })).toBeVisible();
   await expect(page.getByText('workflow_unpublished')).toBeVisible();

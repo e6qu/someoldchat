@@ -525,6 +525,61 @@ func TestDuplicateWorkflowCopiesTheHeadAsANewDraft(t *testing.T) {
 	}
 }
 
+func TestWorkflowActivitySummarizesRunsForTheOwner(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	running, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "activity-running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	activity, err := messages.WorkflowActivity(ctx, "T1", "U1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activity.Running != 1 || activity.Completed != 0 || len(activity.RecentRuns) != 1 ||
+		activity.RecentRuns[0].ID != running.ID || activity.RecentRuns[0].Status != domain.WorkflowRunRunning {
+		t.Fatalf("activity while running=%+v", activity)
+	}
+	if _, err := messages.WorkflowActivity(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member activity error=%v, want ErrNotFound", err)
+	}
+	// Complete the executing function step so the run finishes, then the
+	// dashboard flips the count from running to completed.
+	records, err := repository.ListEventsAfter(ctx, "T1", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executionID domain.WorkflowStepID
+	for _, record := range records {
+		if record.Event.Topic != "function_executed" {
+			continue
+		}
+		delivered, _ := events.Deliverable(record.Event)
+		if id, ok := delivered.Field("function_execution_id"); ok {
+			executionID = domain.WorkflowStepID(id)
+		}
+	}
+	if executionID == "" {
+		t.Fatal("no function_executed event found for the running workflow")
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executionID, `{"result":"done"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	activity, err = messages.WorkflowActivity(ctx, "T1", "U1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if activity.Running != 0 || activity.Completed != 1 || len(activity.RecentRuns) != 1 ||
+		activity.RecentRuns[0].Status != domain.WorkflowRunCompleted {
+		t.Fatalf("activity after completion=%+v", activity)
+	}
+}
+
 func TestDeleteWorkflowCancelsRunsAndRemovesEveryRecord(t *testing.T) {
 	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
 	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{

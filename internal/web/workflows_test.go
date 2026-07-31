@@ -385,6 +385,51 @@ func TestWorkflowBuilderMarksPerStepChangesAgainstThePublishedRevision(t *testin
 	}
 }
 
+func TestWorkflowBuilderShowsRunActivityToTheOwner(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	page := get(t, mux, workflowURL)
+	requireContains(t, "empty activity", page.Body.String(), "Run activity", "No runs yet")
+	postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+	triggered := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Start incident triage"}, "type": {"link"},
+	}.Encode(), false)
+	page = get(t, mux, triggered.Header().Get("Location"))
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+	if len(trigger) != 2 || len(key) != 2 {
+		t.Fatalf("run form missing: %s", page.Body)
+	}
+	started := postForm(t, mux, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
+		"_csrf": {csrf}, "idempotency_key": {key[1]},
+	}.Encode(), false)
+	if started.Code != http.StatusSeeOther {
+		t.Fatalf("run=%d: %s", started.Code, started.Body)
+	}
+	page = get(t, mux, workflowURL)
+	requireContains(t, "running activity", page.Body.String(), "Run activity", "<b>1</b> running", "Start incident triage", `data-activity-run`)
+	runLink := regexp.MustCompile(`href="(/app/workflows/runs/Wx[0-9a-f]+)"`).FindStringSubmatch(page.Body.String())
+	if len(runLink) != 2 {
+		t.Fatalf("activity run link missing: %s", page.Body)
+	}
+
+	unpublished := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"2"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"unpublish"},
+	}.Encode(), false)
+	if unpublished.Code != http.StatusSeeOther {
+		t.Fatalf("unpublish=%d: %s", unpublished.Code, unpublished.Body)
+	}
+	page = get(t, mux, workflowURL)
+	requireContains(t, "cancelled activity", page.Body.String(), "<b>0</b> running", "<b>1</b> cancelled")
+}
+
 func TestWorkflowBuilderCopiesAndDeletesAWorkflow(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	created := postForm(t, mux, "/app/workflows/create", url.Values{

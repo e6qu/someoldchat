@@ -622,6 +622,24 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		t.Fatalf("event cursor after monotonic advance=%d err=%v, want 41", cursor, err)
 	}
 
+	// The activity summary counts runs per status and returns the newest runs
+	// first: at this point the workflow has a completed run and a cancelled
+	// one, and the completed run carries the higher id.
+	summary, err := repository.SummarizeWorkflowRuns(ctx, workspaceID, workflowID, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Completed != 1 || summary.Cancelled != 1 || summary.Running != 0 || summary.Failed != 0 || summary.Queued != 0 {
+		t.Fatalf("workflow summary=%+v", summary)
+	}
+	if len(summary.RecentRuns) != 2 || summary.RecentRuns[0].ID != runID || summary.RecentRuns[1].ID != cancellableRun.ID {
+		t.Fatalf("recent runs=%+v", summary.RecentRuns)
+	}
+	if bounded, err := repository.SummarizeWorkflowRuns(ctx, workspaceID, workflowID, 1); err != nil || len(bounded.RecentRuns) != 1 ||
+		bounded.RecentRuns[0].ID != runID || bounded.Completed != 1 {
+		t.Fatalf("bounded summary=%+v err=%v", bounded, err)
+	}
+
 	// Deleting removes the workflow and every record derived from it in one
 	// transaction: a running execution is cancelled first, then the workflow,
 	// its revisions, triggers, runs, steps, and featured entries all go away.

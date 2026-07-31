@@ -3028,6 +3028,41 @@ func (s *Store) ListWorkflowRuns(_ context.Context, workspace domain.WorkspaceID
 	return values, more, next, err
 }
 
+func (s *Store) SummarizeWorkflowRuns(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, limit int) (domain.WorkflowActivity, error) {
+	if workspace == "" || workflowID == "" || limit < 1 {
+		return domain.WorkflowActivity{}, store.InvalidArgument("invalid workflow run summary")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	activity := domain.WorkflowActivity{}
+	recent := make([]domain.WorkflowRun, 0, limit+1)
+	for _, run := range s.workflowRuns {
+		if run.WorkspaceID != workspace || run.WorkflowID != workflowID {
+			continue
+		}
+		switch run.Status {
+		case domain.WorkflowRunQueued:
+			activity.Queued++
+		case domain.WorkflowRunRunning:
+			activity.Running++
+		case domain.WorkflowRunCompleted:
+			activity.Completed++
+		case domain.WorkflowRunFailed:
+			activity.Failed++
+		case domain.WorkflowRunCancelled:
+			activity.Cancelled++
+		}
+		recent = appendSorted(recent, run, limit+1, func(left, right domain.WorkflowRun) bool {
+			return left.ID > right.ID
+		})
+	}
+	if len(recent) > limit {
+		recent = recent[:limit]
+	}
+	activity.RecentRuns = recent
+	return activity, nil
+}
+
 func automationPermissionKey(workspace domain.WorkspaceID, resourceType, resourceID string) string {
 	return string(workspace) + "\x00" + resourceType + "\x00" + resourceID
 }

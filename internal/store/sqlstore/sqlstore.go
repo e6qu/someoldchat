@@ -6267,6 +6267,60 @@ func (s *Store) ListWorkflowRuns(ctx context.Context, workspace domain.Workspace
 	return values, more, next, err
 }
 
+func (s *Store) SummarizeWorkflowRuns(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, limit int) (domain.WorkflowActivity, error) {
+	if workspace == "" || workflowID == "" || limit < 1 {
+		return domain.WorkflowActivity{}, store.InvalidArgument("invalid workflow run summary")
+	}
+	activity := domain.WorkflowActivity{}
+	counts, err := s.db.QueryContext(ctx, `SELECT status, COUNT(*) FROM workflow_runs
+		WHERE workspace_id = ? AND workflow_id = ? GROUP BY status`, workspace, workflowID)
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	defer counts.Close()
+	for counts.Next() {
+		var status domain.WorkflowRunStatus
+		var count int
+		if err := counts.Scan(&status, &count); err != nil {
+			return domain.WorkflowActivity{}, err
+		}
+		switch status {
+		case domain.WorkflowRunQueued:
+			activity.Queued = count
+		case domain.WorkflowRunRunning:
+			activity.Running = count
+		case domain.WorkflowRunCompleted:
+			activity.Completed = count
+		case domain.WorkflowRunFailed:
+			activity.Failed = count
+		case domain.WorkflowRunCancelled:
+			activity.Cancelled = count
+		}
+	}
+	if err := counts.Err(); err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowRunColumns+` FROM workflow_runs
+		WHERE workspace_id = ? AND workflow_id = ? ORDER BY id DESC LIMIT ?`, workspace, workflowID, limit)
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	defer rows.Close()
+	recent := make([]domain.WorkflowRun, 0, limit)
+	for rows.Next() {
+		value, scanErr := scanWorkflowRun(rows)
+		if scanErr != nil {
+			return domain.WorkflowActivity{}, scanErr
+		}
+		recent = append(recent, value)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	activity.RecentRuns = recent
+	return activity, nil
+}
+
 func automationPermissionJSON(value domain.AutomationPermission) (string, string, string, string, error) {
 	userIDs, err := json.Marshal(value.UserIDs)
 	if err != nil {

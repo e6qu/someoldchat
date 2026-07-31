@@ -306,6 +306,22 @@ func (m Messages) DeleteWorkflow(ctx context.Context, workspaceID domain.Workspa
 	return nil
 }
 
+// WorkflowActivity returns the run dashboard a workflow owner sees in Slack's
+// builder: how many runs are in each state and which runs happened most
+// recently. Members do not read another owner's activity.
+func (m Messages) WorkflowActivity(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowActivity, error) {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	if current.OwnerID != actor {
+		return domain.WorkflowActivity{}, store.ErrNotFound
+	}
+	return m.Store.SummarizeWorkflowRuns(ctx, workspaceID, workflowID, workflowActivityRecentLimit)
+}
+
+const workflowActivityRecentLimit = 5
+
 // WorkflowStepChanges reports the step-level differences between a published
 // workflow's staged draft and its published revision. Only the owner reads the
 // live head, so only the owner can observe the changes; a member receives

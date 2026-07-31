@@ -2387,6 +2387,23 @@ func (r Remote) DeleteWorkflow(ctx context.Context, workspaceID domain.Workspace
 	return requireAcknowledgement(out.GetOk(), "delete workflow")
 }
 
+func (r Remote) WorkflowActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowActivity, error) {
+	out, err := r.workflows.WorkflowActivity(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return domain.WorkflowActivity{}, err
+	}
+	recent := make([]domain.WorkflowRun, 0, len(out.GetRecentRuns()))
+	for _, run := range out.GetRecentRuns() {
+		recent = append(recent, decodeWorkflowRun(run))
+	}
+	return domain.WorkflowActivity{
+		Queued: int(out.GetQueued()), Running: int(out.GetRunning()), Completed: int(out.GetCompleted()),
+		Failed: int(out.GetFailed()), Cancelled: int(out.GetCancelled()), RecentRuns: recent,
+	}, nil
+}
+
 func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition, expectedVersion uint64, publish bool) (domain.WorkflowDefinition, error) {
 	out, err := r.workflows.UpdateWorkflow(ctx, &chatv1.WorkflowMutationRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Workflow: encodeWorkflowDefinition(value),
@@ -4939,6 +4956,24 @@ func (s *Server) DeleteWorkflow(ctx context.Context, input *chatv1.WorkflowDelet
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) WorkflowActivity(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowActivitySummary, error) {
+	activity, err := s.implementation.WorkflowActivity(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	recent := make([]*chatv1.WorkflowRun, 0, len(activity.RecentRuns))
+	for _, run := range activity.RecentRuns {
+		recent = append(recent, encodeWorkflowRun(run))
+	}
+	return &chatv1.WorkflowActivitySummary{
+		Queued: int32(activity.Queued), Running: int32(activity.Running), Completed: int32(activity.Completed),
+		Failed: int32(activity.Failed), Cancelled: int32(activity.Cancelled), RecentRuns: recent,
+	}, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {
