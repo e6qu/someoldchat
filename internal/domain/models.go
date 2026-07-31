@@ -1326,6 +1326,20 @@ type AppInstallation struct {
 	CreatedAt   time.Time
 }
 
+// AppAuthorization is the non-secret perspective under which an installed app
+// may receive Events API traffic. Multiple rotated access tokens can represent
+// the same authorization; repositories collapse them by app/workspace/type/
+// subject so delivery never duplicates a callback merely because credentials
+// rotated.
+type AppAuthorization struct {
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	BotID       BotID
+	TokenType   string
+	Scopes      []string
+}
+
 // AppEventCursor is the durable delivery position for one app transport. It is
 // intentionally payload-free: administration can explain queue progress and
 // retry state without exposing event bodies from installed workspaces.

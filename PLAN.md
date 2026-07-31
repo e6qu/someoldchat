@@ -224,7 +224,7 @@ current method:
   call them. Those methods are useful compatibility inventory, but they are not
   part of the current Slack denominator.
 - After correcting overstated method claims and separating deprecated
-  `reminders.*` from first-party Later, the ledger records 200 current methods
+  `reminders.*` from first-party Later, the ledger records 199 current methods
   as `behavior-compatible`, 21 as `sdk-compatible`, two as
   `schema-compatible`, and none as
   `verified-against-slack`. A passing route, local test, or SDK parse is not
@@ -368,8 +368,22 @@ Node, Python, and Java clients record every `/api/{method}` path they actually
 request, and the Deno runtime records its two verified function-completion
 requests at its own receiver. `make sdk-qualification` fails if any operation
 claimed at `sdk-compatible` or above is absent. The current result is 231 of
-231 claimed methods observed (221 current plus ten retained legacy methods);
+231 claimed methods observed (221 current plus ten retained legacy methods)
+across 233 distinct SDK-observed paths;
 this proves SDK serialization/decoding only, not live Slack equivalence.
+
+Current app-execution work replaces installed-bot-only event filtering with
+bot/user authorization perspectives and immutable callback snapshots. Message
+create/change/delete and file create/share callbacks now retain the exact
+committed version through delayed delivery and SQL restart; HTTP and Socket
+Mode apply the same manifest subscription, OAuth-scope, and conversation
+visibility rules. Current callbacks carry one representative authorization
+and an event-backed `event_context`; the full set is returned only to an
+`authorizations:read` app token through `apps.event.authorizations.list`.
+`star_added`/`star_removed` are available to the matching user-token
+subscription on Events API and RTM as Slack documents. File-unshare mutation
+production, retained attempt/authorization history, and controlled live-Slack
+differential outcomes remain the next event-runtime gaps.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and
@@ -474,8 +488,8 @@ Phase 5 exits only when each method counted as complete names its current
 official sources, executable evidence, known deviations, and live-comparison
 state. An aggregate green suite is supporting evidence, not a substitute for
 that per-method record. The compatibility report now makes the missing records
-explicit: only 25 of the 221 current methods claimed at `sdk-compatible` or
-above carry method-level evidence in the ledger; 196 claims still require
+explicit: only 26 of the 221 current methods claimed at `sdk-compatible` or
+above carry method-level evidence in the ledger; 195 claims still require
 individual review and evidence even though the official SDK aggregate observes
 their request paths.
 

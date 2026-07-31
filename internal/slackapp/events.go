@@ -32,6 +32,7 @@ type EventStore interface {
 	GetMessage(context.Context, domain.MessageID) (domain.Message, error)
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	GetBotByApp(context.Context, domain.WorkspaceID, domain.AppID) (domain.Bot, error)
+	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IsConversationMember(context.Context, domain.ConversationID, domain.UserID) (bool, error)
 }
 

@@ -1482,12 +1482,13 @@ decisions:
       message.created record is hydrated into a Slack message only after
       installed-bot or connected-user conversation visibility is proved, and
       current Node, Python, and Java Socket Mode plus Node RTM clients parse that
-      result. Bolt callback qualifications still submit independently
-      constructed signed callbacks, and message change/delete, file
-      share/unshare, and user-token HTTP/Socket subscriptions remain
-      unqualified. The pinned event schemas therefore support only the
-      explicitly qualified message-created slice; they do not promote the
-      whole Events API surface.
+      result. Message mutation and file create/share callbacks use immutable
+      outbox snapshots; HTTP and Socket Mode select bot/user authorization
+      perspectives by granted scope, membership, and manifest subscription.
+      Bolt callback qualifications still submit independently constructed
+      signed callbacks, file-unshare production remains incomplete, and no
+      callback shape is live-Slack verified. The evidence therefore does not
+      promote the whole Events API surface.
   - method: rtm.connect
     evidence: https://docs.slack.dev/reference/methods/rtm.connect/
     decision: >-

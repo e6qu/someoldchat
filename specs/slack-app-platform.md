@@ -29,8 +29,8 @@ journey inventory is maintained in
 | Slack-hosted app datastores | Manifest-declared schemas, isolated durable records, replace/merge/delete semantics, 25-item bulk operations, query/count with the complete documented expression operator set and post-filter scan behavior, uninstall cleanup, bot-token scopes, local/gRPC parity, the current official Node SDK raw-method path, and a first-party developer console for schema/query/item inspection are exercised end to end | Supported for the documented item, expression, and pagination contract |
 | Bot execution | A bot token authenticates as its bot user and app, reports bot/app identity, writes as that subject, and is revoked with its installation | Supported |
 | Incoming webhooks | Durable, revocable webhooks post as the installed app's verified bot only after bot membership is proved; unknown/disabled credentials are indistinguishable, and archived destinations return Slack's plain-text `410 channel_is_archived`. Provisioning still uses an internal administration route rather than install-time selection | Partially supported |
-| Events API over HTTP | Delivery is selected from each installed manifest, filtered by subscriptions, signed with the app secret, and retried with Slack headers. Every event carrying `channel_id` is filtered by installed-bot membership, and real message/file records are hydrated only after installed-bot conversation access is proved; a TLS receiver test posts and receives an actual private-channel message. The developer console exposes the real durable HTTP/Socket cursor, queued evaluation, active lease, and retry time/count/reason without leaking event payloads | Supported for message creation and the implemented content-free event catalog; retained attempt history/metrics, user subscriptions, and message change/delete/file-share variants remain |
-| Socket Mode | App-level tokens with `connections:write`, connection limits, envelopes, acknowledgements, and retries are implemented. The current official Node client receives and acknowledges a real service-posted message rather than a fixture-planted callback | Supported for the implemented event surface |
+| Events API over HTTP | Delivery is selected from each installed manifest, filtered independently across bot/user subscriptions, signed with the app secret, and retried with Slack headers. Scope and conversation visibility are evaluated for every active bot/user authorization; current callbacks carry one matching authorization plus a durable `event_context`, while `apps.event.authorizations.list` requires an `xapp` token and resolves the full event-backed set. Immutable outbox snapshots preserve the exact create/change/delete message version and file create/share projection across delayed delivery and SQL restart. The developer console exposes the real durable HTTP/Socket cursor, queued evaluation, active lease, and retry time/count/reason without leaking event payloads | Supported for the implemented event catalog; retained attempt history/metrics, `file_unshared` production, and live-Slack differential comparison remain |
+| Socket Mode | App-level tokens with `connections:write`, connection limits, envelopes, acknowledgements, retries, bot/user subscription perspective selection, and the same event callback projection as HTTP are implemented. Current official Node, Python, and Java clients receive real service events rather than fixture-planted callbacks | Supported for the implemented event surface |
 | RTM | The current official Node RTM client connects through `rtm.connect` and receives a real stored message hydrated only after connected-user conversation membership is proved. Other events carrying `channel_id` are likewise membership-filtered; the previous hand-authored journal event is gone | Supported for message creation and the implemented content-free event catalog; the legacy RTM event surface remains narrower than Slack's catalog |
 | Slash commands | Manifest commands are validated and dispatched to signed HTTP or Socket Mode receivers with deduplication, exact `response_url` authorization, bounded trigger/response lifecycles, manifest-controlled `should_escape`, composer discovery, and implemented built-in commands. Current HTTP and Socket qualifications use distinct human callers and installed bot identities | Supported for implemented built-ins and installed app commands; workflow/Enterprise command breadth remains tracked |
 | Interactivity | Message/Home/modal block actions, global and message shortcuts, view submissions and closures, external options, signed HTTP delivery, Socket Mode envelopes, triggers, and `response_url` mutations are wired end to end | Supported for the implemented Block Kit elements |
@@ -59,19 +59,20 @@ unimplemented current methods break down as:
 That count is a coverage inventory, not a claim that all implemented methods
 are live-Slack-equivalent. The ledger currently records 200 current methods as
 behavior-compatible, 21 as SDK-compatible, two as schema-compatible, and
-zero as live-differential `verified-against-slack`. Only 25 of the 221
+zero as live-differential `verified-against-slack`. Only 26 of the 221
 current methods claimed at SDK compatibility or better carry method-level
 ledger evidence; the aggregate SDK path inventory does not promote the other
-196 claims. The next app-runtime priorities are user-token visibility for
-HTTP/Socket event subscriptions, message change/delete and file share/unshare
-event production, then the manifest sections that are stored but not yet
+195 claims. The next app-runtime priorities are the remaining file-unshare
+mutation, retained delivery history, and controlled HTTP/Socket differential
+coverage, then the manifest sections that are stored but not yet
 executable—functions/workflows, external authentication, incoming-webhook
 install selection, and agent/assistant configuration—before Enterprise-only
 breadth.
 
-Until user-token event authorization is implemented, user-scoped
-`star_added`/`star_removed` callbacks are deliberately withheld from app
-surfaces and delivered through RTM only to the acting user.
+User-scoped `star_added`/`star_removed` callbacks are delivered only through a
+matching user-token authorization with `stars:read`; generic event JSON remains
+fail-closed, so recipient-scoped state cannot leak through an audience-less
+worker.
 
 “Supported” here means the stated slice is real; it is not a claim that the row
 covers every Slack variant. In particular, Enterprise Grid organization

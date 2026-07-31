@@ -3,6 +3,7 @@ import io
 import json
 import os
 import time
+import urllib.request
 
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -14,6 +15,10 @@ client = WebClient(
 )
 reminder_client = WebClient(
     token="xoxp-reminder-qualification",
+    base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
+)
+app_client = WebClient(
+    token=os.environ.get("SAMEOLDCHAT_APP_TOKEN", "xapp-test"),
     base_url=os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/"),
 )
 
@@ -199,7 +204,11 @@ refreshed_openid_token = client.api_call(
 )
 assert refreshed_openid_token["ok"] is True
 assert refreshed_openid_token["access_token"] != openid_token["access_token"]
-authorizations = client.apps_event_authorizations_list(event_context="qualification-event")
+api_url = os.environ.get("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/")
+event_context_url = api_url.rsplit("/api/", 1)[0] + "/qualification/event-context"
+with urllib.request.urlopen(event_context_url) as response:
+    event_context = response.read().decode("utf-8")
+authorizations = app_client.apps_event_authorizations_list(event_context=event_context)
 assert authorizations["ok"] is True
 assert authorizations["authorizations"][0]["team_id"] == "T1"
 assert authorizations["authorizations"][0]["is_bot"] is True

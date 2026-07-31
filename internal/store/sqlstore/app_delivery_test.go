@@ -41,12 +41,16 @@ func TestSQLiteAppEventDeliveryCursorSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	event.PrivatePayload = `{"content":"restart-safe-private-snapshot"}`
 	if err := repository.AppendEvent(ctx, event); err != nil {
 		t.Fatal(err)
 	}
 	claimed, _, _, found, err := repository.ClaimAppEvent(ctx, "A1", "socket", "worker", time.Minute)
 	if err != nil || !found {
 		t.Fatalf("claim=%+v found=%v err=%v", claimed, found, err)
+	}
+	if claimed.Event.PrivatePayload != event.PrivatePayload {
+		t.Fatalf("claimed private payload=%q want %q", claimed.Event.PrivatePayload, event.PrivatePayload)
 	}
 	retryAt := now.Add(time.Minute)
 	if err := repository.ReleaseAppEvent(ctx, "A1", "socket", "worker", claimed.Sequence, "connection_closed", retryAt); err != nil {

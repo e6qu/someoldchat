@@ -349,6 +349,7 @@ type Store interface {
 	DeleteApp(context.Context, domain.AppID, domain.UserID, time.Time) error
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	UninstallApp(context.Context, domain.WorkspaceID, domain.AppID) error
 	CreateIncomingWebhook(context.Context, domain.IncomingWebhook) error
 	LookupIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.IncomingWebhook, error)
@@ -593,7 +594,7 @@ type Store interface {
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
 	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error
 	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, domain.Message, events.Event) error
-	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, events.Event) error
+	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.FileID, domain.FileCommentID, events.Event) error

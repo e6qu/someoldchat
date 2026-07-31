@@ -21,9 +21,10 @@ retrieved_at: 2026-07-28T00:00:00Z
 # proved; the Node RTM qualification does the same for the connected user.
 # Bolt callback suites still submit an independently constructed signed event
 # callback, so they qualify framework decoding and request authentication, not
-# producer translation. Message change/delete, file share/unshare, and
-# user-token Events API subscriptions remain outside the qualified slice. See
-# the events-api decision in specs/compatibility.yaml.
+# producer translation. Immutable producer snapshots and bot/user perspective
+# filtering now cover message create/change/delete and file create/share;
+# file-unshare production and live-Slack differential outcomes remain outside
+# the qualified slice. See the events-api decision in specs/compatibility.yaml.
 status: qualified
 
 sdks:

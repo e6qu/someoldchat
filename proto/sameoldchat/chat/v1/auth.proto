@@ -44,6 +44,24 @@ message AppInstallationsResponse {
   repeated AppInstallation installations = 1;
 }
 
+message AppAuthorizationsRequest {
+  string app_id = 1;
+  string workspace_id = 2;
+}
+
+message AppAuthorization {
+  string app_id = 1;
+  string workspace_id = 2;
+  string user_id = 3;
+  string bot_id = 4;
+  string token_type = 5;
+  repeated string scopes = 6;
+}
+
+message AppAuthorizationsResponse {
+  repeated AppAuthorization authorizations = 1;
+}
+
 message SessionRecord {
   string workspace_id = 1;
   string user_id = 2;
@@ -109,6 +127,7 @@ service AuthService {
   rpc LookupAppToken(TokenRequest) returns (AppTokenRecord);
   rpc CreateAppInstallation(AppInstallationRequest) returns (AuthRevokeResponse);
   rpc ListAppInstallations(AppInstallationRequest) returns (AppInstallationsResponse);
+  rpc ListAppAuthorizations(AppAuthorizationsRequest) returns (AppAuthorizationsResponse);
   rpc UninstallApp(UninstallAppRequest) returns (AuthRevokeResponse);
   rpc LookupSession(TokenRequest) returns (SessionRecord);
   rpc RevokeSession(TokenRequest) returns (AuthRevokeResponse);

@@ -271,8 +271,9 @@ func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
 	// stay in scopedRoutes so the coverage assertion below can see them, and both
 	// have dedicated tests.
 	separateAuthenticator := map[string]struct{}{
-		"/api/apps.connections.open": {},
-		"/api/conversations.invite":  {},
+		"/api/apps.connections.open":          {},
+		"/api/apps.event.authorizations.list": {},
+		"/api/conversations.invite":           {},
 	}
 	for _, route := range scopedRoutes() {
 		if _, ok := separateAuthenticator[route.path]; ok {

@@ -354,7 +354,10 @@ const refreshedOpenIDToken = await client.apiCall("openid.connect.token", {
 });
 assert.equal(refreshedOpenIDToken.ok, true);
 assert.notEqual(refreshedOpenIDToken.access_token, openidToken.access_token);
-const authorizations = await client.apps.event.authorizations.list({ event_context: "qualification-event" });
+const eventContextResponse = await fetch(new URL("../qualification/event-context", process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/"));
+assert.equal(eventContextResponse.ok, true);
+const eventContext = await eventContextResponse.text();
+const authorizations = await appClient.apps.event.authorizations.list({ event_context: eventContext });
 assert.equal(authorizations.ok, true);
 assert.equal(authorizations.authorizations[0].team_id, "T1");
 assert.equal(authorizations.authorizations[0].is_bot, true);

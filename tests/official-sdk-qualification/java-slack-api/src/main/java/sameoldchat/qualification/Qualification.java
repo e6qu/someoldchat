@@ -40,6 +40,10 @@ import com.slack.api.methods.response.users.UsersLookupByEmailResponse;
 import com.slack.api.methods.response.users.UsersGetPresenceResponse;
 import com.slack.api.methods.response.users.UsersSetPresenceResponse;
 import com.slack.api.methods.response.users.profile.UsersProfileSetResponse;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.List;
 
 public final class Qualification {
@@ -47,6 +51,7 @@ public final class Qualification {
 
     public static void main(String[] args) throws Exception {
         String token = env("SAMEOLDCHAT_API_TOKEN", "xoxb-test");
+        String appToken = env("SAMEOLDCHAT_APP_TOKEN", "xapp-test");
         String baseUrl = env("SAMEOLDCHAT_API_URL", "http://127.0.0.1:18080/api/");
 
         SlackConfig config = new SlackConfig();
@@ -54,6 +59,7 @@ public final class Qualification {
         config.setTokenExistenceVerificationEnabled(false);
         try (Slack slack = Slack.getInstance(config)) {
             MethodsClient methods = slack.methods(token);
+            MethodsClient appMethods = slack.methods(appToken);
             MethodsClient reminderMethods = slack.methods("xoxp-reminder-qualification");
 
             ApiTestResponse api = methods.apiTest(com.slack.api.methods.request.api.ApiTestRequest.builder().build());
@@ -143,9 +149,13 @@ public final class Qualification {
                             .token(openidToken.getAccessToken()).build());
             require(openidInfo.isOk() && "U1".equals(openidInfo.getSub()) && "T1".equals(openidInfo.getTeamId()),
                     "openid.connect.userInfo failed: " + openidInfo.getError());
-            com.slack.api.methods.response.apps.event.authorizations.AppsEventAuthorizationsListResponse authorizations = methods.appsEventAuthorizationsList(
+            String eventContextURL = baseUrl.replaceFirst("/api/?$", "/qualification/event-context");
+            String eventContext = HttpClient.newHttpClient().send(
+                    HttpRequest.newBuilder(URI.create(eventContextURL)).GET().build(),
+                    HttpResponse.BodyHandlers.ofString()).body();
+            com.slack.api.methods.response.apps.event.authorizations.AppsEventAuthorizationsListResponse authorizations = appMethods.appsEventAuthorizationsList(
                     com.slack.api.methods.request.apps.event.authorizations.AppsEventAuthorizationsListRequest.builder()
-                            .eventContext("qualification-event").build());
+                            .eventContext(eventContext).build());
             require(authorizations.isOk() && authorizations.getAuthorizations() != null
                             && !authorizations.getAuthorizations().isEmpty(),
                     "apps.event.authorizations.list failed: " + authorizations.getError());

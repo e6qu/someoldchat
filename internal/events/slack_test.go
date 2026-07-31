@@ -39,7 +39,8 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 	}
 	for index, wantUser := range []string{"U2", "U3"} {
 		var envelope struct {
-			Event struct {
+			EventContext string `json:"event_context"`
+			Event        struct {
 				Type    string `json:"type"`
 				User    string `json:"user"`
 				Channel string `json:"channel"`
@@ -52,6 +53,13 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 		if envelope.Event.Type != "member_joined_channel" || envelope.Event.User != wantUser || envelope.Event.Channel != "C1" || envelope.Event.EventTS == "" {
 			t.Fatalf("body[%d]=%s", index, bodies[index])
 		}
+		appID, sequence, eventID, err := ParseEventContext(envelope.EventContext)
+		if err != nil || appID != "A1" || sequence != 1 || eventID != "Ev1" {
+			t.Fatalf("event_context=%q decoded app=%q sequence=%d event=%q err=%v", envelope.EventContext, appID, sequence, eventID, err)
+		}
+	}
+	if _, _, _, err := ParseEventContext("qualification-event"); !errors.Is(err, ErrPayloadFieldInvalid) {
+		t.Fatalf("malformed event context error=%v", err)
 	}
 }
 

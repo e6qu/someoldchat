@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/sameoldchat/sameoldchat/internal/domain"
@@ -28,5 +29,27 @@ func TestFilterSubscribedSlackEventBodiesUsesManifestEventAndConversationKind(t 
 	filtered, err = FilterSubscribedSlackEventBodies(context.Background(), bodies, nil, []string{"reaction_added"}, resolve)
 	if err != nil || len(filtered) != 1 {
 		t.Fatalf("user event subscription bodies=%d err=%v", len(filtered), err)
+	}
+}
+
+func TestFilterSubscribedSlackEventBodiesKeepsOneMatchingAuthorizationPerspective(t *testing.T) {
+	body := []byte(`{"type":"event_callback","event":{"type":"reaction_added","event_ts":"1700000000.000000"},"authorizations":[{"team_id":"T1","user_id":"UB","is_bot":true,"is_enterprise_install":false},{"team_id":"T1","user_id":"U1","is_bot":false,"is_enterprise_install":false}]}`)
+
+	filtered, err := FilterSubscribedSlackEventBodies(context.Background(), [][]byte{body}, nil, []string{"reaction_added"}, nil)
+	if err != nil || len(filtered) != 1 {
+		t.Fatalf("user subscription bodies=%d err=%v", len(filtered), err)
+	}
+	if !strings.Contains(string(filtered[0]), `"authorizations":[{"enterprise_id":"","team_id":"T1","user_id":"U1","is_bot":false`) ||
+		strings.Contains(string(filtered[0]), `"user_id":"UB"`) {
+		t.Fatalf("user subscription retained the wrong perspective: %s", filtered[0])
+	}
+
+	filtered, err = FilterSubscribedSlackEventBodies(context.Background(), [][]byte{body}, []string{"reaction_added"}, nil, nil)
+	if err != nil || len(filtered) != 1 {
+		t.Fatalf("bot subscription bodies=%d err=%v", len(filtered), err)
+	}
+	if !strings.Contains(string(filtered[0]), `"authorizations":[{"enterprise_id":"","team_id":"T1","user_id":"UB","is_bot":true`) ||
+		strings.Contains(string(filtered[0]), `"user_id":"U1"`) {
+		t.Fatalf("bot subscription retained the wrong perspective: %s", filtered[0])
 	}
 }

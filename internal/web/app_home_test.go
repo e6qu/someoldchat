@@ -49,6 +49,9 @@ func TestInstalledAppDirectoryRendersPublishedHomeAndDispatchesActions(t *testin
 	if err := repository.CreateBot(ctx, domain.Bot{ID: "B1", AppID: "A1", WorkspaceID: "T1", UserID: "UBOT", Name: "Release bot", UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	if err := repository.SeedToken(ctx, "xoxb-home", domain.TokenRecord{WorkspaceID: "T1", UserID: "UBOT", AppID: "A1", BotID: "B1", TokenType: "bot"}); err != nil {
+		t.Fatal(err)
+	}
 	messages := service.Messages{Store: repository, AppCredentialKey: key}
 	published, err := messages.PublishView(ctx, "T1", "U1", "A1", "U1", `{"type":"home","blocks":[{"type":"header","block_id":"heading","text":{"type":"plain_text","text":"Production releases"}},{"type":"section","block_id":"summary","text":{"type":"mrkdwn","text":"Choose the environment to inspect."}},{"type":"card","block_id":"health","title":{"type":"plain_text","text":"Release health"},"body":{"type":"mrkdwn","text":"*Healthy*"}},{"type":"data_table","block_id":"deployments","caption":"Recent deployments","rows":[[{"type":"raw_text","text":"Service"},{"type":"raw_text","text":"Version"}],[{"type":"raw_text","text":"API"},{"type":"raw_text","text":"42"}]]},{"type":"actions","block_id":"environment","elements":[{"type":"static_select","action_id":"select_environment","placeholder":{"type":"plain_text","text":"Environment"},"options":[{"text":{"type":"plain_text","text":"Production"},"value":"production"},{"text":{"type":"plain_text","text":"Staging"},"value":"staging"}]}]}]}`, "")
 	if err != nil {

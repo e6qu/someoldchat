@@ -721,6 +721,22 @@ func (r Remote) ListAppInstallations(ctx context.Context, appID domain.AppID) ([
 	return values, nil
 }
 
+func (r Remote) ListAppAuthorizations(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
+	out, err := r.auth.ListAppAuthorizations(ctx, &chatv1.AppAuthorizationsRequest{AppId: string(appID), WorkspaceId: string(workspaceID)})
+	if err != nil {
+		return nil, err
+	}
+	values := make([]domain.AppAuthorization, 0, len(out.GetAuthorizations()))
+	for _, item := range out.GetAuthorizations() {
+		values = append(values, domain.AppAuthorization{
+			AppID: domain.AppID(item.GetAppId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()),
+			UserID: domain.UserID(item.GetUserId()), BotID: domain.BotID(item.GetBotId()),
+			TokenType: item.GetTokenType(), Scopes: domain.NormalizeScopes(item.GetScopes()),
+		})
+	}
+	return values, nil
+}
+
 func (r Remote) LookupSession(ctx context.Context, token string) (domain.SessionRecord, error) {
 	in := &chatv1.TokenRequest{Token: token}
 	out, err := r.auth.LookupSession(ctx, in)
@@ -4138,6 +4154,22 @@ func (s *Server) ListAppInstallations(ctx context.Context, input *chatv1.AppInst
 	return result, nil
 }
 
+func (s *Server) ListAppAuthorizations(ctx context.Context, input *chatv1.AppAuthorizationsRequest) (*chatv1.AppAuthorizationsResponse, error) {
+	values, err := s.implementation.ListAppAuthorizations(ctx, domain.AppID(input.GetAppId()), domain.WorkspaceID(input.GetWorkspaceId()))
+	if err != nil {
+		return nil, mapError(err)
+	}
+	result := &chatv1.AppAuthorizationsResponse{Authorizations: make([]*chatv1.AppAuthorization, 0, len(values))}
+	for _, value := range values {
+		result.Authorizations = append(result.Authorizations, &chatv1.AppAuthorization{
+			AppId: string(value.AppID), WorkspaceId: string(value.WorkspaceID),
+			UserId: string(value.UserID), BotId: string(value.BotID),
+			TokenType: value.TokenType, Scopes: domain.NormalizeScopes(value.Scopes),
+		})
+	}
+	return result, nil
+}
+
 func (s *Server) LookupSession(ctx context.Context, input *chatv1.TokenRequest) (*chatv1.SessionRecord, error) {
 	return s.lookupSessionProto(ctx, input)
 }
@@ -7380,7 +7412,14 @@ func encodeProtoEvents(records []events.Record) *chatv1.EventsResponse {
 }
 
 func encodeProtoEventRecord(record events.Record) *chatv1.EventRecord {
-	return &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano()}
+	authorizations := make([]*chatv1.EventAuthorization, 0, len(record.Event.Authorizations))
+	for _, value := range record.Event.Authorizations {
+		authorizations = append(authorizations, &chatv1.EventAuthorization{
+			EnterpriseId: value.EnterpriseID, TeamId: string(value.TeamID), UserId: string(value.UserID),
+			IsBot: value.IsBot, IsEnterpriseInstall: value.IsEnterpriseInstall,
+		})
+	}
+	return &chatv1.EventRecord{Sequence: record.Sequence, Id: string(record.Event.ID), WorkspaceId: string(record.Event.WorkspaceID), ActorId: string(record.Event.ActorID), Topic: record.Event.Topic, Payload: record.Event.Payload, PrivatePayload: record.Event.PrivatePayload, CreatedAtUnixNano: record.Event.CreatedAt.UnixNano(), Authorizations: authorizations}
 }
 
 func decodeProtoEvents(value *chatv1.EventsResponse) ([]events.Record, error) {
@@ -7402,7 +7441,14 @@ func decodeProtoEventRecord(item *chatv1.EventRecord) (events.Record, error) {
 	if item == nil || item.GetSequence() == 0 || item.GetId() == "" || item.GetWorkspaceId() == "" || item.GetTopic() == "" || item.GetCreatedAtUnixNano() == 0 {
 		return events.Record{}, errors.New("typed event record is incomplete")
 	}
-	return events.Record{Sequence: item.GetSequence(), Event: events.Event{ID: domain.EventID(item.GetId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), ActorID: domain.UserID(item.GetActorId()), Topic: item.GetTopic(), Payload: item.GetPayload(), CreatedAt: time.Unix(0, item.GetCreatedAtUnixNano()).UTC()}}, nil
+	authorizations := make([]events.Authorization, 0, len(item.GetAuthorizations()))
+	for _, value := range item.GetAuthorizations() {
+		authorizations = append(authorizations, events.Authorization{
+			EnterpriseID: value.GetEnterpriseId(), TeamID: domain.WorkspaceID(value.GetTeamId()),
+			UserID: domain.UserID(value.GetUserId()), IsBot: value.GetIsBot(), IsEnterpriseInstall: value.GetIsEnterpriseInstall(),
+		})
+	}
+	return events.Record{Sequence: item.GetSequence(), Event: events.Event{ID: domain.EventID(item.GetId()), WorkspaceID: domain.WorkspaceID(item.GetWorkspaceId()), ActorID: domain.UserID(item.GetActorId()), Topic: item.GetTopic(), Payload: item.GetPayload(), PrivatePayload: item.GetPrivatePayload(), Authorizations: authorizations, CreatedAt: time.Unix(0, item.GetCreatedAtUnixNano()).UTC()}}, nil
 }
 
 func encodeProtoReaction(value domain.Reaction) *chatv1.Reaction {

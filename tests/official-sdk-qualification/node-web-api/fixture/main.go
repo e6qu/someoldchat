@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -147,7 +148,7 @@ func main() {
 			panic(err)
 		}
 	}
-	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
+	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite), string(auth.ScopeAuthorizationsRead)}})
 	store.SeedAppToken(context.Background(), "xapp-interactions", domain.AppTokenRecord{AppID: "A2", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		panic(err)
@@ -230,6 +231,20 @@ func main() {
 	handler.Register(mux)
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /qualification/event-context", func(w http.ResponseWriter, r *http.Request) {
+		records, err := messages.ListAppEventsAfter(r.Context(), "A1", 0, 1)
+		if err != nil || len(records) != 1 {
+			http.Error(w, "qualification event is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		value, err := events.EventContext("A1", records[0])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, value)
 	})
 	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
 	rtmHandler, err := realtime.NewRTMHandler(messages, "T1", messages, messages)

@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS remote_file_shares (
 CREATE INDEX IF NOT EXISTS files_workspace_id ON files(workspace_id, id);
 CREATE TABLE IF NOT EXISTS outbox (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, topic TEXT NOT NULL,
- actor_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
+ actor_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, private_payload TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
  lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', next_attempt_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS access_logs (
@@ -418,7 +418,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 118
+const schemaVersion = 119
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -469,19 +469,19 @@ type queryExecutor interface {
 // actor_id form repeated verbatim at five call sites and a SELECT form repeated
 // at six. Two helpers now cover both shapes, and both take the whole event so a
 // column cannot be forgotten again.
-const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`
+const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, private_payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', '')`
 
 // insertOutboxForConversationStatement derives the workspace from the
 // conversation being mutated, for the events whose caller does not carry it.
-const insertOutboxForConversationStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`
+const insertOutboxForConversationStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, private_payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`
 
 func insertOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
-	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt))
+	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt))
 	return err
 }
 
 func insertOutboxForConversation(ctx context.Context, tx *sql.Tx, event events.Event, conversation domain.ConversationID) error {
-	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt), conversation)
+	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt), conversation)
 	return err
 }
 
@@ -520,7 +520,7 @@ func systemClock() time.Time { return time.Now().UTC() }
 var _ store.Store = (*Store)(nil)
 
 func (s *Store) AppendEvent(ctx context.Context, event events.Event) error {
-	_, err := s.db.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt))
+	_, err := s.db.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt))
 	return err
 }
 
@@ -2566,6 +2566,17 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index scheduled message files: %w", err)
 		}
 	}
+	if version < 119 {
+		columns, err := s.outboxColumns(ctx, db)
+		if err != nil {
+			return err
+		}
+		if !columns["private_payload"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE outbox ADD COLUMN private_payload TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate private outbox payload: %w", err)
+			}
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -3883,6 +3894,46 @@ func (s *Store) LookupToken(ctx context.Context, token string) (domain.TokenReco
 		record.ExpiresAt = time.Unix(0, expiresAt).UTC()
 	}
 	return record, nil
+}
+
+func (s *Store) ListAppAuthorizations(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
+	if appID == "" || workspaceID == "" {
+		return nil, store.InvalidArgument("app authorization identity is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT user_id, bot_id, token_type, scopes
+		FROM tokens WHERE app_id = ? AND workspace_id = ? AND revoked = 0
+		AND (expires_at = 0 OR expires_at > ?) AND token_type IN ('bot', 'user')
+		ORDER BY token_type, user_id, bot_id, token_hash`, appID, workspaceID, time.Now().UTC().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byKey := make(map[string]domain.AppAuthorization)
+	keys := make([]string, 0)
+	for rows.Next() {
+		var userID domain.UserID
+		var botID domain.BotID
+		var tokenType, scopes string
+		if err := rows.Scan(&userID, &botID, &tokenType, &scopes); err != nil {
+			return nil, err
+		}
+		key := tokenType + "\x00" + string(userID) + "\x00" + string(botID)
+		value, exists := byKey[key]
+		if !exists {
+			keys = append(keys, key)
+			value = domain.AppAuthorization{AppID: appID, WorkspaceID: workspaceID, UserID: userID, BotID: botID, TokenType: tokenType}
+		}
+		value.Scopes = domain.NormalizeScopes(append(value.Scopes, strings.Fields(scopes)...))
+		byKey[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]domain.AppAuthorization, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, byKey[key])
+	}
+	return result, nil
 }
 
 func (s *Store) SeedAppToken(ctx context.Context, token string, record domain.AppTokenRecord) error {
@@ -8125,8 +8176,8 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 	return nil
 }
 
-func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
-	if len(fileIDs) == 0 {
+func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.FileID, message domain.Message, emitted []events.Event) error {
+	if len(fileIDs) == 0 || len(emitted) == 0 {
 		return store.InvalidArgument("a file share message requires a file")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -8151,8 +8202,13 @@ func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.Fil
 		}
 		message.Files[index].ID = fileID
 	}
-	if err := insertFileShareMessage(ctx, tx, message, event); err != nil {
+	if err := insertFileShareMessage(ctx, tx, message, emitted[0]); err != nil {
 		return err
+	}
+	for _, event := range emitted[1:] {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -12279,7 +12335,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	now := s.now()
 	nowText := domain.NewStoredTime(now)
 	expiresText := domain.NewStoredTime(now.Add(lease))
-	query := `SELECT sequence, id, workspace_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0`
+	query := `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0`
 	args := []any{workspace}
 	if topic == "" {
 		predicate, excluded := internalTopicPredicate("topic")
@@ -12303,7 +12359,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	candidates := make([]candidate, 0, limit)
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.sequence, &item.event.ID, &item.event.WorkspaceID, &item.event.Topic, &item.event.Payload, &item.created); err != nil {
+		if err := rows.Scan(&item.sequence, &item.event.ID, &item.event.WorkspaceID, &item.event.ActorID, &item.event.Topic, &item.event.Payload, &item.event.PrivatePayload, &item.created); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -12415,7 +12471,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 	predicate, excluded := internalTopicPredicate("topic")
 	args := append([]any{workspace, after}, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ?`+predicate+` ORDER BY sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ?`+predicate+` ORDER BY sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -12425,7 +12481,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 		var sequence uint64
 		var event events.Event
 		var created string
-		if err := rows.Scan(&sequence, &event.ID, &event.WorkspaceID, &event.ActorID, &event.Topic, &event.Payload, &created); err != nil {
+		if err := rows.Scan(&sequence, &event.ID, &event.WorkspaceID, &event.ActorID, &event.Topic, &event.Payload, &event.PrivatePayload, &created); err != nil {
 			return nil, err
 		}
 		event.CreatedAt, err = domain.ParseStoredTime(created)
@@ -12444,7 +12500,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	predicate, excluded := internalTopicPredicate("o.topic")
 	args := append([]any{appID, after}, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -12453,7 +12509,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	for rows.Next() {
 		var record events.Record
 		var created string
-		if err := rows.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &created); err != nil {
+		if err := rows.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &record.Event.PrivatePayload, &created); err != nil {
 			return nil, err
 		}
 		record.Event.CreatedAt, err = domain.ParseStoredTime(created)
@@ -12502,10 +12558,10 @@ func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, 
 		predicate, excluded := internalTopicPredicate("o.topic")
 		args := append([]any{appID, sequence}, excluded...)
 		var created string
-		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at
+		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
 			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND i.enabled = 1
 			WHERE o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
-			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &created)
+			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &claimed.Event.PrivatePayload, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return tx.Commit()
 		}
@@ -13491,7 +13547,7 @@ func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.
 }
 
 func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
-	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
+	if len(completions) == 0 || len(completions) != len(files) || len(emitted) == 0 || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
 	}
 	if scheduledID != "" && len(messages) != 1 {
@@ -13604,7 +13660,9 @@ func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.
 				return classify(err)
 			}
 		}
-		if err := insertOutbox(ctx, tx, emitted[index]); err != nil {
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
 			return err
 		}
 	}

@@ -251,6 +251,8 @@ func recordedNonPinnedCodes() map[string]string {
 		"posting_to_channel_denied": "current files.completeUploadExternal method reference; archived channels cannot accept the generated file-share message",
 		"restricted_too_many":       "current chat.scheduleMessage method reference; the immutable legacy OpenAPI snapshot predates the documented 30-messages-per-five-minute restriction",
 		"no_query":                  "current search.* method references require query; the immutable legacy OpenAPI snapshot omits the Web API error enum",
+		"auth_mismatch":             "current apps.event.authorizations.list method reference; the supplied app token belongs to a different app than event_context",
+		"invalid_event_context":     "current apps.event.authorizations.list method reference; event_context does not resolve to an event visible to the authenticated app",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

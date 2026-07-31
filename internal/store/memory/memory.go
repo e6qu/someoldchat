@@ -575,6 +575,46 @@ func (s *Store) LookupToken(_ context.Context, token string) (domain.TokenRecord
 	return record, nil
 }
 
+func (s *Store) ListAppAuthorizations(_ context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
+	if appID == "" || workspaceID == "" {
+		return nil, store.InvalidArgument("app authorization identity is required")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	byKey := make(map[string]domain.AppAuthorization)
+	for _, token := range s.tokens {
+		if token.AppID != appID || token.WorkspaceID != workspaceID || token.Revoked || (!token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now)) {
+			continue
+		}
+		tokenType := strings.TrimSpace(token.TokenType)
+		if tokenType != "bot" && tokenType != "user" {
+			continue
+		}
+		key := tokenType + "\x00" + string(token.UserID) + "\x00" + string(token.BotID)
+		value := byKey[key]
+		value.AppID = appID
+		value.WorkspaceID = workspaceID
+		value.UserID = token.UserID
+		value.BotID = token.BotID
+		value.TokenType = tokenType
+		value.Scopes = domain.NormalizeScopes(append(value.Scopes, token.Scopes...))
+		byKey[key] = value
+	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	result := make([]domain.AppAuthorization, 0, len(keys))
+	for _, key := range keys {
+		value := byKey[key]
+		value.Scopes = append([]string(nil), value.Scopes...)
+		result = append(result, value)
+	}
+	return result, nil
+}
+
 func (s *Store) SeedAppToken(_ context.Context, token string, record domain.AppTokenRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -4223,8 +4263,8 @@ func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user d
 	return false
 }
 
-func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
-	if len(fileIDs) == 0 {
+func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, emitted []events.Event) error {
+	if len(fileIDs) == 0 || len(emitted) == 0 {
 		return store.InvalidArgument("a file share message requires a file")
 	}
 	message.Files = make([]domain.File, len(fileIDs))
@@ -4249,12 +4289,13 @@ func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileI
 			slices.Sort(s.fileShares[fileID])
 		}
 	}
-	if err := s.createMessageLocked(normalized, event, ""); err != nil {
+	if err := s.createMessageLocked(normalized, emitted[0], ""); err != nil {
 		for fileID, channels := range previous {
 			s.fileShares[fileID] = channels
 		}
 		return err
 	}
+	s.outbox = append(s.outbox, emitted[1:]...)
 	return nil
 }
 
@@ -7660,7 +7701,7 @@ func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.
 }
 
 func (s *Store) completeExternalUploads(_ context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
-	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
+	if len(completions) == 0 || len(completions) != len(files) || len(emitted) == 0 || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
 	}
 	if scheduledID != "" && len(messages) != 1 {
@@ -7754,8 +7795,8 @@ func (s *Store) completeExternalUploads(_ context.Context, scheduledID domain.Sc
 		s.externalUploads[completion.ID] = value
 		s.files[file.ID] = file
 		s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
-		s.outbox = append(s.outbox, emitted[index])
 	}
+	s.outbox = append(s.outbox, emitted...)
 	rollback := func() {
 		for uploadID, value := range previousUploads {
 			s.externalUploads[uploadID] = value

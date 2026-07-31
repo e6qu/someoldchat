@@ -16,6 +16,17 @@ type Source interface {
 	ListEventsAfter(context.Context, domain.WorkspaceID, uint64, int) ([]Record, error)
 }
 
+// Authorization is one Slack Events API delivery perspective. It contains no
+// credential material; it is the non-secret subject/type projection included
+// in Slack's event_callback authorizations array.
+type Authorization struct {
+	EnterpriseID        string
+	TeamID              domain.WorkspaceID
+	UserID              domain.UserID
+	IsBot               bool
+	IsEnterpriseInstall bool
+}
+
 // Event is a durable journal record. Build one with New: Payload holds the
 // encoded storage and wire representation of a typed events.Payload, and the
 // typed constructor is the only supported way to produce it. Consumers must
@@ -26,7 +37,18 @@ type Event struct {
 	ActorID     domain.UserID
 	Topic       string
 	Payload     string
-	CreatedAt   time.Time
+	// PrivatePayload is the immutable, delivery-time snapshot needed to build
+	// an external callback without re-reading newer mutable state. It is stored
+	// beside the public routing payload and carried across the private gRPC
+	// seam, but it is deliberately excluded from JSON so browser SSE, generic
+	// webhooks, logs, and operator tooling cannot expose message or file
+	// content merely by serializing an Event.
+	PrivatePayload string `json:"-"`
+	// Authorizations is populated only after app-specific visibility and
+	// manifest filtering. Like PrivatePayload it is internal delivery metadata,
+	// not part of the generic durable-event JSON representation.
+	Authorizations []Authorization `json:"-"`
+	CreatedAt      time.Time
 }
 
 type Record struct {

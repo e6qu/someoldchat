@@ -547,19 +547,44 @@ func TestOAuthV2UserAccessReturnsUserGrantOnly(t *testing.T) {
 	}
 }
 
-func TestBotTokenIdentityIsReportedByAuthAndAuthorizations(t *testing.T) {
+func TestBotIdentityAndEventAuthorizationsUseTheirRequiredTokenTypes(t *testing.T) {
+	ctx := context.Background()
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1", Name: "test"})
 	s.SeedUser(domain.User{ID: "Ubot", WorkspaceID: "T1", Name: "app"})
-	s.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1", Name: "alice"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+	s.SeedConversationMember("C1", "Ubot")
+	s.SeedConversationMember("C1", "U1")
+	s.CreateAppInstallation(ctx, domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()})
+	s.SeedToken(ctx, "xoxb-test", domain.TokenRecord{
 		WorkspaceID: "T1",
 		UserID:      "Ubot",
 		AppID:       "A1",
 		BotID:       "B1",
 		TokenType:   "bot",
-		Scopes:      []string{string(auth.ScopeAuthorizationsRead)},
+		Scopes:      []string{"reactions:read"},
 	})
+	s.SeedToken(ctx, "xoxp-test", domain.TokenRecord{
+		WorkspaceID: "T1", UserID: "U1", AppID: "A1", TokenType: "user", Scopes: []string{"reactions:read"},
+	})
+	s.SeedAppToken(ctx, "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeAuthorizationsRead)}})
+	s.SeedAppToken(ctx, "xapp-narrow", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
+	event, err := events.New("EV1", "T1", "U1", events.NewPayload("reaction.added",
+		events.String("channel_id", "C1"), events.String("user_id", "U1"),
+		events.String("reaction", "wave"), events.String("ts", "1700000000.000001"),
+	), time.Unix(1700000001, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendEvent(ctx, event); err != nil {
+		t.Fatal(err)
+	}
 	authenticator, err := auth.NewStored(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appAuthenticator, err := auth.NewAppStored(s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,25 +592,43 @@ func TestBotTokenIdentityIsReportedByAuthAndAuthorizations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	handler.ConfigureSocketMode(socketmode.Service{}, appAuthenticator)
 	mux := http.NewServeMux()
 	handler.Register(mux)
 
-	for path, expected := range map[string][]string{
-		"/api/auth.test": {`"user_id":"Ubot"`, `"bot_id":"B1"`, `"is_enterprise_install":false`},
-		"/api/apps.event.authorizations.list?event_context=event": {`"user_id":"Ubot"`, `"is_bot":true`},
+	eventContext, err := events.EventContext("A1", events.Record{Sequence: 1, Event: event})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path     string
+		token    string
+		expected []string
+	}{
+		{"/api/auth.test", "xoxb-test", []string{`"user_id":"Ubot"`, `"bot_id":"B1"`, `"is_enterprise_install":false`}},
+		{"/api/apps.event.authorizations.list?event_context=" + url.QueryEscape(eventContext), "xapp-test", []string{`"user_id":"Ubot"`, `"is_bot":true`, `"user_id":"U1"`, `"is_bot":false`}},
 	} {
-		request := httptest.NewRequest(http.MethodGet, path, nil)
-		request.Header.Set("Authorization", "Bearer xoxb-test")
+		request := httptest.NewRequest(http.MethodGet, test.path, nil)
+		request.Header.Set("Authorization", "Bearer "+test.token)
 		response := httptest.NewRecorder()
 		mux.ServeHTTP(response, request)
 		if response.Code != http.StatusOK {
-			t.Fatalf("%s status=%d body=%s", path, response.Code, response.Body)
+			t.Fatalf("%s status=%d body=%s", test.path, response.Code, response.Body)
 		}
-		for _, fragment := range expected {
+		for _, fragment := range test.expected {
 			if !strings.Contains(response.Body.String(), fragment) {
-				t.Errorf("%s body=%s, want %s", path, response.Body, fragment)
+				t.Errorf("%s body=%s, want %s", test.path, response.Body, fragment)
 			}
 		}
+	}
+
+	missingScope := httptest.NewRequest(http.MethodGet, "/api/apps.event.authorizations.list?event_context="+url.QueryEscape(eventContext), nil)
+	missingScope.Header.Set("Authorization", "Bearer xapp-narrow")
+	missingScopeResponse := httptest.NewRecorder()
+	mux.ServeHTTP(missingScopeResponse, missingScope)
+	if !strings.Contains(missingScopeResponse.Body.String(), `"error":"missing_scope"`) ||
+		!strings.Contains(missingScopeResponse.Body.String(), `"needed":"authorizations:read"`) {
+		t.Fatalf("app token missing authorizations:read body=%s", missingScopeResponse.Body)
 	}
 }
 
@@ -1195,13 +1238,6 @@ func TestAppPermissionIntrospectionUsesAuthenticatedScopes(t *testing.T) {
 	handler.ServeHTTP(resourcesResult, resources)
 	if resourcesResult.Code != http.StatusOK || !strings.Contains(resourcesResult.Body.String(), `"id":"T1"`) {
 		t.Fatalf("resources status=%d body=%s", resourcesResult.Code, resourcesResult.Body)
-	}
-	authorizations := httptest.NewRequest(http.MethodGet, "/api/apps.event.authorizations.list?event_context=ctx-1", nil)
-	authorizations.Header.Set("Authorization", "Bearer token")
-	authorizationsResult := httptest.NewRecorder()
-	handler.ServeHTTP(authorizationsResult, authorizations)
-	if authorizationsResult.Code != http.StatusOK || !strings.Contains(authorizationsResult.Body.String(), `"team_id":"T1"`) {
-		t.Fatalf("authorizations status=%d body=%s", authorizationsResult.Code, authorizationsResult.Body)
 	}
 	users := httptest.NewRequest(http.MethodGet, "/api/apps.permissions.users.list?limit=1", nil)
 	users.Header.Set("Authorization", "Bearer token")

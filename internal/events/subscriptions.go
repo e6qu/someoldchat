@@ -16,12 +16,13 @@ type ConversationResolver func(context.Context, domain.ConversationID) (domain.C
 // otherwise enabling Socket Mode silently turns a narrow subscription into a
 // workspace-wide event tap.
 func FilterSubscribedSlackEventBodies(ctx context.Context, bodies [][]byte, botEvents, userEvents []string, resolve ConversationResolver) ([][]byte, error) {
-	subscriptions := make(map[string]bool, len(botEvents)+len(userEvents))
+	botSubscriptions := make(map[string]bool, len(botEvents))
 	for _, name := range botEvents {
-		subscriptions[name] = true
+		botSubscriptions[name] = true
 	}
+	userSubscriptions := make(map[string]bool, len(userEvents))
 	for _, name := range userEvents {
-		subscriptions[name] = true
+		userSubscriptions[name] = true
 	}
 	filtered := make([][]byte, 0, len(bodies))
 	for _, body := range bodies {
@@ -30,11 +31,18 @@ func FilterSubscribedSlackEventBodies(ctx context.Context, bodies [][]byte, botE
 				Type    string                `json:"type"`
 				Channel domain.ConversationID `json:"channel"`
 			} `json:"event"`
+			Authorizations []struct {
+				EnterpriseID        string             `json:"enterprise_id"`
+				TeamID              domain.WorkspaceID `json:"team_id"`
+				UserID              domain.UserID      `json:"user_id"`
+				IsBot               bool               `json:"is_bot"`
+				IsEnterpriseInstall bool               `json:"is_enterprise_install"`
+			} `json:"authorizations"`
 		}
 		if err := json.Unmarshal(body, &envelope); err != nil {
 			return nil, err
 		}
-		subscribed := subscriptions[envelope.Event.Type]
+		eventName := envelope.Event.Type
 		if envelope.Event.Type == "message" && envelope.Event.Channel != "" {
 			if resolve == nil {
 				return nil, ErrSlackEventIncomplete
@@ -52,11 +60,73 @@ func FilterSubscribedSlackEventBodies(ctx context.Context, bodies [][]byte, botE
 			case conversation.IsPrivate:
 				messageSubscription = "message.groups"
 			}
-			subscribed = subscriptions[messageSubscription]
+			eventName = messageSubscription
 		}
-		if subscribed {
+		botSubscribed := botSubscriptions[eventName]
+		userSubscribed := userSubscriptions[eventName]
+		if !botSubscribed && !userSubscribed {
+			continue
+		}
+		if len(envelope.Authorizations) == 0 {
+			// Compatibility fixtures written before authorization-aware
+			// delivery still exercise subscription naming. Production records
+			// carry explicit perspectives and take the branch below.
 			filtered = append(filtered, body)
+			continue
 		}
+		kept := envelope.Authorizations[:0]
+		for _, authorization := range envelope.Authorizations {
+			if authorization.IsBot && botSubscribed || !authorization.IsBot && userSubscribed {
+				kept = append(kept, authorization)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		// Slack's current callback carries one representative installation.
+		// apps.event.authorizations.list is the API for the complete set.
+		kept = kept[:1]
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(body, &object); err != nil {
+			return nil, err
+		}
+		encodedAuthorizations, err := json.Marshal(kept)
+		if err != nil {
+			return nil, err
+		}
+		object["authorizations"] = encodedAuthorizations
+		encoded, err := encodeObject(object)
+		if err != nil {
+			return nil, err
+		}
+		filtered = append(filtered, []byte(encoded))
 	}
 	return filtered, nil
+}
+
+// SlackEventBodyAuthorizations returns the already subscription-filtered
+// authorization perspective from a callback. Socket Mode rebuilds the same
+// callback after the service claim crosses gRPC, so the selected perspective
+// must travel on the record rather than being chosen again without a manifest.
+func SlackEventBodyAuthorizations(body []byte) ([]Authorization, error) {
+	var envelope struct {
+		Authorizations []struct {
+			EnterpriseID        string             `json:"enterprise_id"`
+			TeamID              domain.WorkspaceID `json:"team_id"`
+			UserID              domain.UserID      `json:"user_id"`
+			IsBot               bool               `json:"is_bot"`
+			IsEnterpriseInstall bool               `json:"is_enterprise_install"`
+		} `json:"authorizations"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return nil, err
+	}
+	result := make([]Authorization, 0, len(envelope.Authorizations))
+	for _, value := range envelope.Authorizations {
+		result = append(result, Authorization{
+			EnterpriseID: value.EnterpriseID, TeamID: value.TeamID, UserID: value.UserID,
+			IsBot: value.IsBot, IsEnterpriseInstall: value.IsEnterpriseInstall,
+		})
+	}
+	return result, nil
 }

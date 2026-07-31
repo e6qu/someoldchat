@@ -121,6 +121,21 @@ func TestSerializingARecordRefusesExactlyWhatBroadcastRefuses(t *testing.T) {
 	}
 }
 
+func TestEventJSONNeverExposesPrivateDeliverySnapshot(t *testing.T) {
+	event := mustEvent(t, "Ev-private", NewPayload("message.created", String("message_id", "M1")), time.Unix(1700000000, 0))
+	event.PrivatePayload = `{"current":{"text":"DO-NOT-BROADCAST"}}`
+	encoded, err := json.Marshal(Record{Sequence: 1, Event: event})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "DO-NOT-BROADCAST") || strings.Contains(string(encoded), "PrivatePayload") || strings.Contains(string(encoded), "private_payload") {
+		t.Fatalf("private delivery snapshot crossed the public JSON boundary: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `message_id`) || !strings.Contains(string(encoded), `M1`) {
+		t.Fatalf("public routing payload disappeared with the private snapshot: %s", encoded)
+	}
+}
+
 // TestNoRecordIsWithheldFromOneRecipientButBroadcastToEveryone states the
 // direction that matters for a leak: whatever Deliverable hands to a consumer
 // that can filter on a recipient, Broadcastable must refuse for a consumer that

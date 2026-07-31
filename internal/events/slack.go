@@ -3,6 +3,7 @@ package events
 import (
 	"crypto/hmac"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/sameoldchat/sameoldchat/internal/domain"
 )
 
 // ErrSlackEventIncomplete reports a durable record whose topic maps to a Slack
@@ -21,6 +24,41 @@ import (
 var ErrSlackEventIncomplete = errors.New("durable payload lacks a field the Slack event requires")
 
 const targetAppIDField = "target_app_id"
+
+// EventContext is the opaque handle Slack includes with an Events API callback
+// and accepts at apps.event.authorizations.list. It carries only durable,
+// non-secret identity; the API still authenticates the app-level token and
+// verifies that the referenced event belongs to that app before returning
+// authorization subjects.
+func EventContext(appID string, record Record) (string, error) {
+	if err := checkRecord(record, appID); err != nil {
+		return "", err
+	}
+	value := strings.TrimSpace(appID) + "\x00" + strconv.FormatUint(record.Sequence, 10) + "\x00" + string(record.Event.ID)
+	return "EC" + base64.RawURLEncoding.EncodeToString([]byte(value)), nil
+}
+
+// ParseEventContext decodes an EventContext. Callers must still compare the
+// returned app and event identity with authenticated, app-visible state.
+func ParseEventContext(value string) (string, uint64, domain.EventID, error) {
+	value = strings.TrimSpace(value)
+	if !strings.HasPrefix(value, "EC") {
+		return "", 0, "", ErrPayloadFieldInvalid
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(strings.TrimPrefix(value, "EC"))
+	if err != nil {
+		return "", 0, "", ErrPayloadFieldInvalid
+	}
+	parts := strings.Split(string(decoded), "\x00")
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[2]) == "" {
+		return "", 0, "", ErrPayloadFieldInvalid
+	}
+	sequence, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil || sequence == 0 {
+		return "", 0, "", ErrPayloadFieldInvalid
+	}
+	return parts[0], sequence, domain.EventID(parts[2]), nil
+}
 
 // Inner is one Slack inner event — the object an Events API envelope carries as
 // "event", and the object an RTM socket carries on its own.
@@ -165,7 +203,28 @@ func appHomeOpened(delivered Delivered) ([]Inner, error) {
 }
 
 func broadcastableToApp(event Event, appID string) (Delivered, bool, error) {
-	delivered, err := Broadcastable(event)
+	var (
+		delivered Delivered
+		err       error
+	)
+	if RecipientScoped(event.Topic) {
+		if len(event.Authorizations) == 0 {
+			return Delivered{}, false, ErrPayloadRecipientScoped
+		}
+		delivered, err = Deliverable(event)
+		if err == nil {
+			recipient, exists := delivered.Field("user_id")
+			authorized := false
+			for _, authorization := range event.Authorizations {
+				authorized = authorized || (!authorization.IsBot && string(authorization.UserID) == recipient)
+			}
+			if !exists || recipient == "" || !authorized {
+				return Delivered{}, false, nil
+			}
+		}
+	} else {
+		delivered, err = Broadcastable(event)
+	}
 	if err != nil {
 		return Delivered{}, false, err
 	}
@@ -366,27 +425,51 @@ func SlackInner(topic string, delivered Delivered, surface Surface) ([]Inner, er
 
 // eventCallback builds the pinned Events API wrapper around one inner event.
 //
-// Two fields the pinned schema marks required are deliberately absent, and both
-// are recorded as deviations rather than guessed:
+// The deprecated verification token remains deliberately absent: this system
+// issues none, and a fabricated value would be a credential-shaped lie.
 //
-//   - "token" is the deprecated verification token. This system issues none,
-//     and a fabricated value would be a credential-shaped lie.
-//   - "authed_users" names the users an app is installed for. The snapshot
-//     predates Slack's "authorizations" replacement, and which of the two a
-//     receiver expects is not settled by any pinned source.
+// Slack's current authorizations replacement is emitted from the app-specific
+// authorization projection. Generic durable records never contain it.
 func eventCallback(record Record, appID string, inner Inner) (map[string]json.RawMessage, error) {
 	encoded, err := inner.Encode()
 	if err != nil {
 		return nil, fmt.Errorf("%w: Slack inner event cannot be encoded: %v", ErrPayloadMalformed, err)
 	}
-	return map[string]json.RawMessage{
-		"type":       mustEncodeString("event_callback"),
-		"team_id":    mustEncodeString(string(record.Event.WorkspaceID)),
-		"api_app_id": mustEncodeString(appID),
-		"event_id":   mustEncodeString(string(record.Event.ID)),
-		"event_time": json.RawMessage(strconv.FormatInt(record.Event.CreatedAt.Unix(), 10)),
-		"event":      json.RawMessage(encoded),
-	}, nil
+	eventContext, err := EventContext(appID, record)
+	if err != nil {
+		return nil, err
+	}
+	envelope := map[string]json.RawMessage{
+		"type":          mustEncodeString("event_callback"),
+		"team_id":       mustEncodeString(string(record.Event.WorkspaceID)),
+		"api_app_id":    mustEncodeString(appID),
+		"event_id":      mustEncodeString(string(record.Event.ID)),
+		"event_context": mustEncodeString(eventContext),
+		"event_time":    json.RawMessage(strconv.FormatInt(record.Event.CreatedAt.Unix(), 10)),
+		"event":         json.RawMessage(encoded),
+	}
+	if len(record.Event.Authorizations) != 0 {
+		authorizations := make([]map[string]any, 0, len(record.Event.Authorizations))
+		for _, value := range record.Event.Authorizations {
+			teamID := value.TeamID
+			if teamID == "" {
+				teamID = record.Event.WorkspaceID
+			}
+			authorizations = append(authorizations, map[string]any{
+				"enterprise_id":         value.EnterpriseID,
+				"team_id":               teamID,
+				"user_id":               value.UserID,
+				"is_bot":                value.IsBot,
+				"is_enterprise_install": value.IsEnterpriseInstall,
+			})
+		}
+		encodedAuthorizations, err := json.Marshal(authorizations)
+		if err != nil {
+			return nil, fmt.Errorf("%w: event authorizations cannot be encoded: %v", ErrPayloadMalformed, err)
+		}
+		envelope["authorizations"] = encodedAuthorizations
+	}
+	return envelope, nil
 }
 
 // checkRecord rejects a record whose own identity is incomplete. It is a

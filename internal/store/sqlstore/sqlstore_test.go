@@ -809,7 +809,7 @@ func TestSQLiteFileShareMessageIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	conflict := domain.Message{ID: "M-conflict", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created}
-	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, conflict, events.Event{ID: "E-conflict", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}); !errors.Is(err, store.ErrMessageTimestampTaken) {
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, conflict, []events.Event{{ID: "E-conflict", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}}); !errors.Is(err, store.ErrMessageTimestampTaken) {
 		t.Fatalf("conflicting share error=%v", err)
 	}
 	metadata, err := s.GetFile(ctx, "F1")
@@ -817,7 +817,7 @@ func TestSQLiteFileShareMessageIsAtomicAndDurable(t *testing.T) {
 		t.Fatalf("failed message left a share behind: file=%+v err=%v", metadata, err)
 	}
 	shared := domain.Message{ID: "M-shared", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created.Add(time.Microsecond)}
-	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, shared, events.Event{ID: "E-shared", WorkspaceID: "T1", Topic: "message.created", CreatedAt: shared.CreatedAt}); err != nil {
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, shared, []events.Event{{ID: "E-shared", WorkspaceID: "T1", Topic: "message.created", CreatedAt: shared.CreatedAt}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -862,7 +862,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 		t.Fatal(err)
 	}
 	original := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "D1", AuthorID: "U1", Text: "retained context", CreatedAt: at.Add(time.Microsecond)}
-	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, original, event("E-message", "message.created", original.CreatedAt)); err != nil {
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, original, []events.Event{event("E-message", "message.created", original.CreatedAt)}); err != nil {
 		t.Fatal(err)
 	}
 	target := domain.Conversation{ID: "D2", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsGroupDirect: true}

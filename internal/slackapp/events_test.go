@@ -99,6 +99,9 @@ func TestEventProcessorUsesInstalledManifestSubscriptionsSigningAndSlackRetryHea
 	if err := repository.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: app.ID, UserID: "UBOT", Name: "events-bot", UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
+	if err := repository.SeedToken(ctx, "xoxb-events", domain.TokenRecord{WorkspaceID: "T1", UserID: "UBOT", AppID: app.ID, BotID: "B1", TokenType: "bot", Scopes: []string{"reactions:read"}}); err != nil {
+		t.Fatal(err)
+	}
 	event, err := events.New("evt_reaction", "T1", "U1", events.NewPayload("reaction.added",
 		events.String("channel_id", "C1"),
 		events.String("user_id", "U1"),
@@ -175,6 +178,9 @@ func TestEventProcessorHydratesARealMessageOnlyForTheInstalledBot(t *testing.T) 
 		t.Fatal(err)
 	}
 	if err := repository.CreateBot(ctx, domain.Bot{ID: "B1", WorkspaceID: "T1", AppID: app.ID, UserID: "UB", Name: "messages-bot", UpdatedAt: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SeedToken(ctx, "xoxb-messages", domain.TokenRecord{WorkspaceID: "T1", UserID: "UB", AppID: app.ID, BotID: "B1", TokenType: "bot", Scopes: []string{"groups:history"}}); err != nil {
 		t.Fatal(err)
 	}
 	bot, err := repository.GetBotByApp(ctx, "T1", app.ID)

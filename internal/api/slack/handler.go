@@ -12,6 +12,7 @@ import (
 	"github.com/sameoldchat/sameoldchat/internal/auth"
 	"github.com/sameoldchat/sameoldchat/internal/blockkit"
 	"github.com/sameoldchat/sameoldchat/internal/domain"
+	"github.com/sameoldchat/sameoldchat/internal/events"
 	chatapi "github.com/sameoldchat/sameoldchat/internal/modules/chat/api"
 	"github.com/sameoldchat/sameoldchat/internal/service"
 	"github.com/sameoldchat/sameoldchat/internal/slackemoji"
@@ -1115,9 +1116,13 @@ func (h Handler) appsPermissionsResourcesList(w http.ResponseWriter, r *http.Req
 }
 
 func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Request) {
-	// Pinned /apps.event.authorizations.list token parameter: "Requires scope:
-	// `authorizations:read`".
-	principal, err := h.authenticate(r, auth.ScopeAuthorizationsRead)
+	// Slack requires an app-level token in the Authorization header because
+	// this method can return installations across several user/bot tokens.
+	if strings.TrimSpace(r.Header.Get("Authorization")) == "" {
+		writeError(w, "not_authed")
+		return
+	}
+	principal, err := h.authenticateApp(r, auth.ScopeAuthorizationsRead)
 	if err != nil {
 		writeAuthError(w, err)
 		return
@@ -1127,16 +1132,35 @@ func (h Handler) appsEventAuthorizationsList(w http.ResponseWriter, r *http.Requ
 		writeDecodeError(w, err)
 		return
 	}
-	if strings.TrimSpace(fields["event_context"]) == "" {
-		writeError(w, "invalid_arg_name")
+	appID, sequence, eventID, err := events.ParseEventContext(fields["event_context"])
+	if err != nil {
+		writeError(w, "invalid_event_context")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "authorizations": []map[string]any{{
-		"enterprise_id": "",
-		"is_bot":        principal.TokenType == "bot",
-		"team_id":       principal.WorkspaceID,
-		"user_id":       principal.UserID,
-	}}})
+	if domain.AppID(appID) != principal.AppID {
+		writeError(w, "auth_mismatch")
+		return
+	}
+	records, err := h.Messages.ListAppEventsAfter(r.Context(), principal.AppID, sequence-1, 1)
+	if err != nil {
+		writeError(w, mapServiceError(err, "internal_error"))
+		return
+	}
+	if len(records) != 1 || records[0].Sequence != sequence || records[0].Event.ID != eventID {
+		writeError(w, "invalid_event_context")
+		return
+	}
+	authorizations := make([]map[string]any, 0, len(records[0].Event.Authorizations))
+	for _, authorization := range records[0].Event.Authorizations {
+		authorizations = append(authorizations, map[string]any{
+			"enterprise_id":         authorization.EnterpriseID,
+			"team_id":               authorization.TeamID,
+			"user_id":               authorization.UserID,
+			"is_bot":                authorization.IsBot,
+			"is_enterprise_install": authorization.IsEnterpriseInstall,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "authorizations": authorizations})
 }
 
 func (h Handler) appsPermissionsUsersList(w http.ResponseWriter, r *http.Request) {
@@ -8800,6 +8824,23 @@ func (h Handler) authenticate(r *http.Request, scope auth.Scope) (auth.Principal
 	}
 	if err := h.Messages.RecordAccess(r.Context(), principal.WorkspaceID, principal.UserID, truncate(r.RemoteAddr, maxAccessLogIP), truncate(r.UserAgent(), maxAccessLogUserAgent)); err != nil {
 		return auth.Principal{}, fmt.Errorf("%w: %v", errAccessLogging, err)
+	}
+	return principal, nil
+}
+
+func (h Handler) authenticateApp(r *http.Request, scope auth.Scope) (auth.Principal, error) {
+	if h.SocketAuth == nil {
+		return auth.Principal{}, auth.ErrInvalidToken
+	}
+	principal, err := h.SocketAuth.Authenticate(r)
+	if err != nil {
+		return auth.Principal{}, err
+	}
+	if principal.AppID == "" {
+		return auth.Principal{}, auth.ErrInvalidToken
+	}
+	if scope != "" && !principal.HasScope(scope) {
+		return auth.Principal{}, missingScopeError{needed: scope, provided: permissionScopes(principal)}
 	}
 	return principal, nil
 }

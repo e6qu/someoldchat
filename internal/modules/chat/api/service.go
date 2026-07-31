@@ -17,6 +17,7 @@ type Service interface {
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IssueAppConfigurationToken(context.Context, domain.WorkspaceID, domain.UserID) (domain.AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(context.Context, string) (domain.AppConfigurationCredentials, error)
 	ValidateAppManifest(context.Context, string, string, string) ([]appmanifest.Error, error)

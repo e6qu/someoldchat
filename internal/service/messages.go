@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -172,6 +173,10 @@ func (m Messages) ListAppInstallations(ctx context.Context, appID domain.AppID) 
 	return m.Store.ListAppInstallations(ctx, appID)
 }
 
+func (m Messages) ListAppAuthorizations(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
+	return m.Store.ListAppAuthorizations(ctx, appID, workspaceID)
+}
+
 func (m Messages) UninstallApp(ctx context.Context, clientID, clientSecret string, workspaceID domain.WorkspaceID, appID domain.AppID) error {
 	client, err := m.Store.GetOAuthClient(ctx, strings.TrimSpace(clientID))
 	if err != nil || !secretDigestsEqual(client.SecretHash, domain.HashToken(strings.TrimSpace(clientSecret))) {
@@ -292,6 +297,11 @@ func (m Messages) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface
 			return events.Record{}, 0, "", false, err
 		}
 		if len(filtered) != 0 {
+			record.Event.Authorizations, err = events.SlackEventBodyAuthorizations(filtered[0])
+			if err != nil {
+				_ = m.Store.ReleaseAppEvent(ctx, appID, surface, owner, record.Sequence, "authorization_filter_failed", time.Now().UTC())
+				return events.Record{}, 0, "", false, err
+			}
 			return record, attempt, reason, true, nil
 		}
 		if err := m.Store.AckAppEvent(ctx, appID, surface, owner, record.Sequence); err != nil {
@@ -483,7 +493,7 @@ func (m Messages) UploadFile(ctx context.Context, workspaceID domain.WorkspaceID
 		}
 		return domain.File{}, err
 	}
-	event, err := newEvent(workspaceID, userID, events.NewPayload("file.created", events.String("file_id", string(file.ID))), file.CreatedAt)
+	event, err := fileEventAt(workspaceID, userID, "file.created", file, "", file.CreatedAt)
 	if err != nil {
 		cleanupErr := m.Blob.Delete(context.Background(), file.BlobKey)
 		if cleanupErr != nil {
@@ -5801,11 +5811,19 @@ func (m Messages) ShareFile(ctx context.Context, workspaceID domain.WorkspaceID,
 		Files: []domain.File{file},
 	}
 	for {
-		event, eventErr := newEvent(workspaceID, userID, messagePayload("message.created", message), message.CreatedAt)
+		messageEvent, eventErr := messageEventAt(workspaceID, "message.created", message, nil, message.CreatedAt)
 		if eventErr != nil {
 			return domain.Message{}, eventErr
 		}
-		if err := m.Store.CreateFileShareMessage(ctx, []domain.FileID{fileID}, message, event); errors.Is(err, store.ErrMessageTimestampTaken) {
+		sharedFile := file
+		if !slices.Contains(sharedFile.SharedChannels, conversationID) {
+			sharedFile.SharedChannels = append(sharedFile.SharedChannels, conversationID)
+		}
+		shareEvent, eventErr := fileEventAt(workspaceID, userID, "file.shared", sharedFile, conversationID, message.CreatedAt)
+		if eventErr != nil {
+			return domain.Message{}, eventErr
+		}
+		if err := m.Store.CreateFileShareMessage(ctx, []domain.FileID{fileID}, message, []events.Event{messageEvent, shareEvent}); errors.Is(err, store.ErrMessageTimestampTaken) {
 			message.CreatedAt = message.CreatedAt.Add(time.Microsecond)
 			continue
 		} else if err != nil {
@@ -5928,8 +5946,9 @@ func (m Messages) Delete(ctx context.Context, workspaceID domain.WorkspaceID, us
 	if message.Deleted {
 		return domain.Message{}, ErrMessageAlreadyDeleted
 	}
+	previous := message
 	message.Deleted = true
-	event, err := messageEvent(workspaceID, "message.deleted", message)
+	event, err := messageMutationEvent(workspaceID, "message.deleted", message, previous)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -5973,7 +5992,39 @@ func newEvent(workspaceID domain.WorkspaceID, actorID domain.UserID, payload eve
 }
 
 func messageEvent(workspaceID domain.WorkspaceID, topic string, message domain.Message) (events.Event, error) {
-	return newEvent(workspaceID, message.AuthorID, messagePayload(topic, message), time.Now().UTC())
+	return messageEventAt(workspaceID, topic, message, nil, time.Now().UTC())
+}
+
+func messageMutationEvent(workspaceID domain.WorkspaceID, topic string, message, previous domain.Message) (events.Event, error) {
+	return messageEventAt(workspaceID, topic, message, &previous, time.Now().UTC())
+}
+
+func messageEventAt(workspaceID domain.WorkspaceID, topic string, message domain.Message, previous *domain.Message, createdAt time.Time) (events.Event, error) {
+	event, err := newEvent(workspaceID, message.AuthorID, messagePayload(topic, message), createdAt)
+	if err != nil {
+		return events.Event{}, err
+	}
+	event.PrivatePayload, err = encodeMessageEventSnapshot(message, previous)
+	if err != nil {
+		return events.Event{}, err
+	}
+	return event, nil
+}
+
+func fileEventAt(workspaceID domain.WorkspaceID, userID domain.UserID, topic string, file domain.File, channelID domain.ConversationID, createdAt time.Time) (events.Event, error) {
+	fields := []events.Field{events.String("file_id", string(file.ID))}
+	if channelID != "" {
+		fields = append(fields, events.String("channel_id", string(channelID)), events.String("user_id", string(userID)))
+	}
+	event, err := newEvent(workspaceID, userID, events.NewPayload(topic, fields...), createdAt)
+	if err != nil {
+		return events.Event{}, err
+	}
+	event.PrivatePayload, err = encodeFileEventSnapshot(file, channelID, userID)
+	if err != nil {
+		return events.Event{}, err
+	}
+	return event, nil
 }
 
 // messagePayload deliberately omits the message text. The durable journal is
@@ -6631,7 +6682,7 @@ func (m Messages) postMessageAs(ctx context.Context, workspaceID domain.Workspac
 	// This is the same construction the real Slack timestamp uses, and it is why
 	// the identifier cannot be merged no matter how coarse the host clock is.
 	for {
-		event, err := newEvent(workspaceID, authorID, messagePayload("message.created", message), message.CreatedAt)
+		event, err := messageEventAt(workspaceID, "message.created", message, nil, message.CreatedAt)
 		if err != nil {
 			return domain.Message{}, err
 		}
@@ -6685,6 +6736,7 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 	if message.Deleted {
 		return domain.Message{}, ErrMessageAlreadyDeleted
 	}
+	previous := message
 	if patch.Text != nil {
 		message.Text = *patch.Text
 	}
@@ -6707,7 +6759,7 @@ func (m Messages) UpdateMessage(ctx context.Context, workspaceID domain.Workspac
 		(strings.TrimSpace(message.Text) == "" && message.Blocks == "" && message.Attachments == "") {
 		return domain.Message{}, ErrInvalidMessage
 	}
-	event, err := messageEvent(workspaceID, "message.changed", message)
+	event, err := messageMutationEvent(workspaceID, "message.changed", message, previous)
 	if err != nil {
 		return domain.Message{}, err
 	}
@@ -6921,7 +6973,7 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 		}
 	}
 	files := make([]domain.File, len(values))
-	eventsToEmit := make([]events.Event, len(values))
+	eventsToEmit := make([]events.Event, 0, len(values)*(len(channels)+1))
 	for index, value := range values {
 		// The upload identifier was handed to the client as file_id when the
 		// upload URL was issued. Minting a fresh one here would strand every
@@ -6933,11 +6985,18 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 		}
 		createdAt := time.Now().UTC()
 		files[index] = domain.File{ID: fileID, WorkspaceID: value.WorkspaceID, Uploader: value.Uploader, Name: value.Name, Title: title, MIMEType: value.MIMEType, BlobKey: value.BlobKey, Size: value.Size, CreatedAt: createdAt, SharedChannels: append([]domain.ConversationID(nil), channels...)}
-		emitted, err := newEvent(workspaceID, userID, events.NewPayload("file.created", events.String("file_id", string(fileID)), events.Strings("channel_ids", conversationIDStrings(channels))), createdAt)
+		emitted, err := fileEventAt(workspaceID, userID, "file.created", files[index], "", createdAt)
 		if err != nil {
 			return nil, err
 		}
-		eventsToEmit[index] = emitted
+		eventsToEmit = append(eventsToEmit, emitted)
+		for _, channel := range channels {
+			shared, err := fileEventAt(workspaceID, userID, "file.shared", files[index], channel, createdAt)
+			if err != nil {
+				return nil, err
+			}
+			eventsToEmit = append(eventsToEmit, shared)
+		}
 	}
 	messages := make([]domain.Message, len(channels))
 	messageEvents := make([]events.Event, len(channels))
@@ -6952,7 +7011,7 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 			Text: initialComment, Blocks: normalizedBlocks, ThreadTimestamp: threadTimestampValue,
 			CreatedAt: createdAt.Add(time.Duration(index) * time.Microsecond), Files: append([]domain.File(nil), files...),
 		}
-		emitted, eventErr := newEvent(workspaceID, userID, messagePayload("message.created", messages[index]), messages[index].CreatedAt)
+		emitted, eventErr := messageEventAt(workspaceID, "message.created", messages[index], nil, messages[index].CreatedAt)
 		if eventErr != nil {
 			return nil, eventErr
 		}
@@ -6972,7 +7031,7 @@ func (m Messages) completeExternalUploads(ctx context.Context, workspaceID domai
 			// the host clock's current microsecond.
 			for index := range messages {
 				messages[index].CreatedAt = messages[index].CreatedAt.Add(time.Microsecond)
-				messageEvents[index], err = newEvent(workspaceID, userID, messagePayload("message.created", messages[index]), messages[index].CreatedAt)
+				messageEvents[index], err = messageEventAt(workspaceID, "message.created", messages[index], nil, messages[index].CreatedAt)
 				if err != nil {
 					return nil, err
 				}

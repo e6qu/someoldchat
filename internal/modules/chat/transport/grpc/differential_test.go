@@ -1590,6 +1590,10 @@ func parityCases() []parityCase {
 				requireSeed(t, target.CreateBot(context.Background(), domain.Bot{
 					ID: "B1", WorkspaceID: "T1", AppID: "A1", UserID: "UBOT", Name: "events-bot", UpdatedAt: now,
 				}))
+				requireSeed(t, target.SeedToken(context.Background(), "xoxb-events", domain.TokenRecord{
+					WorkspaceID: "T1", UserID: "UBOT", AppID: "A1", BotID: "B1",
+					TokenType: "bot", Scopes: []string{"reactions:read"},
+				}))
 				event, err := events.New("EV1", "T1", "U1", events.NewPayload("reaction.added",
 					events.String("message_id", "M1"),
 					events.String("channel_id", "C1"),
@@ -1607,6 +1611,10 @@ func parityCases() []parityCase {
 				}
 				if !found {
 					return nil, errors.New("first event lease was not found")
+				}
+				authorizations, err := chat.ListAppAuthorizations(ctx, "A1", "T1")
+				if err != nil {
+					return nil, err
 				}
 				if err := chat.ReleaseAppEvent(ctx, "A1", "socket", "connection-1", first.Sequence, "connection_closed", time.Now().UTC().Add(-time.Second)); err != nil {
 					return nil, err
@@ -1632,6 +1640,7 @@ func parityCases() []parityCase {
 					health.AcknowledgedSequence, health.InFlightSequence, health.RetryCount, health.RetryReason,
 					health.PendingEvaluation, health.NextEventTopic, health.NextEventAt,
 					second.Sequence, secondAttempt, secondReason,
+					authorizations,
 				}, nil
 			},
 		},
