@@ -207,6 +207,65 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}}))
 }
 
+func seedBranchParity(t *testing.T, target *memory.Store) {
+	t.Helper()
+	seedWorkflowParity(t, target)
+	now := time.Unix(1_700_000_100, 0).UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: "WfBranch", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "branch-workflow",
+		Title: "Branched workflow", InputSchema: `{}`,
+		Steps: `[
+			{"id":"triage","type":"function","function_id":"triage","title":"Classify"},
+			{"id":"triage-2","type":"function","function_id":"triage","title":"Escalate","condition":{"source":"inputs.severity","operator":"equals","value":"high"}},
+			{"id":"triage-3","type":"function","function_id":"triage","title":"Log","condition":{"source":"steps.triage.outputs.result","operator":"contains","value":"ok"}}
+		]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
+		ID: "evt_branch_workflow", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now,
+	}))
+	trigger := domain.WorkflowTrigger{
+		ID: "FtBranch", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Run branches",
+		Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	requireSeed(t, target.SetWorkflowTrigger(context.Background(), trigger, 0, events.Event{
+		ID: "evt_branch_trigger", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now,
+	}))
+	seedRun := func(runID domain.WorkflowRunID, inputs string, currentStep int, executing domain.WorkflowStep, completed *domain.WorkflowStep) {
+		run := domain.WorkflowRun{
+			ID: runID, WorkflowID: workflow.ID, WorkflowVersion: 1, TriggerID: trigger.ID,
+			WorkspaceID: "T1", AppID: "A1", ActorID: "U1", ConversationID: "C1",
+			Status: domain.WorkflowRunRunning, Inputs: inputs, Outputs: `{}`, CurrentStep: currentStep,
+			CreatedAt: now, UpdatedAt: now,
+		}
+		requireSeed(t, target.CreateWorkflowRun(context.Background(), run, &executing, []events.Event{{
+			ID: domain.EventID("evt_" + strings.ToLower(string(runID)) + "_started"), WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now,
+		}}))
+		if completed != nil {
+			requireSeed(t, target.SetWorkflowStep(context.Background(), *completed, events.Event{
+				ID: domain.EventID("evt_" + strings.ToLower(string(runID)) + "_first"), WorkspaceID: "T1", Topic: "function_executed", CreatedAt: now,
+			}))
+		}
+	}
+	seedRun("WxBranchHigh", `{"severity":"high"}`, 1,
+		domain.WorkflowStep{
+			ID: "FxBranchHigh", WorkflowRunID: "WxBranchHigh", WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+			FunctionID: "FnBranch", EditID: "triage-2", Status: domain.WorkflowStepExecuting,
+			Inputs: `{}`, Outputs: `{}`, CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second),
+		},
+		&domain.WorkflowStep{
+			ID: "FxBranchHighFirst", WorkflowRunID: "WxBranchHigh", WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+			FunctionID: "FnBranch", EditID: "triage", Status: domain.WorkflowStepCompleted,
+			Inputs: `{}`, Outputs: `{"result":"ok"}`, CreatedAt: now, UpdatedAt: now,
+		})
+	seedRun("WxBranchLow", `{"severity":"low"}`, 0,
+		domain.WorkflowStep{
+			ID: "FxBranchLow", WorkflowRunID: "WxBranchLow", WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+			FunctionID: "FnBranch", EditID: "triage", Status: domain.WorkflowStepExecuting,
+			Inputs: `{"severity":"low"}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+		}, nil)
+}
+
 func newParity(t *testing.T, testCase parityCase) parity {
 	t.Helper()
 	seed := testCase.seed
@@ -326,6 +385,36 @@ func parityCases() []parityCase {
 		return domain.NewMessageTimestamp(message.CreatedAt)
 	}
 	return []parityCase{
+		{
+			name: "workflow branches route completed runs across the composition seam",
+			seed: seedBranchParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				// The severity=high run is executing its escalate step; when it
+				// completes, the log step's condition on the first step's
+				// outputs holds, so the run advances to it.
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxBranchHigh", `{"result":"escalated"}`, ""); err != nil {
+					return nil, err
+				}
+				highRun, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxBranchHigh")
+				if err != nil {
+					return nil, err
+				}
+				// The severity=low run is still on its first step; completing
+				// it with outputs the log condition rejects skips both
+				// remaining steps and finishes the run.
+				if err := chat.CompleteFunction(ctx, "T1", "U1", "A1", "FxBranchLow", `{"result":"bad"}`, ""); err != nil {
+					return nil, err
+				}
+				lowRun, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxBranchLow")
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					highRun.Status, highRun.CurrentStep,
+					lowRun.Status, lowRun.CurrentStep,
+				}, nil
+			},
+		},
 		{
 			name: "workflow activity summarizes runs across the composition seam",
 			seed: seedWorkflowParity,

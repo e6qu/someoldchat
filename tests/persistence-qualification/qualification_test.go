@@ -502,6 +502,9 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	if err != nil || storedStep.Status != domain.WorkflowStepCompleted || storedStep.Outputs != step.Outputs {
 		t.Fatalf("completed workflow step=%+v err=%v", storedStep, err)
 	}
+	if runSteps, err := repository.ListWorkflowRunSteps(ctx, workspaceID, runID); err != nil || len(runSteps) != 1 || runSteps[0].ID != stepID {
+		t.Fatalf("run steps=%+v err=%v", runSteps, err)
+	}
 
 	// Staged edits can be discarded: the head reverts to the published revision.
 	published, err := repository.GetWorkflow(ctx, workspaceID, workflowID)

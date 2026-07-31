@@ -494,10 +494,10 @@ func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 }
 
 func TestWorkflowBuilderPreservesLongStepListsAndUsesRunPermissions(t *testing.T) {
-	callbacks := make([]string, 12)
+	callbacks := make([]workflowDecodedStep, 12)
 	fields := map[string]string{"step_count": "12"}
 	for index := range callbacks {
-		callbacks[index] = "triage"
+		callbacks[index] = workflowDecodedStep{Callback: "triage"}
 		fields["step_"+strconv.Itoa(index+1)] = "triage"
 	}
 	slots := workflowSlots(callbacks)
@@ -521,4 +521,45 @@ func TestWorkflowBuilderPreservesLongStepListsAndUsesRunPermissions(t *testing.T
 	if !workflowPermissionAllows(domain.AutomationPermission{PermissionType: "named_entities", TeamIDs: []domain.WorkspaceID{"T1"}}, principal, "U1") {
 		t.Fatal("workspace-named member was denied a run action")
 	}
+}
+
+func TestWorkflowBuilderSavesAndRendersStepConditions(t *testing.T) {
+	options := []workflowFunctionOption{{AppID: "A1", CallbackID: "triage", Title: "Triage"}}
+	encoded, err := encodeWorkflowSteps(map[string]string{
+		"step_count": "2", "step_1": "triage", "step_2": "triage",
+		"condition_source_2": "inputs.severity", "condition_operator_2": "equals", "condition_value_2": "high",
+	}, options, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := decodeWorkflowSteps(encoded)
+	if len(steps) != 2 || steps[1].ConditionSource != "inputs.severity" ||
+		steps[1].ConditionOperator != "equals" || steps[1].ConditionValue != "high" {
+		t.Fatalf("round-tripped steps=%+v from %s", steps, encoded)
+	}
+	if steps[0].ConditionSource != "" {
+		t.Fatalf("unconditional step gained a condition: %+v", steps[0])
+	}
+	if _, err := encodeWorkflowSteps(map[string]string{
+		"step_1": "triage", "condition_source_1": "inputs.severity",
+	}, options, "A1"); err == nil {
+		t.Fatal("condition source without an operator was accepted")
+	}
+
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Conditional triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	saved := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Conditional triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "condition_source_1": {"inputs.severity"},
+		"condition_operator_1": {"equals"}, "condition_value_1": {"high"}, "action": {"publish"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("conditional publish=%d: %s", saved.Code, saved.Body)
+	}
+	page := get(t, mux, saved.Header().Get("Location"))
+	requireContains(t, "rendered condition", page.Body.String(),
+		`name="condition_source_1" value="inputs.severity"`, `name="condition_value_1" value="high"`, `option value="equals" selected`)
 }

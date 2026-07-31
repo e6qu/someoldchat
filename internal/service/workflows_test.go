@@ -539,6 +539,226 @@ func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestWorkflowBranchesSkipStepsWhoseConditionsFail(t *testing.T) {
+	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Branched triage", InputSchema: `{}`,
+		Steps: `[
+			{"function_id":"triage","title":"Classify"},
+			{"function_id":"notify","title":"Escalate","condition":{"source":"inputs.severity","operator":"equals","value":"high"}},
+			{"function_id":"triage","title":"Log routine","condition":{"source":"inputs.severity","operator":"not_equals","value":"high"}}
+		]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// severity=high: the escalate branch runs and the routine branch is
+	// skipped, so the run completes after two executions.
+	highRun, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"severity":"high"}`, "branch-high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", highRun.ID)
+	if err != nil || len(executions) != 1 || executions[0].EditID != "triage" {
+		t.Fatalf("high executions=%+v err=%v", executions, err)
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executions[0].ID, `{"result":"p1"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", highRun.ID)
+	if err != nil || len(executions) != 2 || executions[1].EditID != "notify" || executions[1].Status != domain.WorkflowStepExecuting {
+		t.Fatalf("high advance executions=%+v err=%v", executions, err)
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executions[1].ID, `{}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	finishedHigh, err := repository.GetWorkflowRun(ctx, "T1", highRun.ID)
+	if err != nil || finishedHigh.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("high run=%+v err=%v", finishedHigh, err)
+	}
+
+	// severity=low: escalate is skipped and the routine branch runs instead.
+	lowRun, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"severity":"low"}`, "branch-low")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", lowRun.ID)
+	if err != nil || len(executions) != 1 {
+		t.Fatalf("low executions=%+v err=%v", executions, err)
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executions[0].ID, `{"result":"p3"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", lowRun.ID)
+	if err != nil || len(executions) != 2 || executions[1].EditID != "triage-2" {
+		t.Fatalf("low advance executions=%+v err=%v", executions, err)
+	}
+	advancedLow, err := repository.GetWorkflowRun(ctx, "T1", lowRun.ID)
+	if err != nil || advancedLow.Status != domain.WorkflowRunRunning || advancedLow.CurrentStep != 2 {
+		t.Fatalf("low run=%+v err=%v", advancedLow, err)
+	}
+}
+
+func TestWorkflowBranchesResolveEarlierStepOutputs(t *testing.T) {
+	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Output branch", InputSchema: `{}`,
+		Steps: `[
+			{"function_id":"triage","title":"Classify"},
+			{"function_id":"notify","title":"Escalate","condition":{"source":"steps.triage.outputs.result","operator":"contains","value":"urgent"}}
+		]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	urgentRun, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "branch-urgent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", urgentRun.ID)
+	if err != nil || len(executions) != 1 {
+		t.Fatalf("urgent executions=%+v err=%v", executions, err)
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executions[0].ID, `{"result":"urgent: fire"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", urgentRun.ID)
+	if err != nil || len(executions) != 2 || executions[1].EditID != "notify" {
+		t.Fatalf("urgent advance executions=%+v err=%v", executions, err)
+	}
+
+	calmRun, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "branch-calm")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", calmRun.ID)
+	if err != nil || len(executions) != 1 {
+		t.Fatalf("calm executions=%+v err=%v", executions, err)
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executions[0].ID, `{"result":"ok"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	finishedCalm, err := repository.GetWorkflowRun(ctx, "T1", calmRun.ID)
+	if err != nil || finishedCalm.Status != domain.WorkflowRunCompleted {
+		t.Fatalf("calm run=%+v err=%v", finishedCalm, err)
+	}
+	if executions, err := repository.ListWorkflowRunSteps(ctx, "T1", calmRun.ID); err != nil || len(executions) != 1 {
+		t.Fatalf("calm final executions=%+v err=%v", executions, err)
+	}
+}
+
+func TestWorkflowRunSkipsEveryStepWhenNoConditionHolds(t *testing.T) {
+	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "All skipped", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Classify","condition":{"source":"inputs.go","operator":"equals","value":"yes"}}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"go":"no"}`, "branch-skipped")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != domain.WorkflowRunCompleted || run.CompletedAt.IsZero() {
+		t.Fatalf("skipped run=%+v", run)
+	}
+	if executions, err := repository.ListWorkflowRunSteps(ctx, "T1", run.ID); err != nil || len(executions) != 0 {
+		t.Fatalf("skipped run executions=%+v err=%v", executions, err)
+	}
+}
+
+func TestWorkflowRunStartsFromThePublishedRevisionWhileStaged(t *testing.T) {
+	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Pinned start", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Classify"},{"function_id":"notify","title":"Notify"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Stage an edit that changes the first step. The published revision still
+	// starts with triage; the staged head starts with notify.
+	staged := workflow
+	staged.Steps = `[{"function_id":"notify","title":"Notify first"},{"function_id":"notify","title":"Notify"}]`
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", staged, workflow.Version, false); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "pinned-start")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.WorkflowVersion != workflow.PublishedVersion {
+		t.Fatalf("run version=%d, want published %d", run.WorkflowVersion, workflow.PublishedVersion)
+	}
+	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 1 || executions[0].EditID != "triage" {
+		t.Fatalf("pinned start executions=%+v err=%v, want the published triage step", executions, err)
+	}
+}
+
+func TestNormalizeWorkflowStepsValidatesConditions(t *testing.T) {
+	for _, raw := range []string{
+		`[{"function_id":"triage","condition":{"source":"inputs.x","operator":"matches","value":"y"}}]`,
+		`[{"function_id":"triage","condition":{"source":"severity","operator":"equals","value":"y"}}]`,
+		`[{"function_id":"triage","condition":{"source":"steps.later.outputs.x","operator":"equals","value":"y"}},{"id":"later","function_id":"notify"}]`,
+		`[{"id":"self","function_id":"triage","condition":{"source":"steps.self.outputs.x","operator":"equals","value":"y"}}]`,
+		`[{"function_id":"triage","condition":{"operator":"equals","value":"y"}}]`,
+	} {
+		if _, _, err := normalizeWorkflowSteps(raw); !errors.Is(err, ErrInvalidWorkflowStep) {
+			t.Fatalf("steps %s error=%v, want ErrInvalidWorkflowStep", raw, err)
+		}
+	}
+	if _, steps, err := normalizeWorkflowSteps(`[
+		{"function_id":"triage"},
+		{"function_id":"notify","condition":{"source":"steps.triage.outputs.result","operator":"greater_than","value":"3"}}
+	]`); err != nil || steps[1].Condition.Operator != "greater_than" {
+		t.Fatalf("valid condition steps=%+v err=%v", steps, err)
+	}
+}
+
 func TestDuplicateWorkflowCopiesTheHeadAsANewDraft(t *testing.T) {
 	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
 	duplicate, err := messages.DuplicateWorkflow(ctx, "T1", "U1", workflow.ID)

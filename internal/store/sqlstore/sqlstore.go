@@ -5514,6 +5514,24 @@ func (s *Store) GetWorkflowStep(ctx context.Context, workspace domain.WorkspaceI
 	return value, translateNotFound(err)
 }
 
+func (s *Store) ListWorkflowRunSteps(ctx context.Context, workspace domain.WorkspaceID, runID domain.WorkflowRunID) ([]domain.WorkflowStep, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowStepColumns+` FROM workflow_steps
+		WHERE workspace_id = ? AND workflow_run_id = ? ORDER BY created_at, id`, workspace, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowStep, 0)
+	for rows.Next() {
+		value, scanErr := scanWorkflowStep(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, input_schema, steps, status, version, published_version, created_at, updated_at`
 
 func scanWorkflow(row interface{ Scan(...any) error }) (domain.WorkflowDefinition, error) {

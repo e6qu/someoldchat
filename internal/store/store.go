@@ -370,6 +370,9 @@ type Store interface {
 	DeleteView(context.Context, domain.WorkspaceID, domain.UserID, domain.ViewID, bool, events.Event) error
 	SetWorkflowStep(context.Context, domain.WorkflowStep, events.Event) error
 	GetWorkflowStep(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.WorkflowStep, error)
+	// ListWorkflowRunSteps returns one run's step executions in creation
+	// order.
+	ListWorkflowRunSteps(context.Context, domain.WorkspaceID, domain.WorkflowRunID) ([]domain.WorkflowStep, error)
 	CreateWorkflow(context.Context, domain.WorkflowDefinition, events.Event) error
 	UpdateWorkflow(context.Context, domain.WorkflowDefinition, uint64, events.Event) error
 	// DiscardWorkflowStagedChanges reverts the head row to the published

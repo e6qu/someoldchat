@@ -2520,6 +2520,24 @@ func (s *Store) GetWorkflowStep(_ context.Context, workspace domain.WorkspaceID,
 	return value, nil
 }
 
+func (s *Store) ListWorkflowRunSteps(_ context.Context, workspace domain.WorkspaceID, runID domain.WorkflowRunID) ([]domain.WorkflowStep, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowStep, 0)
+	for _, value := range s.workflowSteps {
+		if value.WorkspaceID == workspace && value.WorkflowRunID == runID {
+			values = append(values, value)
+		}
+	}
+	slices.SortFunc(values, func(left, right domain.WorkflowStep) int {
+		if ordering := left.CreatedAt.Compare(right.CreatedAt); ordering != 0 {
+			return ordering
+		}
+		return strings.Compare(string(left.ID), string(right.ID))
+	})
+	return values, nil
+}
+
 func (s *Store) CreateWorkflow(_ context.Context, value domain.WorkflowDefinition, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.OwnerID == "" ||
 		value.Title == "" || value.Status == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
