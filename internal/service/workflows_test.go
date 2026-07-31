@@ -539,6 +539,83 @@ func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
 	}
 }
 
+func TestWorkflowStepInputMappingResolvesVariables(t *testing.T) {
+	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
+	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Mapped inputs", InputSchema: `{}`,
+		Steps: `[
+			{"function_id":"triage","title":"Classify"},
+			{"function_id":"notify","title":"Escalate","input_mapping":{
+				"item":"steps.triage.outputs.result",
+				"note":"inputs.note",
+				"static":"literal",
+				"missing":"steps.triage.outputs.absent"
+			}}
+		]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err = messages.UpdateWorkflow(ctx, "T1", "U1", workflow, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"note":"from run","item":"run item"}`, "mapped-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 1 {
+		t.Fatalf("executions=%+v err=%v", executions, err)
+	}
+	// The first step has no mapping, so it keeps the run's inputs.
+	if executions[0].Inputs != `{"item":"run item","note":"from run"}` {
+		t.Fatalf("first step inputs=%s", executions[0].Inputs)
+	}
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executions[0].ID, `{"result":"classified"}`, ""); err != nil {
+		t.Fatal(err)
+	}
+	executions, err = repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
+	if err != nil || len(executions) != 2 {
+		t.Fatalf("advanced executions=%+v err=%v", executions, err)
+	}
+	// The mapped step receives the earlier step's output under its own
+	// parameter name, keeps the run input the mapping names, carries the
+	// literal, and drops the key whose variable did not resolve — including
+	// the run input it would otherwise have inherited.
+	var mapped map[string]string
+	if err := json.Unmarshal([]byte(executions[1].Inputs), &mapped); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"item": "classified", "note": "from run", "static": "literal"}
+	if len(mapped) != len(want) {
+		t.Fatalf("mapped inputs=%v, want %v", mapped, want)
+	}
+	for name, value := range want {
+		if mapped[name] != value {
+			t.Fatalf("mapped inputs=%v, want %v", mapped, want)
+		}
+	}
+	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Bad mapping", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","input_mapping":{"item":"steps.later.outputs.x"}},{"id":"later","function_id":"notify"}]`,
+	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("forward mapping error=%v, want ErrInvalidWorkflowStep", err)
+	}
+	if _, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Bad variable", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","input_mapping":{"item":"steps."}}]`,
+	}); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("malformed mapping error=%v, want ErrInvalidWorkflowStep", err)
+	}
+}
+
 func TestWorkflowBranchesSkipStepsWhoseConditionsFail(t *testing.T) {
 	ctx, repository, messages, _ := seedWorkflowTriggerWorld(t)
 	workflow, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{

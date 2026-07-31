@@ -18,13 +18,14 @@ import (
 )
 
 type workflowFunctionDefinition struct {
-	ID         string                 `json:"id,omitempty"`
-	Type       string                 `json:"type,omitempty"`
-	FunctionID string                 `json:"function_id"`
-	AppID      domain.AppID           `json:"app_id,omitempty"`
-	Title      string                 `json:"title,omitempty"`
-	Inputs     any                    `json:"inputs,omitempty"`
-	Condition  *workflowStepCondition `json:"condition,omitempty"`
+	ID           string                 `json:"id,omitempty"`
+	Type         string                 `json:"type,omitempty"`
+	FunctionID   string                 `json:"function_id"`
+	AppID        domain.AppID           `json:"app_id,omitempty"`
+	Title        string                 `json:"title,omitempty"`
+	Inputs       any                    `json:"inputs,omitempty"`
+	InputMapping map[string]string      `json:"input_mapping,omitempty"`
+	Condition    *workflowStepCondition `json:"condition,omitempty"`
 }
 
 // workflowStepCondition gates one step on a variable comparison, Slack's
@@ -144,6 +145,30 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 			}
 		}
 		seen[values[index].ID] = index
+	}
+	// Input mappings follow the same reference rules as conditions: a
+	// variable source must parse, and a step output may only come from an
+	// earlier step. A value without a variable prefix is a literal.
+	for index := range values {
+		for name, target := range values[index].InputMapping {
+			if strings.TrimSpace(name) == "" {
+				return "", nil, ErrInvalidWorkflowStep
+			}
+			target = strings.TrimSpace(target)
+			if !strings.HasPrefix(target, "inputs.") && !strings.HasPrefix(target, "steps.") {
+				continue
+			}
+			source, err := parseWorkflowVariableSource(target)
+			if err != nil {
+				return "", nil, err
+			}
+			if source.Kind == "steps" {
+				if earlier, defined := seen[source.StepID]; !defined || earlier >= index {
+					return "", nil, ErrInvalidWorkflowStep
+				}
+			}
+			values[index].InputMapping[name] = target
+		}
 	}
 	encoded, err := json.Marshal(values)
 	if err != nil {
@@ -838,6 +863,47 @@ func functionInputs(step workflowFunctionDefinition, runInputs string) (string, 
 	return string(encoded), err
 }
 
+// resolveWorkflowStepInputs builds one execution's inputs: the run inputs
+// merged with the step's static inputs, then the step's input mapping applied
+// on top. A mapped variable keeps its JSON type; a variable that does not
+// resolve removes the key entirely so a stale inherited value cannot leak
+// through, and a mapping value without a variable prefix is a literal.
+func resolveWorkflowStepInputs(step workflowFunctionDefinition, runInputs string, inputs map[string]any, outputs map[string]map[string]any) (string, error) {
+	base, err := functionInputs(step, runInputs)
+	if err != nil {
+		return "", err
+	}
+	if len(step.InputMapping) == 0 {
+		return base, nil
+	}
+	merged := map[string]json.RawMessage{}
+	if json.Unmarshal([]byte(base), &merged) != nil || merged == nil {
+		return "", ErrInvalidWorkflowStep
+	}
+	for name, target := range step.InputMapping {
+		if source, err := parseWorkflowVariableSource(target); err == nil {
+			value, found := resolveWorkflowVariable(source, inputs, outputs)
+			if !found {
+				delete(merged, name)
+				continue
+			}
+			encoded, err := json.Marshal(value)
+			if err != nil {
+				return "", err
+			}
+			merged[name] = encoded
+			continue
+		}
+		encoded, err := json.Marshal(target)
+		if err != nil {
+			return "", err
+		}
+		merged[name] = encoded
+	}
+	encoded, err := json.Marshal(merged)
+	return string(encoded), err
+}
+
 func workflowFunctionID(appID domain.AppID, callbackID string) string {
 	sum := sha256.Sum256([]byte(string(appID) + "\x00" + callbackID))
 	return fmt.Sprintf("Fn%X", sum[:8])
@@ -884,7 +950,7 @@ func (m Messages) validateWorkflowFunctions(ctx context.Context, appID domain.Ap
 	return nil
 }
 
-func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time) (domain.WorkflowStep, events.Event, error) {
+func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowRun, step workflowFunctionDefinition, defaultApp domain.AppID, actor domain.UserID, now time.Time, stepOutputs map[string]map[string]any) (domain.WorkflowStep, events.Event, error) {
 	appID := step.AppID
 	if appID == "" {
 		appID = defaultApp
@@ -900,7 +966,7 @@ func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowR
 	if err != nil {
 		return domain.WorkflowStep{}, events.Event{}, err
 	}
-	inputs, err := functionInputs(step, run.Inputs)
+	inputs, err := resolveWorkflowStepInputs(step, run.Inputs, decodeWorkflowInputsMap(run.Inputs), stepOutputs)
 	if err != nil {
 		return domain.WorkflowStep{}, events.Event{}, err
 	}
@@ -1033,7 +1099,7 @@ func (m Messages) runWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 		run.CompletedAt = now
 	} else {
 		run.CurrentStep = firstIndex
-		execution, executionEvent, executionErr := m.newFunctionExecution(ctx, run, steps[firstIndex], workflow.AppID, actor, now)
+		execution, executionEvent, executionErr := m.newFunctionExecution(ctx, run, steps[firstIndex], workflow.AppID, actor, now, nil)
 		if executionErr != nil {
 			return domain.WorkflowRun{}, executionErr
 		}
@@ -1171,7 +1237,7 @@ func (m Messages) CompleteFunction(ctx context.Context, workspaceID domain.Works
 			run.Status = domain.WorkflowRunCompleted
 			run.CompletedAt = now
 		} else {
-			nextValue, nextEvent, nextErr := m.newFunctionExecution(ctx, run, steps[nextIndex], workflow.AppID, run.ActorID, now)
+			nextValue, nextEvent, nextErr := m.newFunctionExecution(ctx, run, steps[nextIndex], workflow.AppID, run.ActorID, now, stepOutputs)
 			if nextErr != nil {
 				return nextErr
 			}

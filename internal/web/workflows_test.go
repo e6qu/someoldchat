@@ -493,6 +493,41 @@ func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	requireContains(t, "invalid function", response.Body.String(), "The workflow was not created", "Choose a function belonging to the selected app")
 }
 
+func TestWorkflowBuilderSavesAndRendersStepMappings(t *testing.T) {
+	options := []workflowFunctionOption{{AppID: "A1", CallbackID: "triage", Title: "Triage"}}
+	encoded, err := encodeWorkflowSteps(map[string]string{
+		"step_count": "2", "step_1": "triage", "step_2": "triage",
+		"mapping_2": `{"item":"inputs.item","prev":"steps.triage.outputs.x"}`,
+	}, options, "A1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	steps := decodeWorkflowSteps(encoded)
+	if len(steps) != 2 || steps[0].Mapping != "" || steps[1].Mapping != `{"item":"inputs.item","prev":"steps.triage.outputs.x"}` {
+		t.Fatalf("round-tripped steps=%+v from %s", steps, encoded)
+	}
+	if _, err := encodeWorkflowSteps(map[string]string{
+		"step_1": "triage", "mapping_1": `not json`,
+	}, options, "A1"); err == nil {
+		t.Fatal("malformed mapping was accepted")
+	}
+
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Mapped triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	saved := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Mapped triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "mapping_1": {`{"item":"inputs.item"}`}, "action": {"publish"},
+	}.Encode(), false)
+	if saved.Code != http.StatusSeeOther {
+		t.Fatalf("mapped publish=%d: %s", saved.Code, saved.Body)
+	}
+	page := get(t, mux, saved.Header().Get("Location"))
+	requireContains(t, "rendered mapping", page.Body.String(), `name="mapping_1" value="{&#34;item&#34;:&#34;inputs.item&#34;}"`)
+}
+
 func TestWorkflowBuilderPreservesLongStepListsAndUsesRunPermissions(t *testing.T) {
 	callbacks := make([]workflowDecodedStep, 12)
 	fields := map[string]string{"step_count": "12"}
