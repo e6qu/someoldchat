@@ -22,6 +22,7 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	}
 	for _, user := range []domain.User{
 		{ID: "U1", WorkspaceID: "T1", Name: "owner"},
+		{ID: "U2", WorkspaceID: "T1", Name: "member"},
 		{ID: "UB", WorkspaceID: "T1", Name: "bot"},
 	} {
 		if err := repository.SeedUser(user); err != nil {
@@ -70,14 +71,23 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 	if err != nil || workflow.Status != domain.WorkflowPublished || workflow.PublishedVersion != 2 {
 		t.Fatalf("workflow=%+v err=%v", workflow, err)
 	}
-	unpublishedEdit := workflow
-	unpublishedEdit.Title = "Unpublished title"
-	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", unpublishedEdit, workflow.Version, false); !errors.Is(err, ErrInvalidWorkflowStep) {
-		t.Fatalf("published workflow accepted an edit without publishing it: %v", err)
+	// A staged edit to a published workflow keeps the published revision live:
+	// the head carries the draft, runs keep pinning the published version, and a
+	// non-owner never sees the unpublished title.
+	stagedEdit := workflow
+	stagedEdit.Title = "Staged title"
+	stagedEdit.Description = "not yet published"
+	staged, err := messages.UpdateWorkflow(ctx, "T1", "U1", stagedEdit, workflow.Version, false)
+	if err != nil || staged.Status != domain.WorkflowPublished || staged.PublishedVersion != workflow.PublishedVersion || staged.Title != "Staged title" {
+		t.Fatalf("staged edit workflow=%+v err=%v", staged, err)
 	}
-	stillPublished, err := repository.GetWorkflow(ctx, "T1", workflow.ID)
-	if err != nil || stillPublished.Status != domain.WorkflowPublished || stillPublished.Title != workflow.Title {
-		t.Fatalf("failed edit changed the published workflow: %+v err=%v", stillPublished, err)
+	head, err := repository.GetWorkflow(ctx, "T1", workflow.ID)
+	if err != nil || head.Version != workflow.Version+1 || head.Title != "Staged title" || head.PublishedVersion != workflow.PublishedVersion {
+		t.Fatalf("staged head=%+v err=%v", head, err)
+	}
+	projected, err := messages.GetWorkflow(ctx, "T1", "U2", workflow.ID)
+	if err != nil || projected.Title == "Staged title" {
+		t.Fatalf("non-owner saw staged edits: %+v err=%v", projected, err)
 	}
 	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 		WorkflowID: workflow.ID, Title: "Run triage", Type: "link", Config: `{}`, Enabled: true,
@@ -166,8 +176,8 @@ func TestWorkflowRunDispatchesSpecShapedFunctionAndCompletesOnce(t *testing.T) {
 		{"function_id":"triage","title":"First classification"},
 		{"function_id":"triage","title":"Second classification"}
 	]`
-	republished, err = messages.UpdateWorkflow(ctx, "T1", "U1", republished, workflow.Version, true)
-	if err != nil || republished.PublishedVersion != 3 {
+	republished, err = messages.UpdateWorkflow(ctx, "T1", "U1", republished, head.Version, true)
+	if err != nil || republished.PublishedVersion != head.Version+1 {
 		t.Fatalf("republished workflow=%+v err=%v", republished, err)
 	}
 	if err := messages.CompleteFunction(ctx, "T1", "UB", "wrong-app", domain.WorkflowStepID(executionID), `{"priority":1}`, ""); !errors.Is(err, ErrFunctionAccessDenied) {
@@ -226,5 +236,50 @@ func TestListWorkflowsAppliesVisibilityBeforePagination(t *testing.T) {
 	second, more, next, err := messages.ListWorkflows(ctx, "T1", "U2", domain.PageRequest{Limit: 1, Cursor: next})
 	if err != nil || len(second) != 1 || second[0].ID != "Wf003" || more || next != "" {
 		t.Fatalf("second visible page=%+v more=%v next=%q err=%v", second, more, next, err)
+	}
+}
+
+func TestStagedWorkflowEditKeepsRunningExecutionOnThePublishedRevision(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "staged-run")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishedVersion := workflow.PublishedVersion
+
+	// Stage an edit that removes the only step. A naive implementation would
+	// let the in-flight run complete against an empty step list.
+	staged := workflow
+	staged.Steps = `[]`
+	staged, err = messages.UpdateWorkflow(ctx, "T1", "U1", staged, workflow.Version, false)
+	if err != nil || staged.Status != domain.WorkflowPublished || staged.PublishedVersion != publishedVersion {
+		t.Fatalf("staged edit=%+v err=%v", staged, err)
+	}
+	if staged.Version == staged.PublishedVersion {
+		t.Fatal("staged edit did not diverge Version from PublishedVersion")
+	}
+
+	// The owner sees the staged (empty) steps; a non-owner sees the published
+	// revision's steps.
+	ownerView, err := messages.GetWorkflow(ctx, "T1", "U1", workflow.ID)
+	if err != nil || ownerView.Steps != `[]` {
+		t.Fatalf("owner view steps=%q err=%v", ownerView.Steps, err)
+	}
+	memberView, err := messages.GetWorkflow(ctx, "T1", "U2", workflow.ID)
+	if err != nil || memberView.Steps == `[]` {
+		t.Fatalf("member view saw staged steps=%q err=%v", memberView.Steps, err)
+	}
+
+	// Completing the in-flight run resolves the step from the published
+	// revision, not the staged head: the run stays pinned to PublishedVersion.
+	execution, err := repository.GetWorkflowRun(ctx, "T1", run.ID)
+	if err != nil || execution.WorkflowVersion != publishedVersion {
+		t.Fatalf("run drifted off the published revision: %+v", execution)
 	}
 }

@@ -32,6 +32,9 @@ type WorkflowRevision struct {
 	WorkspaceID WorkspaceID
 	Version     uint64
 	Title       string
+	Description string
+	CallbackID  string
+	InputSchema string
 	Steps       string
 	Status      WorkflowStatus
 	CreatedAt   time.Time

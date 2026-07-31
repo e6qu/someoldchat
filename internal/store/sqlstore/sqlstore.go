@@ -176,6 +176,8 @@ CREATE INDEX IF NOT EXISTS workflows_workspace_id ON workflows(workspace_id, id)
 CREATE TABLE IF NOT EXISTS workflow_revisions (
  workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), version INTEGER NOT NULL, title TEXT NOT NULL,
+ description TEXT NOT NULL DEFAULT '', callback_id TEXT NOT NULL DEFAULT '',
+ input_schema TEXT NOT NULL DEFAULT '{}',
  steps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at INTEGER NOT NULL,
  PRIMARY KEY (workflow_id, version)
 );
@@ -468,7 +470,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 122
+const schemaVersion = 123
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2731,6 +2733,35 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("migrate workflow event cursor: %w", err)
 		}
 	}
+	if version < 123 {
+		columns, err := s.tableColumns(ctx, db, "workflow_revisions")
+		if err != nil {
+			return fmt.Errorf("inspect workflow revisions: %w", err)
+		}
+		for column, definition := range map[string]string{
+			"description":  `TEXT NOT NULL DEFAULT ''`,
+			"callback_id":  `TEXT NOT NULL DEFAULT ''`,
+			"input_schema": `TEXT NOT NULL DEFAULT '{}'`,
+		} {
+			if _, exists := columns[column]; exists {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE workflow_revisions ADD COLUMN `+column+` `+definition); err != nil {
+				return fmt.Errorf("migrate workflow revision metadata: %w", err)
+			}
+		}
+		// Revisions predating the metadata columns inherit the head row's
+		// values. That is exact for the common case — the head is the published
+		// revision — and harmless for older rows, whose metadata no consumer
+		// reads: the non-owner projection only loads PublishedVersion.
+		if _, err := db.ExecContext(ctx, `UPDATE workflow_revisions SET
+			description = (SELECT w.description FROM workflows w WHERE w.id = workflow_revisions.workflow_id),
+			callback_id = (SELECT w.callback_id FROM workflows w WHERE w.id = workflow_revisions.workflow_id),
+			input_schema = (SELECT w.input_schema FROM workflows w WHERE w.id = workflow_revisions.workflow_id)
+			WHERE description = '' AND callback_id = ''`); err != nil {
+			return fmt.Errorf("backfill workflow revision metadata: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -3001,7 +3032,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflow_steps" && table != "workflow_triggers" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflow_steps" && table != "workflow_triggers" && table != "workflow_revisions" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -5522,9 +5553,9 @@ func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		return classify(err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
-		workflow_id, workspace_id, version, title, steps, status, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Steps,
-		value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		workflow_id, workspace_id, version, title, description, callback_id, input_schema, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Description,
+		value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -5568,9 +5599,9 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		return store.ErrConflict
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
-		workflow_id, workspace_id, version, title, steps, status, created_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Steps,
-		value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		workflow_id, workspace_id, version, title, description, callback_id, input_schema, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Description,
+		value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
@@ -5621,7 +5652,7 @@ func (s *Store) ListWorkflows(ctx context.Context, workspace domain.WorkspaceID,
 }
 
 func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowRevision, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT workflow_id, workspace_id, version, title, steps, status, created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT workflow_id, workspace_id, version, title, description, callback_id, input_schema, steps, status, created_at
 		FROM workflow_revisions WHERE workspace_id = ? AND workflow_id = ? ORDER BY version`, workspace, workflowID)
 	if err != nil {
 		return nil, err
@@ -5631,7 +5662,8 @@ func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.Work
 	for rows.Next() {
 		var value domain.WorkflowRevision
 		var created int64
-		if err := rows.Scan(&value.WorkflowID, &value.WorkspaceID, &value.Version, &value.Title, &value.Steps, &value.Status, &created); err != nil {
+		if err := rows.Scan(&value.WorkflowID, &value.WorkspaceID, &value.Version, &value.Title, &value.Description,
+			&value.CallbackID, &value.InputSchema, &value.Steps, &value.Status, &created); err != nil {
 			return nil, err
 		}
 		value.CreatedAt = time.Unix(0, created).UTC()

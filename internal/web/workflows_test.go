@@ -201,6 +201,41 @@ func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T)
 	requireContains(t, "disabled message trigger", page.Body.String(), "Watch incidents", "message · disabled", "containing &#34;incident&#34;")
 }
 
+func TestWorkflowBuilderStagesEditsOverAPublishedRevision(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+
+	staged := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"2"}, "title": {"Incident triage v2"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"save"},
+	}.Encode(), false)
+	if staged.Code != http.StatusSeeOther {
+		t.Fatalf("staged save=%d: %s", staged.Code, staged.Body)
+	}
+	page := get(t, mux, staged.Header().Get("Location"))
+	requireContains(t, "staged workflow", page.Body.String(), "Staged changes saved", "Incident triage v2", "your staged changes are not yet published", "published version 2")
+
+	published := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"3"}, "title": {"Incident triage v2"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+	if published.Code != http.StatusSeeOther {
+		t.Fatalf("publish staged=%d: %s", published.Code, published.Body)
+	}
+	page = get(t, mux, published.Header().Get("Location"))
+	requireContains(t, "republished workflow", page.Body.String(), "Workflow published", "published version 4")
+	if strings.Contains(page.Body.String(), "your staged changes are not yet published") {
+		t.Fatalf("published workflow still reports staged changes: %s", page.Body)
+	}
+}
+
 func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	response := postForm(t, mux, "/app/workflows/create", url.Values{

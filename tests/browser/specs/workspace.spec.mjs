@@ -1256,7 +1256,10 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await expect(composer).toHaveValue(':tada: ');
 
   const draft = `durable draft ${Date.now()}`;
-  await composer.fill(draft);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/app/draft?') && response.status() === 204),
+    composer.fill(draft),
+  ]);
   await page.reload();
   await expect(composer).toHaveValue(draft);
 
@@ -1904,6 +1907,11 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await page.reload();
   await expect(page.getByText('An app function is running. Reload to see its latest durable state.')).toBeVisible();
   await page.getByRole('link', { name: '← Workflow' }).click();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Incident workflow staged');
+  await page.getByRole('button', { name: 'Save staged changes' }).click();
+  await expect(page.getByText('Staged changes saved')).toBeVisible();
+  await expect(page.getByText('your staged changes are not yet published')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Incident workflow staged' })).toBeVisible();
   await page.getByRole('button', { name: 'Unpublish' }).click();
   await expect(page.getByText('Workflow unpublished')).toBeVisible();
   await expect(page.getByText('disabled', { exact: true })).toBeVisible();

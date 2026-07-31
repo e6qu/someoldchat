@@ -147,7 +147,8 @@ notification/workflow effects remain gaps.
 
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered
-steps and a JSON input schema, publish or unpublish, create and enable or
+steps and a JSON input schema, publish or unpublish, stage edits over a live
+published revision while runs keep pinning the published version, create and enable or
 disable link, shortcut, scheduled, webhook, message, reaction, join, and list
 triggers, start one idempotent durable run, and reopen
 its exact state. Scheduled triggers fire from a durable next-occurrence queue
@@ -167,9 +168,9 @@ permissions, plan/admin policy, Slack built-in and connector functions, typed
 variable mapping, form and button steps, branches, templates and AI creation,
 icons, copy/delete, drag reordering, trigger-change rules, schedule frequency
 variants beyond hourly/daily/weekly/monthly (named weekdays, month-end
-semantics), trigger inputs wired to step variables, activity dashboards, async
-workflow and form-response CSV export, staged edits that leave an older published
-revision live, cancellation of already-running executions on unpublish,
+semantics), trigger inputs wired to step variables, discarding staged changes,
+per-step change tracking, activity dashboards, async workflow
+and form-response CSV export, cancellation of already-running executions on unpublish,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain
 verified gaps. Current callback snapshots
