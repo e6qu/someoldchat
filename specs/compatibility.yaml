@@ -706,10 +706,16 @@ operations:
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.completeSuccess/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.completeError
     status: behavior-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.completeError/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: files.remote.add
     status: behavior-compatible
     provenance: slack-api-specs-openapi
@@ -1353,25 +1359,45 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/conversations.requestSharedInvite.list/
   - method: functions.distributions.permissions.add
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.add/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.distributions.permissions.list
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - Enterprise organization and multi-workspace permission resolution has not been live-Slack qualified.
   - method: functions.distributions.permissions.remove
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.remove/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.distributions.permissions.set
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.distributions.permissions.set/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: functions.workflows.steps.list
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/functions.workflows.steps.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - Historical function-step occurrences are durable, but removed-step is_deleted projection has not been live-Slack qualified.
+      - Tier 3 rate limiting is not enforced.
   - method: functions.workflows.steps.responses.export
     status: unimplemented
     provenance: slack-reference
@@ -1435,37 +1461,66 @@ operations:
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/users.discoverableContacts.lookup/
   - method: workflows.featured.add
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.add/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.featured.list
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.featured.remove
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.remove/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.featured.set
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.featured.set/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - Workspace workflow-manager policy is currently represented by workflow ownership rather than Slack's multi-manager role.
+      - Tier 3 rate limiting is not enforced.
   - method: workflows.triggers.permissions.add
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.add/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.triggers.permissions.list
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.list/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.triggers.permissions.remove
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.remove/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
   - method: workflows.triggers.permissions.set
-    status: unimplemented
+    status: sdk-compatible
     provenance: slack-reference
     reference: https://docs.slack.dev/reference/methods/workflows.triggers.permissions.set/
+    evidence:
+      - tests/official-sdk-qualification/node-web-api/qualification.mjs
+      - tests/official-sdk-qualification/python-slack-sdk/qualification.py
+    deviations:
+      - Enterprise organization and multi-workspace named-entity resolution has not been live-Slack qualified.
 
 decisions:
   # The two Events-API sources above are pinned and hashed, and until this entry
@@ -1482,12 +1537,13 @@ decisions:
       message.created record is hydrated into a Slack message only after
       installed-bot or connected-user conversation visibility is proved, and
       current Node, Python, and Java Socket Mode plus Node RTM clients parse that
-      result. Bolt callback qualifications still submit independently
-      constructed signed callbacks, and message change/delete, file
-      share/unshare, and user-token HTTP/Socket subscriptions remain
-      unqualified. The pinned event schemas therefore support only the
-      explicitly qualified message-created slice; they do not promote the
-      whole Events API surface.
+      result. Message mutation and file create/share callbacks use immutable
+      outbox snapshots; HTTP and Socket Mode select bot/user authorization
+      perspectives by granted scope, membership, and manifest subscription.
+      Bolt callback qualifications still submit independently constructed
+      signed callbacks, file-unshare production remains incomplete, and no
+      callback shape is live-Slack verified. The evidence therefore does not
+      promote the whole Events API surface.
   - method: rtm.connect
     evidence: https://docs.slack.dev/reference/methods/rtm.connect/
     decision: >-

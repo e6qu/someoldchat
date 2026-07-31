@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -86,6 +87,28 @@ func main() {
 	); err != nil {
 		panic(err)
 	}
+	workflowSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:A3:signing-secret", "workflow-signing")
+	if err != nil {
+		panic(err)
+	}
+	workflowVerificationCiphertext, err := secretbox.Seal(appCredentialKey, "app:A3:verification-token", "workflow-verification")
+	if err != nil {
+		panic(err)
+	}
+	workflowManifest := `{"display_information":{"name":"Workflow Qualification"},"oauth_config":{"scopes":{"bot":["triggers:read","triggers:write","bookmarks:read","bookmarks:write"]}},"settings":{"function_runtime":"remote"},"functions":{"triage":{"title":"Triage","description":"Qualify current custom functions","input_parameters":{"properties":{"item":{"type":"string","title":"Item"}},"required":["item"]},"output_parameters":{"properties":{"result":{"type":"string","title":"Result"}},"required":["result"]}}}}`
+	if err := store.CreateApp(context.Background(),
+		domain.App{ID: "A3", DevelopmentWorkspaceID: "T1", OwnerID: "U1", Name: "Workflow Qualification", ClientID: "workflow-qualification-client", SigningSecretHash: domain.HashToken("workflow-signing"), SigningSecretCiphertext: workflowSigningCiphertext, VerificationTokenHash: domain.HashToken("workflow-verification"), VerificationTokenCiphertext: workflowVerificationCiphertext, ManifestVersion: 1, Distribution: "private", CreatedAt: now, UpdatedAt: now},
+		domain.AppManifestRevision{AppID: "A3", Version: 1, Manifest: workflowManifest, CreatedBy: "U1", CreatedAt: now},
+		domain.OAuthClient{ID: "workflow-qualification-client", SecretHash: domain.HashToken("workflow-secret"), AppID: "A3"},
+	); err != nil {
+		panic(err)
+	}
+	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A3", WorkspaceID: "T1", Enabled: true, CreatedAt: now}); err != nil {
+		panic(err)
+	}
+	if err := store.CreateBot(context.Background(), domain.Bot{ID: "B3", WorkspaceID: "T1", AppID: "A3", UserID: "U1", Name: "workflow-qualification-bot", UpdatedAt: now}); err != nil {
+		panic(err)
+	}
 	interactionSigningCiphertext, err := secretbox.Seal(appCredentialKey, "app:A2:signing-secret", "interaction-signing")
 	if err != nil {
 		panic(err)
@@ -121,6 +144,7 @@ func main() {
 		}
 	}
 	store.SeedToken(context.Background(), "xoxb-test", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A1", BotID: "B1", TokenType: "bot", Scopes: auth.AllScopes()})
+	store.SeedToken(context.Background(), "xoxb-workflow-qualification", domain.TokenRecord{WorkspaceID: "T1", UserID: "U1", AppID: "A3", BotID: "B3", TokenType: "bot", Scopes: auth.AllScopes()})
 	// Reminder methods are documented as a user-token surface. Keeping a real
 	// user credential beside the broad bot fixture prevents the SDK suites from
 	// "qualifying" reminders with an identity Slack does not advertise for the
@@ -147,7 +171,7 @@ func main() {
 			panic(err)
 		}
 	}
-	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
+	store.SeedAppToken(context.Background(), "xapp-test", domain.AppTokenRecord{AppID: "A1", Scopes: []string{string(auth.ScopeConnectionsWrite), string(auth.ScopeAuthorizationsRead)}})
 	store.SeedAppToken(context.Background(), "xapp-interactions", domain.AppTokenRecord{AppID: "A2", Scopes: []string{string(auth.ScopeConnectionsWrite)}})
 	if err := store.CreateAppInstallation(context.Background(), domain.AppInstallation{AppID: "A1", WorkspaceID: "T1", Enabled: true, CreatedAt: time.Now().UTC()}); err != nil {
 		panic(err)
@@ -171,6 +195,53 @@ func main() {
 		panic(err)
 	}
 	messages := service.Messages{Store: store, Blob: blobs, AppCredentialKey: appCredentialKey}
+	qualificationWorkflow := domain.WorkflowDefinition{
+		ID: "WfQualification", WorkspaceID: "T1", AppID: "A3", OwnerID: "U1", CallbackID: "qualification-workflow",
+		Title: "Qualification workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage"}]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateWorkflow(context.Background(), qualificationWorkflow,
+		newQualificationEvent("qualification-workflow", "U1", events.NewPayload("workflow.created",
+			events.String("workflow_id", string(qualificationWorkflow.ID)), events.String("app_id", "A3")))); err != nil {
+		panic(err)
+	}
+	qualificationTrigger := domain.WorkflowTrigger{
+		ID: "FtQualification", WorkflowID: qualificationWorkflow.ID, WorkspaceID: "T1", AppID: "A3",
+		Title: "Run qualification", Type: "link", Config: `{}`, Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.SetWorkflowTrigger(context.Background(), qualificationTrigger, 0,
+		newQualificationEvent("qualification-trigger", "U1", events.NewPayload("workflow.trigger_created",
+			events.String("workflow_id", string(qualificationWorkflow.ID)), events.String("trigger_id", string(qualificationTrigger.ID))))); err != nil {
+		panic(err)
+	}
+	qualificationRun := domain.WorkflowRun{
+		ID: "WxQualification", WorkflowID: qualificationWorkflow.ID, WorkflowVersion: 1, TriggerID: qualificationTrigger.ID,
+		WorkspaceID: "T1", AppID: "A3", ActorID: "U1", ConversationID: "C1",
+		Status: domain.WorkflowRunRunning, Inputs: `{"item":"SDK qualification"}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	qualificationExecution := domain.WorkflowStep{
+		ID: "FxQualification", WorkflowRunID: qualificationRun.ID, WorkspaceID: "T1", AppID: "A3", UserID: "U1",
+		FunctionID: "FnB4D6AFBF12045549", EditID: "triage", Status: domain.WorkflowStepExecuting,
+		Inputs: qualificationRun.Inputs, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateWorkflowRun(context.Background(), qualificationRun, &qualificationExecution, []events.Event{
+		newQualificationEvent("qualification-workflow-run", "U1", events.NewPayload("workflow.run_started",
+			events.String("workflow_id", string(qualificationWorkflow.ID)), events.String("workflow_run_id", string(qualificationRun.ID)))),
+	}); err != nil {
+		panic(err)
+	}
+	failingRun := qualificationRun
+	failingRun.ID = "WxQualificationError"
+	failingRun.IdempotencyKey = "qualification-error"
+	failingExecution := qualificationExecution
+	failingExecution.ID = "FxQualificationError"
+	failingExecution.WorkflowRunID = failingRun.ID
+	if err := store.CreateWorkflowRun(context.Background(), failingRun, &failingExecution, []events.Event{
+		newQualificationEvent("qualification-workflow-run-error", "U1", events.NewPayload("workflow.run_started",
+			events.String("workflow_id", string(qualificationWorkflow.ID)), events.String("workflow_run_id", string(failingRun.ID)))),
+	}); err != nil {
+		panic(err)
+	}
 	if _, err := messages.Post(context.Background(), "T1", "U1", "C1", "rtm qualification event", "", "rtm-qualification"); err != nil {
 		panic(err)
 	}
@@ -230,6 +301,20 @@ func main() {
 	handler.Register(mux)
 	mux.HandleFunc("GET /qualification/ready", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /qualification/event-context", func(w http.ResponseWriter, r *http.Request) {
+		records, err := messages.ListAppEventsAfter(r.Context(), "A1", 0, 1)
+		if err != nil || len(records) != 1 {
+			http.Error(w, "qualification event is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		value, err := events.EventContext("A1", records[0])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = io.WriteString(w, value)
 	})
 	mux.Handle("/socket-mode", socketmode.Handler{Store: store, Queue: messages, Interactions: messages, Responses: responses})
 	rtmHandler, err := realtime.NewRTMHandler(messages, "T1", messages, messages)

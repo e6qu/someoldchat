@@ -112,12 +112,9 @@ The 87 unimplemented current Web API methods are:
 
 App-platform work must remain dependency-ordered:
 
-1. extend the new conversation-visibility-aware Events API hydration from
-   installed bots to user-token HTTP/Socket subscriptions, message
-   change/delete variants, and `file_shared`/`file_unshared`; message creation
-   and hosted-file creation now hydrate only after installed-bot access is
-   proved, and every currently translated event carrying `channel_id` is
-   membership-filtered for app and RTM delivery;
+1. finish `file_unshared` mutation production and retained authorization/
+   attempt history on top of the bot/user HTTP/Socket subscription, immutable
+   message create/change/delete, and file create/share projections now in place;
 2. implement workflow execution and durable activity records;
 3. implement external OAuth provider configuration, browser consent, encrypted
    refresh/access tokens, and `apps.auth.external.*`/connection callbacks as one

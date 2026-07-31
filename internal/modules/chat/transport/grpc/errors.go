@@ -108,6 +108,7 @@ var errorClasses = []errorClass{
 	{key: "service.invalid_app_approval", code: codes.InvalidArgument, sentinel: service.ErrInvalidAppApproval},
 	{key: "service.invalid_view", code: codes.InvalidArgument, sentinel: service.ErrInvalidView},
 	{key: "service.invalid_workflow_step", code: codes.InvalidArgument, sentinel: service.ErrInvalidWorkflowStep},
+	{key: "service.automation_entities_empty", code: codes.InvalidArgument, sentinel: service.ErrAutomationEntitiesEmpty},
 	{key: "service.invalid_dialog", code: codes.InvalidArgument, sentinel: service.ErrInvalidDialog},
 	{key: "service.invalid_bot", code: codes.InvalidArgument, sentinel: service.ErrInvalidBot},
 	{key: "service.invalid_migration", code: codes.InvalidArgument, sentinel: service.ErrInvalidMigration},
@@ -181,6 +182,8 @@ var errorClasses = []errorClass{
 	// because renaming the fallback would change what a peer that sends no detail
 	// means, and only one class per code may hold it.
 	{key: "service.not_workspace_admin", code: codes.PermissionDenied, sentinel: service.ErrNotWorkspaceAdmin},
+	{key: "service.workflow_permission_denied", code: codes.PermissionDenied, sentinel: service.ErrWorkflowPermissionDenied},
+	{key: "service.function_access_denied", code: codes.PermissionDenied, sentinel: service.ErrFunctionAccessDenied},
 	{key: "service.message_not_owned_by_app", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwnedByApp},
 	{key: "service.message_not_owned", code: codes.PermissionDenied, sentinel: service.ErrMessageNotOwned, restoresCode: true},
 	// Refusing to remove a workspace's last owner is a precondition failure, not
@@ -199,6 +202,7 @@ var errorClasses = []errorClass{
 	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
 	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},
 	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},
+	{key: "service.function_not_running", code: codes.FailedPrecondition, sentinel: service.ErrFunctionNotRunning},
 	{key: "service.message_not_streaming", code: codes.FailedPrecondition, sentinel: service.ErrMessageNotStreaming},
 	{key: "service.message_already_deleted", code: codes.FailedPrecondition, sentinel: service.ErrMessageAlreadyDeleted, restoresCode: true},
 
@@ -209,6 +213,11 @@ var errorClasses = []errorClass{
 	// a missing object was store.ErrNotFound in one composition and
 	// codes.Unavailable in the other.
 	{key: "blob.not_found", code: codes.NotFound, sentinel: blob.ErrNotFound},
+	{key: "service.automation_user_not_found", code: codes.NotFound, sentinel: service.ErrAutomationUserNotFound},
+	{key: "service.automation_channel_not_found", code: codes.NotFound, sentinel: service.ErrAutomationChannelNotFound},
+	{key: "service.automation_team_not_found", code: codes.NotFound, sentinel: service.ErrAutomationTeamNotFound},
+	{key: "service.automation_org_not_found", code: codes.NotFound, sentinel: service.ErrAutomationOrgNotFound},
+	{key: "service.workflow_function_not_found", code: codes.NotFound, sentinel: service.ErrWorkflowFunctionNotFound},
 	{key: "service.slash_command_not_found", code: codes.NotFound, sentinel: service.ErrSlashCommandNotFound},
 	{key: "service.app_datastore_not_found", code: codes.NotFound, sentinel: service.ErrAppDatastoreNotFound},
 	{key: "store.not_found", code: codes.NotFound, sentinel: store.ErrNotFound, restoresCode: true},

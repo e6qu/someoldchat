@@ -36,6 +36,9 @@ type CallID string
 type BookmarkID string
 type ViewID string
 type WorkflowStepID string
+type WorkflowID string
+type WorkflowTriggerID string
+type WorkflowRunID string
 type DialogID string
 type BotID string
 type IncomingWebhookID string
@@ -114,6 +117,26 @@ func NewListItemID() (ListItemID, error) {
 func NewListDownloadID() (ListDownloadID, error) {
 	value, err := PublicID("export_")
 	return ListDownloadID(value), err
+}
+func NewWorkflowID() (WorkflowID, error) {
+	value, err := PublicID("Wf")
+	return WorkflowID(value), err
+}
+func NewWorkflowTriggerID() (WorkflowTriggerID, error) {
+	value, err := PublicID("Ft")
+	return WorkflowTriggerID(value), err
+}
+func NewWorkflowRunID() (WorkflowRunID, error) {
+	// Slack exposes workflow executions as Wx… identifiers in
+	// function_executed payloads and functions.* completion calls. Keep the
+	// durable run in that same public identifier space so transports never have
+	// to invent a second execution identity.
+	value, err := PublicID("Wx")
+	return WorkflowRunID(value), err
+}
+func NewFunctionExecutionID() (WorkflowStepID, error) {
+	value, err := PublicID("Fx")
+	return WorkflowStepID(value), err
 }
 func NewReminderID() (ReminderID, error) {
 	value, err := PublicID("Rm")

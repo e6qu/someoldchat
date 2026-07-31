@@ -349,6 +349,7 @@ type Store interface {
 	DeleteApp(context.Context, domain.AppID, domain.UserID, time.Time) error
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	UninstallApp(context.Context, domain.WorkspaceID, domain.AppID) error
 	CreateIncomingWebhook(context.Context, domain.IncomingWebhook) error
 	LookupIncomingWebhook(context.Context, domain.WorkspaceID, domain.AppID, string) (domain.IncomingWebhook, error)
@@ -369,6 +370,23 @@ type Store interface {
 	DeleteView(context.Context, domain.WorkspaceID, domain.UserID, domain.ViewID, bool, events.Event) error
 	SetWorkflowStep(context.Context, domain.WorkflowStep, events.Event) error
 	GetWorkflowStep(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.WorkflowStep, error)
+	CreateWorkflow(context.Context, domain.WorkflowDefinition, events.Event) error
+	UpdateWorkflow(context.Context, domain.WorkflowDefinition, uint64, events.Event) error
+	GetWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID) (domain.WorkflowDefinition, error)
+	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
+	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)
+	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, uint64, events.Event) error
+	GetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID) (domain.WorkflowTrigger, error)
+	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)
+	CreateWorkflowRun(context.Context, domain.WorkflowRun, *domain.WorkflowStep, []events.Event) error
+	AdvanceWorkflowRun(context.Context, domain.WorkflowStep, *domain.WorkflowStep, domain.WorkflowRun, int, []events.Event) error
+	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.WorkflowRunID) (domain.WorkflowRun, error)
+	GetWorkflowRunByIdempotency(context.Context, domain.WorkspaceID, string) (domain.WorkflowRun, error)
+	ListWorkflowRuns(context.Context, domain.WorkspaceID, domain.WorkflowID, domain.PageRequest) ([]domain.WorkflowRun, bool, domain.Cursor, error)
+	SetAutomationPermission(context.Context, domain.AutomationPermission, events.Event) error
+	GetAutomationPermission(context.Context, domain.WorkspaceID, string, string) (domain.AutomationPermission, error)
+	SetFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.ConversationID, []domain.FeaturedWorkflow, events.Event) error
+	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
 	CreateDialog(context.Context, domain.Dialog, events.Event) error
 	GetDialog(context.Context, domain.WorkspaceID, domain.DialogID) (domain.Dialog, error)
 	CreateBot(context.Context, domain.Bot) error
@@ -593,7 +611,7 @@ type Store interface {
 	CompleteExternalUpload(context.Context, domain.ExternalUploadID, domain.File, []domain.ConversationID, events.Event) error
 	CompleteExternalUploads(context.Context, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, []domain.Message, []events.Event) error
 	CompleteScheduledExternalUploads(context.Context, domain.ScheduledMessageID, []domain.ExternalUploadCompletion, []domain.File, []domain.ConversationID, []events.Event, domain.Message, events.Event) error
-	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, events.Event) error
+	CreateFileShareMessage(context.Context, []domain.FileID, domain.Message, []events.Event) error
 	GetFile(context.Context, domain.FileID) (domain.File, error)
 	DeleteFile(context.Context, domain.FileID, events.Event) error
 	DeleteFileComment(context.Context, domain.WorkspaceID, domain.FileID, domain.FileCommentID, events.Event) error

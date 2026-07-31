@@ -39,7 +39,8 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 	}
 	for index, wantUser := range []string{"U2", "U3"} {
 		var envelope struct {
-			Event struct {
+			EventContext string `json:"event_context"`
+			Event        struct {
 				Type    string `json:"type"`
 				User    string `json:"user"`
 				Channel string `json:"channel"`
@@ -52,6 +53,13 @@ func TestSlackEventBodiesFanOutInvitedMembers(t *testing.T) {
 		if envelope.Event.Type != "member_joined_channel" || envelope.Event.User != wantUser || envelope.Event.Channel != "C1" || envelope.Event.EventTS == "" {
 			t.Fatalf("body[%d]=%s", index, bodies[index])
 		}
+		appID, sequence, eventID, err := ParseEventContext(envelope.EventContext)
+		if err != nil || appID != "A1" || sequence != 1 || eventID != "Ev1" {
+			t.Fatalf("event_context=%q decoded app=%q sequence=%d event=%q err=%v", envelope.EventContext, appID, sequence, eventID, err)
+		}
+	}
+	if _, _, _, err := ParseEventContext("qualification-event"); !errors.Is(err, ErrPayloadFieldInvalid) {
+		t.Fatalf("malformed event context error=%v", err)
 	}
 }
 
@@ -100,6 +108,66 @@ func TestAppHomeOpenedIsDeliveredOnlyToItsOwningApp(t *testing.T) {
 	if err != nil || len(socket) != 0 {
 		t.Fatalf("other app received %d socket envelopes err=%v", len(socket), err)
 	}
+}
+
+func TestFunctionExecutedBuildsCurrentSlackEventForOnlyItsOwningApp(t *testing.T) {
+	event, err := New("Ev-function", "T1", "U1", NewPayload("function_executed",
+		String("target_app_id", "A1"),
+		JSON("function", `{"id":"Fn1","callback_id":"triage","title":"Triage","type":"app","input_parameters":[],"output_parameters":[],"app_id":"A1","date_created":1700000000,"date_updated":1700000000,"date_deleted":0}`),
+		JSON("inputs", `{"incident":"INC-1"}`),
+		String("function_execution_id", "Fx1"),
+		String("workflow_execution_id", "Wx1"),
+		String("bot_access_token", "xoxb-execution"),
+	), time.Unix(1700000000, 0).UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	event.Authorizations = []Authorization{{TeamID: "T1", UserID: "UB", IsBot: true}}
+	record := Record{Sequence: 1, Event: event}
+	bodies, err := SlackEventBodies(record, "A1")
+	if err != nil || len(bodies) != 1 {
+		t.Fatalf("owning app bodies=%d err=%v", len(bodies), err)
+	}
+	var envelope struct {
+		AppID string `json:"api_app_id"`
+		Event struct {
+			Type                string         `json:"type"`
+			Function            map[string]any `json:"function"`
+			Inputs              map[string]any `json:"inputs"`
+			FunctionExecutionID string         `json:"function_execution_id"`
+			WorkflowExecutionID string         `json:"workflow_execution_id"`
+			BotAccessToken      string         `json:"bot_access_token"`
+			EventTS             string         `json:"event_ts"`
+		} `json:"event"`
+	}
+	if err := json.Unmarshal(bodies[0], &envelope); err != nil {
+		t.Fatal(err)
+	}
+	if envelope.AppID != "A1" || envelope.Event.Type != "function_executed" ||
+		envelope.Event.Function["id"] != "Fn1" || envelope.Event.Inputs["incident"] != "INC-1" ||
+		envelope.Event.FunctionExecutionID != "Fx1" || envelope.Event.WorkflowExecutionID != "Wx1" ||
+		envelope.Event.BotAccessToken != "xoxb-execution" || envelope.Event.EventTS == "" {
+		t.Fatalf("envelope=%s", bodies[0])
+	}
+	if containsJSONField(bodies[0], "target_app_id") {
+		t.Fatalf("routing metadata leaked into Slack payload: %s", bodies[0])
+	}
+	other, err := SlackEventBodies(record, "A2")
+	if err != nil || len(other) != 0 {
+		t.Fatalf("other app received %d bodies err=%v", len(other), err)
+	}
+	if inners, err := SlackInner(event.Topic, mustDeliverable(t, event), SurfaceRTM); err != nil || len(inners) != 0 {
+		t.Fatalf("RTM received app-only function event: inners=%v err=%v", inners, err)
+	}
+}
+
+func mustDeliverable(t *testing.T, event Event) Delivered {
+	t.Helper()
+	delivered, err := Deliverable(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return delivered
 }
 
 func containsJSONField(encoded []byte, field string) bool {

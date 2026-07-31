@@ -276,6 +276,7 @@ func codeArguments(t *testing.T) map[string][]int {
 // strong scope anywhere satisfied the table.
 var scopeArguments = map[string][]int{
 	"authenticate":                 {1},
+	"authenticateApp":              {1},
 	"authenticateConversationJoin": {1, 2},
 	"listEmoji":                    {2},
 	"deleteListItemsWithScope":     {2},

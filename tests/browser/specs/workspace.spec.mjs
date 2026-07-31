@@ -1841,6 +1841,79 @@ test('[CANVAS-01 CANVAS-02 LIST-01 LIST-02] persisted canvases and lists survive
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger and starts one durable execution', async ({ page, context, request }) => {
+  await signIn(context);
+  const redirectURI = 'https://client.example/workflow-browser-callback';
+  const appName = `Workflow tools ${Date.now()}`;
+  const installed = await createAndInstallApp(page, request, {
+    display_information: { name: appName },
+    oauth_config: {
+      redirect_urls: [redirectURI],
+      scopes: { bot: ['chat:write'] },
+    },
+    settings: { function_runtime: 'remote' },
+    functions: {
+      triage: {
+        title: 'Triage request',
+        description: 'Triage one incoming request',
+        input_parameters: {
+          properties: { item: { type: 'string', title: 'Item' } },
+          required: ['item'],
+        },
+        output_parameters: {
+          properties: { result: { type: 'string', title: 'Result' } },
+          required: ['result'],
+        },
+      },
+      notify: {
+        title: 'Notify channel',
+        description: 'Post the result',
+        input_parameters: { properties: {} },
+        output_parameters: { properties: {} },
+      },
+    },
+  }, redirectURI);
+
+  await page.goto('/app');
+  await page.getByRole('link', { name: 'Workflows' }).click();
+  await page.getByText('Create a workflow').click();
+  const workflowName = `Incident workflow ${Date.now()}`;
+  await page.getByLabel('Name').fill(workflowName);
+  await page.getByLabel('Owning app').selectOption(installed.appID);
+  await page.getByLabel('Description').fill('Classify an incident and notify the team');
+  await page.getByLabel('First step').selectOption('triage');
+  await page.getByLabel('Workflow reference').fill('incident-triage');
+  await page.getByRole('button', { name: 'Create workflow' }).click();
+  await expect(page.getByRole('heading', { name: workflowName })).toBeVisible();
+  await expect(page.getByText('draft', { exact: true })).toBeVisible();
+
+  await page.getByLabel('Step 2').selectOption('notify');
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+  await expect(page.getByText('published', { exact: true })).toBeVisible();
+
+  await page.getByLabel('Trigger name').fill('Start incident triage');
+  await page.getByLabel('Trigger type').selectOption('link');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Start incident triage' })).toBeVisible();
+  await page.getByRole('button', { name: 'Run' }).click();
+  await expect(page).toHaveURL(/\/app\/workflows\/runs\/Wx[0-9a-f]+$/);
+  await expect(page.getByRole('heading', { name: 'Workflow run' })).toBeVisible();
+  await expect(page.getByText('running', { exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByText('An app function is running. Reload to see its latest durable state.')).toBeVisible();
+  await page.getByRole('link', { name: '← Workflow' }).click();
+  await page.getByRole('button', { name: 'Unpublish' }).click();
+  await expect(page.getByText('Workflow unpublished')).toBeVisible();
+  await expect(page.getByText('disabled', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Publish' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Run' })).toBeVisible();
+  await expectNoSeriousAccessibilityViolations(page);
+});
+
 // Sign-out must come last in this file. The suite runs with a single worker
 // against one server holding one static browser session, so revoking it ends
 // every session the remaining tests would use. Placing this earlier makes every

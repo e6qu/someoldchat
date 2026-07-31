@@ -26,8 +26,216 @@ message WorkflowStepMutationResponse {
   bool ok = 1;
 }
 
+message WorkflowDefinition {
+  string id = 1;
+  string workspace_id = 2;
+  string app_id = 3;
+  string owner_id = 4;
+  string callback_id = 5;
+  string title = 6;
+  string description = 7;
+  string input_schema = 8;
+  string steps = 9;
+  string status = 10;
+  uint64 version = 11;
+  uint64 published_version = 12;
+  int64 created_at_unix_nano = 13;
+  int64 updated_at_unix_nano = 14;
+}
+
+message WorkflowMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  WorkflowDefinition workflow = 3;
+  uint64 expected_version = 4;
+  bool publish = 5;
+}
+
+message WorkflowGetRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_id = 3;
+}
+
+message WorkflowListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+  string cursor = 4;
+  bool descending = 5;
+}
+
+message WorkflowListResponse {
+  repeated WorkflowDefinition workflows = 1;
+  bool has_more = 2;
+  string next_cursor = 3;
+}
+
+message WorkflowTrigger {
+  string id = 1;
+  string workflow_id = 2;
+  string workspace_id = 3;
+  string app_id = 4;
+  string title = 5;
+  string type = 6;
+  string config = 7;
+  bool enabled = 8;
+  uint64 version = 9;
+  int64 created_at_unix_nano = 10;
+  int64 updated_at_unix_nano = 11;
+}
+
+message WorkflowTriggerMutationRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  WorkflowTrigger trigger = 3;
+  uint64 expected_version = 4;
+}
+
+message WorkflowTriggerListRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_id = 3;
+}
+
+message WorkflowTriggerListResponse {
+  repeated WorkflowTrigger triggers = 1;
+}
+
+message WorkflowRun {
+  string id = 1;
+  string workflow_id = 2;
+  uint64 workflow_version = 3;
+  string trigger_id = 4;
+  string workspace_id = 5;
+  string app_id = 6;
+  string actor_id = 7;
+  string channel_id = 8;
+  string status = 9;
+  string inputs = 10;
+  string outputs = 11;
+  string error = 12;
+  int32 current_step = 13;
+  string idempotency_key = 14;
+  int64 created_at_unix_nano = 15;
+  int64 updated_at_unix_nano = 16;
+  int64 completed_at_unix_nano = 17;
+}
+
+message WorkflowRunRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+  string channel_id = 4;
+  string inputs = 5;
+  string idempotency_key = 6;
+}
+
+message WorkflowRunGetRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string workflow_run_id = 3;
+}
+
+message FunctionCompletionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string function_execution_id = 4;
+  string outputs = 5;
+  string error = 6;
+}
+
+message AutomationPermission {
+  string resource_type = 1;
+  string resource_id = 2;
+  string workspace_id = 3;
+  string app_id = 4;
+  string permission_type = 5;
+  repeated string user_ids = 6;
+  repeated string channel_ids = 7;
+  repeated string team_ids = 8;
+  repeated string org_ids = 9;
+  int64 updated_at_unix_nano = 10;
+}
+
+message FunctionPermissionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string function_id = 4;
+  string function_callback_id = 5;
+  AutomationPermission permission = 6;
+}
+
+message TriggerPermissionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string trigger_id = 4;
+  AutomationPermission permission = 5;
+}
+
+message FeaturedWorkflowsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string channel_id = 3;
+  repeated string channel_ids = 4;
+  repeated string trigger_ids = 5;
+}
+
+message FeaturedWorkflow {
+  string workspace_id = 1;
+  string channel_id = 2;
+  string trigger_id = 3;
+  string title = 4;
+  int32 position = 5;
+}
+
+message FeaturedWorkflowsResponse {
+  repeated FeaturedWorkflow workflows = 1;
+}
+
+message FunctionWorkflowStepsRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string function_id = 4;
+  string workflow_id = 5;
+  string workflow = 6;
+  string workflow_app_id = 7;
+}
+
+message WorkflowStepVersion {
+  string title = 1;
+  string workflow_id = 2;
+  string step_id = 3;
+  bool is_deleted = 4;
+  string workflow_version_created = 5;
+}
+
+message WorkflowStepVersionsResponse {
+  repeated WorkflowStepVersion steps_versions = 1;
+}
+
 service WorkflowsService {
   rpc StepCompleted(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
   rpc StepFailed(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
   rpc UpdateStep(WorkflowStepUpdateRequest) returns (WorkflowStepMutationResponse);
+  rpc CreateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
+  rpc GetWorkflow(WorkflowGetRequest) returns (WorkflowDefinition);
+  rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
+  rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
+  rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);
+  rpc ListWorkflowTriggers(WorkflowTriggerListRequest) returns (WorkflowTriggerListResponse);
+  rpc RunWorkflow(WorkflowRunRequest) returns (WorkflowRun);
+  rpc GetWorkflowRun(WorkflowRunGetRequest) returns (WorkflowRun);
+  rpc CompleteFunction(FunctionCompletionRequest) returns (WorkflowStepMutationResponse);
+  rpc GetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
+  rpc SetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);
+  rpc GetTriggerPermission(TriggerPermissionRequest) returns (AutomationPermission);
+  rpc SetTriggerPermission(TriggerPermissionRequest) returns (AutomationPermission);
+  rpc SetFeaturedWorkflows(FeaturedWorkflowsRequest) returns (WorkflowStepMutationResponse);
+  rpc ListFeaturedWorkflows(FeaturedWorkflowsRequest) returns (FeaturedWorkflowsResponse);
+  rpc ListFunctionWorkflowSteps(FunctionWorkflowStepsRequest) returns (WorkflowStepVersionsResponse);
 }

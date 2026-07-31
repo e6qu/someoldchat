@@ -379,6 +379,107 @@ func TestSQLiteWorkflowStepLifecycleIsDurable(t *testing.T) {
 	}
 }
 
+func TestSQLiteWorkflowAutomationLifecycleIsDurableAndVersioned(t *testing.T) {
+	ctx := context.Background()
+	dsn := filepath.Join(t.TempDir(), "workflow-automation.sqlite")
+	s, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := s.SeedWorkspace(ctx, domain.Workspace{ID: "T1", Name: "Test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SeedUser(ctx, domain.User{ID: "U1", WorkspaceID: "T1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateConversation(ctx, domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"}, "U1", events.Event{ID: "E0", WorkspaceID: "T1", Topic: "conversation.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	workflow := domain.WorkflowDefinition{ID: "Wf1", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", Title: "Triage", InputSchema: `{}`, Steps: `[]`, Status: domain.WorkflowDraft, CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateWorkflow(ctx, workflow, events.Event{ID: "E1", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	workflow.Status = domain.WorkflowPublished
+	workflow.PublishedVersion = 2
+	workflow.UpdatedAt = now.Add(time.Second)
+	if err := s.UpdateWorkflow(ctx, workflow, 1, events.Event{ID: "E2", WorkspaceID: "T1", Topic: "workflow.published", CreatedAt: workflow.UpdatedAt}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateWorkflow(ctx, workflow, 1, events.Event{ID: "E3", WorkspaceID: "T1", Topic: "workflow.updated", CreatedAt: workflow.UpdatedAt}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale update error=%v", err)
+	}
+	trigger := domain.WorkflowTrigger{ID: "Ft1", WorkflowID: "Wf1", WorkspaceID: "T1", AppID: "A1", Title: "Run triage", Type: "link", Config: `{}`, Enabled: true, CreatedAt: now, UpdatedAt: now}
+	if err := s.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "E4", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	otherWorkflow := workflow
+	otherWorkflow.ID = "Wf2"
+	otherWorkflow.Version = 1
+	otherWorkflow.Status = domain.WorkflowDraft
+	otherWorkflow.PublishedVersion = 0
+	if err := s.CreateWorkflow(ctx, otherWorkflow, events.Event{ID: "E4b", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	movedTrigger := trigger
+	movedTrigger.WorkflowID = otherWorkflow.ID
+	movedTrigger.UpdatedAt = now.Add(2 * time.Second)
+	if err := s.SetWorkflowTrigger(ctx, movedTrigger, 1, events.Event{ID: "E4c", WorkspaceID: "T1", Topic: "workflow.trigger_updated", CreatedAt: movedTrigger.UpdatedAt}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("trigger moved across workflows: %v", err)
+	}
+	permission := domain.AutomationPermission{ResourceType: "trigger", ResourceID: "Ft1", WorkspaceID: "T1", AppID: "A1", PermissionType: "named_entities", UserIDs: []domain.UserID{"U1"}, UpdatedAt: now}
+	if err := s.SetAutomationPermission(ctx, permission, events.Event{ID: "E5", WorkspaceID: "T1", Topic: "workflow.permission_set", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFeaturedWorkflows(ctx, "T1", "C1", []domain.FeaturedWorkflow{{TriggerID: "Ft1", Title: "Run triage"}}, events.Event{ID: "E6", WorkspaceID: "T1", Topic: "workflow.featured_set", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	run := domain.WorkflowRun{ID: "Wr1", WorkflowID: "Wf1", WorkflowVersion: 2, TriggerID: "Ft1", WorkspaceID: "T1", AppID: "A1", ActorID: "U1", ConversationID: "C1", Status: domain.WorkflowRunRunning, Inputs: `{}`, Outputs: `{}`, IdempotencyKey: "once", CreatedAt: now, UpdatedAt: now}
+	firstStep := domain.WorkflowStep{ID: "Fx1", WorkflowRunID: "Wr1", WorkspaceID: "T1", AppID: "A1", UserID: "U1", FunctionID: "Fn1", Status: domain.WorkflowStepExecuting, Inputs: `{}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now}
+	if err := s.CreateWorkflowRun(ctx, run, &firstStep, []events.Event{{ID: "E7", WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now}}); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := run
+	duplicate.ID = "Wr2"
+	if err := s.CreateWorkflowRun(ctx, duplicate, nil, []events.Event{{ID: "E8", WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now}}); !errors.Is(err, store.ErrAlreadyExists) {
+		t.Fatalf("idempotency error=%v", err)
+	}
+	run.Status = domain.WorkflowRunCompleted
+	run.Outputs = `{"result":"ok"}`
+	run.CompletedAt = now.Add(time.Second)
+	run.UpdatedAt = run.CompletedAt
+	firstStep.Status = domain.WorkflowStepCompleted
+	firstStep.Outputs = run.Outputs
+	firstStep.UpdatedAt = run.UpdatedAt
+	if err := s.AdvanceWorkflowRun(ctx, firstStep, nil, run, 0, []events.Event{{ID: "E9", WorkspaceID: "T1", Topic: "workflow.run_completed", CreatedAt: run.CompletedAt}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	loaded, err := reopened.GetWorkflow(ctx, "T1", "Wf1")
+	if err != nil || loaded.Version != 2 || loaded.Status != domain.WorkflowPublished {
+		t.Fatalf("workflow=%+v err=%v", loaded, err)
+	}
+	revisions, err := reopened.ListWorkflowRevisions(ctx, "T1", "Wf1")
+	if err != nil || len(revisions) != 2 || revisions[0].Version != 1 || revisions[1].Version != 2 {
+		t.Fatalf("revisions=%+v err=%v", revisions, err)
+	}
+	storedRun, err := reopened.GetWorkflowRun(ctx, "T1", "Wr1")
+	if err != nil || storedRun.Status != domain.WorkflowRunCompleted || storedRun.Outputs != run.Outputs {
+		t.Fatalf("run=%+v err=%v", storedRun, err)
+	}
+	featured, err := reopened.ListFeaturedWorkflows(ctx, "T1", []domain.ConversationID{"C1"})
+	if err != nil || len(featured) != 1 || featured[0].TriggerID != "Ft1" {
+		t.Fatalf("featured=%+v err=%v", featured, err)
+	}
+}
+
 func TestSQLiteDialogIsDurable(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, "file:dialog-lifecycle?mode=memory&cache=shared")
@@ -809,7 +910,7 @@ func TestSQLiteFileShareMessageIsAtomicAndDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	conflict := domain.Message{ID: "M-conflict", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created}
-	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, conflict, events.Event{ID: "E-conflict", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}); !errors.Is(err, store.ErrMessageTimestampTaken) {
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, conflict, []events.Event{{ID: "E-conflict", WorkspaceID: "T1", Topic: "message.created", CreatedAt: created}}); !errors.Is(err, store.ErrMessageTimestampTaken) {
 		t.Fatalf("conflicting share error=%v", err)
 	}
 	metadata, err := s.GetFile(ctx, "F1")
@@ -817,7 +918,7 @@ func TestSQLiteFileShareMessageIsAtomicAndDurable(t *testing.T) {
 		t.Fatalf("failed message left a share behind: file=%+v err=%v", metadata, err)
 	}
 	shared := domain.Message{ID: "M-shared", WorkspaceID: "T1", Conversation: "C1", AuthorID: "U1", CreatedAt: created.Add(time.Microsecond)}
-	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, shared, events.Event{ID: "E-shared", WorkspaceID: "T1", Topic: "message.created", CreatedAt: shared.CreatedAt}); err != nil {
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, shared, []events.Event{{ID: "E-shared", WorkspaceID: "T1", Topic: "message.created", CreatedAt: shared.CreatedAt}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Close(); err != nil {
@@ -862,7 +963,7 @@ func TestSQLiteDirectExpansionCopiesFilesAndConversionSurvivesReopen(t *testing.
 		t.Fatal(err)
 	}
 	original := domain.Message{ID: "M1", WorkspaceID: "T1", Conversation: "D1", AuthorID: "U1", Text: "retained context", CreatedAt: at.Add(time.Microsecond)}
-	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, original, event("E-message", "message.created", original.CreatedAt)); err != nil {
+	if err := s.CreateFileShareMessage(ctx, []domain.FileID{"F1"}, original, []events.Event{event("E-message", "message.created", original.CreatedAt)}); err != nil {
 		t.Fatal(err)
 	}
 	target := domain.Conversation{ID: "D2", WorkspaceID: "T1", Name: "direct", IsPrivate: true, IsGroupDirect: true}

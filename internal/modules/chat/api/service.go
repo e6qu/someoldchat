@@ -17,6 +17,7 @@ type Service interface {
 	LookupAppToken(context.Context, string) (domain.AppTokenRecord, error)
 	CreateAppInstallation(context.Context, domain.AppInstallation) error
 	ListAppInstallations(context.Context, domain.AppID) ([]domain.AppInstallation, error)
+	ListAppAuthorizations(context.Context, domain.AppID, domain.WorkspaceID) ([]domain.AppAuthorization, error)
 	IssueAppConfigurationToken(context.Context, domain.WorkspaceID, domain.UserID) (domain.AppConfigurationCredentials, error)
 	RotateAppConfigurationToken(context.Context, string) (domain.AppConfigurationCredentials, error)
 	ValidateAppManifest(context.Context, string, string, string) ([]appmanifest.Error, error)
@@ -139,6 +140,22 @@ type Service interface {
 	WorkflowStepCompleted(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	WorkflowStepFailed(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	WorkflowUpdateStep(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string) error
+	CreateWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowDefinition) (domain.WorkflowDefinition, error)
+	GetWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) (domain.WorkflowDefinition, error)
+	UpdateWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowDefinition, uint64, bool) (domain.WorkflowDefinition, error)
+	ListWorkflows(context.Context, domain.WorkspaceID, domain.UserID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
+	SetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTrigger, uint64) (domain.WorkflowTrigger, error)
+	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)
+	RunWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerID, domain.ConversationID, string, string) (domain.WorkflowRun, error)
+	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID) (domain.WorkflowRun, error)
+	CompleteFunction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowStepID, string, string) error
+	GetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.AutomationPermission, error)
+	SetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string, domain.AutomationPermission) (domain.AutomationPermission, error)
+	GetTriggerPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowTriggerID) (domain.AutomationPermission, error)
+	SetTriggerPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowTriggerID, domain.AutomationPermission) (domain.AutomationPermission, error)
+	SetFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.UserID, domain.ConversationID, []domain.WorkflowTriggerID) error
+	ListFeaturedWorkflows(context.Context, domain.WorkspaceID, domain.UserID, []domain.ConversationID) ([]domain.FeaturedWorkflow, error)
+	ListFunctionWorkflowSteps(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, domain.WorkflowID, string, domain.AppID) ([]domain.WorkflowStepVersion, error)
 	OpenDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) error
 	BotInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.BotID) (domain.Bot, error)
 	MigrationExchange(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, bool) (domain.MigrationExchange, error)

@@ -163,7 +163,53 @@ CREATE INDEX IF NOT EXISTS incoming_webhooks_lookup ON incoming_webhooks(workspa
 CREATE TABLE IF NOT EXISTS app_permission_requests (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), requester_id TEXT NOT NULL REFERENCES users(id), target_user_id TEXT NOT NULL REFERENCES users(id), scopes TEXT NOT NULL, trigger_id TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS views (id TEXT PRIMARY KEY, app_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), type TEXT NOT NULL, external_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT '', errors TEXT NOT NULL DEFAULT '{}', hash TEXT NOT NULL, root_view_id TEXT NOT NULL, previous_view_id TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE UNIQUE INDEX IF NOT EXISTS views_workspace_external ON views(workspace_id, external_id) WHERE external_id <> '';
-CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, workflow_run_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), function_id TEXT NOT NULL DEFAULT '', edit_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '', step_name TEXT NOT NULL DEFAULT '', image_url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS workflows (
+ id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
+ owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
+ description TEXT NOT NULL DEFAULT '', input_schema TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]',
+ status TEXT NOT NULL, version INTEGER NOT NULL, published_version INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS workflows_callback ON workflows(workspace_id, app_id, callback_id) WHERE callback_id <> '';
+CREATE INDEX IF NOT EXISTS workflows_workspace_id ON workflows(workspace_id, id);
+CREATE TABLE IF NOT EXISTS workflow_revisions (
+ workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), version INTEGER NOT NULL, title TEXT NOT NULL,
+ steps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at INTEGER NOT NULL,
+ PRIMARY KEY (workflow_id, version)
+);
+CREATE INDEX IF NOT EXISTS workflow_revisions_workspace ON workflow_revisions(workspace_id, workflow_id, version);
+CREATE TABLE IF NOT EXISTS workflow_triggers (
+ id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+ type TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+ version INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS workflow_triggers_workflow ON workflow_triggers(workspace_id, workflow_id, id);
+CREATE TABLE IF NOT EXISTS workflow_runs (
+ id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id), workflow_version INTEGER NOT NULL,
+ trigger_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
+ actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+ inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
+ current_step INTEGER NOT NULL DEFAULT 0, idempotency_key TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS workflow_runs_idempotency ON workflow_runs(workspace_id, idempotency_key) WHERE idempotency_key <> '';
+CREATE INDEX IF NOT EXISTS workflow_runs_workflow ON workflow_runs(workspace_id, workflow_id, id);
+CREATE TABLE IF NOT EXISTS automation_permissions (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), resource_type TEXT NOT NULL, resource_id TEXT NOT NULL,
+ app_id TEXT NOT NULL DEFAULT '', permission_type TEXT NOT NULL, user_ids TEXT NOT NULL DEFAULT '[]',
+ channel_ids TEXT NOT NULL DEFAULT '[]', team_ids TEXT NOT NULL DEFAULT '[]', org_ids TEXT NOT NULL DEFAULT '[]',
+ updated_at INTEGER NOT NULL, PRIMARY KEY (workspace_id, resource_type, resource_id)
+);
+CREATE TABLE IF NOT EXISTS featured_workflows (
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+ trigger_id TEXT NOT NULL REFERENCES workflow_triggers(id) ON DELETE CASCADE, title TEXT NOT NULL DEFAULT '',
+ position INTEGER NOT NULL, PRIMARY KEY (workspace_id, conversation_id, trigger_id),
+ UNIQUE (workspace_id, conversation_id, position)
+);
+CREATE INDEX IF NOT EXISTS featured_workflows_channels ON featured_workflows(workspace_id, conversation_id, position);
 CREATE TABLE IF NOT EXISTS dialogs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), payload TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bots (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL DEFAULT '', user_id TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL, image_36 TEXT NOT NULL DEFAULT '', image_48 TEXT NOT NULL DEFAULT '', image_72 TEXT NOT NULL DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS user_migrations (workspace_id TEXT NOT NULL REFERENCES workspaces(id), old_id TEXT NOT NULL, global_id TEXT NOT NULL, PRIMARY KEY (workspace_id, old_id), UNIQUE (workspace_id, global_id));
@@ -232,7 +278,7 @@ CREATE TABLE IF NOT EXISTS remote_file_shares (
 CREATE INDEX IF NOT EXISTS files_workspace_id ON files(workspace_id, id);
 CREATE TABLE IF NOT EXISTS outbox (
  sequence INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT NOT NULL UNIQUE, workspace_id TEXT NOT NULL, topic TEXT NOT NULL,
- actor_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
+ actor_id TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL, private_payload TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0,
  lease_owner TEXT NOT NULL DEFAULT '', lease_until TEXT NOT NULL DEFAULT '', next_attempt_at TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS access_logs (
@@ -418,7 +464,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 118
+const schemaVersion = 121
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -469,19 +515,19 @@ type queryExecutor interface {
 // actor_id form repeated verbatim at five call sites and a SELECT form repeated
 // at six. Two helpers now cover both shapes, and both take the whole event so a
 // column cannot be forgotten again.
-const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, 0, '', '', '')`
+const insertOutboxStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, private_payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', '')`
 
 // insertOutboxForConversationStatement derives the workspace from the
 // conversation being mutated, for the events whose caller does not carry it.
-const insertOutboxForConversationStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`
+const insertOutboxForConversationStatement = `INSERT INTO outbox (id, workspace_id, actor_id, topic, payload, private_payload, created_at, delivered, lease_owner, lease_until, next_attempt_at) SELECT ?, workspace_id, ?, ?, ?, ?, ?, 0, '', '', '' FROM conversations WHERE id = ?`
 
 func insertOutbox(ctx context.Context, tx *sql.Tx, event events.Event) error {
-	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt))
+	_, err := tx.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt))
 	return err
 }
 
 func insertOutboxForConversation(ctx context.Context, tx *sql.Tx, event events.Event, conversation domain.ConversationID) error {
-	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt), conversation)
+	_, err := tx.ExecContext(ctx, insertOutboxForConversationStatement, event.ID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt), conversation)
 	return err
 }
 
@@ -520,7 +566,7 @@ func systemClock() time.Time { return time.Now().UTC() }
 var _ store.Store = (*Store)(nil)
 
 func (s *Store) AppendEvent(ctx context.Context, event events.Event) error {
-	_, err := s.db.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, domain.NewStoredTime(event.CreatedAt))
+	_, err := s.db.ExecContext(ctx, insertOutboxStatement, event.ID, event.WorkspaceID, event.ActorID, event.Topic, event.Payload, event.PrivatePayload, domain.NewStoredTime(event.CreatedAt))
 	return err
 }
 
@@ -2566,6 +2612,102 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("index scheduled message files: %w", err)
 		}
 	}
+	if version < 119 {
+		columns, err := s.outboxColumns(ctx, db)
+		if err != nil {
+			return err
+		}
+		if !columns["private_payload"] {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE outbox ADD COLUMN private_payload TEXT NOT NULL DEFAULT ''`); err != nil {
+				return fmt.Errorf("migrate private outbox payload: %w", err)
+			}
+		}
+	}
+	if version < 120 {
+		workflowStepColumns, err := s.tableColumns(ctx, db, "workflow_steps")
+		if err != nil {
+			return err
+		}
+		for _, column := range []struct {
+			name       string
+			definition string
+		}{
+			{"workflow_run_id", `TEXT NOT NULL DEFAULT ''`},
+			{"app_id", `TEXT NOT NULL DEFAULT ''`},
+			{"function_id", `TEXT NOT NULL DEFAULT ''`},
+		} {
+			if workflowStepColumns[column.name] {
+				continue
+			}
+			if _, err := db.ExecContext(ctx, `ALTER TABLE workflow_steps ADD COLUMN `+column.name+` `+column.definition); err != nil {
+				return fmt.Errorf("migrate workflow step %s: %w", column.name, err)
+			}
+		}
+		statements := []string{
+			`CREATE TABLE IF NOT EXISTS workflows (
+				id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
+				owner_id TEXT NOT NULL REFERENCES users(id), callback_id TEXT NOT NULL DEFAULT '', title TEXT NOT NULL,
+				description TEXT NOT NULL DEFAULT '', input_schema TEXT NOT NULL DEFAULT '{}', steps TEXT NOT NULL DEFAULT '[]',
+				status TEXT NOT NULL, version INTEGER NOT NULL, published_version INTEGER NOT NULL DEFAULT 0,
+				created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS workflows_callback ON workflows(workspace_id, app_id, callback_id) WHERE callback_id <> ''`,
+			`CREATE INDEX IF NOT EXISTS workflows_workspace_id ON workflows(workspace_id, id)`,
+			`CREATE TABLE IF NOT EXISTS workflow_triggers (
+				id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+				workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+				type TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+				version INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS workflow_triggers_workflow ON workflow_triggers(workspace_id, workflow_id, id)`,
+			`CREATE TABLE IF NOT EXISTS workflow_runs (
+				id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id), workflow_version INTEGER NOT NULL,
+				trigger_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
+				actor_id TEXT NOT NULL DEFAULT '', conversation_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL,
+				inputs TEXT NOT NULL DEFAULT '{}', outputs TEXT NOT NULL DEFAULT '{}', error TEXT NOT NULL DEFAULT '',
+				current_step INTEGER NOT NULL DEFAULT 0, idempotency_key TEXT NOT NULL DEFAULT '',
+				created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, completed_at INTEGER NOT NULL DEFAULT 0
+			)`,
+			`CREATE UNIQUE INDEX IF NOT EXISTS workflow_runs_idempotency ON workflow_runs(workspace_id, idempotency_key) WHERE idempotency_key <> ''`,
+			`CREATE INDEX IF NOT EXISTS workflow_runs_workflow ON workflow_runs(workspace_id, workflow_id, id)`,
+			`CREATE TABLE IF NOT EXISTS automation_permissions (
+				workspace_id TEXT NOT NULL REFERENCES workspaces(id), resource_type TEXT NOT NULL, resource_id TEXT NOT NULL,
+				app_id TEXT NOT NULL DEFAULT '', permission_type TEXT NOT NULL, user_ids TEXT NOT NULL DEFAULT '[]',
+				channel_ids TEXT NOT NULL DEFAULT '[]', team_ids TEXT NOT NULL DEFAULT '[]', org_ids TEXT NOT NULL DEFAULT '[]',
+				updated_at INTEGER NOT NULL, PRIMARY KEY (workspace_id, resource_type, resource_id)
+			)`,
+			`CREATE TABLE IF NOT EXISTS featured_workflows (
+				workspace_id TEXT NOT NULL REFERENCES workspaces(id), conversation_id TEXT NOT NULL REFERENCES conversations(id),
+				trigger_id TEXT NOT NULL REFERENCES workflow_triggers(id) ON DELETE CASCADE, title TEXT NOT NULL DEFAULT '',
+				position INTEGER NOT NULL, PRIMARY KEY (workspace_id, conversation_id, trigger_id),
+				UNIQUE (workspace_id, conversation_id, position)
+			)`,
+			`CREATE INDEX IF NOT EXISTS featured_workflows_channels ON featured_workflows(workspace_id, conversation_id, position)`,
+		}
+		for _, statement := range statements {
+			if _, err := db.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("migrate workflow automation: %w", err)
+			}
+		}
+	}
+	if version < 121 {
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workflow_revisions (
+			workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+			workspace_id TEXT NOT NULL REFERENCES workspaces(id), version INTEGER NOT NULL, title TEXT NOT NULL,
+			steps TEXT NOT NULL DEFAULT '[]', status TEXT NOT NULL, created_at INTEGER NOT NULL,
+			PRIMARY KEY (workflow_id, version)
+		)`); err != nil {
+			return fmt.Errorf("migrate workflow revisions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS workflow_revisions_workspace ON workflow_revisions(workspace_id, workflow_id, version)`); err != nil {
+			return fmt.Errorf("index workflow revisions: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO workflow_revisions(workflow_id, workspace_id, version, title, steps, status, created_at)
+			SELECT id, workspace_id, version, title, steps, status, updated_at FROM workflows WHERE true
+			ON CONFLICT(workflow_id, version) DO NOTHING`); err != nil {
+			return fmt.Errorf("backfill workflow revisions: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2836,7 +2978,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflow_steps" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -3883,6 +4025,46 @@ func (s *Store) LookupToken(ctx context.Context, token string) (domain.TokenReco
 		record.ExpiresAt = time.Unix(0, expiresAt).UTC()
 	}
 	return record, nil
+}
+
+func (s *Store) ListAppAuthorizations(ctx context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
+	if appID == "" || workspaceID == "" {
+		return nil, store.InvalidArgument("app authorization identity is required")
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT user_id, bot_id, token_type, scopes
+		FROM tokens WHERE app_id = ? AND workspace_id = ? AND revoked = 0
+		AND (expires_at = 0 OR expires_at > ?) AND token_type IN ('bot', 'user')
+		ORDER BY token_type, user_id, bot_id, token_hash`, appID, workspaceID, time.Now().UTC().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	byKey := make(map[string]domain.AppAuthorization)
+	keys := make([]string, 0)
+	for rows.Next() {
+		var userID domain.UserID
+		var botID domain.BotID
+		var tokenType, scopes string
+		if err := rows.Scan(&userID, &botID, &tokenType, &scopes); err != nil {
+			return nil, err
+		}
+		key := tokenType + "\x00" + string(userID) + "\x00" + string(botID)
+		value, exists := byKey[key]
+		if !exists {
+			keys = append(keys, key)
+			value = domain.AppAuthorization{AppID: appID, WorkspaceID: workspaceID, UserID: userID, BotID: botID, TokenType: tokenType}
+		}
+		value.Scopes = domain.NormalizeScopes(append(value.Scopes, strings.Fields(scopes)...))
+		byKey[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]domain.AppAuthorization, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, byKey[key])
+	}
+	return result, nil
 }
 
 func (s *Store) SeedAppToken(ctx context.Context, token string, record domain.AppTokenRecord) error {
@@ -5231,7 +5413,7 @@ func (s *Store) DeleteView(ctx context.Context, workspace domain.WorkspaceID, us
 func scanWorkflowStep(row interface{ Scan(...any) error }) (domain.WorkflowStep, error) {
 	var value domain.WorkflowStep
 	var created, updated int64
-	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.UserID, &value.EditID, &value.Status, &value.Inputs, &value.Outputs, &value.Error, &value.StepName, &value.ImageURL, &created, &updated); err != nil {
+	if err := row.Scan(&value.ID, &value.WorkflowRunID, &value.WorkspaceID, &value.AppID, &value.UserID, &value.FunctionID, &value.EditID, &value.Status, &value.Inputs, &value.Outputs, &value.Error, &value.StepName, &value.ImageURL, &created, &updated); err != nil {
 		return domain.WorkflowStep{}, err
 	}
 	value.CreatedAt = time.Unix(0, created).UTC()
@@ -5239,7 +5421,7 @@ func scanWorkflowStep(row interface{ Scan(...any) error }) (domain.WorkflowStep,
 	return value, nil
 }
 
-const workflowStepColumns = `id, workspace_id, user_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at`
+const workflowStepColumns = `id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at`
 
 func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Status == "" || value.UpdatedAt.IsZero() {
@@ -5263,7 +5445,7 @@ func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, 
 	} else if value.CreatedAt.IsZero() {
 		value.CreatedAt = value.UpdatedAt
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(id, workspace_id, user_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET user_id = excluded.user_id, edit_id = excluded.edit_id, status = excluded.status, inputs = excluded.inputs, outputs = excluded.outputs, error = excluded.error, step_name = excluded.step_name, image_url = excluded.image_url, updated_at = excluded.updated_at`, value.ID, value.WorkspaceID, value.UserID, value.EditID, value.Status, value.Inputs, value.Outputs, value.Error, value.StepName, value.ImageURL, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status, inputs, outputs, error, step_name, image_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET workflow_run_id = excluded.workflow_run_id, app_id = excluded.app_id, user_id = excluded.user_id, function_id = excluded.function_id, edit_id = excluded.edit_id, status = excluded.status, inputs = excluded.inputs, outputs = excluded.outputs, error = excluded.error, step_name = excluded.step_name, image_url = excluded.image_url, updated_at = excluded.updated_at`, value.ID, value.WorkflowRunID, value.WorkspaceID, value.AppID, value.UserID, value.FunctionID, value.EditID, value.Status, value.Inputs, value.Outputs, value.Error, value.StepName, value.ImageURL, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
 	if err != nil {
 		return err
 	}
@@ -5276,6 +5458,635 @@ func (s *Store) SetWorkflowStep(ctx context.Context, value domain.WorkflowStep, 
 func (s *Store) GetWorkflowStep(ctx context.Context, workspace domain.WorkspaceID, id domain.WorkflowStepID) (domain.WorkflowStep, error) {
 	value, err := scanWorkflowStep(s.db.QueryRowContext(ctx, `SELECT `+workflowStepColumns+` FROM workflow_steps WHERE workspace_id = ? AND id = ?`, workspace, id))
 	return value, translateNotFound(err)
+}
+
+const workflowColumns = `id, workspace_id, app_id, owner_id, callback_id, title, description, input_schema, steps, status, version, published_version, created_at, updated_at`
+
+func scanWorkflow(row interface{ Scan(...any) error }) (domain.WorkflowDefinition, error) {
+	var value domain.WorkflowDefinition
+	var created, updated int64
+	if err := row.Scan(&value.ID, &value.WorkspaceID, &value.AppID, &value.OwnerID, &value.CallbackID, &value.Title,
+		&value.Description, &value.InputSchema, &value.Steps, &value.Status, &value.Version, &value.PublishedVersion,
+		&created, &updated); err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	value.CreatedAt = time.Unix(0, created).UTC()
+	value.UpdatedAt = time.Unix(0, updated).UTC()
+	return value, nil
+}
+
+func (s *Store) CreateWorkflow(ctx context.Context, value domain.WorkflowDefinition, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.OwnerID == "" ||
+		value.Title == "" || value.Status == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid workflow")
+	}
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflows(
+		id, workspace_id, app_id, owner_id, callback_id, title, description, input_schema, steps, status,
+		version, published_version, created_at, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkspaceID, value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description,
+		value.InputSchema, value.Steps, value.Status, value.Version, value.PublishedVersion,
+		value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+	if err != nil {
+		return classify(err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
+		workflow_id, workspace_id, version, title, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, value.Version, value.Title, value.Steps,
+		value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinition, expectedVersion uint64, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || expectedVersion == 0 {
+		return store.InvalidArgument("invalid workflow update")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE workflows SET
+		app_id = ?, owner_id = ?, callback_id = ?, title = ?, description = ?, input_schema = ?, steps = ?,
+		status = ?, version = ?, published_version = ?, updated_at = ?
+		WHERE id = ? AND workspace_id = ? AND version = ?`,
+		value.AppID, value.OwnerID, value.CallbackID, value.Title, value.Description, value.InputSchema, value.Steps,
+		value.Status, expectedVersion+1, value.PublishedVersion, value.UpdatedAt.UTC().UnixNano(),
+		value.ID, value.WorkspaceID, expectedVersion)
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		var version uint64
+		lookupErr := tx.QueryRowContext(ctx, `SELECT version FROM workflows WHERE id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID).Scan(&version)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if lookupErr != nil {
+			return lookupErr
+		}
+		return store.ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workflow_revisions(
+		workflow_id, workspace_id, version, title, steps, status, created_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?)`, value.ID, value.WorkspaceID, expectedVersion+1, value.Title, value.Steps,
+		value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetWorkflow(ctx context.Context, workspace domain.WorkspaceID, id domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	value, err := scanWorkflow(s.db.QueryRowContext(ctx, `SELECT `+workflowColumns+` FROM workflows WHERE workspace_id = ? AND id = ?`, workspace, id))
+	return value, translateNotFound(err)
+}
+
+func (s *Store) ListWorkflows(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowColumns+` FROM workflows
+		WHERE workspace_id = ? AND id > ? ORDER BY id LIMIT ?`, workspace, after, request.Limit+1)
+	if err != nil {
+		return nil, false, "", err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowDefinition, 0, request.Limit+1)
+	for rows.Next() {
+		value, scanErr := scanWorkflow(rows)
+		if scanErr != nil {
+			return nil, false, "", scanErr
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, "", err
+	}
+	more := len(values) > request.Limit
+	if more {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		next, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return values, more, next, err
+}
+
+func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowRevision, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT workflow_id, workspace_id, version, title, steps, status, created_at
+		FROM workflow_revisions WHERE workspace_id = ? AND workflow_id = ? ORDER BY version`, workspace, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowRevision, 0)
+	for rows.Next() {
+		var value domain.WorkflowRevision
+		var created int64
+		if err := rows.Scan(&value.WorkflowID, &value.WorkspaceID, &value.Version, &value.Title, &value.Steps, &value.Status, &created); err != nil {
+			return nil, err
+		}
+		value.CreatedAt = time.Unix(0, created).UTC()
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(values) == 0 {
+		if _, err := s.GetWorkflow(ctx, workspace, workflowID); err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
+}
+
+const workflowTriggerColumns = `id, workflow_id, workspace_id, app_id, title, type, config, enabled, version, created_at, updated_at`
+
+func scanWorkflowTrigger(row interface{ Scan(...any) error }) (domain.WorkflowTrigger, error) {
+	var value domain.WorkflowTrigger
+	var created, updated int64
+	var enabled int
+	if err := row.Scan(&value.ID, &value.WorkflowID, &value.WorkspaceID, &value.AppID, &value.Title, &value.Type,
+		&value.Config, &enabled, &value.Version, &created, &updated); err != nil {
+		return domain.WorkflowTrigger{}, err
+	}
+	value.Enabled = enabled != 0
+	value.CreatedAt = time.Unix(0, created).UTC()
+	value.UpdatedAt = time.Unix(0, updated).UTC()
+	return value, nil
+}
+
+func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTrigger, expectedVersion uint64, event events.Event) error {
+	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
+		value.Type == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid workflow trigger")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var workflowApp domain.AppID
+	if err := tx.QueryRowContext(ctx, `SELECT app_id FROM workflows WHERE id = ? AND workspace_id = ?`, value.WorkflowID, value.WorkspaceID).Scan(&workflowApp); err != nil {
+		return translateNotFound(err)
+	}
+	if workflowApp != value.AppID {
+		return store.ErrNotFound
+	}
+	if expectedVersion == 0 {
+		value.Version = 1
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_triggers(
+			id, workflow_id, workspace_id, app_id, title, type, config, enabled, version, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			value.ID, value.WorkflowID, value.WorkspaceID, value.AppID, value.Title, value.Type, value.Config,
+			boolInt(value.Enabled), value.Version, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+		if err != nil {
+			return classify(err)
+		}
+	} else {
+		result, updateErr := tx.ExecContext(ctx, `UPDATE workflow_triggers SET
+			workflow_id = ?, app_id = ?, title = ?, type = ?, config = ?, enabled = ?, version = ?, updated_at = ?
+			WHERE id = ? AND workspace_id = ? AND workflow_id = ? AND app_id = ? AND version = ?`,
+			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, boolInt(value.Enabled), expectedVersion+1,
+			value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, value.WorkflowID, value.AppID, expectedVersion)
+		if updateErr != nil {
+			return classify(updateErr)
+		}
+		changed, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return rowsErr
+		}
+		if changed == 0 {
+			var currentWorkflow domain.WorkflowID
+			var currentApp domain.AppID
+			var version uint64
+			lookupErr := tx.QueryRowContext(ctx, `SELECT workflow_id, app_id, version FROM workflow_triggers WHERE id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID).Scan(&currentWorkflow, &currentApp, &version)
+			if errors.Is(lookupErr, sql.ErrNoRows) {
+				return store.ErrNotFound
+			}
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if currentWorkflow != value.WorkflowID || currentApp != value.AppID {
+				return store.ErrNotFound
+			}
+			return store.ErrConflict
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetWorkflowTrigger(ctx context.Context, workspace domain.WorkspaceID, id domain.WorkflowTriggerID) (domain.WorkflowTrigger, error) {
+	value, err := scanWorkflowTrigger(s.db.QueryRowContext(ctx, `SELECT `+workflowTriggerColumns+` FROM workflow_triggers WHERE workspace_id = ? AND id = ?`, workspace, id))
+	return value, translateNotFound(err)
+}
+
+func (s *Store) ListWorkflowTriggers(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowTrigger, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowTriggerColumns+` FROM workflow_triggers
+		WHERE workspace_id = ? AND workflow_id = ? ORDER BY id`, workspace, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowTrigger, 0)
+	for rows.Next() {
+		value, scanErr := scanWorkflowTrigger(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+const workflowRunColumns = `id, workflow_id, workflow_version, trigger_id, workspace_id, app_id, actor_id, conversation_id, status, inputs, outputs, error, current_step, idempotency_key, created_at, updated_at, completed_at`
+
+func scanWorkflowRun(row interface{ Scan(...any) error }) (domain.WorkflowRun, error) {
+	var value domain.WorkflowRun
+	var created, updated, completed int64
+	if err := row.Scan(&value.ID, &value.WorkflowID, &value.WorkflowVersion, &value.TriggerID, &value.WorkspaceID,
+		&value.AppID, &value.ActorID, &value.ConversationID, &value.Status, &value.Inputs, &value.Outputs,
+		&value.Error, &value.CurrentStep, &value.IdempotencyKey, &created, &updated, &completed); err != nil {
+		return domain.WorkflowRun{}, err
+	}
+	value.CreatedAt = time.Unix(0, created).UTC()
+	value.UpdatedAt = time.Unix(0, updated).UTC()
+	if completed != 0 {
+		value.CompletedAt = time.Unix(0, completed).UTC()
+	}
+	return value, nil
+}
+
+func workflowTime(value time.Time) int64 {
+	if value.IsZero() {
+		return 0
+	}
+	return value.UTC().UnixNano()
+}
+
+func (s *Store) CreateWorkflowRun(ctx context.Context, value domain.WorkflowRun, firstStep *domain.WorkflowStep, emitted []events.Event) error {
+	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
+		value.Status == "" || value.WorkflowVersion == 0 || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid workflow run")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var workflowApp domain.AppID
+	if err := tx.QueryRowContext(ctx, `SELECT app_id FROM workflows WHERE id = ? AND workspace_id = ?`, value.WorkflowID, value.WorkspaceID).Scan(&workflowApp); err != nil {
+		return translateNotFound(err)
+	}
+	if workflowApp != value.AppID {
+		return store.ErrNotFound
+	}
+	if firstStep != nil && (firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
+		firstStep.AppID == "" || firstStep.UserID == "" || firstStep.Status != domain.WorkflowStepExecuting ||
+		firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero()) {
+		return store.InvalidArgument("invalid first workflow step")
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO workflow_runs(
+		id, workflow_id, workflow_version, trigger_id, workspace_id, app_id, actor_id, conversation_id,
+		status, inputs, outputs, error, current_step, idempotency_key, created_at, updated_at, completed_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		value.ID, value.WorkflowID, value.WorkflowVersion, value.TriggerID, value.WorkspaceID, value.AppID,
+		value.ActorID, value.ConversationID, value.Status, value.Inputs, value.Outputs, value.Error,
+		value.CurrentStep, value.IdempotencyKey, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano(),
+		workflowTime(value.CompletedAt))
+	if err != nil {
+		return classify(err)
+	}
+	if firstStep != nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(
+			id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status,
+			inputs, outputs, error, step_name, image_url, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			firstStep.ID, firstStep.WorkflowRunID, firstStep.WorkspaceID, firstStep.AppID, firstStep.UserID,
+			firstStep.FunctionID, firstStep.EditID, firstStep.Status, firstStep.Inputs, firstStep.Outputs,
+			firstStep.Error, firstStep.StepName, firstStep.ImageURL, firstStep.CreatedAt.UTC().UnixNano(),
+			firstStep.UpdatedAt.UTC().UnixNano())
+		if err != nil {
+			return classify(err)
+		}
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) AdvanceWorkflowRun(ctx context.Context, completed domain.WorkflowStep, next *domain.WorkflowStep, value domain.WorkflowRun, expectedStep int, emitted []events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.Status == "" || value.UpdatedAt.IsZero() ||
+		completed.ID == "" || completed.WorkflowRunID != value.ID || completed.Status == domain.WorkflowStepExecuting {
+		return store.InvalidArgument("invalid workflow run advance")
+	}
+	if next != nil && (next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
+		next.AppID == "" || next.UserID == "" || next.Status != domain.WorkflowStepExecuting ||
+		next.CreatedAt.IsZero() || next.UpdatedAt.IsZero()) {
+		return store.InvalidArgument("invalid next workflow step")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stepResult, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET
+		app_id = ?, user_id = ?, function_id = ?, status = ?, inputs = ?, outputs = ?, error = ?,
+		step_name = ?, image_url = ?, updated_at = ?
+		WHERE id = ? AND workflow_run_id = ? AND workspace_id = ? AND status = ?`,
+		completed.AppID, completed.UserID, completed.FunctionID, completed.Status, completed.Inputs, completed.Outputs,
+		completed.Error, completed.StepName, completed.ImageURL, completed.UpdatedAt.UTC().UnixNano(),
+		completed.ID, value.ID, value.WorkspaceID, domain.WorkflowStepExecuting)
+	if err != nil {
+		return classify(err)
+	}
+	stepChanged, err := stepResult.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if stepChanged == 0 {
+		return store.ErrConflict
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE workflow_runs SET
+		workflow_id = ?, workflow_version = ?, trigger_id = ?, app_id = ?, actor_id = ?, conversation_id = ?,
+		status = ?, inputs = ?, outputs = ?, error = ?, current_step = ?, idempotency_key = ?,
+		updated_at = ?, completed_at = ?
+		WHERE id = ? AND workspace_id = ? AND status = ? AND current_step = ?`,
+		value.WorkflowID, value.WorkflowVersion, value.TriggerID, value.AppID, value.ActorID, value.ConversationID,
+		value.Status, value.Inputs, value.Outputs, value.Error, value.CurrentStep, value.IdempotencyKey,
+		value.UpdatedAt.UTC().UnixNano(), workflowTime(value.CompletedAt), value.ID, value.WorkspaceID,
+		domain.WorkflowRunRunning, expectedStep)
+	if err != nil {
+		return classify(err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if changed == 0 {
+		var status domain.WorkflowRunStatus
+		lookupErr := tx.QueryRowContext(ctx, `SELECT status FROM workflow_runs WHERE id = ? AND workspace_id = ?`, value.ID, value.WorkspaceID).Scan(&status)
+		if errors.Is(lookupErr, sql.ErrNoRows) {
+			return store.ErrNotFound
+		}
+		if lookupErr != nil {
+			return lookupErr
+		}
+		return store.ErrConflict
+	}
+	if next != nil {
+		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_steps(
+			id, workflow_run_id, workspace_id, app_id, user_id, function_id, edit_id, status,
+			inputs, outputs, error, step_name, image_url, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			next.ID, next.WorkflowRunID, next.WorkspaceID, next.AppID, next.UserID, next.FunctionID, next.EditID,
+			next.Status, next.Inputs, next.Outputs, next.Error, next.StepName, next.ImageURL,
+			next.CreatedAt.UTC().UnixNano(), next.UpdatedAt.UTC().UnixNano())
+		if err != nil {
+			return classify(err)
+		}
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetWorkflowRun(ctx context.Context, workspace domain.WorkspaceID, id domain.WorkflowRunID) (domain.WorkflowRun, error) {
+	value, err := scanWorkflowRun(s.db.QueryRowContext(ctx, `SELECT `+workflowRunColumns+` FROM workflow_runs WHERE workspace_id = ? AND id = ?`, workspace, id))
+	return value, translateNotFound(err)
+}
+
+func (s *Store) GetWorkflowRunByIdempotency(ctx context.Context, workspace domain.WorkspaceID, key string) (domain.WorkflowRun, error) {
+	if strings.TrimSpace(key) == "" {
+		return domain.WorkflowRun{}, store.InvalidArgument("workflow idempotency key is required")
+	}
+	value, err := scanWorkflowRun(s.db.QueryRowContext(ctx, `SELECT `+workflowRunColumns+` FROM workflow_runs WHERE workspace_id = ? AND idempotency_key = ?`, workspace, key))
+	return value, translateNotFound(err)
+}
+
+func (s *Store) ListWorkflowRuns(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, request domain.PageRequest) ([]domain.WorkflowRun, bool, domain.Cursor, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
+	query := `SELECT ` + workflowRunColumns + ` FROM workflow_runs WHERE workspace_id = ? AND id > ?`
+	args := []any{workspace, after}
+	if workflowID != "" {
+		query += ` AND workflow_id = ?`
+		args = append(args, workflowID)
+	}
+	query += ` ORDER BY id LIMIT ?`
+	args = append(args, request.Limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, false, "", err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowRun, 0, request.Limit+1)
+	for rows.Next() {
+		value, scanErr := scanWorkflowRun(rows)
+		if scanErr != nil {
+			return nil, false, "", scanErr
+		}
+		values = append(values, value)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, "", err
+	}
+	more := len(values) > request.Limit
+	if more {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		next, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return values, more, next, err
+}
+
+func automationPermissionJSON(value domain.AutomationPermission) (string, string, string, string, error) {
+	userIDs, err := json.Marshal(value.UserIDs)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	channelIDs, err := json.Marshal(value.ChannelIDs)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	teamIDs, err := json.Marshal(value.TeamIDs)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	orgIDs, err := json.Marshal(value.OrgIDs)
+	if err != nil {
+		return "", "", "", "", err
+	}
+	return string(userIDs), string(channelIDs), string(teamIDs), string(orgIDs), nil
+}
+
+func (s *Store) SetAutomationPermission(ctx context.Context, value domain.AutomationPermission, event events.Event) error {
+	if value.WorkspaceID == "" || value.ResourceType == "" || value.ResourceID == "" ||
+		value.PermissionType == "" || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid automation permission")
+	}
+	userIDs, channelIDs, teamIDs, orgIDs, err := automationPermissionJSON(value)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.ExecContext(ctx, `INSERT INTO automation_permissions(
+		workspace_id, resource_type, resource_id, app_id, permission_type, user_ids, channel_ids, team_ids, org_ids, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(workspace_id, resource_type, resource_id) DO UPDATE SET
+		app_id = excluded.app_id, permission_type = excluded.permission_type, user_ids = excluded.user_ids,
+		channel_ids = excluded.channel_ids, team_ids = excluded.team_ids, org_ids = excluded.org_ids,
+		updated_at = excluded.updated_at`,
+		value.WorkspaceID, value.ResourceType, value.ResourceID, value.AppID, value.PermissionType,
+		userIDs, channelIDs, teamIDs, orgIDs, value.UpdatedAt.UTC().UnixNano())
+	if err != nil {
+		return classify(err)
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) GetAutomationPermission(ctx context.Context, workspace domain.WorkspaceID, resourceType, resourceID string) (domain.AutomationPermission, error) {
+	var value domain.AutomationPermission
+	var userIDs, channelIDs, teamIDs, orgIDs string
+	var updated int64
+	err := s.db.QueryRowContext(ctx, `SELECT workspace_id, resource_type, resource_id, app_id, permission_type,
+		user_ids, channel_ids, team_ids, org_ids, updated_at FROM automation_permissions
+		WHERE workspace_id = ? AND resource_type = ? AND resource_id = ?`, workspace, resourceType, resourceID).
+		Scan(&value.WorkspaceID, &value.ResourceType, &value.ResourceID, &value.AppID, &value.PermissionType,
+			&userIDs, &channelIDs, &teamIDs, &orgIDs, &updated)
+	if err != nil {
+		return domain.AutomationPermission{}, translateNotFound(err)
+	}
+	if err := json.Unmarshal([]byte(userIDs), &value.UserIDs); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := json.Unmarshal([]byte(channelIDs), &value.ChannelIDs); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := json.Unmarshal([]byte(teamIDs), &value.TeamIDs); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	if err := json.Unmarshal([]byte(orgIDs), &value.OrgIDs); err != nil {
+		return domain.AutomationPermission{}, err
+	}
+	value.UpdatedAt = time.Unix(0, updated).UTC()
+	return value, nil
+}
+
+func (s *Store) SetFeaturedWorkflows(ctx context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, values []domain.FeaturedWorkflow, event events.Event) error {
+	if workspace == "" || conversation == "" {
+		return store.InvalidArgument("invalid featured workflow target")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var exists int
+	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM conversations WHERE workspace_id = ? AND id = ?`, workspace, conversation).Scan(&exists); err != nil {
+		return translateNotFound(err)
+	}
+	seen := make(map[domain.WorkflowTriggerID]struct{}, len(values))
+	for _, value := range values {
+		if value.TriggerID == "" {
+			return store.InvalidArgument("featured workflow trigger is required")
+		}
+		if _, duplicate := seen[value.TriggerID]; duplicate {
+			return store.ErrAlreadyExists
+		}
+		seen[value.TriggerID] = struct{}{}
+		if err := tx.QueryRowContext(ctx, `SELECT 1 FROM workflow_triggers WHERE workspace_id = ? AND id = ?`, workspace, value.TriggerID).Scan(&exists); err != nil {
+			return translateNotFound(err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM featured_workflows WHERE workspace_id = ? AND conversation_id = ?`, workspace, conversation); err != nil {
+		return err
+	}
+	for position, value := range values {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO featured_workflows(
+			workspace_id, conversation_id, trigger_id, title, position
+		) VALUES (?, ?, ?, ?, ?)`, workspace, conversation, value.TriggerID, value.Title, position); err != nil {
+			return classify(err)
+		}
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (s *Store) ListFeaturedWorkflows(ctx context.Context, workspace domain.WorkspaceID, conversations []domain.ConversationID) ([]domain.FeaturedWorkflow, error) {
+	values := make([]domain.FeaturedWorkflow, 0)
+	for _, conversation := range conversations {
+		rows, err := s.db.QueryContext(ctx, `SELECT workspace_id, conversation_id, trigger_id, title, position
+			FROM featured_workflows WHERE workspace_id = ? AND conversation_id = ?
+			ORDER BY position`, workspace, conversation)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var value domain.FeaturedWorkflow
+			if err := rows.Scan(&value.WorkspaceID, &value.ConversationID, &value.TriggerID, &value.Title, &value.Position); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			values = append(values, value)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+	}
+	return values, nil
 }
 
 func (s *Store) CreateDialog(ctx context.Context, value domain.Dialog, event events.Event) error {
@@ -8125,8 +8936,8 @@ func insertMessageActivity(ctx context.Context, tx *sql.Tx, message domain.Messa
 	return nil
 }
 
-func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
-	if len(fileIDs) == 0 {
+func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.FileID, message domain.Message, emitted []events.Event) error {
+	if len(fileIDs) == 0 || len(emitted) == 0 {
 		return store.InvalidArgument("a file share message requires a file")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -8151,8 +8962,13 @@ func (s *Store) CreateFileShareMessage(ctx context.Context, fileIDs []domain.Fil
 		}
 		message.Files[index].ID = fileID
 	}
-	if err := insertFileShareMessage(ctx, tx, message, event); err != nil {
+	if err := insertFileShareMessage(ctx, tx, message, emitted[0]); err != nil {
 		return err
+	}
+	for _, event := range emitted[1:] {
+		if err := insertOutbox(ctx, tx, event); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -12279,7 +13095,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	now := s.now()
 	nowText := domain.NewStoredTime(now)
 	expiresText := domain.NewStoredTime(now.Add(lease))
-	query := `SELECT sequence, id, workspace_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0`
+	query := `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND delivered = 0`
 	args := []any{workspace}
 	if topic == "" {
 		predicate, excluded := internalTopicPredicate("topic")
@@ -12303,7 +13119,7 @@ func (s *Store) claimEvents(ctx context.Context, workspace domain.WorkspaceID, t
 	candidates := make([]candidate, 0, limit)
 	for rows.Next() {
 		var item candidate
-		if err := rows.Scan(&item.sequence, &item.event.ID, &item.event.WorkspaceID, &item.event.Topic, &item.event.Payload, &item.created); err != nil {
+		if err := rows.Scan(&item.sequence, &item.event.ID, &item.event.WorkspaceID, &item.event.ActorID, &item.event.Topic, &item.event.Payload, &item.event.PrivatePayload, &item.created); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -12415,7 +13231,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 	predicate, excluded := internalTopicPredicate("topic")
 	args := append([]any{workspace, after}, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ?`+predicate+` ORDER BY sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ?`+predicate+` ORDER BY sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -12425,7 +13241,7 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 		var sequence uint64
 		var event events.Event
 		var created string
-		if err := rows.Scan(&sequence, &event.ID, &event.WorkspaceID, &event.ActorID, &event.Topic, &event.Payload, &created); err != nil {
+		if err := rows.Scan(&sequence, &event.ID, &event.WorkspaceID, &event.ActorID, &event.Topic, &event.Payload, &event.PrivatePayload, &created); err != nil {
 			return nil, err
 		}
 		event.CreatedAt, err = domain.ParseStoredTime(created)
@@ -12444,7 +13260,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	predicate, excluded := internalTopicPredicate("o.topic")
 	args := append([]any{appID, after}, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id WHERE i.app_id = ? AND i.enabled = 1 AND o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -12453,7 +13269,7 @@ func (s *Store) ListAppEventsAfter(ctx context.Context, appID domain.AppID, afte
 	for rows.Next() {
 		var record events.Record
 		var created string
-		if err := rows.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &created); err != nil {
+		if err := rows.Scan(&record.Sequence, &record.Event.ID, &record.Event.WorkspaceID, &record.Event.ActorID, &record.Event.Topic, &record.Event.Payload, &record.Event.PrivatePayload, &created); err != nil {
 			return nil, err
 		}
 		record.Event.CreatedAt, err = domain.ParseStoredTime(created)
@@ -12502,10 +13318,10 @@ func (s *Store) ClaimAppEvent(ctx context.Context, appID domain.AppID, surface, 
 		predicate, excluded := internalTopicPredicate("o.topic")
 		args := append([]any{appID, sequence}, excluded...)
 		var created string
-		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.created_at
+		err = tx.QueryRowContext(ctx, `SELECT o.sequence, o.id, o.workspace_id, o.actor_id, o.topic, o.payload, o.private_payload, o.created_at
 			FROM outbox o JOIN app_installations i ON i.workspace_id = o.workspace_id AND i.app_id = ? AND i.enabled = 1
 			WHERE o.sequence > ?`+predicate+` ORDER BY o.sequence LIMIT 1`, args...).
-			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &created)
+			Scan(&claimed.Sequence, &claimed.Event.ID, &claimed.Event.WorkspaceID, &claimed.Event.ActorID, &claimed.Event.Topic, &claimed.Event.Payload, &claimed.Event.PrivatePayload, &created)
 		if errors.Is(err, sql.ErrNoRows) {
 			return tx.Commit()
 		}
@@ -13491,7 +14307,7 @@ func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.
 }
 
 func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
-	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
+	if len(completions) == 0 || len(completions) != len(files) || len(emitted) == 0 || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
 	}
 	if scheduledID != "" && len(messages) != 1 {
@@ -13604,7 +14420,9 @@ func (s *Store) completeExternalUploads(ctx context.Context, scheduledID domain.
 				return classify(err)
 			}
 		}
-		if err := insertOutbox(ctx, tx, emitted[index]); err != nil {
+	}
+	for _, event := range emitted {
+		if err := insertOutbox(ctx, tx, event); err != nil {
 			return err
 		}
 	}

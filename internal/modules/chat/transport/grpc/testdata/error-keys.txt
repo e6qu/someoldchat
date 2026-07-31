@@ -16,6 +16,11 @@ service.app_datastore_not_found
 service.app_home_not_enabled
 service.app_interaction_unavailable
 service.app_not_hosted
+service.automation_channel_not_found
+service.automation_entities_empty
+service.automation_org_not_found
+service.automation_team_not_found
+service.automation_user_not_found
 service.blob_unavailable
 service.cannot_archive_default
 service.cannot_invite_self
@@ -23,6 +28,8 @@ service.cannot_leave_default
 service.conversation_already_archived
 service.conversation_not_archived
 service.emoji_already_exists
+service.function_access_denied
+service.function_not_running
 service.invalid_access_log
 service.invalid_app_approval
 service.invalid_app_manifest
@@ -82,6 +89,8 @@ service.scheduled_time_too_far
 service.scheduled_too_many
 service.slash_command_in_thread
 service.slash_command_not_found
+service.workflow_function_not_found
+service.workflow_permission_denied
 store.already_exists
 store.bookmark_limit
 store.conflict

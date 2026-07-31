@@ -251,6 +251,25 @@ func recordedNonPinnedCodes() map[string]string {
 		"posting_to_channel_denied": "current files.completeUploadExternal method reference; archived channels cannot accept the generated file-share message",
 		"restricted_too_many":       "current chat.scheduleMessage method reference; the immutable legacy OpenAPI snapshot predates the documented 30-messages-per-five-minute restriction",
 		"no_query":                  "current search.* method references require query; the immutable legacy OpenAPI snapshot omits the Web API error enum",
+		"auth_mismatch":             "current apps.event.authorizations.list method reference; the supplied app token belongs to a different app than event_context",
+		"invalid_event_context":     "current apps.event.authorizations.list method reference; event_context does not resolve to an event visible to the authenticated app",
+		// The immutable legacy OpenAPI snapshot predates current custom
+		// functions and Workflow Builder management methods. These names come
+		// from the first-party method references pinned in
+		// specs/compatibility.yaml.
+		"access_denied":                  "current functions.complete*, functions.distributions.permissions.*, workflows.featured.*, and workflows.triggers.permissions.* method references",
+		"execution_not_in_running_state": "current functions.completeError and functions.completeSuccess method references",
+		"function_execution_not_found":   "current functions.completeError and functions.completeSuccess method references",
+		"function_not_found":             "current functions.distributions.permissions.* and functions.workflows.steps.list method references",
+		"invalid_named_entities":         "current functions.distributions.permissions.set method reference",
+		"invalid_permission_type":        "current functions.distributions.permissions.* and workflows.triggers.permissions.* method references",
+		"named_entities_cannot_be_empty": "current workflows.triggers.permissions.set method reference",
+		"org_not_found":                  "current workflows.triggers.permissions.set method reference",
+		"permission_type_required":       "current functions.distributions.permissions.set method reference",
+		"trigger_not_found":              "current workflows.triggers.permissions.* and workflows.featured.* method references",
+		"error_invalid_channels":         "current workflows.featured.list method reference",
+		"error_modifying_workflows":      "current workflows.featured.add, remove, and set method references",
+		"unknown_workflow_id":            "current functions.workflows.steps.list method reference",
 		// Recorded deviation: Socket Mode is optional in this deployment.
 		"socket_mode_unavailable": "recorded deviation, and the only remaining non-200 JSON error status",
 		// Recorded deviation: the snapshot describes no routing failure at all, so

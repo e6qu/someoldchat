@@ -46,6 +46,10 @@ type slackRule struct {
 	eventType string
 	// surfaces are the surfaces this event may be written to.
 	surfaces Surface
+	// automatic marks an app-targeted event Slack dispatches because the app
+	// owns the invoked resource rather than because the app subscribed to the
+	// event name in its manifest.
+	automatic bool
 	// build renders the inner event. A rule with an eventType and no build is a
 	// mapping whose inner shape this repository has not modelled yet — either
 	// because the pinned snapshot does not settle it, or because the event needs
@@ -86,6 +90,10 @@ func mapped(eventType string, surfaces Surface) slackRule {
 // translated builds a row for a topic this package can render today.
 func translated(eventType string, surfaces Surface, build builder) slackRule {
 	return slackRule{eventType: eventType, surfaces: surfaces, build: build}
+}
+
+func automatic(eventType string, surfaces Surface, build builder) slackRule {
+	return slackRule{eventType: eventType, surfaces: surfaces, automatic: true, build: build}
 }
 
 // topicRules is the single topic table.
@@ -149,10 +157,10 @@ var topicRules = []topicRule{
 		note: "pinned topic; inner shape NOT settled by the pinned material — the field names are carried over from the pinned reaction_added example, which is the only inner event the snapshot works out"},
 	{topic: "pin.removed", slack: translated("pin_removed", everySurface, itemEvent("pin_removed", false)),
 		note: "pinned topic; inner shape NOT settled, as pin.added"},
-	{topic: "star.added", recipient: true, slack: translated("star_added", SurfaceRTM, itemEvent("star_added", false)),
-		note: "current Slack reference authorizes a non-bot user and sends RTM only for the authenticated user; Events API delivery remains withheld until user-token subscriptions are modelled"},
-	{topic: "star.removed", recipient: true, slack: translated("star_removed", SurfaceRTM, itemEvent("star_removed", false)),
-		note: "current Slack reference authorizes a non-bot user and sends RTM only for the authenticated user; Events API delivery remains withheld until user-token subscriptions are modelled"},
+	{topic: "star.added", recipient: true, slack: translated("star_added", everySurface, itemEvent("star_added", false)),
+		note: "current Slack event reference: Events and RTM; recipient-scoped to the authenticated user authorization"},
+	{topic: "star.removed", recipient: true, slack: translated("star_removed", everySurface, itemEvent("star_removed", false)),
+		note: "current Slack event reference: Events and RTM; recipient-scoped to the authenticated user authorization"},
 
 	// ---- conversation membership -------------------------------------------
 	{topic: "conversation.member_added", slack: translated("member_joined_channel", everySurface, memberJoinedChannel),
@@ -257,6 +265,10 @@ var topicRules = []topicRule{
 		note: "not pinned: role administration has no Slack event"},
 	{topic: "file.created", slack: mapped("file_created", everySurface),
 		note: "pinned topic; app delivery hydrates the file object only when the installed bot can access it"},
+	{topic: "file.shared", slack: mapped("file_shared", everySurface),
+		note: "current Slack reference; delivery uses the immutable file/channel snapshot captured by the share transaction"},
+	{topic: "file.unshared", slack: mapped("file_unshared", everySurface),
+		note: "current Slack reference; delivery authorizes against the channel recorded before the final share is removed"},
 	{topic: "file.public_shared", slack: mapped("file_public", everySurface),
 		note: "pinned topic; needs the file object"},
 	{topic: "file.public_revoked",
@@ -305,6 +317,8 @@ var topicRules = []topicRule{
 	{topic: "view.published", note: "an interaction payload, not an event"},
 	{topic: "view.pushed", note: "an interaction payload, not an event"},
 	{topic: "view.updated", note: "an interaction payload, not an event"},
+	{topic: "function_executed", slack: automatic("function_executed", appSurfaces, functionExecuted),
+		note: "current function_executed reference: dispatched automatically when a function owned by the target app runs; no event subscription or scope is required"},
 	{topic: "workflow.step_configured", note: "not pinned: workflow_step_execute postdates the snapshot"},
 	{topic: "workflow.step_completed", note: "not pinned: workflow_step_execute postdates the snapshot"},
 	{topic: "workflow.step_failed", note: "not pinned: workflow_step_execute postdates the snapshot"},
@@ -402,6 +416,19 @@ func SlackEventType(topic string) (string, bool) {
 func SlackTranslatable(topic string, surface Surface) bool {
 	rule := ruleFor(topic).slack
 	return rule.build != nil && rule.surfaces&surface != 0
+}
+
+// AutomaticSlackEvent reports whether Slack dispatches this event because the
+// target app owns the invoked resource, independent of manifest event
+// subscriptions. Keeping the decision in the topic table prevents HTTP Events
+// API and Socket Mode from acquiring different delivery rules.
+func AutomaticSlackEvent(eventType string) bool {
+	for _, rule := range topicRules {
+		if rule.slack.eventType == eventType && rule.slack.automatic {
+			return true
+		}
+	}
+	return false
 }
 
 // SlackTopics lists every topic the table knows, in sorted order, for a report

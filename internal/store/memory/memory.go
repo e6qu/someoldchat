@@ -43,6 +43,12 @@ type Store struct {
 	permissionRequests            map[domain.AppRequestID]domain.AppPermissionRequest
 	views                         map[domain.ViewID]domain.View
 	workflowSteps                 map[domain.WorkflowStepID]domain.WorkflowStep
+	workflows                     map[domain.WorkflowID]domain.WorkflowDefinition
+	workflowRevisions             map[domain.WorkflowID][]domain.WorkflowRevision
+	workflowTriggers              map[domain.WorkflowTriggerID]domain.WorkflowTrigger
+	workflowRuns                  map[domain.WorkflowRunID]domain.WorkflowRun
+	automationPermissions         map[string]domain.AutomationPermission
+	featuredWorkflows             map[domain.ConversationID][]domain.FeaturedWorkflow
 	dialogs                       map[domain.DialogID]domain.Dialog
 	bots                          map[domain.BotID]domain.Bot
 	migrations                    map[string]domain.UserMigration
@@ -178,7 +184,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -573,6 +579,46 @@ func (s *Store) LookupToken(_ context.Context, token string) (domain.TokenRecord
 	}
 	record.Scopes = append([]string(nil), record.Scopes...)
 	return record, nil
+}
+
+func (s *Store) ListAppAuthorizations(_ context.Context, appID domain.AppID, workspaceID domain.WorkspaceID) ([]domain.AppAuthorization, error) {
+	if appID == "" || workspaceID == "" {
+		return nil, store.InvalidArgument("app authorization identity is required")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	byKey := make(map[string]domain.AppAuthorization)
+	for _, token := range s.tokens {
+		if token.AppID != appID || token.WorkspaceID != workspaceID || token.Revoked || (!token.ExpiresAt.IsZero() && !token.ExpiresAt.After(now)) {
+			continue
+		}
+		tokenType := strings.TrimSpace(token.TokenType)
+		if tokenType != "bot" && tokenType != "user" {
+			continue
+		}
+		key := tokenType + "\x00" + string(token.UserID) + "\x00" + string(token.BotID)
+		value := byKey[key]
+		value.AppID = appID
+		value.WorkspaceID = workspaceID
+		value.UserID = token.UserID
+		value.BotID = token.BotID
+		value.TokenType = tokenType
+		value.Scopes = domain.NormalizeScopes(append(value.Scopes, token.Scopes...))
+		byKey[key] = value
+	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	result := make([]domain.AppAuthorization, 0, len(keys))
+	for _, key := range keys {
+		value := byKey[key]
+		value.Scopes = append([]string(nil), value.Scopes...)
+		result = append(result, value)
+	}
+	return result, nil
 }
 
 func (s *Store) SeedAppToken(_ context.Context, token string, record domain.AppTokenRecord) error {
@@ -2473,6 +2519,373 @@ func (s *Store) GetWorkflowStep(_ context.Context, workspace domain.WorkspaceID,
 	return value, nil
 }
 
+func (s *Store) CreateWorkflow(_ context.Context, value domain.WorkflowDefinition, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.AppID == "" || value.OwnerID == "" ||
+		value.Title == "" || value.Status == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid workflow")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.workflows[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if value.Version == 0 {
+		value.Version = 1
+	}
+	s.workflows[value.ID] = value
+	s.workflowRevisions[value.ID] = append(s.workflowRevisions[value.ID], domain.WorkflowRevision{
+		WorkflowID: value.ID, WorkspaceID: value.WorkspaceID, Version: value.Version, Title: value.Title,
+		Steps: value.Steps, Status: value.Status, CreatedAt: value.UpdatedAt,
+	})
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinition, expectedVersion uint64, event events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.UpdatedAt.IsZero() || expectedVersion == 0 {
+		return store.InvalidArgument("invalid workflow update")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflows[value.ID]
+	if !exists || current.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if current.Version != expectedVersion {
+		return store.ErrConflict
+	}
+	value.CreatedAt = current.CreatedAt
+	value.Version = expectedVersion + 1
+	s.workflows[value.ID] = value
+	s.workflowRevisions[value.ID] = append(s.workflowRevisions[value.ID], domain.WorkflowRevision{
+		WorkflowID: value.ID, WorkspaceID: value.WorkspaceID, Version: value.Version, Title: value.Title,
+		Steps: value.Steps, Status: value.Status, CreatedAt: value.UpdatedAt,
+	})
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetWorkflow(_ context.Context, workspace domain.WorkspaceID, id domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.workflows[id]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.WorkflowDefinition{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ListWorkflows(_ context.Context, workspace domain.WorkspaceID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowDefinition, 0, request.Limit+1)
+	for _, value := range s.workflows {
+		if value.WorkspaceID != workspace || (after != "" && string(value.ID) <= after) {
+			continue
+		}
+		values = appendSorted(values, value, request.Limit+1, func(left, right domain.WorkflowDefinition) bool {
+			return left.ID < right.ID
+		})
+	}
+	more := len(values) > request.Limit
+	if more {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		next, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return values, more, next, err
+}
+
+func (s *Store) ListWorkflowRevisions(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowRevision, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if workflow, exists := s.workflows[workflowID]; !exists || workflow.WorkspaceID != workspace {
+		return nil, store.ErrNotFound
+	}
+	return slices.Clone(s.workflowRevisions[workflowID]), nil
+}
+
+func (s *Store) SetWorkflowTrigger(_ context.Context, value domain.WorkflowTrigger, expectedVersion uint64, event events.Event) error {
+	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
+		value.Type == "" || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid workflow trigger")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, exists := s.workflows[value.WorkflowID]
+	if !exists || workflow.WorkspaceID != value.WorkspaceID || workflow.AppID != value.AppID {
+		return store.ErrNotFound
+	}
+	current, exists := s.workflowTriggers[value.ID]
+	if !exists {
+		if expectedVersion != 0 {
+			return store.ErrConflict
+		}
+		value.Version = 1
+	} else {
+		if current.WorkspaceID != value.WorkspaceID || current.WorkflowID != value.WorkflowID || current.AppID != value.AppID {
+			return store.ErrNotFound
+		}
+		if current.Version != expectedVersion {
+			return store.ErrConflict
+		}
+		value.CreatedAt = current.CreatedAt
+		value.Version = expectedVersion + 1
+	}
+	s.workflowTriggers[value.ID] = value
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetWorkflowTrigger(_ context.Context, workspace domain.WorkspaceID, id domain.WorkflowTriggerID) (domain.WorkflowTrigger, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.workflowTriggers[id]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.WorkflowTrigger{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) ListWorkflowTriggers(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID) ([]domain.WorkflowTrigger, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowTrigger, 0)
+	for _, value := range s.workflowTriggers {
+		if value.WorkspaceID == workspace && value.WorkflowID == workflowID {
+			values = append(values, value)
+		}
+	}
+	slices.SortFunc(values, func(left, right domain.WorkflowTrigger) int {
+		return strings.Compare(string(left.ID), string(right.ID))
+	})
+	return values, nil
+}
+
+func (s *Store) CreateWorkflowRun(_ context.Context, value domain.WorkflowRun, firstStep *domain.WorkflowStep, emitted []events.Event) error {
+	if value.ID == "" || value.WorkflowID == "" || value.WorkspaceID == "" || value.AppID == "" ||
+		value.Status == "" || value.WorkflowVersion == 0 || value.CreatedAt.IsZero() || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid workflow run")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	workflow, exists := s.workflows[value.WorkflowID]
+	if !exists || workflow.WorkspaceID != value.WorkspaceID || workflow.AppID != value.AppID {
+		return store.ErrNotFound
+	}
+	if _, exists := s.workflowRuns[value.ID]; exists {
+		return store.ErrAlreadyExists
+	}
+	if value.IdempotencyKey != "" {
+		for _, current := range s.workflowRuns {
+			if current.WorkspaceID == value.WorkspaceID && current.IdempotencyKey == value.IdempotencyKey {
+				return store.ErrAlreadyExists
+			}
+		}
+	}
+	if firstStep != nil {
+		if firstStep.ID == "" || firstStep.WorkflowRunID != value.ID || firstStep.WorkspaceID != value.WorkspaceID ||
+			firstStep.AppID == "" || firstStep.UserID == "" || firstStep.Status != domain.WorkflowStepExecuting ||
+			firstStep.CreatedAt.IsZero() || firstStep.UpdatedAt.IsZero() {
+			return store.InvalidArgument("invalid first workflow step")
+		}
+		if _, exists := s.workflowSteps[firstStep.ID]; exists {
+			return store.ErrAlreadyExists
+		}
+	}
+	s.workflowRuns[value.ID] = value
+	if firstStep != nil {
+		s.workflowSteps[firstStep.ID] = *firstStep
+	}
+	s.outbox = append(s.outbox, emitted...)
+	return nil
+}
+
+func (s *Store) AdvanceWorkflowRun(_ context.Context, completed domain.WorkflowStep, next *domain.WorkflowStep, value domain.WorkflowRun, expectedStep int, emitted []events.Event) error {
+	if value.ID == "" || value.WorkspaceID == "" || value.Status == "" || value.UpdatedAt.IsZero() ||
+		completed.ID == "" || completed.WorkflowRunID != value.ID || completed.Status == domain.WorkflowStepExecuting {
+		return store.InvalidArgument("invalid workflow run advance")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflowRuns[value.ID]
+	if !exists || current.WorkspaceID != value.WorkspaceID {
+		return store.ErrNotFound
+	}
+	if current.Status != domain.WorkflowRunRunning || current.CurrentStep != expectedStep {
+		return store.ErrConflict
+	}
+	currentExecution, exists := s.workflowSteps[completed.ID]
+	if !exists || currentExecution.WorkflowRunID != value.ID || currentExecution.Status != domain.WorkflowStepExecuting {
+		return store.ErrConflict
+	}
+	if next != nil {
+		if next.ID == "" || next.WorkflowRunID != value.ID || next.WorkspaceID != value.WorkspaceID ||
+			next.AppID == "" || next.UserID == "" || next.Status != domain.WorkflowStepExecuting ||
+			next.CreatedAt.IsZero() || next.UpdatedAt.IsZero() {
+			return store.InvalidArgument("invalid next workflow step")
+		}
+		if _, exists := s.workflowSteps[next.ID]; exists {
+			return store.ErrAlreadyExists
+		}
+	}
+	completed.CreatedAt = currentExecution.CreatedAt
+	s.workflowSteps[completed.ID] = completed
+	if next != nil {
+		s.workflowSteps[next.ID] = *next
+	}
+	value.CreatedAt = current.CreatedAt
+	s.workflowRuns[value.ID] = value
+	s.outbox = append(s.outbox, emitted...)
+	return nil
+}
+
+func (s *Store) GetWorkflowRun(_ context.Context, workspace domain.WorkspaceID, id domain.WorkflowRunID) (domain.WorkflowRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.workflowRuns[id]
+	if !exists || value.WorkspaceID != workspace {
+		return domain.WorkflowRun{}, store.ErrNotFound
+	}
+	return value, nil
+}
+
+func (s *Store) GetWorkflowRunByIdempotency(_ context.Context, workspace domain.WorkspaceID, key string) (domain.WorkflowRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, value := range s.workflowRuns {
+		if value.WorkspaceID == workspace && value.IdempotencyKey == key && key != "" {
+			return value, nil
+		}
+	}
+	return domain.WorkflowRun{}, store.ErrNotFound
+}
+
+func (s *Store) ListWorkflowRuns(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, request domain.PageRequest) ([]domain.WorkflowRun, bool, domain.Cursor, error) {
+	if err := store.CheckAscendingPage(request); err != nil {
+		return nil, false, "", err
+	}
+	after, err := domain.DecodeListCursor(request.Cursor)
+	if err != nil {
+		return nil, false, "", err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowRun, 0, request.Limit+1)
+	for _, value := range s.workflowRuns {
+		if value.WorkspaceID != workspace || (workflowID != "" && value.WorkflowID != workflowID) ||
+			(after != "" && string(value.ID) <= after) {
+			continue
+		}
+		values = appendSorted(values, value, request.Limit+1, func(left, right domain.WorkflowRun) bool {
+			return left.ID < right.ID
+		})
+	}
+	more := len(values) > request.Limit
+	if more {
+		values = values[:request.Limit]
+	}
+	var next domain.Cursor
+	if more {
+		next, err = domain.NewListCursor(string(values[len(values)-1].ID))
+	}
+	return values, more, next, err
+}
+
+func automationPermissionKey(workspace domain.WorkspaceID, resourceType, resourceID string) string {
+	return string(workspace) + "\x00" + resourceType + "\x00" + resourceID
+}
+
+func cloneAutomationPermission(value domain.AutomationPermission) domain.AutomationPermission {
+	value.UserIDs = slices.Clone(value.UserIDs)
+	value.ChannelIDs = slices.Clone(value.ChannelIDs)
+	value.TeamIDs = slices.Clone(value.TeamIDs)
+	value.OrgIDs = slices.Clone(value.OrgIDs)
+	return value
+}
+
+func (s *Store) SetAutomationPermission(_ context.Context, value domain.AutomationPermission, event events.Event) error {
+	if value.WorkspaceID == "" || value.ResourceType == "" || value.ResourceID == "" ||
+		value.PermissionType == "" || value.UpdatedAt.IsZero() {
+		return store.InvalidArgument("invalid automation permission")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.automationPermissions[automationPermissionKey(value.WorkspaceID, value.ResourceType, value.ResourceID)] = cloneAutomationPermission(value)
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) GetAutomationPermission(_ context.Context, workspace domain.WorkspaceID, resourceType, resourceID string) (domain.AutomationPermission, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	value, exists := s.automationPermissions[automationPermissionKey(workspace, resourceType, resourceID)]
+	if !exists {
+		return domain.AutomationPermission{}, store.ErrNotFound
+	}
+	return cloneAutomationPermission(value), nil
+}
+
+func (s *Store) SetFeaturedWorkflows(_ context.Context, workspace domain.WorkspaceID, conversation domain.ConversationID, values []domain.FeaturedWorkflow, event events.Event) error {
+	if workspace == "" || conversation == "" {
+		return store.InvalidArgument("invalid featured workflow target")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	channel, exists := s.conversations[conversation]
+	if !exists || channel.WorkspaceID != workspace {
+		return store.ErrNotFound
+	}
+	next := make([]domain.FeaturedWorkflow, len(values))
+	seen := make(map[domain.WorkflowTriggerID]struct{}, len(values))
+	for index, value := range values {
+		trigger, exists := s.workflowTriggers[value.TriggerID]
+		if value.TriggerID == "" || !exists || trigger.WorkspaceID != workspace {
+			return store.ErrNotFound
+		}
+		if _, duplicate := seen[value.TriggerID]; duplicate {
+			return store.ErrAlreadyExists
+		}
+		seen[value.TriggerID] = struct{}{}
+		value.WorkspaceID = workspace
+		value.ConversationID = conversation
+		value.Position = index
+		next[index] = value
+	}
+	s.featuredWorkflows[conversation] = next
+	s.outbox = append(s.outbox, event)
+	return nil
+}
+
+func (s *Store) ListFeaturedWorkflows(_ context.Context, workspace domain.WorkspaceID, conversations []domain.ConversationID) ([]domain.FeaturedWorkflow, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.FeaturedWorkflow, 0)
+	for _, conversation := range conversations {
+		for _, value := range s.featuredWorkflows[conversation] {
+			if value.WorkspaceID == workspace {
+				values = append(values, value)
+			}
+		}
+	}
+	slices.SortFunc(values, func(left, right domain.FeaturedWorkflow) int {
+		if value := strings.Compare(string(left.ConversationID), string(right.ConversationID)); value != 0 {
+			return value
+		}
+		return left.Position - right.Position
+	})
+	return values, nil
+}
+
 func (s *Store) CreateDialog(_ context.Context, value domain.Dialog, event events.Event) error {
 	if value.ID == "" || value.WorkspaceID == "" || value.UserID == "" || value.Payload == "" || value.CreatedAt.IsZero() {
 		return store.InvalidArgument("invalid dialog")
@@ -4223,8 +4636,8 @@ func (s *Store) canViewActivitySourceLocked(workspace domain.WorkspaceID, user d
 	return false
 }
 
-func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, event events.Event) error {
-	if len(fileIDs) == 0 {
+func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileID, message domain.Message, emitted []events.Event) error {
+	if len(fileIDs) == 0 || len(emitted) == 0 {
 		return store.InvalidArgument("a file share message requires a file")
 	}
 	message.Files = make([]domain.File, len(fileIDs))
@@ -4249,12 +4662,13 @@ func (s *Store) CreateFileShareMessage(_ context.Context, fileIDs []domain.FileI
 			slices.Sort(s.fileShares[fileID])
 		}
 	}
-	if err := s.createMessageLocked(normalized, event, ""); err != nil {
+	if err := s.createMessageLocked(normalized, emitted[0], ""); err != nil {
 		for fileID, channels := range previous {
 			s.fileShares[fileID] = channels
 		}
 		return err
 	}
+	s.outbox = append(s.outbox, emitted[1:]...)
 	return nil
 }
 
@@ -7660,7 +8074,7 @@ func (s *Store) CompleteScheduledExternalUploads(ctx context.Context, id domain.
 }
 
 func (s *Store) completeExternalUploads(_ context.Context, scheduledID domain.ScheduledMessageID, completions []domain.ExternalUploadCompletion, files []domain.File, channels []domain.ConversationID, emitted []events.Event, messages []domain.Message, messageEvents []events.Event) error {
-	if len(completions) == 0 || len(completions) != len(files) || len(files) != len(emitted) || len(messages) != len(messageEvents) {
+	if len(completions) == 0 || len(completions) != len(files) || len(emitted) == 0 || len(messages) != len(messageEvents) {
 		return store.ErrInvalidArgument
 	}
 	if scheduledID != "" && len(messages) != 1 {
@@ -7754,8 +8168,8 @@ func (s *Store) completeExternalUploads(_ context.Context, scheduledID domain.Sc
 		s.externalUploads[completion.ID] = value
 		s.files[file.ID] = file
 		s.fileShares[file.ID] = append([]domain.ConversationID(nil), channels...)
-		s.outbox = append(s.outbox, emitted[index])
 	}
+	s.outbox = append(s.outbox, emitted...)
 	rollback := func() {
 		for uploadID, value := range previousUploads {
 			s.externalUploads[uploadID] = value

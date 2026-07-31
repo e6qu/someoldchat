@@ -49,6 +49,14 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodGet, "/api/workflows.stepCompleted", auth.ScopeWorkflowStepsExecute},
 		{http.MethodGet, "/api/workflows.stepFailed", auth.ScopeWorkflowStepsExecute},
 		{http.MethodGet, "/api/workflows.updateStep", auth.ScopeWorkflowStepsExecute},
+		{http.MethodPost, "/api/workflows.featured.add", auth.ScopeBookmarksWrite},
+		{http.MethodPost, "/api/workflows.featured.list", auth.ScopeBookmarksRead},
+		{http.MethodPost, "/api/workflows.featured.remove", auth.ScopeBookmarksWrite},
+		{http.MethodPost, "/api/workflows.featured.set", auth.ScopeBookmarksWrite},
+		{http.MethodPost, "/api/workflows.triggers.permissions.add", auth.ScopeTriggersWrite},
+		{http.MethodPost, "/api/workflows.triggers.permissions.list", auth.ScopeTriggersRead},
+		{http.MethodPost, "/api/workflows.triggers.permissions.remove", auth.ScopeTriggersWrite},
+		{http.MethodPost, "/api/workflows.triggers.permissions.set", auth.ScopeTriggersWrite},
 		{http.MethodGet, "/api/team.info", auth.ScopeTeamRead},
 		{http.MethodGet, "/api/team.preferences.list", auth.ScopeTeamPreferencesRead},
 		{http.MethodGet, "/api/rtm.connect", auth.ScopeRTMStream},
@@ -271,8 +279,9 @@ func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
 	// stay in scopedRoutes so the coverage assertion below can see them, and both
 	// have dedicated tests.
 	separateAuthenticator := map[string]struct{}{
-		"/api/apps.connections.open": {},
-		"/api/conversations.invite":  {},
+		"/api/apps.connections.open":          {},
+		"/api/apps.event.authorizations.list": {},
+		"/api/conversations.invite":           {},
 	}
 	for _, route := range scopedRoutes() {
 		if _, ok := separateAuthenticator[route.path]; ok {

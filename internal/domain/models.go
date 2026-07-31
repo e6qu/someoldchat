@@ -236,23 +236,27 @@ type WorkflowStepStatus string
 
 const (
 	WorkflowStepConfigured WorkflowStepStatus = "configured"
+	WorkflowStepExecuting  WorkflowStepStatus = "executing"
 	WorkflowStepCompleted  WorkflowStepStatus = "completed"
 	WorkflowStepFailed     WorkflowStepStatus = "failed"
 )
 
 type WorkflowStep struct {
-	ID          WorkflowStepID
-	WorkspaceID WorkspaceID
-	UserID      UserID
-	EditID      string
-	Status      WorkflowStepStatus
-	Inputs      string
-	Outputs     string
-	Error       string
-	StepName    string
-	ImageURL    string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            WorkflowStepID
+	WorkflowRunID WorkflowRunID
+	WorkspaceID   WorkspaceID
+	AppID         AppID
+	UserID        UserID
+	FunctionID    string
+	EditID        string
+	Status        WorkflowStepStatus
+	Inputs        string
+	Outputs       string
+	Error         string
+	StepName      string
+	ImageURL      string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 type Dialog struct {
@@ -1324,6 +1328,20 @@ type AppInstallation struct {
 	WorkspaceID WorkspaceID
 	Enabled     bool
 	CreatedAt   time.Time
+}
+
+// AppAuthorization is the non-secret perspective under which an installed app
+// may receive Events API traffic. Multiple rotated access tokens can represent
+// the same authorization; repositories collapse them by app/workspace/type/
+// subject so delivery never duplicates a callback merely because credentials
+// rotated.
+type AppAuthorization struct {
+	AppID       AppID
+	WorkspaceID WorkspaceID
+	UserID      UserID
+	BotID       BotID
+	TokenType   string
+	Scopes      []string
 }
 
 // AppEventCursor is the durable delivery position for one app transport. It is

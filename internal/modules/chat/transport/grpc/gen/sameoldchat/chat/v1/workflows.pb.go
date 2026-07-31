@@ -233,6 +233,1806 @@ func (x *WorkflowStepMutationResponse) GetOk() bool {
 	return false
 }
 
+type WorkflowDefinition struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	AppId             string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	OwnerId           string                 `protobuf:"bytes,4,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	CallbackId        string                 `protobuf:"bytes,5,opt,name=callback_id,json=callbackId,proto3" json:"callback_id,omitempty"`
+	Title             string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
+	Description       string                 `protobuf:"bytes,7,opt,name=description,proto3" json:"description,omitempty"`
+	InputSchema       string                 `protobuf:"bytes,8,opt,name=input_schema,json=inputSchema,proto3" json:"input_schema,omitempty"`
+	Steps             string                 `protobuf:"bytes,9,opt,name=steps,proto3" json:"steps,omitempty"`
+	Status            string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`
+	Version           uint64                 `protobuf:"varint,11,opt,name=version,proto3" json:"version,omitempty"`
+	PublishedVersion  uint64                 `protobuf:"varint,12,opt,name=published_version,json=publishedVersion,proto3" json:"published_version,omitempty"`
+	CreatedAtUnixNano int64                  `protobuf:"varint,13,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	UpdatedAtUnixNano int64                  `protobuf:"varint,14,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *WorkflowDefinition) Reset() {
+	*x = WorkflowDefinition{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowDefinition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowDefinition) ProtoMessage() {}
+
+func (x *WorkflowDefinition) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowDefinition.ProtoReflect.Descriptor instead.
+func (*WorkflowDefinition) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WorkflowDefinition) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetOwnerId() string {
+	if x != nil {
+		return x.OwnerId
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetCallbackId() string {
+	if x != nil {
+		return x.CallbackId
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetDescription() string {
+	if x != nil {
+		return x.Description
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetInputSchema() string {
+	if x != nil {
+		return x.InputSchema
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetSteps() string {
+	if x != nil {
+		return x.Steps
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetVersion() uint64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *WorkflowDefinition) GetPublishedVersion() uint64 {
+	if x != nil {
+		return x.PublishedVersion
+	}
+	return 0
+}
+
+func (x *WorkflowDefinition) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *WorkflowDefinition) GetUpdatedAtUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedAtUnixNano
+	}
+	return 0
+}
+
+type WorkflowMutationRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Workflow        *WorkflowDefinition    `protobuf:"bytes,3,opt,name=workflow,proto3" json:"workflow,omitempty"`
+	ExpectedVersion uint64                 `protobuf:"varint,4,opt,name=expected_version,json=expectedVersion,proto3" json:"expected_version,omitempty"`
+	Publish         bool                   `protobuf:"varint,5,opt,name=publish,proto3" json:"publish,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *WorkflowMutationRequest) Reset() {
+	*x = WorkflowMutationRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowMutationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowMutationRequest) ProtoMessage() {}
+
+func (x *WorkflowMutationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowMutationRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowMutationRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *WorkflowMutationRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowMutationRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowMutationRequest) GetWorkflow() *WorkflowDefinition {
+	if x != nil {
+		return x.Workflow
+	}
+	return nil
+}
+
+func (x *WorkflowMutationRequest) GetExpectedVersion() uint64 {
+	if x != nil {
+		return x.ExpectedVersion
+	}
+	return 0
+}
+
+func (x *WorkflowMutationRequest) GetPublish() bool {
+	if x != nil {
+		return x.Publish
+	}
+	return false
+}
+
+type WorkflowGetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WorkflowId    string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowGetRequest) Reset() {
+	*x = WorkflowGetRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowGetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowGetRequest) ProtoMessage() {}
+
+func (x *WorkflowGetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowGetRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowGetRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *WorkflowGetRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowGetRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowGetRequest) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+type WorkflowListRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Limit         int32                  `protobuf:"varint,3,opt,name=limit,proto3" json:"limit,omitempty"`
+	Cursor        string                 `protobuf:"bytes,4,opt,name=cursor,proto3" json:"cursor,omitempty"`
+	Descending    bool                   `protobuf:"varint,5,opt,name=descending,proto3" json:"descending,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowListRequest) Reset() {
+	*x = WorkflowListRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowListRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowListRequest) ProtoMessage() {}
+
+func (x *WorkflowListRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowListRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowListRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *WorkflowListRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowListRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowListRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *WorkflowListRequest) GetCursor() string {
+	if x != nil {
+		return x.Cursor
+	}
+	return ""
+}
+
+func (x *WorkflowListRequest) GetDescending() bool {
+	if x != nil {
+		return x.Descending
+	}
+	return false
+}
+
+type WorkflowListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workflows     []*WorkflowDefinition  `protobuf:"bytes,1,rep,name=workflows,proto3" json:"workflows,omitempty"`
+	HasMore       bool                   `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
+	NextCursor    string                 `protobuf:"bytes,3,opt,name=next_cursor,json=nextCursor,proto3" json:"next_cursor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowListResponse) Reset() {
+	*x = WorkflowListResponse{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowListResponse) ProtoMessage() {}
+
+func (x *WorkflowListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowListResponse.ProtoReflect.Descriptor instead.
+func (*WorkflowListResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *WorkflowListResponse) GetWorkflows() []*WorkflowDefinition {
+	if x != nil {
+		return x.Workflows
+	}
+	return nil
+}
+
+func (x *WorkflowListResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
+func (x *WorkflowListResponse) GetNextCursor() string {
+	if x != nil {
+		return x.NextCursor
+	}
+	return ""
+}
+
+type WorkflowTrigger struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkflowId        string                 `protobuf:"bytes,2,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	AppId             string                 `protobuf:"bytes,4,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	Title             string                 `protobuf:"bytes,5,opt,name=title,proto3" json:"title,omitempty"`
+	Type              string                 `protobuf:"bytes,6,opt,name=type,proto3" json:"type,omitempty"`
+	Config            string                 `protobuf:"bytes,7,opt,name=config,proto3" json:"config,omitempty"`
+	Enabled           bool                   `protobuf:"varint,8,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Version           uint64                 `protobuf:"varint,9,opt,name=version,proto3" json:"version,omitempty"`
+	CreatedAtUnixNano int64                  `protobuf:"varint,10,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	UpdatedAtUnixNano int64                  `protobuf:"varint,11,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *WorkflowTrigger) Reset() {
+	*x = WorkflowTrigger{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowTrigger) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowTrigger) ProtoMessage() {}
+
+func (x *WorkflowTrigger) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowTrigger.ProtoReflect.Descriptor instead.
+func (*WorkflowTrigger) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *WorkflowTrigger) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetConfig() string {
+	if x != nil {
+		return x.Config
+	}
+	return ""
+}
+
+func (x *WorkflowTrigger) GetEnabled() bool {
+	if x != nil {
+		return x.Enabled
+	}
+	return false
+}
+
+func (x *WorkflowTrigger) GetVersion() uint64 {
+	if x != nil {
+		return x.Version
+	}
+	return 0
+}
+
+func (x *WorkflowTrigger) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *WorkflowTrigger) GetUpdatedAtUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedAtUnixNano
+	}
+	return 0
+}
+
+type WorkflowTriggerMutationRequest struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId     string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId          string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Trigger         *WorkflowTrigger       `protobuf:"bytes,3,opt,name=trigger,proto3" json:"trigger,omitempty"`
+	ExpectedVersion uint64                 `protobuf:"varint,4,opt,name=expected_version,json=expectedVersion,proto3" json:"expected_version,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *WorkflowTriggerMutationRequest) Reset() {
+	*x = WorkflowTriggerMutationRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowTriggerMutationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowTriggerMutationRequest) ProtoMessage() {}
+
+func (x *WorkflowTriggerMutationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowTriggerMutationRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowTriggerMutationRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *WorkflowTriggerMutationRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowTriggerMutationRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowTriggerMutationRequest) GetTrigger() *WorkflowTrigger {
+	if x != nil {
+		return x.Trigger
+	}
+	return nil
+}
+
+func (x *WorkflowTriggerMutationRequest) GetExpectedVersion() uint64 {
+	if x != nil {
+		return x.ExpectedVersion
+	}
+	return 0
+}
+
+type WorkflowTriggerListRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WorkflowId    string                 `protobuf:"bytes,3,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowTriggerListRequest) Reset() {
+	*x = WorkflowTriggerListRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowTriggerListRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowTriggerListRequest) ProtoMessage() {}
+
+func (x *WorkflowTriggerListRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowTriggerListRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowTriggerListRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *WorkflowTriggerListRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowTriggerListRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowTriggerListRequest) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+type WorkflowTriggerListResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Triggers      []*WorkflowTrigger     `protobuf:"bytes,1,rep,name=triggers,proto3" json:"triggers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowTriggerListResponse) Reset() {
+	*x = WorkflowTriggerListResponse{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowTriggerListResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowTriggerListResponse) ProtoMessage() {}
+
+func (x *WorkflowTriggerListResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowTriggerListResponse.ProtoReflect.Descriptor instead.
+func (*WorkflowTriggerListResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *WorkflowTriggerListResponse) GetTriggers() []*WorkflowTrigger {
+	if x != nil {
+		return x.Triggers
+	}
+	return nil
+}
+
+type WorkflowRun struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	Id                  string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WorkflowId          string                 `protobuf:"bytes,2,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	WorkflowVersion     uint64                 `protobuf:"varint,3,opt,name=workflow_version,json=workflowVersion,proto3" json:"workflow_version,omitempty"`
+	TriggerId           string                 `protobuf:"bytes,4,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	WorkspaceId         string                 `protobuf:"bytes,5,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	AppId               string                 `protobuf:"bytes,6,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	ActorId             string                 `protobuf:"bytes,7,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	ChannelId           string                 `protobuf:"bytes,8,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Status              string                 `protobuf:"bytes,9,opt,name=status,proto3" json:"status,omitempty"`
+	Inputs              string                 `protobuf:"bytes,10,opt,name=inputs,proto3" json:"inputs,omitempty"`
+	Outputs             string                 `protobuf:"bytes,11,opt,name=outputs,proto3" json:"outputs,omitempty"`
+	Error               string                 `protobuf:"bytes,12,opt,name=error,proto3" json:"error,omitempty"`
+	CurrentStep         int32                  `protobuf:"varint,13,opt,name=current_step,json=currentStep,proto3" json:"current_step,omitempty"`
+	IdempotencyKey      string                 `protobuf:"bytes,14,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	CreatedAtUnixNano   int64                  `protobuf:"varint,15,opt,name=created_at_unix_nano,json=createdAtUnixNano,proto3" json:"created_at_unix_nano,omitempty"`
+	UpdatedAtUnixNano   int64                  `protobuf:"varint,16,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	CompletedAtUnixNano int64                  `protobuf:"varint,17,opt,name=completed_at_unix_nano,json=completedAtUnixNano,proto3" json:"completed_at_unix_nano,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *WorkflowRun) Reset() {
+	*x = WorkflowRun{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowRun) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowRun) ProtoMessage() {}
+
+func (x *WorkflowRun) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowRun.ProtoReflect.Descriptor instead.
+func (*WorkflowRun) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *WorkflowRun) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetWorkflowVersion() uint64 {
+	if x != nil {
+		return x.WorkflowVersion
+	}
+	return 0
+}
+
+func (x *WorkflowRun) GetTriggerId() string {
+	if x != nil {
+		return x.TriggerId
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetActorId() string {
+	if x != nil {
+		return x.ActorId
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetInputs() string {
+	if x != nil {
+		return x.Inputs
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetOutputs() string {
+	if x != nil {
+		return x.Outputs
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetCurrentStep() int32 {
+	if x != nil {
+		return x.CurrentStep
+	}
+	return 0
+}
+
+func (x *WorkflowRun) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+func (x *WorkflowRun) GetCreatedAtUnixNano() int64 {
+	if x != nil {
+		return x.CreatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *WorkflowRun) GetUpdatedAtUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedAtUnixNano
+	}
+	return 0
+}
+
+func (x *WorkflowRun) GetCompletedAtUnixNano() int64 {
+	if x != nil {
+		return x.CompletedAtUnixNano
+	}
+	return 0
+}
+
+type WorkflowRunRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId    string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId         string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	TriggerId      string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	ChannelId      string                 `protobuf:"bytes,4,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	Inputs         string                 `protobuf:"bytes,5,opt,name=inputs,proto3" json:"inputs,omitempty"`
+	IdempotencyKey string                 `protobuf:"bytes,6,opt,name=idempotency_key,json=idempotencyKey,proto3" json:"idempotency_key,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *WorkflowRunRequest) Reset() {
+	*x = WorkflowRunRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowRunRequest) ProtoMessage() {}
+
+func (x *WorkflowRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowRunRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowRunRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *WorkflowRunRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowRunRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowRunRequest) GetTriggerId() string {
+	if x != nil {
+		return x.TriggerId
+	}
+	return ""
+}
+
+func (x *WorkflowRunRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *WorkflowRunRequest) GetInputs() string {
+	if x != nil {
+		return x.Inputs
+	}
+	return ""
+}
+
+func (x *WorkflowRunRequest) GetIdempotencyKey() string {
+	if x != nil {
+		return x.IdempotencyKey
+	}
+	return ""
+}
+
+type WorkflowRunGetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	WorkflowRunId string                 `protobuf:"bytes,3,opt,name=workflow_run_id,json=workflowRunId,proto3" json:"workflow_run_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowRunGetRequest) Reset() {
+	*x = WorkflowRunGetRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowRunGetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowRunGetRequest) ProtoMessage() {}
+
+func (x *WorkflowRunGetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowRunGetRequest.ProtoReflect.Descriptor instead.
+func (*WorkflowRunGetRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *WorkflowRunGetRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *WorkflowRunGetRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *WorkflowRunGetRequest) GetWorkflowRunId() string {
+	if x != nil {
+		return x.WorkflowRunId
+	}
+	return ""
+}
+
+type FunctionCompletionRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId         string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId              string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId               string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	FunctionExecutionId string                 `protobuf:"bytes,4,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	Outputs             string                 `protobuf:"bytes,5,opt,name=outputs,proto3" json:"outputs,omitempty"`
+	Error               string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *FunctionCompletionRequest) Reset() {
+	*x = FunctionCompletionRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FunctionCompletionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FunctionCompletionRequest) ProtoMessage() {}
+
+func (x *FunctionCompletionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FunctionCompletionRequest.ProtoReflect.Descriptor instead.
+func (*FunctionCompletionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *FunctionCompletionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetOutputs() string {
+	if x != nil {
+		return x.Outputs
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type AutomationPermission struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	ResourceType      string                 `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	ResourceId        string                 `protobuf:"bytes,2,opt,name=resource_id,json=resourceId,proto3" json:"resource_id,omitempty"`
+	WorkspaceId       string                 `protobuf:"bytes,3,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	AppId             string                 `protobuf:"bytes,4,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	PermissionType    string                 `protobuf:"bytes,5,opt,name=permission_type,json=permissionType,proto3" json:"permission_type,omitempty"`
+	UserIds           []string               `protobuf:"bytes,6,rep,name=user_ids,json=userIds,proto3" json:"user_ids,omitempty"`
+	ChannelIds        []string               `protobuf:"bytes,7,rep,name=channel_ids,json=channelIds,proto3" json:"channel_ids,omitempty"`
+	TeamIds           []string               `protobuf:"bytes,8,rep,name=team_ids,json=teamIds,proto3" json:"team_ids,omitempty"`
+	OrgIds            []string               `protobuf:"bytes,9,rep,name=org_ids,json=orgIds,proto3" json:"org_ids,omitempty"`
+	UpdatedAtUnixNano int64                  `protobuf:"varint,10,opt,name=updated_at_unix_nano,json=updatedAtUnixNano,proto3" json:"updated_at_unix_nano,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AutomationPermission) Reset() {
+	*x = AutomationPermission{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AutomationPermission) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AutomationPermission) ProtoMessage() {}
+
+func (x *AutomationPermission) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AutomationPermission.ProtoReflect.Descriptor instead.
+func (*AutomationPermission) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *AutomationPermission) GetResourceType() string {
+	if x != nil {
+		return x.ResourceType
+	}
+	return ""
+}
+
+func (x *AutomationPermission) GetResourceId() string {
+	if x != nil {
+		return x.ResourceId
+	}
+	return ""
+}
+
+func (x *AutomationPermission) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *AutomationPermission) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *AutomationPermission) GetPermissionType() string {
+	if x != nil {
+		return x.PermissionType
+	}
+	return ""
+}
+
+func (x *AutomationPermission) GetUserIds() []string {
+	if x != nil {
+		return x.UserIds
+	}
+	return nil
+}
+
+func (x *AutomationPermission) GetChannelIds() []string {
+	if x != nil {
+		return x.ChannelIds
+	}
+	return nil
+}
+
+func (x *AutomationPermission) GetTeamIds() []string {
+	if x != nil {
+		return x.TeamIds
+	}
+	return nil
+}
+
+func (x *AutomationPermission) GetOrgIds() []string {
+	if x != nil {
+		return x.OrgIds
+	}
+	return nil
+}
+
+func (x *AutomationPermission) GetUpdatedAtUnixNano() int64 {
+	if x != nil {
+		return x.UpdatedAtUnixNano
+	}
+	return 0
+}
+
+type FunctionPermissionRequest struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId        string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId             string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId              string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	FunctionId         string                 `protobuf:"bytes,4,opt,name=function_id,json=functionId,proto3" json:"function_id,omitempty"`
+	FunctionCallbackId string                 `protobuf:"bytes,5,opt,name=function_callback_id,json=functionCallbackId,proto3" json:"function_callback_id,omitempty"`
+	Permission         *AutomationPermission  `protobuf:"bytes,6,opt,name=permission,proto3" json:"permission,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *FunctionPermissionRequest) Reset() {
+	*x = FunctionPermissionRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FunctionPermissionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FunctionPermissionRequest) ProtoMessage() {}
+
+func (x *FunctionPermissionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FunctionPermissionRequest.ProtoReflect.Descriptor instead.
+func (*FunctionPermissionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *FunctionPermissionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *FunctionPermissionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *FunctionPermissionRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *FunctionPermissionRequest) GetFunctionId() string {
+	if x != nil {
+		return x.FunctionId
+	}
+	return ""
+}
+
+func (x *FunctionPermissionRequest) GetFunctionCallbackId() string {
+	if x != nil {
+		return x.FunctionCallbackId
+	}
+	return ""
+}
+
+func (x *FunctionPermissionRequest) GetPermission() *AutomationPermission {
+	if x != nil {
+		return x.Permission
+	}
+	return nil
+}
+
+type TriggerPermissionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId         string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	TriggerId     string                 `protobuf:"bytes,4,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	Permission    *AutomationPermission  `protobuf:"bytes,5,opt,name=permission,proto3" json:"permission,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TriggerPermissionRequest) Reset() {
+	*x = TriggerPermissionRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TriggerPermissionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TriggerPermissionRequest) ProtoMessage() {}
+
+func (x *TriggerPermissionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TriggerPermissionRequest.ProtoReflect.Descriptor instead.
+func (*TriggerPermissionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *TriggerPermissionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TriggerPermissionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *TriggerPermissionRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *TriggerPermissionRequest) GetTriggerId() string {
+	if x != nil {
+		return x.TriggerId
+	}
+	return ""
+}
+
+func (x *TriggerPermissionRequest) GetPermission() *AutomationPermission {
+	if x != nil {
+		return x.Permission
+	}
+	return nil
+}
+
+type FeaturedWorkflowsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,3,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	ChannelIds    []string               `protobuf:"bytes,4,rep,name=channel_ids,json=channelIds,proto3" json:"channel_ids,omitempty"`
+	TriggerIds    []string               `protobuf:"bytes,5,rep,name=trigger_ids,json=triggerIds,proto3" json:"trigger_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeaturedWorkflowsRequest) Reset() {
+	*x = FeaturedWorkflowsRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeaturedWorkflowsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeaturedWorkflowsRequest) ProtoMessage() {}
+
+func (x *FeaturedWorkflowsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeaturedWorkflowsRequest.ProtoReflect.Descriptor instead.
+func (*FeaturedWorkflowsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *FeaturedWorkflowsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflowsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflowsRequest) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflowsRequest) GetChannelIds() []string {
+	if x != nil {
+		return x.ChannelIds
+	}
+	return nil
+}
+
+func (x *FeaturedWorkflowsRequest) GetTriggerIds() []string {
+	if x != nil {
+		return x.TriggerIds
+	}
+	return nil
+}
+
+type FeaturedWorkflow struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ChannelId     string                 `protobuf:"bytes,2,opt,name=channel_id,json=channelId,proto3" json:"channel_id,omitempty"`
+	TriggerId     string                 `protobuf:"bytes,3,opt,name=trigger_id,json=triggerId,proto3" json:"trigger_id,omitempty"`
+	Title         string                 `protobuf:"bytes,4,opt,name=title,proto3" json:"title,omitempty"`
+	Position      int32                  `protobuf:"varint,5,opt,name=position,proto3" json:"position,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeaturedWorkflow) Reset() {
+	*x = FeaturedWorkflow{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeaturedWorkflow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeaturedWorkflow) ProtoMessage() {}
+
+func (x *FeaturedWorkflow) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeaturedWorkflow.ProtoReflect.Descriptor instead.
+func (*FeaturedWorkflow) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *FeaturedWorkflow) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflow) GetChannelId() string {
+	if x != nil {
+		return x.ChannelId
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflow) GetTriggerId() string {
+	if x != nil {
+		return x.TriggerId
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflow) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *FeaturedWorkflow) GetPosition() int32 {
+	if x != nil {
+		return x.Position
+	}
+	return 0
+}
+
+type FeaturedWorkflowsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workflows     []*FeaturedWorkflow    `protobuf:"bytes,1,rep,name=workflows,proto3" json:"workflows,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FeaturedWorkflowsResponse) Reset() {
+	*x = FeaturedWorkflowsResponse{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FeaturedWorkflowsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FeaturedWorkflowsResponse) ProtoMessage() {}
+
+func (x *FeaturedWorkflowsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FeaturedWorkflowsResponse.ProtoReflect.Descriptor instead.
+func (*FeaturedWorkflowsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *FeaturedWorkflowsResponse) GetWorkflows() []*FeaturedWorkflow {
+	if x != nil {
+		return x.Workflows
+	}
+	return nil
+}
+
+type FunctionWorkflowStepsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId         string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	FunctionId    string                 `protobuf:"bytes,4,opt,name=function_id,json=functionId,proto3" json:"function_id,omitempty"`
+	WorkflowId    string                 `protobuf:"bytes,5,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	Workflow      string                 `protobuf:"bytes,6,opt,name=workflow,proto3" json:"workflow,omitempty"`
+	WorkflowAppId string                 `protobuf:"bytes,7,opt,name=workflow_app_id,json=workflowAppId,proto3" json:"workflow_app_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FunctionWorkflowStepsRequest) Reset() {
+	*x = FunctionWorkflowStepsRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FunctionWorkflowStepsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FunctionWorkflowStepsRequest) ProtoMessage() {}
+
+func (x *FunctionWorkflowStepsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FunctionWorkflowStepsRequest.ProtoReflect.Descriptor instead.
+func (*FunctionWorkflowStepsRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *FunctionWorkflowStepsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *FunctionWorkflowStepsRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *FunctionWorkflowStepsRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *FunctionWorkflowStepsRequest) GetFunctionId() string {
+	if x != nil {
+		return x.FunctionId
+	}
+	return ""
+}
+
+func (x *FunctionWorkflowStepsRequest) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *FunctionWorkflowStepsRequest) GetWorkflow() string {
+	if x != nil {
+		return x.Workflow
+	}
+	return ""
+}
+
+func (x *FunctionWorkflowStepsRequest) GetWorkflowAppId() string {
+	if x != nil {
+		return x.WorkflowAppId
+	}
+	return ""
+}
+
+type WorkflowStepVersion struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Title                  string                 `protobuf:"bytes,1,opt,name=title,proto3" json:"title,omitempty"`
+	WorkflowId             string                 `protobuf:"bytes,2,opt,name=workflow_id,json=workflowId,proto3" json:"workflow_id,omitempty"`
+	StepId                 string                 `protobuf:"bytes,3,opt,name=step_id,json=stepId,proto3" json:"step_id,omitempty"`
+	IsDeleted              bool                   `protobuf:"varint,4,opt,name=is_deleted,json=isDeleted,proto3" json:"is_deleted,omitempty"`
+	WorkflowVersionCreated string                 `protobuf:"bytes,5,opt,name=workflow_version_created,json=workflowVersionCreated,proto3" json:"workflow_version_created,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
+}
+
+func (x *WorkflowStepVersion) Reset() {
+	*x = WorkflowStepVersion{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepVersion) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepVersion) ProtoMessage() {}
+
+func (x *WorkflowStepVersion) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepVersion.ProtoReflect.Descriptor instead.
+func (*WorkflowStepVersion) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *WorkflowStepVersion) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *WorkflowStepVersion) GetWorkflowId() string {
+	if x != nil {
+		return x.WorkflowId
+	}
+	return ""
+}
+
+func (x *WorkflowStepVersion) GetStepId() string {
+	if x != nil {
+		return x.StepId
+	}
+	return ""
+}
+
+func (x *WorkflowStepVersion) GetIsDeleted() bool {
+	if x != nil {
+		return x.IsDeleted
+	}
+	return false
+}
+
+func (x *WorkflowStepVersion) GetWorkflowVersionCreated() string {
+	if x != nil {
+		return x.WorkflowVersionCreated
+	}
+	return ""
+}
+
+type WorkflowStepVersionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StepsVersions []*WorkflowStepVersion `protobuf:"bytes,1,rep,name=steps_versions,json=stepsVersions,proto3" json:"steps_versions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkflowStepVersionsResponse) Reset() {
+	*x = WorkflowStepVersionsResponse{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkflowStepVersionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkflowStepVersionsResponse) ProtoMessage() {}
+
+func (x *WorkflowStepVersionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkflowStepVersionsResponse.ProtoReflect.Descriptor instead.
+func (*WorkflowStepVersionsResponse) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *WorkflowStepVersionsResponse) GetStepsVersions() []*WorkflowStepVersion {
+	if x != nil {
+		return x.StepsVersions
+	}
+	return nil
+}
+
 var File_sameoldchat_chat_v1_workflows_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
@@ -253,13 +2053,210 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\tstep_name\x18\x06 \x01(\tR\bstepName\x12$\n" +
 	"\x0estep_image_url\x18\a \x01(\tR\fstepImageUrl\".\n" +
 	"\x1cWorkflowStepMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xdc\x02\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xcc\x03\n" +
+	"\x12WorkflowDefinition\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12\x19\n" +
+	"\bowner_id\x18\x04 \x01(\tR\aownerId\x12\x1f\n" +
+	"\vcallback_id\x18\x05 \x01(\tR\n" +
+	"callbackId\x12\x14\n" +
+	"\x05title\x18\x06 \x01(\tR\x05title\x12 \n" +
+	"\vdescription\x18\a \x01(\tR\vdescription\x12!\n" +
+	"\finput_schema\x18\b \x01(\tR\vinputSchema\x12\x14\n" +
+	"\x05steps\x18\t \x01(\tR\x05steps\x12\x16\n" +
+	"\x06status\x18\n" +
+	" \x01(\tR\x06status\x12\x18\n" +
+	"\aversion\x18\v \x01(\x04R\aversion\x12+\n" +
+	"\x11published_version\x18\f \x01(\x04R\x10publishedVersion\x12/\n" +
+	"\x14created_at_unix_nano\x18\r \x01(\x03R\x11createdAtUnixNano\x12/\n" +
+	"\x14updated_at_unix_nano\x18\x0e \x01(\x03R\x11updatedAtUnixNano\"\xdf\x01\n" +
+	"\x17WorkflowMutationRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12C\n" +
+	"\bworkflow\x18\x03 \x01(\v2'.sameoldchat.chat.v1.WorkflowDefinitionR\bworkflow\x12)\n" +
+	"\x10expected_version\x18\x04 \x01(\x04R\x0fexpectedVersion\x12\x18\n" +
+	"\apublish\x18\x05 \x01(\bR\apublish\"q\n" +
+	"\x12WorkflowGetRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
+	"\vworkflow_id\x18\x03 \x01(\tR\n" +
+	"workflowId\"\x9f\x01\n" +
+	"\x13WorkflowListRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x14\n" +
+	"\x05limit\x18\x03 \x01(\x05R\x05limit\x12\x16\n" +
+	"\x06cursor\x18\x04 \x01(\tR\x06cursor\x12\x1e\n" +
+	"\n" +
+	"descending\x18\x05 \x01(\bR\n" +
+	"descending\"\x99\x01\n" +
+	"\x14WorkflowListResponse\x12E\n" +
+	"\tworkflows\x18\x01 \x03(\v2'.sameoldchat.chat.v1.WorkflowDefinitionR\tworkflows\x12\x19\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\x12\x1f\n" +
+	"\vnext_cursor\x18\x03 \x01(\tR\n" +
+	"nextCursor\"\xd4\x02\n" +
+	"\x0fWorkflowTrigger\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\vworkflow_id\x18\x02 \x01(\tR\n" +
+	"workflowId\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12\x15\n" +
+	"\x06app_id\x18\x04 \x01(\tR\x05appId\x12\x14\n" +
+	"\x05title\x18\x05 \x01(\tR\x05title\x12\x12\n" +
+	"\x04type\x18\x06 \x01(\tR\x04type\x12\x16\n" +
+	"\x06config\x18\a \x01(\tR\x06config\x12\x18\n" +
+	"\aenabled\x18\b \x01(\bR\aenabled\x12\x18\n" +
+	"\aversion\x18\t \x01(\x04R\aversion\x12/\n" +
+	"\x14created_at_unix_nano\x18\n" +
+	" \x01(\x03R\x11createdAtUnixNano\x12/\n" +
+	"\x14updated_at_unix_nano\x18\v \x01(\x03R\x11updatedAtUnixNano\"\xc7\x01\n" +
+	"\x1eWorkflowTriggerMutationRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12>\n" +
+	"\atrigger\x18\x03 \x01(\v2$.sameoldchat.chat.v1.WorkflowTriggerR\atrigger\x12)\n" +
+	"\x10expected_version\x18\x04 \x01(\x04R\x0fexpectedVersion\"y\n" +
+	"\x1aWorkflowTriggerListRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1f\n" +
+	"\vworkflow_id\x18\x03 \x01(\tR\n" +
+	"workflowId\"_\n" +
+	"\x1bWorkflowTriggerListResponse\x12@\n" +
+	"\btriggers\x18\x01 \x03(\v2$.sameoldchat.chat.v1.WorkflowTriggerR\btriggers\"\xbf\x04\n" +
+	"\vWorkflowRun\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\vworkflow_id\x18\x02 \x01(\tR\n" +
+	"workflowId\x12)\n" +
+	"\x10workflow_version\x18\x03 \x01(\x04R\x0fworkflowVersion\x12\x1d\n" +
+	"\n" +
+	"trigger_id\x18\x04 \x01(\tR\ttriggerId\x12!\n" +
+	"\fworkspace_id\x18\x05 \x01(\tR\vworkspaceId\x12\x15\n" +
+	"\x06app_id\x18\x06 \x01(\tR\x05appId\x12\x19\n" +
+	"\bactor_id\x18\a \x01(\tR\aactorId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\b \x01(\tR\tchannelId\x12\x16\n" +
+	"\x06status\x18\t \x01(\tR\x06status\x12\x16\n" +
+	"\x06inputs\x18\n" +
+	" \x01(\tR\x06inputs\x12\x18\n" +
+	"\aoutputs\x18\v \x01(\tR\aoutputs\x12\x14\n" +
+	"\x05error\x18\f \x01(\tR\x05error\x12!\n" +
+	"\fcurrent_step\x18\r \x01(\x05R\vcurrentStep\x12'\n" +
+	"\x0fidempotency_key\x18\x0e \x01(\tR\x0eidempotencyKey\x12/\n" +
+	"\x14created_at_unix_nano\x18\x0f \x01(\x03R\x11createdAtUnixNano\x12/\n" +
+	"\x14updated_at_unix_nano\x18\x10 \x01(\x03R\x11updatedAtUnixNano\x123\n" +
+	"\x16completed_at_unix_nano\x18\x11 \x01(\x03R\x13completedAtUnixNano\"\xcf\x01\n" +
+	"\x12WorkflowRunRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x04 \x01(\tR\tchannelId\x12\x16\n" +
+	"\x06inputs\x18\x05 \x01(\tR\x06inputs\x12'\n" +
+	"\x0fidempotency_key\x18\x06 \x01(\tR\x0eidempotencyKey\"{\n" +
+	"\x15WorkflowRunGetRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12&\n" +
+	"\x0fworkflow_run_id\x18\x03 \x01(\tR\rworkflowRunId\"\xd2\x01\n" +
+	"\x19FunctionCompletionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x122\n" +
+	"\x15function_execution_id\x18\x04 \x01(\tR\x13functionExecutionId\x12\x18\n" +
+	"\aoutputs\x18\x05 \x01(\tR\aoutputs\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error\"\xe0\x02\n" +
+	"\x14AutomationPermission\x12#\n" +
+	"\rresource_type\x18\x01 \x01(\tR\fresourceType\x12\x1f\n" +
+	"\vresource_id\x18\x02 \x01(\tR\n" +
+	"resourceId\x12!\n" +
+	"\fworkspace_id\x18\x03 \x01(\tR\vworkspaceId\x12\x15\n" +
+	"\x06app_id\x18\x04 \x01(\tR\x05appId\x12'\n" +
+	"\x0fpermission_type\x18\x05 \x01(\tR\x0epermissionType\x12\x19\n" +
+	"\buser_ids\x18\x06 \x03(\tR\auserIds\x12\x1f\n" +
+	"\vchannel_ids\x18\a \x03(\tR\n" +
+	"channelIds\x12\x19\n" +
+	"\bteam_ids\x18\b \x03(\tR\ateamIds\x12\x17\n" +
+	"\aorg_ids\x18\t \x03(\tR\x06orgIds\x12/\n" +
+	"\x14updated_at_unix_nano\x18\n" +
+	" \x01(\x03R\x11updatedAtUnixNano\"\x8c\x02\n" +
+	"\x19FunctionPermissionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12\x1f\n" +
+	"\vfunction_id\x18\x04 \x01(\tR\n" +
+	"functionId\x120\n" +
+	"\x14function_callback_id\x18\x05 \x01(\tR\x12functionCallbackId\x12I\n" +
+	"\n" +
+	"permission\x18\x06 \x01(\v2).sameoldchat.chat.v1.AutomationPermissionR\n" +
+	"permission\"\xd7\x01\n" +
+	"\x18TriggerPermissionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12\x1d\n" +
+	"\n" +
+	"trigger_id\x18\x04 \x01(\tR\ttriggerId\x12I\n" +
+	"\n" +
+	"permission\x18\x05 \x01(\v2).sameoldchat.chat.v1.AutomationPermissionR\n" +
+	"permission\"\xb7\x01\n" +
+	"\x18FeaturedWorkflowsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x03 \x01(\tR\tchannelId\x12\x1f\n" +
+	"\vchannel_ids\x18\x04 \x03(\tR\n" +
+	"channelIds\x12\x1f\n" +
+	"\vtrigger_ids\x18\x05 \x03(\tR\n" +
+	"triggerIds\"\xa5\x01\n" +
+	"\x10FeaturedWorkflow\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1d\n" +
+	"\n" +
+	"channel_id\x18\x02 \x01(\tR\tchannelId\x12\x1d\n" +
+	"\n" +
+	"trigger_id\x18\x03 \x01(\tR\ttriggerId\x12\x14\n" +
+	"\x05title\x18\x04 \x01(\tR\x05title\x12\x1a\n" +
+	"\bposition\x18\x05 \x01(\x05R\bposition\"`\n" +
+	"\x19FeaturedWorkflowsResponse\x12C\n" +
+	"\tworkflows\x18\x01 \x03(\v2%.sameoldchat.chat.v1.FeaturedWorkflowR\tworkflows\"\xf7\x01\n" +
+	"\x1cFunctionWorkflowStepsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x12\x1f\n" +
+	"\vfunction_id\x18\x04 \x01(\tR\n" +
+	"functionId\x12\x1f\n" +
+	"\vworkflow_id\x18\x05 \x01(\tR\n" +
+	"workflowId\x12\x1a\n" +
+	"\bworkflow\x18\x06 \x01(\tR\bworkflow\x12&\n" +
+	"\x0fworkflow_app_id\x18\a \x01(\tR\rworkflowAppId\"\xbe\x01\n" +
+	"\x13WorkflowStepVersion\x12\x14\n" +
+	"\x05title\x18\x01 \x01(\tR\x05title\x12\x1f\n" +
+	"\vworkflow_id\x18\x02 \x01(\tR\n" +
+	"workflowId\x12\x17\n" +
+	"\astep_id\x18\x03 \x01(\tR\x06stepId\x12\x1d\n" +
+	"\n" +
+	"is_deleted\x18\x04 \x01(\bR\tisDeleted\x128\n" +
+	"\x18workflow_version_created\x18\x05 \x01(\tR\x16workflowVersionCreated\"o\n" +
+	"\x1cWorkflowStepVersionsResponse\x12O\n" +
+	"\x0esteps_versions\x18\x01 \x03(\v2(.sameoldchat.chat.v1.WorkflowStepVersionR\rstepsVersions2\xd4\x10\n" +
 	"\x10WorkflowsService\x12l\n" +
 	"\rStepCompleted\x12(.sameoldchat.chat.v1.WorkflowStepRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12i\n" +
 	"\n" +
 	"StepFailed\x12(.sameoldchat.chat.v1.WorkflowStepRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12o\n" +
 	"\n" +
-	"UpdateStep\x12..sameoldchat.chat.v1.WorkflowStepUpdateRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"UpdateStep\x12..sameoldchat.chat.v1.WorkflowStepUpdateRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12g\n" +
+	"\x0eCreateWorkflow\x12,.sameoldchat.chat.v1.WorkflowMutationRequest\x1a'.sameoldchat.chat.v1.WorkflowDefinition\x12_\n" +
+	"\vGetWorkflow\x12'.sameoldchat.chat.v1.WorkflowGetRequest\x1a'.sameoldchat.chat.v1.WorkflowDefinition\x12g\n" +
+	"\x0eUpdateWorkflow\x12,.sameoldchat.chat.v1.WorkflowMutationRequest\x1a'.sameoldchat.chat.v1.WorkflowDefinition\x12d\n" +
+	"\rListWorkflows\x12(.sameoldchat.chat.v1.WorkflowListRequest\x1a).sameoldchat.chat.v1.WorkflowListResponse\x12o\n" +
+	"\x12SetWorkflowTrigger\x123.sameoldchat.chat.v1.WorkflowTriggerMutationRequest\x1a$.sameoldchat.chat.v1.WorkflowTrigger\x12y\n" +
+	"\x14ListWorkflowTriggers\x12/.sameoldchat.chat.v1.WorkflowTriggerListRequest\x1a0.sameoldchat.chat.v1.WorkflowTriggerListResponse\x12X\n" +
+	"\vRunWorkflow\x12'.sameoldchat.chat.v1.WorkflowRunRequest\x1a .sameoldchat.chat.v1.WorkflowRun\x12^\n" +
+	"\x0eGetWorkflowRun\x12*.sameoldchat.chat.v1.WorkflowRunGetRequest\x1a .sameoldchat.chat.v1.WorkflowRun\x12u\n" +
+	"\x10CompleteFunction\x12..sameoldchat.chat.v1.FunctionCompletionRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12r\n" +
+	"\x15GetFunctionPermission\x12..sameoldchat.chat.v1.FunctionPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12r\n" +
+	"\x15SetFunctionPermission\x12..sameoldchat.chat.v1.FunctionPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12p\n" +
+	"\x14GetTriggerPermission\x12-.sameoldchat.chat.v1.TriggerPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12p\n" +
+	"\x14SetTriggerPermission\x12-.sameoldchat.chat.v1.TriggerPermissionRequest\x1a).sameoldchat.chat.v1.AutomationPermission\x12x\n" +
+	"\x14SetFeaturedWorkflows\x12-.sameoldchat.chat.v1.FeaturedWorkflowsRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12v\n" +
+	"\x15ListFeaturedWorkflows\x12-.sameoldchat.chat.v1.FeaturedWorkflowsRequest\x1a..sameoldchat.chat.v1.FeaturedWorkflowsResponse\x12\x81\x01\n" +
+	"\x19ListFunctionWorkflowSteps\x121.sameoldchat.chat.v1.FunctionWorkflowStepsRequest\x1a1.sameoldchat.chat.v1.WorkflowStepVersionsResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_workflows_proto_rawDescOnce sync.Once
@@ -273,24 +2270,86 @@ func file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_workflows_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_sameoldchat_chat_v1_workflows_proto_goTypes = []any{
-	(*WorkflowStepRequest)(nil),          // 0: sameoldchat.chat.v1.WorkflowStepRequest
-	(*WorkflowStepUpdateRequest)(nil),    // 1: sameoldchat.chat.v1.WorkflowStepUpdateRequest
-	(*WorkflowStepMutationResponse)(nil), // 2: sameoldchat.chat.v1.WorkflowStepMutationResponse
+	(*WorkflowStepRequest)(nil),            // 0: sameoldchat.chat.v1.WorkflowStepRequest
+	(*WorkflowStepUpdateRequest)(nil),      // 1: sameoldchat.chat.v1.WorkflowStepUpdateRequest
+	(*WorkflowStepMutationResponse)(nil),   // 2: sameoldchat.chat.v1.WorkflowStepMutationResponse
+	(*WorkflowDefinition)(nil),             // 3: sameoldchat.chat.v1.WorkflowDefinition
+	(*WorkflowMutationRequest)(nil),        // 4: sameoldchat.chat.v1.WorkflowMutationRequest
+	(*WorkflowGetRequest)(nil),             // 5: sameoldchat.chat.v1.WorkflowGetRequest
+	(*WorkflowListRequest)(nil),            // 6: sameoldchat.chat.v1.WorkflowListRequest
+	(*WorkflowListResponse)(nil),           // 7: sameoldchat.chat.v1.WorkflowListResponse
+	(*WorkflowTrigger)(nil),                // 8: sameoldchat.chat.v1.WorkflowTrigger
+	(*WorkflowTriggerMutationRequest)(nil), // 9: sameoldchat.chat.v1.WorkflowTriggerMutationRequest
+	(*WorkflowTriggerListRequest)(nil),     // 10: sameoldchat.chat.v1.WorkflowTriggerListRequest
+	(*WorkflowTriggerListResponse)(nil),    // 11: sameoldchat.chat.v1.WorkflowTriggerListResponse
+	(*WorkflowRun)(nil),                    // 12: sameoldchat.chat.v1.WorkflowRun
+	(*WorkflowRunRequest)(nil),             // 13: sameoldchat.chat.v1.WorkflowRunRequest
+	(*WorkflowRunGetRequest)(nil),          // 14: sameoldchat.chat.v1.WorkflowRunGetRequest
+	(*FunctionCompletionRequest)(nil),      // 15: sameoldchat.chat.v1.FunctionCompletionRequest
+	(*AutomationPermission)(nil),           // 16: sameoldchat.chat.v1.AutomationPermission
+	(*FunctionPermissionRequest)(nil),      // 17: sameoldchat.chat.v1.FunctionPermissionRequest
+	(*TriggerPermissionRequest)(nil),       // 18: sameoldchat.chat.v1.TriggerPermissionRequest
+	(*FeaturedWorkflowsRequest)(nil),       // 19: sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	(*FeaturedWorkflow)(nil),               // 20: sameoldchat.chat.v1.FeaturedWorkflow
+	(*FeaturedWorkflowsResponse)(nil),      // 21: sameoldchat.chat.v1.FeaturedWorkflowsResponse
+	(*FunctionWorkflowStepsRequest)(nil),   // 22: sameoldchat.chat.v1.FunctionWorkflowStepsRequest
+	(*WorkflowStepVersion)(nil),            // 23: sameoldchat.chat.v1.WorkflowStepVersion
+	(*WorkflowStepVersionsResponse)(nil),   // 24: sameoldchat.chat.v1.WorkflowStepVersionsResponse
 }
 var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.WorkflowsService.StepCompleted:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
-	0, // 1: sameoldchat.chat.v1.WorkflowsService.StepFailed:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
-	1, // 2: sameoldchat.chat.v1.WorkflowsService.UpdateStep:input_type -> sameoldchat.chat.v1.WorkflowStepUpdateRequest
-	2, // 3: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2, // 4: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2, // 5: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	3,  // 0: sameoldchat.chat.v1.WorkflowMutationRequest.workflow:type_name -> sameoldchat.chat.v1.WorkflowDefinition
+	3,  // 1: sameoldchat.chat.v1.WorkflowListResponse.workflows:type_name -> sameoldchat.chat.v1.WorkflowDefinition
+	8,  // 2: sameoldchat.chat.v1.WorkflowTriggerMutationRequest.trigger:type_name -> sameoldchat.chat.v1.WorkflowTrigger
+	8,  // 3: sameoldchat.chat.v1.WorkflowTriggerListResponse.triggers:type_name -> sameoldchat.chat.v1.WorkflowTrigger
+	16, // 4: sameoldchat.chat.v1.FunctionPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
+	16, // 5: sameoldchat.chat.v1.TriggerPermissionRequest.permission:type_name -> sameoldchat.chat.v1.AutomationPermission
+	20, // 6: sameoldchat.chat.v1.FeaturedWorkflowsResponse.workflows:type_name -> sameoldchat.chat.v1.FeaturedWorkflow
+	23, // 7: sameoldchat.chat.v1.WorkflowStepVersionsResponse.steps_versions:type_name -> sameoldchat.chat.v1.WorkflowStepVersion
+	0,  // 8: sameoldchat.chat.v1.WorkflowsService.StepCompleted:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
+	0,  // 9: sameoldchat.chat.v1.WorkflowsService.StepFailed:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
+	1,  // 10: sameoldchat.chat.v1.WorkflowsService.UpdateStep:input_type -> sameoldchat.chat.v1.WorkflowStepUpdateRequest
+	4,  // 11: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
+	5,  // 12: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:input_type -> sameoldchat.chat.v1.WorkflowGetRequest
+	4,  // 13: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:input_type -> sameoldchat.chat.v1.WorkflowMutationRequest
+	6,  // 14: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:input_type -> sameoldchat.chat.v1.WorkflowListRequest
+	9,  // 15: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:input_type -> sameoldchat.chat.v1.WorkflowTriggerMutationRequest
+	10, // 16: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:input_type -> sameoldchat.chat.v1.WorkflowTriggerListRequest
+	13, // 17: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:input_type -> sameoldchat.chat.v1.WorkflowRunRequest
+	14, // 18: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:input_type -> sameoldchat.chat.v1.WorkflowRunGetRequest
+	15, // 19: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:input_type -> sameoldchat.chat.v1.FunctionCompletionRequest
+	17, // 20: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
+	17, // 21: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:input_type -> sameoldchat.chat.v1.FunctionPermissionRequest
+	18, // 22: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
+	18, // 23: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:input_type -> sameoldchat.chat.v1.TriggerPermissionRequest
+	19, // 24: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	19, // 25: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:input_type -> sameoldchat.chat.v1.FeaturedWorkflowsRequest
+	22, // 26: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:input_type -> sameoldchat.chat.v1.FunctionWorkflowStepsRequest
+	2,  // 27: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 28: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2,  // 29: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	3,  // 30: sameoldchat.chat.v1.WorkflowsService.CreateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	3,  // 31: sameoldchat.chat.v1.WorkflowsService.GetWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	3,  // 32: sameoldchat.chat.v1.WorkflowsService.UpdateWorkflow:output_type -> sameoldchat.chat.v1.WorkflowDefinition
+	7,  // 33: sameoldchat.chat.v1.WorkflowsService.ListWorkflows:output_type -> sameoldchat.chat.v1.WorkflowListResponse
+	8,  // 34: sameoldchat.chat.v1.WorkflowsService.SetWorkflowTrigger:output_type -> sameoldchat.chat.v1.WorkflowTrigger
+	11, // 35: sameoldchat.chat.v1.WorkflowsService.ListWorkflowTriggers:output_type -> sameoldchat.chat.v1.WorkflowTriggerListResponse
+	12, // 36: sameoldchat.chat.v1.WorkflowsService.RunWorkflow:output_type -> sameoldchat.chat.v1.WorkflowRun
+	12, // 37: sameoldchat.chat.v1.WorkflowsService.GetWorkflowRun:output_type -> sameoldchat.chat.v1.WorkflowRun
+	2,  // 38: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	16, // 39: sameoldchat.chat.v1.WorkflowsService.GetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	16, // 40: sameoldchat.chat.v1.WorkflowsService.SetFunctionPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	16, // 41: sameoldchat.chat.v1.WorkflowsService.GetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	16, // 42: sameoldchat.chat.v1.WorkflowsService.SetTriggerPermission:output_type -> sameoldchat.chat.v1.AutomationPermission
+	2,  // 43: sameoldchat.chat.v1.WorkflowsService.SetFeaturedWorkflows:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	21, // 44: sameoldchat.chat.v1.WorkflowsService.ListFeaturedWorkflows:output_type -> sameoldchat.chat.v1.FeaturedWorkflowsResponse
+	24, // 45: sameoldchat.chat.v1.WorkflowsService.ListFunctionWorkflowSteps:output_type -> sameoldchat.chat.v1.WorkflowStepVersionsResponse
+	27, // [27:46] is the sub-list for method output_type
+	8,  // [8:27] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_workflows_proto_init() }
@@ -304,7 +2363,7 @@ func file_sameoldchat_chat_v1_workflows_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_workflows_proto_rawDesc), len(file_sameoldchat_chat_v1_workflows_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

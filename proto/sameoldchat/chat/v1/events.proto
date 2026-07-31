@@ -15,6 +15,19 @@ message EventRecord {
   // record delivered through the seam lost the user who caused it while the
   // monolith kept it.
   string actor_id = 7;
+  // Immutable content snapshot for internal delivery workers. Event's JSON
+  // representation omits this field; public SSE and generic record delivery
+  // must never expose it.
+  string private_payload = 8;
+  repeated EventAuthorization authorizations = 9;
+}
+
+message EventAuthorization {
+  string enterprise_id = 1;
+  string team_id = 2;
+  string user_id = 3;
+  bool is_bot = 4;
+  bool is_enterprise_install = 5;
 }
 
 message EventsRequest {

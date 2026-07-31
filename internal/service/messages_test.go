@@ -2505,6 +2505,20 @@ func TestExternalUploadSurvivesUploadRetryAndCompletesOnce(t *testing.T) {
 	if err != nil || stored.Status != domain.ExternalUploadCompleted {
 		t.Fatalf("stored=%+v err=%v", stored, err)
 	}
+	records, err := s.ListEventsAfter(ctx, "T1", 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	topics := make([]string, 0, len(records))
+	for _, record := range records {
+		topics = append(topics, record.Event.Topic)
+		if (record.Event.Topic == "file.created" || record.Event.Topic == "file.shared" || record.Event.Topic == "message.created") && record.Event.PrivatePayload == "" {
+			t.Fatalf("%s has no immutable delivery snapshot", record.Event.Topic)
+		}
+	}
+	if strings.Join(topics, ",") != "file.created,file.shared,message.created" {
+		t.Fatalf("upload events=%v", topics)
+	}
 }
 
 func TestExternalUploadUsesTicketSizeForMultipartParts(t *testing.T) {

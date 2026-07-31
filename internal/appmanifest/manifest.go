@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -48,11 +49,28 @@ type Parsed struct {
 	AgentView               *AgentView
 	AssistantView           *AgentView
 	Datastores              map[string]Datastore
+	Functions               map[string]Function
 }
 
 type AgentView struct {
 	Description      string
 	SuggestedPrompts []SuggestedPrompt
+}
+
+type Function struct {
+	CallbackID       string
+	Title            string
+	Description      string
+	InputParameters  []FunctionParameter
+	OutputParameters []FunctionParameter
+}
+
+type FunctionParameter struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	IsRequired  bool   `json:"is_required"`
 }
 
 type SuggestedPrompt struct {
@@ -326,13 +344,9 @@ func Parse(raw string) (Parsed, []Error) {
 			})
 		}
 	}
-	if functions, exists := document["functions"]; exists {
-		values, ok := functions.(map[string]any)
-		if !ok {
-			problems = append(problems, Error{Message: "Functions must be an object", Pointer: "/functions"})
-		} else if len(values) != 0 && functionRuntime == "" {
-			problems = append(problems, Error{Message: "function_runtime is required when functions are declared", Pointer: "/settings/function_runtime"})
-		}
+	functions := parseFunctions(document["functions"], &problems)
+	if len(functions) != 0 && functionRuntime == "" {
+		problems = append(problems, Error{Message: "function_runtime is required when functions are declared", Pointer: "/settings/function_runtime"})
 	}
 	datastores := parseDatastores(document["datastores"], &problems)
 	if len(datastores) != 0 {
@@ -381,7 +395,93 @@ func Parse(raw string) (Parsed, []Error) {
 		AgentView:               agentView,
 		AssistantView:           assistantView,
 		Datastores:              datastores,
+		Functions:               functions,
 	}, nil
+}
+
+func parseFunctions(raw any, problems *[]Error) map[string]Function {
+	if raw == nil {
+		return map[string]Function{}
+	}
+	values, ok := raw.(map[string]any)
+	if !ok {
+		*problems = append(*problems, Error{Message: "Functions must be an object", Pointer: "/functions"})
+		return map[string]Function{}
+	}
+	result := make(map[string]Function, len(values))
+	for callbackID, rawFunction := range values {
+		pointer := "/functions/" + callbackID
+		value, ok := rawFunction.(map[string]any)
+		if !ok {
+			*problems = append(*problems, Error{Message: "Function must be an object", Pointer: pointer})
+			continue
+		}
+		title := strings.TrimSpace(stringField(value, "title"))
+		description := strings.TrimSpace(stringField(value, "description"))
+		if strings.TrimSpace(callbackID) == "" {
+			*problems = append(*problems, Error{Message: "Function callback ID is required", Pointer: pointer})
+			continue
+		}
+		if title == "" {
+			*problems = append(*problems, Error{Message: "Function title is required", Pointer: pointer + "/title"})
+		}
+		result[callbackID] = Function{
+			CallbackID: callbackID, Title: title, Description: description,
+			InputParameters:  parseFunctionParameters(value["input_parameters"], pointer+"/input_parameters", problems),
+			OutputParameters: parseFunctionParameters(value["output_parameters"], pointer+"/output_parameters", problems),
+		}
+	}
+	return result
+}
+
+func parseFunctionParameters(raw any, pointer string, problems *[]Error) []FunctionParameter {
+	if raw == nil {
+		return []FunctionParameter{}
+	}
+	schema, ok := raw.(map[string]any)
+	if !ok {
+		*problems = append(*problems, Error{Message: "Function parameters must be an object", Pointer: pointer})
+		return []FunctionParameter{}
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok && schema["properties"] != nil {
+		*problems = append(*problems, Error{Message: "Function parameter properties must be an object", Pointer: pointer + "/properties"})
+		return []FunctionParameter{}
+	}
+	required := map[string]bool{}
+	if values, ok := schema["required"].([]any); ok {
+		for _, value := range values {
+			if name, ok := value.(string); ok {
+				required[name] = true
+			}
+		}
+	}
+	names := make([]string, 0, len(properties))
+	for name := range properties {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]FunctionParameter, 0, len(names))
+	for _, name := range names {
+		value, ok := properties[name].(map[string]any)
+		if !ok {
+			*problems = append(*problems, Error{Message: "Function parameter must be an object", Pointer: pointer + "/properties/" + name})
+			continue
+		}
+		typeName := strings.TrimSpace(stringField(value, "type"))
+		title := strings.TrimSpace(stringField(value, "title"))
+		if typeName == "" {
+			*problems = append(*problems, Error{Message: "Function parameter type is required", Pointer: pointer + "/properties/" + name + "/type"})
+		}
+		if title == "" {
+			title = name
+		}
+		result = append(result, FunctionParameter{
+			Name: name, Type: typeName, Title: title, Description: strings.TrimSpace(stringField(value, "description")),
+			IsRequired: required[name],
+		})
+	}
+	return result
 }
 
 var manifestColor = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)

@@ -9,6 +9,7 @@ const clientOptions = {
 };
 const client = new WebClient(token, clientOptions);
 const reminderClient = new WebClient("xoxp-reminder-qualification", clientOptions);
+const workflowClient = new WebClient("xoxb-workflow-qualification", clientOptions);
 const appClient = new WebClient(process.env.SAMEOLDCHAT_APP_TOKEN ?? "xapp-test", clientOptions);
 const configurationClient = new WebClient(process.env.SAMEOLDCHAT_CONFIGURATION_TOKEN ?? "xoxe.xoxp-qualification", clientOptions);
 
@@ -354,7 +355,10 @@ const refreshedOpenIDToken = await client.apiCall("openid.connect.token", {
 });
 assert.equal(refreshedOpenIDToken.ok, true);
 assert.notEqual(refreshedOpenIDToken.access_token, openidToken.access_token);
-const authorizations = await client.apps.event.authorizations.list({ event_context: "qualification-event" });
+const eventContextResponse = await fetch(new URL("../qualification/event-context", process.env.SAMEOLDCHAT_API_URL ?? "http://127.0.0.1:18080/api/"));
+assert.equal(eventContextResponse.ok, true);
+const eventContext = await eventContextResponse.text();
+const authorizations = await appClient.apps.event.authorizations.list({ event_context: eventContext });
 assert.equal(authorizations.ok, true);
 assert.equal(authorizations.authorizations[0].team_id, "T1");
 assert.equal(authorizations.authorizations[0].is_bot, true);
@@ -490,6 +494,78 @@ const updatedStep = await client.apiCall("workflows.updateStep", {
   outputs: [{ type: "text", name: "answer", label: "Answer" }],
 });
 assert.equal(updatedStep.ok, true);
+const functionPermission = await workflowClient.apiCall("functions.distributions.permissions.set", {
+  function_callback_id: "triage",
+  function_app_id: "A3",
+  permission_type: "named_entities",
+  user_ids: ["U1", "U2"],
+});
+assert.equal(functionPermission.ok, true);
+assert.equal(functionPermission.permission_type, "named_entities");
+assert.deepEqual(functionPermission.users.map((user) => user.user_id), ["U1", "U2"]);
+assert.equal((await workflowClient.apiCall("functions.distributions.permissions.add", {
+  function_id: "FnB4D6AFBF12045549",
+  user_ids: ["U3"],
+})).ok, true);
+assert.equal((await workflowClient.apiCall("functions.distributions.permissions.remove", {
+  function_id: "FnB4D6AFBF12045549",
+  user_ids: ["U3"],
+})).ok, true);
+const listedFunctionPermission = await workflowClient.apiCall("functions.distributions.permissions.list", {
+  function_id: "FnB4D6AFBF12045549",
+});
+assert.equal(listedFunctionPermission.ok, true);
+assert.deepEqual(listedFunctionPermission.users.map((user) => user.user_id), ["U1", "U2"]);
+const triggerPermission = await workflowClient.apiCall("workflows.triggers.permissions.set", {
+  trigger_id: "FtQualification",
+  permission_type: "named_entities",
+  user_ids: ["U1", "U2"],
+});
+assert.equal(triggerPermission.ok, true);
+assert.equal((await workflowClient.apiCall("workflows.triggers.permissions.add", {
+  trigger_id: "FtQualification",
+  user_ids: ["U3"],
+})).ok, true);
+assert.equal((await workflowClient.apiCall("workflows.triggers.permissions.remove", {
+  trigger_id: "FtQualification",
+  user_ids: ["U3"],
+})).ok, true);
+assert.equal((await workflowClient.apiCall("workflows.triggers.permissions.set", {
+  trigger_id: "FtQualification",
+  permission_type: "everyone",
+})).ok, true);
+assert.equal((await workflowClient.apiCall("workflows.triggers.permissions.list", {
+  trigger_id: "FtQualification",
+})).permission_type, "everyone");
+assert.equal((await workflowClient.apiCall("workflows.featured.set", {
+  channel_id: "C1",
+  trigger_ids: ["FtQualification"],
+})).ok, true);
+const featuredWorkflows = await workflowClient.apiCall("workflows.featured.list", { channel_ids: ["C1"] });
+assert.equal(featuredWorkflows.ok, true);
+assert.equal(featuredWorkflows.featured_workflows[0].triggers[0].id, "FtQualification");
+assert.equal((await workflowClient.apiCall("workflows.featured.remove", {
+  channel_id: "C1",
+  trigger_ids: ["FtQualification"],
+})).ok, true);
+assert.equal((await workflowClient.apiCall("workflows.featured.add", {
+  channel_id: "C1",
+  trigger_ids: ["FtQualification"],
+})).ok, true);
+const functionSteps = await workflowClient.apiCall("functions.workflows.steps.list", {
+  function_id: "FnB4D6AFBF12045549",
+  workflow_id: "WfQualification",
+});
+assert.equal(functionSteps.ok, true);
+assert.equal(functionSteps.steps_versions[0].title, "Triage");
+assert.equal((await workflowClient.apiCall("functions.completeSuccess", {
+  function_execution_id: "FxQualification",
+  outputs: { result: "qualified by Node" },
+})).ok, true);
+assert.equal((await workflowClient.apiCall("functions.completeError", {
+  function_execution_id: "FxQualificationError",
+  error: "qualified failure from Node",
+})).ok, true);
 const openedDialog = await client.dialog.open({
   trigger_id: "qualification-dialog-trigger",
   dialog: {

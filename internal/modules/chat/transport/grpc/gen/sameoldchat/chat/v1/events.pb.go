@@ -32,9 +32,14 @@ type EventRecord struct {
 	// The actor is part of events.Event and was absent from this message, so every
 	// record delivered through the seam lost the user who caused it while the
 	// monolith kept it.
-	ActorId       string `protobuf:"bytes,7,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ActorId string `protobuf:"bytes,7,opt,name=actor_id,json=actorId,proto3" json:"actor_id,omitempty"`
+	// Immutable content snapshot for internal delivery workers. Event's JSON
+	// representation omits this field; public SSE and generic record delivery
+	// must never expose it.
+	PrivatePayload string                `protobuf:"bytes,8,opt,name=private_payload,json=privatePayload,proto3" json:"private_payload,omitempty"`
+	Authorizations []*EventAuthorization `protobuf:"bytes,9,rep,name=authorizations,proto3" json:"authorizations,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *EventRecord) Reset() {
@@ -116,6 +121,96 @@ func (x *EventRecord) GetActorId() string {
 	return ""
 }
 
+func (x *EventRecord) GetPrivatePayload() string {
+	if x != nil {
+		return x.PrivatePayload
+	}
+	return ""
+}
+
+func (x *EventRecord) GetAuthorizations() []*EventAuthorization {
+	if x != nil {
+		return x.Authorizations
+	}
+	return nil
+}
+
+type EventAuthorization struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	EnterpriseId        string                 `protobuf:"bytes,1,opt,name=enterprise_id,json=enterpriseId,proto3" json:"enterprise_id,omitempty"`
+	TeamId              string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	UserId              string                 `protobuf:"bytes,3,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	IsBot               bool                   `protobuf:"varint,4,opt,name=is_bot,json=isBot,proto3" json:"is_bot,omitempty"`
+	IsEnterpriseInstall bool                   `protobuf:"varint,5,opt,name=is_enterprise_install,json=isEnterpriseInstall,proto3" json:"is_enterprise_install,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *EventAuthorization) Reset() {
+	*x = EventAuthorization{}
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EventAuthorization) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EventAuthorization) ProtoMessage() {}
+
+func (x *EventAuthorization) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EventAuthorization.ProtoReflect.Descriptor instead.
+func (*EventAuthorization) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *EventAuthorization) GetEnterpriseId() string {
+	if x != nil {
+		return x.EnterpriseId
+	}
+	return ""
+}
+
+func (x *EventAuthorization) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *EventAuthorization) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *EventAuthorization) GetIsBot() bool {
+	if x != nil {
+		return x.IsBot
+	}
+	return false
+}
+
+func (x *EventAuthorization) GetIsEnterpriseInstall() bool {
+	if x != nil {
+		return x.IsEnterpriseInstall
+	}
+	return false
+}
+
 type EventsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
@@ -129,7 +224,7 @@ type EventsRequest struct {
 
 func (x *EventsRequest) Reset() {
 	*x = EventsRequest{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -141,7 +236,7 @@ func (x *EventsRequest) String() string {
 func (*EventsRequest) ProtoMessage() {}
 
 func (x *EventsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[1]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -154,7 +249,7 @@ func (x *EventsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventsRequest.ProtoReflect.Descriptor instead.
 func (*EventsRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{1}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *EventsRequest) GetWorkspaceId() string {
@@ -201,7 +296,7 @@ type EventsResponse struct {
 
 func (x *EventsResponse) Reset() {
 	*x = EventsResponse{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -213,7 +308,7 @@ func (x *EventsResponse) String() string {
 func (*EventsResponse) ProtoMessage() {}
 
 func (x *EventsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[2]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -226,7 +321,7 @@ func (x *EventsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EventsResponse.ProtoReflect.Descriptor instead.
 func (*EventsResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{2}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *EventsResponse) GetRecords() []*EventRecord {
@@ -248,7 +343,7 @@ type AppEventClaimRequest struct {
 
 func (x *AppEventClaimRequest) Reset() {
 	*x = AppEventClaimRequest{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -260,7 +355,7 @@ func (x *AppEventClaimRequest) String() string {
 func (*AppEventClaimRequest) ProtoMessage() {}
 
 func (x *AppEventClaimRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[3]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -273,7 +368,7 @@ func (x *AppEventClaimRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppEventClaimRequest.ProtoReflect.Descriptor instead.
 func (*AppEventClaimRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{3}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AppEventClaimRequest) GetAppId() string {
@@ -316,7 +411,7 @@ type AppEventLease struct {
 
 func (x *AppEventLease) Reset() {
 	*x = AppEventLease{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -328,7 +423,7 @@ func (x *AppEventLease) String() string {
 func (*AppEventLease) ProtoMessage() {}
 
 func (x *AppEventLease) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[4]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -341,7 +436,7 @@ func (x *AppEventLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppEventLease.ProtoReflect.Descriptor instead.
 func (*AppEventLease) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{4}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AppEventLease) GetRecord() *EventRecord {
@@ -384,7 +479,7 @@ type AppEventAckRequest struct {
 
 func (x *AppEventAckRequest) Reset() {
 	*x = AppEventAckRequest{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -396,7 +491,7 @@ func (x *AppEventAckRequest) String() string {
 func (*AppEventAckRequest) ProtoMessage() {}
 
 func (x *AppEventAckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[5]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -409,7 +504,7 @@ func (x *AppEventAckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppEventAckRequest.ProtoReflect.Descriptor instead.
 func (*AppEventAckRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{5}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AppEventAckRequest) GetAppId() string {
@@ -454,7 +549,7 @@ type AppEventReleaseRequest struct {
 
 func (x *AppEventReleaseRequest) Reset() {
 	*x = AppEventReleaseRequest{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -466,7 +561,7 @@ func (x *AppEventReleaseRequest) String() string {
 func (*AppEventReleaseRequest) ProtoMessage() {}
 
 func (x *AppEventReleaseRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[6]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -479,7 +574,7 @@ func (x *AppEventReleaseRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppEventReleaseRequest.ProtoReflect.Descriptor instead.
 func (*AppEventReleaseRequest) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{6}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AppEventReleaseRequest) GetAppId() string {
@@ -533,7 +628,7 @@ type AppEventMutationResponse struct {
 
 func (x *AppEventMutationResponse) Reset() {
 	*x = AppEventMutationResponse{}
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -545,7 +640,7 @@ func (x *AppEventMutationResponse) String() string {
 func (*AppEventMutationResponse) ProtoMessage() {}
 
 func (x *AppEventMutationResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[7]
+	mi := &file_sameoldchat_chat_v1_events_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -558,7 +653,7 @@ func (x *AppEventMutationResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AppEventMutationResponse.ProtoReflect.Descriptor instead.
 func (*AppEventMutationResponse) Descriptor() ([]byte, []int) {
-	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{7}
+	return file_sameoldchat_chat_v1_events_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *AppEventMutationResponse) GetOk() bool {
@@ -572,7 +667,7 @@ var File_sameoldchat_chat_v1_events_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\n" +
-	" sameoldchat/chat/v1/events.proto\x12\x13sameoldchat.chat.v1\"\xd8\x01\n" +
+	" sameoldchat/chat/v1/events.proto\x12\x13sameoldchat.chat.v1\"\xd2\x02\n" +
 	"\vEventRecord\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x0e\n" +
 	"\x02id\x18\x02 \x01(\tR\x02id\x12!\n" +
@@ -580,7 +675,15 @@ const file_sameoldchat_chat_v1_events_proto_rawDesc = "" +
 	"\x05topic\x18\x04 \x01(\tR\x05topic\x12\x18\n" +
 	"\apayload\x18\x05 \x01(\tR\apayload\x12/\n" +
 	"\x14created_at_unix_nano\x18\x06 \x01(\x03R\x11createdAtUnixNano\x12\x19\n" +
-	"\bactor_id\x18\a \x01(\tR\aactorId\"\x8e\x01\n" +
+	"\bactor_id\x18\a \x01(\tR\aactorId\x12'\n" +
+	"\x0fprivate_payload\x18\b \x01(\tR\x0eprivatePayload\x12O\n" +
+	"\x0eauthorizations\x18\t \x03(\v2'.sameoldchat.chat.v1.EventAuthorizationR\x0eauthorizations\"\xb6\x01\n" +
+	"\x12EventAuthorization\x12#\n" +
+	"\renterprise_id\x18\x01 \x01(\tR\fenterpriseId\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x17\n" +
+	"\auser_id\x18\x03 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06is_bot\x18\x04 \x01(\bR\x05isBot\x122\n" +
+	"\x15is_enterprise_install\x18\x05 \x01(\bR\x13isEnterpriseInstall\"\x8e\x01\n" +
 	"\rEventsRequest\x12!\n" +
 	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x14\n" +
 	"\x05after\x18\x02 \x01(\x04R\x05after\x12\x14\n" +
@@ -632,33 +735,35 @@ func file_sameoldchat_chat_v1_events_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_events_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_sameoldchat_chat_v1_events_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_sameoldchat_chat_v1_events_proto_goTypes = []any{
 	(*EventRecord)(nil),              // 0: sameoldchat.chat.v1.EventRecord
-	(*EventsRequest)(nil),            // 1: sameoldchat.chat.v1.EventsRequest
-	(*EventsResponse)(nil),           // 2: sameoldchat.chat.v1.EventsResponse
-	(*AppEventClaimRequest)(nil),     // 3: sameoldchat.chat.v1.AppEventClaimRequest
-	(*AppEventLease)(nil),            // 4: sameoldchat.chat.v1.AppEventLease
-	(*AppEventAckRequest)(nil),       // 5: sameoldchat.chat.v1.AppEventAckRequest
-	(*AppEventReleaseRequest)(nil),   // 6: sameoldchat.chat.v1.AppEventReleaseRequest
-	(*AppEventMutationResponse)(nil), // 7: sameoldchat.chat.v1.AppEventMutationResponse
+	(*EventAuthorization)(nil),       // 1: sameoldchat.chat.v1.EventAuthorization
+	(*EventsRequest)(nil),            // 2: sameoldchat.chat.v1.EventsRequest
+	(*EventsResponse)(nil),           // 3: sameoldchat.chat.v1.EventsResponse
+	(*AppEventClaimRequest)(nil),     // 4: sameoldchat.chat.v1.AppEventClaimRequest
+	(*AppEventLease)(nil),            // 5: sameoldchat.chat.v1.AppEventLease
+	(*AppEventAckRequest)(nil),       // 6: sameoldchat.chat.v1.AppEventAckRequest
+	(*AppEventReleaseRequest)(nil),   // 7: sameoldchat.chat.v1.AppEventReleaseRequest
+	(*AppEventMutationResponse)(nil), // 8: sameoldchat.chat.v1.AppEventMutationResponse
 }
 var file_sameoldchat_chat_v1_events_proto_depIdxs = []int32{
-	0, // 0: sameoldchat.chat.v1.EventsResponse.records:type_name -> sameoldchat.chat.v1.EventRecord
-	0, // 1: sameoldchat.chat.v1.AppEventLease.record:type_name -> sameoldchat.chat.v1.EventRecord
-	1, // 2: sameoldchat.chat.v1.EventsService.ListEventsAfter:input_type -> sameoldchat.chat.v1.EventsRequest
-	3, // 3: sameoldchat.chat.v1.EventsService.ClaimAppEvent:input_type -> sameoldchat.chat.v1.AppEventClaimRequest
-	5, // 4: sameoldchat.chat.v1.EventsService.AckAppEvent:input_type -> sameoldchat.chat.v1.AppEventAckRequest
-	6, // 5: sameoldchat.chat.v1.EventsService.ReleaseAppEvent:input_type -> sameoldchat.chat.v1.AppEventReleaseRequest
-	2, // 6: sameoldchat.chat.v1.EventsService.ListEventsAfter:output_type -> sameoldchat.chat.v1.EventsResponse
-	4, // 7: sameoldchat.chat.v1.EventsService.ClaimAppEvent:output_type -> sameoldchat.chat.v1.AppEventLease
-	7, // 8: sameoldchat.chat.v1.EventsService.AckAppEvent:output_type -> sameoldchat.chat.v1.AppEventMutationResponse
-	7, // 9: sameoldchat.chat.v1.EventsService.ReleaseAppEvent:output_type -> sameoldchat.chat.v1.AppEventMutationResponse
-	6, // [6:10] is the sub-list for method output_type
-	2, // [2:6] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	1, // 0: sameoldchat.chat.v1.EventRecord.authorizations:type_name -> sameoldchat.chat.v1.EventAuthorization
+	0, // 1: sameoldchat.chat.v1.EventsResponse.records:type_name -> sameoldchat.chat.v1.EventRecord
+	0, // 2: sameoldchat.chat.v1.AppEventLease.record:type_name -> sameoldchat.chat.v1.EventRecord
+	2, // 3: sameoldchat.chat.v1.EventsService.ListEventsAfter:input_type -> sameoldchat.chat.v1.EventsRequest
+	4, // 4: sameoldchat.chat.v1.EventsService.ClaimAppEvent:input_type -> sameoldchat.chat.v1.AppEventClaimRequest
+	6, // 5: sameoldchat.chat.v1.EventsService.AckAppEvent:input_type -> sameoldchat.chat.v1.AppEventAckRequest
+	7, // 6: sameoldchat.chat.v1.EventsService.ReleaseAppEvent:input_type -> sameoldchat.chat.v1.AppEventReleaseRequest
+	3, // 7: sameoldchat.chat.v1.EventsService.ListEventsAfter:output_type -> sameoldchat.chat.v1.EventsResponse
+	5, // 8: sameoldchat.chat.v1.EventsService.ClaimAppEvent:output_type -> sameoldchat.chat.v1.AppEventLease
+	8, // 9: sameoldchat.chat.v1.EventsService.AckAppEvent:output_type -> sameoldchat.chat.v1.AppEventMutationResponse
+	8, // 10: sameoldchat.chat.v1.EventsService.ReleaseAppEvent:output_type -> sameoldchat.chat.v1.AppEventMutationResponse
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_sameoldchat_chat_v1_events_proto_init() }
@@ -672,7 +777,7 @@ func file_sameoldchat_chat_v1_events_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_events_proto_rawDesc), len(file_sameoldchat_chat_v1_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

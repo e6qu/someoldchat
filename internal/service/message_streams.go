@@ -102,7 +102,7 @@ func (m Messages) StartMessageStream(ctx context.Context, workspaceID domain.Wor
 		ThreadTimestamp: request.ThreadTimestamp, CreatedAt: domain.MessageInstant(time.Now()),
 	}
 	for {
-		event, err := newEvent(workspaceID, userID, messagePayload("message.created", message), message.CreatedAt)
+		event, err := messageEventAt(workspaceID, "message.created", message, nil, message.CreatedAt)
 		if err != nil {
 			return domain.Message{}, err
 		}
