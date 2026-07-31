@@ -103,10 +103,58 @@ func TestNextWorkflowScheduledRunStepsCalendarsInTheConfiguredZone(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// AddDate normalizes January 31 + 1 month to March 3; the test pins that
-	// arithmetic rather than claiming Slack's undocumented month-end behavior.
-	if want := time.Date(2026, time.March, 3, 8, 0, 0, 0, time.UTC); !monthly.Equal(want) {
+	// A 31st-of-the-month schedule clamps to the last day of shorter months
+	// instead of drifting into the following month.
+	if want := time.Date(2026, time.February, 28, 8, 0, 0, 0, time.UTC); !monthly.Equal(want) {
 		t.Fatalf("month-end occurrence=%s, want %s", monthly, want)
+	}
+	// The clamped occurrence does not drift the schedule: the fire after it
+	// lands back on the 31st.
+	afterClamp, err := NextWorkflowScheduledRun(
+		`{"start_time":"2026-01-31T08:00:00Z","timezone":"UTC","frequency":{"type":"monthly"}}`,
+		monthly, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.March, 31, 8, 0, 0, 0, time.UTC); !afterClamp.Equal(want) {
+		t.Fatalf("post-clamp occurrence=%s, want %s", afterClamp, want)
+	}
+	// An explicit day-of-month uses the same clamp from any start day.
+	explicitDay, err := NextWorkflowScheduledRun(
+		`{"start_time":"2026-01-15T08:00:00Z","timezone":"UTC","frequency":{"type":"monthly","day":31}}`,
+		time.Date(2026, time.January, 15, 8, 0, 0, 0, time.UTC), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.February, 28, 8, 0, 0, 0, time.UTC); !explicitDay.Equal(want) {
+		t.Fatalf("explicit month-end occurrence=%s, want %s", explicitDay, want)
+	}
+	// Named weekdays fire on their own days inside the interval's weeks.
+	weekdays := `{"start_time":"2026-01-05T09:00:00Z","timezone":"UTC","frequency":{"type":"weekly","weekdays":["mon","wed"]}}`
+	firstWeekday, err := NextWorkflowScheduledRun(weekdays, time.Date(2026, time.January, 5, 9, 0, 0, 0, time.UTC), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.January, 7, 9, 0, 0, 0, time.UTC); !firstWeekday.Equal(want) {
+		t.Fatalf("first weekday occurrence=%s, want %s", firstWeekday, want)
+	}
+	secondWeekday, err := NextWorkflowScheduledRun(weekdays, firstWeekday, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.January, 12, 9, 0, 0, 0, time.UTC); !secondWeekday.Equal(want) {
+		t.Fatalf("second weekday occurrence=%s, want %s", secondWeekday, want)
+	}
+	// Interval weeks anchor on the start's week: weekdays in the skipped
+	// weeks do not fire.
+	biweekly, err := NextWorkflowScheduledRun(
+		`{"start_time":"2026-01-05T09:00:00Z","timezone":"UTC","frequency":{"type":"weekly","interval":2,"weekdays":["mon","wed"]}}`,
+		time.Date(2026, time.January, 7, 9, 0, 0, 0, time.UTC), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, time.January, 19, 9, 0, 0, 0, time.UTC); !biweekly.Equal(want) {
+		t.Fatalf("biweekly weekday occurrence=%s, want %s", biweekly, want)
 	}
 	hourly, err := NextWorkflowScheduledRun(
 		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"hourly","interval":6}}`,
@@ -123,6 +171,12 @@ func TestNextWorkflowScheduledRunStepsCalendarsInTheConfiguredZone(t *testing.T)
 		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"yearly"}}`,
 		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"daily","interval":0}}`,
 		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"daily","interval":367}}`,
+		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"daily","weekdays":["mon"]}}`,
+		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"weekly","weekdays":["mon","mon"]}}`,
+		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"weekly","weekdays":["monday"]}}`,
+		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"weekly","day":15}}`,
+		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"monthly","day":32}}`,
+		`{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"monthly","day":0}}`,
 	} {
 		if _, err := NextWorkflowScheduledRun(raw, time.Now(), true); !errors.Is(err, ErrInvalidTriggerConfig) {
 			t.Fatalf("schedule %s error=%v, want ErrInvalidTriggerConfig", raw, err)

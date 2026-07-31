@@ -2,6 +2,8 @@ package web
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -36,6 +38,32 @@ func seedWorkflowApp(t *testing.T) (*http.ServeMux, string) {
 		t.Fatal(err)
 	}
 	return mux, auth.CSRFToken("session")
+}
+
+func TestWorkflowPagesAgreeWithTheContentSecurityPolicy(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	for _, target := range []string{"/app/workflows", workflowURL} {
+		response := get(t, mux, target)
+		policy := response.Header().Get("Content-Security-Policy")
+		if policy == "" {
+			t.Fatalf("%s carries no content security policy", target)
+		}
+		bodies := inlineScriptBodies(response.Body.String())
+		if len(bodies) == 0 {
+			t.Fatalf("%s renders no inline script", target)
+		}
+		for _, body := range bodies {
+			digest := sha256.Sum256([]byte(body))
+			hash := "'sha256-" + base64.StdEncoding.EncodeToString(digest[:]) + "'"
+			if !strings.Contains(policy, hash) {
+				t.Fatalf("%s serves an inline script the policy blocks: %s", target, hash)
+			}
+		}
+	}
 }
 
 func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {
@@ -140,6 +168,38 @@ func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T)
 	}
 	page := get(t, mux, scheduled.Header().Get("Location"))
 	requireContains(t, "scheduled trigger", page.Body.String(), "Every morning", "Every 1 daily · Europe/Helsinki", "Next run")
+
+	weekdays := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Weekday sync"}, "type": {"scheduled"},
+		"schedule_start": {"2030-05-06T09:00"}, "schedule_timezone": {"UTC"},
+		"schedule_frequency": {"weekly"}, "schedule_interval": {"1"},
+		"schedule_weekday_mon": {"1"}, "schedule_weekday_wed": {"1"},
+	}.Encode(), false)
+	if weekdays.Code != http.StatusSeeOther {
+		t.Fatalf("weekday trigger=%d: %s", weekdays.Code, weekdays.Body)
+	}
+	page = get(t, mux, weekdays.Header().Get("Location"))
+	requireContains(t, "weekday trigger", page.Body.String(), "Weekday sync", "Every week on mon, wed · UTC")
+
+	monthEnd := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Month end"}, "type": {"scheduled"},
+		"schedule_start": {"2030-01-15T09:00"}, "schedule_timezone": {"UTC"},
+		"schedule_frequency": {"monthly"}, "schedule_day": {"31"},
+	}.Encode(), false)
+	if monthEnd.Code != http.StatusSeeOther {
+		t.Fatalf("month-end trigger=%d: %s", monthEnd.Code, monthEnd.Body)
+	}
+	page = get(t, mux, monthEnd.Header().Get("Location"))
+	requireContains(t, "month-end trigger", page.Body.String(), "Month end", "Every month on day 31 · UTC")
+
+	invalidDay := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Broken day"}, "type": {"scheduled"},
+		"schedule_start": {"2030-01-15T09:00"}, "schedule_timezone": {"UTC"},
+		"schedule_frequency": {"monthly"}, "schedule_day": {"32"},
+	}.Encode(), false)
+	if invalidDay.Code != http.StatusBadRequest {
+		t.Fatalf("invalid day=%d: %s", invalidDay.Code, invalidDay.Body)
+	}
 
 	broken := postForm(t, mux, workflowURL+"/triggers", url.Values{
 		"_csrf": {csrf}, "title": {"Broken"}, "type": {"scheduled"},

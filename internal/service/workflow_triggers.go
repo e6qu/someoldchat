@@ -38,9 +38,19 @@ type workflowScheduleConfig struct {
 	StartTime string `json:"start_time"`
 	Timezone  string `json:"timezone"`
 	Frequency struct {
-		Type     string `json:"type"`
-		Interval *int   `json:"interval,omitempty"`
+		Type     string   `json:"type"`
+		Interval *int     `json:"interval,omitempty"`
+		Weekdays []string `json:"weekdays,omitempty"`
+		Day      *int     `json:"day,omitempty"`
 	} `json:"frequency"`
+}
+
+// workflowWeekdays names the canonical weekday values a weekly schedule
+// accepts. Slack's builder offers named days for weekly schedules; the names
+// stay short and lowercase like the rest of the trigger configuration.
+var workflowWeekdays = map[string]time.Weekday{
+	"sun": time.Sunday, "mon": time.Monday, "tue": time.Tuesday, "wed": time.Wednesday,
+	"thu": time.Thursday, "fri": time.Friday, "sat": time.Saturday,
 }
 
 func (c workflowScheduleConfig) interval() int {
@@ -93,13 +103,32 @@ func parseWorkflowSchedule(raw string) (workflowScheduleConfig, time.Time, *time
 	default:
 		return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
 	}
+	if len(config.Frequency.Weekdays) > 0 {
+		if config.Frequency.Type != "weekly" {
+			return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		}
+		seen := make(map[string]bool, len(config.Frequency.Weekdays))
+		for _, day := range config.Frequency.Weekdays {
+			if _, ok := workflowWeekdays[day]; !ok || seen[day] {
+				return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+			}
+			seen[day] = true
+		}
+	}
+	if config.Frequency.Day != nil {
+		if config.Frequency.Type != "monthly" || *config.Frequency.Day < 1 || *config.Frequency.Day > 31 {
+			return workflowScheduleConfig{}, time.Time{}, nil, ErrInvalidTriggerConfig
+		}
+	}
 	return config, start.UTC(), location, nil
 }
 
 // stepSchedule advances one occurrence inside the configured zone. Daily,
 // weekly and monthly steps use calendar arithmetic so a wall-clock schedule
 // survives daylight-saving transitions; hourly steps use absolute duration.
-func stepSchedule(config workflowScheduleConfig, location *time.Location, occurrence time.Time) time.Time {
+// The start time anchors weekday and day-of-month schedules so a clamped
+// occurrence (the 31st landing on a shorter month) cannot drift the next one.
+func stepSchedule(config workflowScheduleConfig, start time.Time, location *time.Location, occurrence time.Time) time.Time {
 	interval := config.interval()
 	local := occurrence.In(location)
 	switch config.Frequency.Type {
@@ -108,10 +137,59 @@ func stepSchedule(config workflowScheduleConfig, location *time.Location, occurr
 	case "daily":
 		return local.AddDate(0, 0, interval).UTC()
 	case "weekly":
-		return local.AddDate(0, 0, 7*interval).UTC()
+		if len(config.Frequency.Weekdays) == 0 {
+			return local.AddDate(0, 0, 7*interval).UTC()
+		}
+		return nextWeekdayOccurrence(config, start, location, local)
 	default:
-		return local.AddDate(0, interval, 0).UTC()
+		return monthlyOccurrence(config, start, location, occurrence)
 	}
+}
+
+// nextWeekdayOccurrence finds the next day whose weekday the schedule names
+// and whose week is a whole number of intervals from the start's week. Weeks
+// begin on Monday, matching the wall-clock weeks a builder user reasons about.
+func nextWeekdayOccurrence(config workflowScheduleConfig, start time.Time, location *time.Location, occurrence time.Time) time.Time {
+	interval := config.interval()
+	localStart := start.In(location)
+	days := make(map[time.Weekday]bool, len(config.Frequency.Weekdays))
+	for _, day := range config.Frequency.Weekdays {
+		days[workflowWeekdays[day]] = true
+	}
+	mondayOf := func(value time.Time) time.Time {
+		local := value.In(location)
+		offset := (int(local.Weekday()) + 6) % 7
+		return time.Date(local.Year(), local.Month(), local.Day()-offset, 0, 0, 0, 0, location)
+	}
+	startMonday := mondayOf(localStart)
+	for candidate := occurrence.AddDate(0, 0, 1); ; candidate = candidate.AddDate(0, 0, 1) {
+		weeks := int(mondayOf(candidate).Sub(startMonday).Hours() / 24 / 7)
+		if days[candidate.Weekday()] && weeks%interval == 0 {
+			return candidate.UTC()
+		}
+	}
+}
+
+// monthlyOccurrence lands on the configured day of the month (or the start's
+// day when none is configured), clamped to the month's length so a 31st
+// schedule fires on the last day of shorter months instead of drifting into
+// the following month.
+func monthlyOccurrence(config workflowScheduleConfig, start time.Time, location *time.Location, occurrence time.Time) time.Time {
+	localStart := start.In(location)
+	local := occurrence.In(location)
+	months := (local.Year()-localStart.Year())*12 + int(local.Month()) - int(localStart.Month())
+	monthIndex := int(localStart.Month()) - 1 + months + config.interval()
+	year := localStart.Year() + monthIndex/12
+	month := time.Month(monthIndex%12 + 1)
+	day := localStart.Day()
+	if config.Frequency.Day != nil {
+		day = *config.Frequency.Day
+	}
+	if last := time.Date(year, month+1, 0, 0, 0, 0, 0, location).Day(); day > last {
+		day = last
+	}
+	return time.Date(year, month, day,
+		localStart.Hour(), localStart.Minute(), localStart.Second(), 0, location).UTC()
 }
 
 // NextWorkflowScheduledRun returns the first occurrence at or after `from`
@@ -129,7 +207,7 @@ func NextWorkflowScheduledRun(raw string, from time.Time, inclusive bool) (time.
 		if occurrence.After(from) || inclusive && occurrence.Equal(from) {
 			return occurrence, nil
 		}
-		next := stepSchedule(config, location, occurrence)
+		next := stepSchedule(config, start, location, occurrence)
 		if !next.After(occurrence) {
 			return time.Time{}, ErrInvalidTriggerConfig
 		}

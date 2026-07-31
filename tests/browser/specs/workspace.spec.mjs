@@ -1961,6 +1961,18 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   const denied = await request.post(webhookURL.replace(/[0-9a-f]+$/, '0'.repeat(48)), { data: {} });
   expect(denied.status()).toBe(404);
 
+  // A weekly schedule can name its weekdays, and the trigger summary shows
+  // the named days rather than a bare interval.
+  await page.getByLabel('Trigger name').fill('Weekday digest');
+  await page.getByLabel('Trigger type').selectOption('scheduled');
+  await page.getByLabel('Starts at').fill('2030-05-06T09:00');
+  await page.getByLabel('Repeats').selectOption('weekly');
+  await page.getByLabel('Mon', { exact: true }).check();
+  await page.getByLabel('Wed', { exact: true }).check();
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  await expect(page.getByText('Every week on mon, wed · UTC')).toBeVisible();
+
   // A workflow can be duplicated from the builder as a new draft and deleted
   // again: the copy lands on its own builder page, and deleting it returns to
   // the directory without it.

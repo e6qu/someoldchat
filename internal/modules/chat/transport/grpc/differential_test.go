@@ -541,6 +541,14 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				weekdays, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					WorkflowID: "WfParity", Title: "Weekdays", Type: "scheduled",
+					Config:  `{"start_time":"2026-01-05T09:00:00Z","timezone":"UTC","frequency":{"type":"weekly","weekdays":["mon","wed"]}}`,
+					Enabled: true,
+				}, 0)
+				if err != nil {
+					return nil, err
+				}
 				if _, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
 					WorkflowID: "WfParity", Title: "On message", Type: "message",
 					Config: `{"channel_ids":["C1"]}`, Enabled: true,
@@ -563,7 +571,7 @@ func parityCases() []parityCase {
 					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, service.ErrWebhookTriggerSecret),
 					hookRun.Status, hookRun.ActorID,
 					autoRun.Status, autoRun.ID == autoReplay.ID,
-					!scheduled.NextRunAt.IsZero(),
+					!scheduled.NextRunAt.IsZero(), weekdays.Config, weekdays.NextRunAt.Format(time.RFC3339),
 					started, again,
 				}, nil
 			},
