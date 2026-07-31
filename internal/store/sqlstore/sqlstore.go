@@ -5630,10 +5630,12 @@ const workflowTriggerColumns = `id, workflow_id, workspace_id, app_id, title, ty
 func scanWorkflowTrigger(row interface{ Scan(...any) error }) (domain.WorkflowTrigger, error) {
 	var value domain.WorkflowTrigger
 	var created, updated int64
+	var enabled int
 	if err := row.Scan(&value.ID, &value.WorkflowID, &value.WorkspaceID, &value.AppID, &value.Title, &value.Type,
-		&value.Config, &value.Enabled, &value.Version, &created, &updated); err != nil {
+		&value.Config, &enabled, &value.Version, &created, &updated); err != nil {
 		return domain.WorkflowTrigger{}, err
 	}
+	value.Enabled = enabled != 0
 	value.CreatedAt = time.Unix(0, created).UTC()
 	value.UpdatedAt = time.Unix(0, updated).UTC()
 	return value, nil
@@ -5662,7 +5664,7 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 			id, workflow_id, workspace_id, app_id, title, type, config, enabled, version, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			value.ID, value.WorkflowID, value.WorkspaceID, value.AppID, value.Title, value.Type, value.Config,
-			value.Enabled, value.Version, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+			boolInt(value.Enabled), value.Version, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
 		if err != nil {
 			return classify(err)
 		}
@@ -5670,7 +5672,7 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 		result, updateErr := tx.ExecContext(ctx, `UPDATE workflow_triggers SET
 			workflow_id = ?, app_id = ?, title = ?, type = ?, config = ?, enabled = ?, version = ?, updated_at = ?
 			WHERE id = ? AND workspace_id = ? AND workflow_id = ? AND app_id = ? AND version = ?`,
-			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, value.Enabled, expectedVersion+1,
+			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, boolInt(value.Enabled), expectedVersion+1,
 			value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, value.WorkflowID, value.AppID, expectedVersion)
 		if updateErr != nil {
 			return classify(updateErr)

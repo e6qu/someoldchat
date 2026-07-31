@@ -1903,7 +1903,7 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('running', { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByText('An app function is running. Reload to see its latest durable state.')).toBeVisible();
-  await page.getByRole('link', { name: 'Workflow', exact: true }).click();
+  await page.getByRole('link', { name: '← Workflow' }).click();
   await page.getByRole('button', { name: 'Unpublish' }).click();
   await expect(page.getByText('Workflow unpublished')).toBeVisible();
   await expect(page.getByText('disabled', { exact: true })).toBeVisible();
