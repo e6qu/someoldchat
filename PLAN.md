@@ -433,7 +433,13 @@ active member before they join, as Slack documents, while private and
 access-group-restricted sources remain fenced during both creation and
 hydration. Public/private channel additions now commit a durable, source-linked
 Invitations item atomically with membership and return `already_in_channel`
-without duplicating it. Slack Connect/canvas-share invitations, VIP/section notifications,
+without duplicating it. The ordinary invitation API now also follows Slack's
+current bot/user and public/private scope alternatives, 100-user formal
+argument limit, all-or-none default, per-user error array, and `force=true`
+valid-subset behavior; the qualification fetches those current contracts and
+the three official SDKs decode the public/private success path. Workspace
+guest/channel-limit and Slack Connect policy errors remain explicit deviations.
+Slack Connect/canvas-share invitations, VIP/section notifications,
 custom views, inline Activity reactions, focus-preserving live updates,
 browser/push/email/sound delivery and timing, notification schedules, urgent
 overrides, group-DM UI, pre-v107 history backfill, controlled live-Slack

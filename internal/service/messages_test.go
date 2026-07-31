@@ -788,6 +788,34 @@ func TestConversationInviteSupportsPrivateChannelsAndCreatesActivity(t *testing.
 	}
 }
 
+func TestConversationInviteIsAtomicUnlessForced(t *testing.T) {
+	s := memory.New()
+	s.SeedWorkspace(domain.Workspace{ID: "T1"})
+	s.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+	s.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1"})
+	s.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "channel"})
+	s.SeedConversationMember("C1", "U1")
+	s.SeedConversationMember("C1", "U2")
+	messages := Messages{Store: s}
+
+	result, err := messages.inviteConversationMembersWithOptions(context.Background(), "T1", "U1", "C1", []domain.UserID{"U2", "U-missing", "U1", "U3"}, false)
+	if err != nil || result.InvitedCount != 0 || len(result.Failures) != 3 {
+		t.Fatalf("default result=%+v err=%v", result, err)
+	}
+	if member, err := s.IsConversationMember(context.Background(), "C1", "U3"); err != nil || member {
+		t.Fatalf("default U3 member=%v err=%v", member, err)
+	}
+
+	result, err = messages.inviteConversationMembersWithOptions(context.Background(), "T1", "U1", "C1", []domain.UserID{"U-missing", "U3"}, true)
+	if err != nil || result.InvitedCount != 1 || len(result.Failures) != 1 || result.Failures[0].Reason != conversationInviteUserNotFound {
+		t.Fatalf("forced result=%+v err=%v", result, err)
+	}
+	if member, err := s.IsConversationMember(context.Background(), "C1", "U3"); err != nil || !member {
+		t.Fatalf("forced U3 member=%v err=%v", member, err)
+	}
+}
+
 func TestAdminConversationConversionEnforcesConversationType(t *testing.T) {
 	s := memory.New()
 	s.SeedWorkspace(domain.Workspace{ID: "T1"})

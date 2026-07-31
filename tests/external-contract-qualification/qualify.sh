@@ -390,6 +390,16 @@ assert_contains "$work/conversations-invite.html" 'public or private channel' \
 	'[CONV-03] conversations.invite supports public and private channels' "$conversation_invite_url"
 assert_contains "$work/conversations-invite.html" 'already_in_channel' \
 	'[CONV-03] duplicate conversations.invite has a named Slack error' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'channels:manage channels:write.invites groups:write groups:write.invites im:write mpim:write' \
+	'[CONV-03] conversations.invite bot scope alternatives match the current contract' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'channels:write channels:write.invites groups:write groups:write.invites im:write mpim:write' \
+	'[CONV-03] conversations.invite user scope alternatives match the current contract' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'Up to 100 users may be listed' \
+	'[CONV-03] conversations.invite enforces the formal current user limit' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'continue inviting the valid ones while disregarding invalid IDs' \
+	'[CONV-03] conversations.invite force supports partial success' "$conversation_invite_url"
+assert_contains "$work/conversations-invite.html" 'users cannot be invited for differing reasons' \
+	'[CONV-03] conversations.invite reports per-user failures' "$conversation_invite_url"
 assert_contains "$work/keyboard-navigation.html" 'Enter to reply to a message' \
 	'[ACTIVITY-03] Activity Enter replies rather than merely opening an item' "$keyboard_navigation_url"
 assert_contains "$work/keyboard-navigation.html" 'X to select or un-select an item' \

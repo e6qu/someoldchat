@@ -195,6 +195,7 @@ var errorClasses = []errorClass{
 	// caller is a workspace member and the conversation exists, so it is neither
 	// an absence nor a permission failure.
 	{key: "service.not_in_conversation", code: codes.FailedPrecondition, sentinel: service.ErrNotInConversation},
+	{key: "service.cannot_invite_self", code: codes.FailedPrecondition, sentinel: service.ErrCannotInviteSelf},
 	{key: "service.app_interaction_unavailable", code: codes.FailedPrecondition, sentinel: service.ErrAppInteractionUnavailable},
 	{key: "service.app_home_not_enabled", code: codes.FailedPrecondition, sentinel: service.ErrAppHomeNotEnabled},
 	{key: "service.app_not_hosted", code: codes.FailedPrecondition, sentinel: service.ErrAppNotHosted},

@@ -75,6 +75,7 @@ var (
 	ErrConversationNotArchived     = errors.New("conversation is not archived")
 	ErrCannotArchiveDefault        = errors.New("required conversation cannot be archived")
 	ErrCannotLeaveDefault          = errors.New("required conversation cannot be left")
+	ErrCannotInviteSelf            = errors.New("a conversation member cannot invite themselves")
 
 	// ErrNotWorkspaceAdmin refuses an administrative operation to an actor whose
 	// durable workspace membership is not an administrator or an owner.
@@ -132,6 +133,25 @@ type Messages struct {
 	Blob             blob.Store
 	AppCredentialKey []byte
 	AppHTTPClient    *http.Client
+}
+
+type conversationInviteFailureReason string
+
+const (
+	conversationInviteUserNotFound     conversationInviteFailureReason = "user_not_found"
+	conversationInviteSelf             conversationInviteFailureReason = "cant_invite_self"
+	conversationInviteAlreadyInChannel conversationInviteFailureReason = "already_in_channel"
+)
+
+type conversationInviteFailure struct {
+	UserID domain.UserID
+	Reason conversationInviteFailureReason
+}
+
+type conversationInviteResult struct {
+	Conversation domain.Conversation
+	Failures     []conversationInviteFailure
+	InvitedCount int
 }
 
 var _ chatapi.Service = Messages{}
@@ -3513,11 +3533,89 @@ func (m Messages) JoinConversation(ctx context.Context, workspaceID domain.Works
 }
 
 func (m Messages) InviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID) (domain.Conversation, error) {
-	return m.inviteConversationMembers(ctx, workspaceID, userID, conversationID, users, true)
+	result, err := m.inviteConversationMembersWithOptions(ctx, workspaceID, userID, conversationID, users, false)
+	if err != nil {
+		return domain.Conversation{}, err
+	}
+	if len(result.Failures) == 0 {
+		return result.Conversation, nil
+	}
+	switch result.Failures[0].Reason {
+	case conversationInviteSelf:
+		return domain.Conversation{}, ErrCannotInviteSelf
+	case conversationInviteAlreadyInChannel:
+		return domain.Conversation{}, store.ErrAlreadyExists
+	default:
+		return domain.Conversation{}, store.ErrNotFound
+	}
+}
+
+// inviteConversationMembersWithOptions implements ordinary
+// conversations.invite. By default every invitee is validated before the store
+// is mutated, so one invalid user makes the whole request atomic. force permits
+// the valid subset to proceed while retaining rejected invitees for the
+// transport's per-user error response.
+func (m Messages) inviteConversationMembersWithOptions(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, force bool) (conversationInviteResult, error) {
+	if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
+		return conversationInviteResult{}, err
+	}
+	conversation, err := m.Store.GetConversation(ctx, conversationID)
+	if err != nil || conversation.WorkspaceID != workspaceID {
+		return conversationInviteResult{}, store.ErrNotFound
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect || conversation.Archived {
+		return conversationInviteResult{}, ErrInvalidConversation
+	}
+
+	result := conversationInviteResult{Conversation: conversation}
+	seen := make(map[domain.UserID]struct{}, len(users))
+	valid := make([]domain.UserID, 0, len(users))
+	for _, targetID := range users {
+		targetID = domain.UserID(strings.TrimSpace(string(targetID)))
+		if targetID == "" {
+			result.Failures = append(result.Failures, conversationInviteFailure{UserID: targetID, Reason: conversationInviteUserNotFound})
+			continue
+		}
+		if _, exists := seen[targetID]; exists {
+			continue
+		}
+		seen[targetID] = struct{}{}
+		if targetID == userID {
+			result.Failures = append(result.Failures, conversationInviteFailure{UserID: targetID, Reason: conversationInviteSelf})
+			continue
+		}
+		target, lookupErr := m.Store.GetUser(ctx, targetID)
+		if lookupErr != nil || target.WorkspaceID != workspaceID || target.Deleted {
+			result.Failures = append(result.Failures, conversationInviteFailure{UserID: targetID, Reason: conversationInviteUserNotFound})
+			continue
+		}
+		member, membershipErr := m.Store.IsConversationMember(ctx, conversationID, targetID)
+		if membershipErr != nil {
+			return conversationInviteResult{}, membershipErr
+		}
+		if member {
+			result.Failures = append(result.Failures, conversationInviteFailure{UserID: targetID, Reason: conversationInviteAlreadyInChannel})
+			continue
+		}
+		valid = append(valid, targetID)
+	}
+	if len(valid) == 0 || (!force && len(result.Failures) != 0) {
+		return result, nil
+	}
+
+	event, err := newEvent(workspaceID, userID, events.NewPayload("conversation.members_invited", events.String("channel_id", string(conversationID)), events.Strings("user_ids", userIDStrings(valid))), time.Now().UTC())
+	if err != nil {
+		return conversationInviteResult{}, err
+	}
+	if err := m.Store.InviteConversationMembers(ctx, conversationID, valid, event); err != nil {
+		return conversationInviteResult{}, err
+	}
+	result.InvitedCount = len(valid)
+	return result, nil
 }
 
 func (m Messages) AdminInviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID) (domain.Conversation, error) {
-	return m.inviteConversationMembers(ctx, workspaceID, userID, conversationID, users, false)
+	return m.adminInviteConversationMembers(ctx, workspaceID, userID, conversationID, users)
 }
 
 func (m Messages) AdminConvertConversationToPrivate(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID) (domain.Conversation, error) {
@@ -4116,17 +4214,11 @@ func (m Messages) AdminTeamUsers(ctx context.Context, workspaceID domain.Workspa
 	return m.Store.ListUsersByRole(ctx, workspaceID, role, request)
 }
 
-// inviteConversationMembers serves two callers with different authority.
-// asConversationMember is the ordinary conversations.invite, where the inviter has
-// to be in the conversation; the administrative admin.conversations.invite reaches
-// conversations the actor is not in, so it requires a workspace administrator
-// instead. Workspace membership alone authorizes neither.
-func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID, asConversationMember bool) (domain.Conversation, error) {
-	if asConversationMember {
-		if err := m.requireConversationMembership(ctx, workspaceID, userID, conversationID); err != nil {
-			return domain.Conversation{}, err
-		}
-	} else if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
+// adminInviteConversationMembers reaches conversations the actor is not in, so
+// it requires a workspace administrator instead of ordinary conversation
+// membership. Workspace membership alone authorizes neither.
+func (m Messages) adminInviteConversationMembers(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, conversationID domain.ConversationID, users []domain.UserID) (domain.Conversation, error) {
+	if err := m.requireWorkspaceAdmin(ctx, workspaceID, userID); err != nil {
 		return domain.Conversation{}, err
 	}
 	conversation, err := m.Store.GetConversation(ctx, conversationID)
@@ -4163,9 +4255,8 @@ func (m Messages) inviteConversationMembers(ctx context.Context, workspaceID dom
 	if err := m.Store.InviteConversationMembers(ctx, conversationID, normalized, event); err != nil {
 		// admin.conversations.invite historically treats an already-complete
 		// membership set as an idempotent success in our pinned compatibility
-		// surface. Ordinary conversations.invite exposes Slack's documented
-		// already_in_channel error instead.
-		if !asConversationMember && errors.Is(err, store.ErrAlreadyExists) {
+		// surface.
+		if errors.Is(err, store.ErrAlreadyExists) {
 			return conversation, nil
 		}
 		return domain.Conversation{}, err

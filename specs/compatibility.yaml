@@ -253,12 +253,10 @@ operations:
       - specs/journeys/02-conversations-and-direct-messages.md
       - specs/journeys/05-search-and-activity.md
     deviations:
-      - Current public/private alternative invite scopes are not yet distinguished; the route still requires channels:manage.
-      - The force partial-success option and Slack's per-user errors array remain unimplemented.
       - Workspace guest/channel-limit and Slack Connect invitation policy errors remain unqualified.
     audit:
       downgraded_from: behavior-compatible
-      reason: Public/private membership, duplicate rejection, Activity projection, and current SDK response decoding are qualified, but the previous full claim ignored current scope alternatives and force/error-array behavior.
+      reason: Public/private membership, current scope alternatives, atomic default invitation, force partial success, per-user errors, duplicate rejection, Activity projection, and current SDK response decoding are qualified. Guest limits and Slack Connect policy remain intentionally outside the claim.
       evidence:
         - https://docs.slack.dev/reference/methods/conversations.invite/
         - internal/api/slack/handler.go

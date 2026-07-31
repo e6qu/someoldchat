@@ -608,6 +608,12 @@ assert.equal(joined.ok, true);
 assert.equal(joined.channel.id, "C2");
 const invited = await client.conversations.invite({ channel: "C1", users: "U2" });
 assert.equal(invited.ok, true);
+const forceInvited = await client.conversations.invite({
+	channel: "C1",
+	users: "U-missing,U3",
+	force: true,
+});
+assert.equal(forceInvited.ok, true);
 const kicked = await client.conversations.kick({ channel: "C1", user: "U2" });
 assert.equal(kicked.ok, true);
 const privateInvitationChannel = await client.conversations.create({

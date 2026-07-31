@@ -18,6 +18,7 @@ service.app_interaction_unavailable
 service.app_not_hosted
 service.blob_unavailable
 service.cannot_archive_default
+service.cannot_invite_self
 service.cannot_leave_default
 service.conversation_already_archived
 service.conversation_not_archived

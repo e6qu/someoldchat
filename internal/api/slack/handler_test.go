@@ -203,7 +203,7 @@ func TestOpenIDConnectMethodsExchangeAndReturnUserInfo(t *testing.T) {
 // value so that a scope-enforcement test can subtract exactly one scope from it,
 // and so testHandlerWithScopes can build a deliberately narrow token.
 func defaultTestScopes() []auth.Scope {
-	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
+	return []auth.Scope{auth.ScopeChatWrite, auth.ScopeChannelsHistory, auth.ScopeRTMStream, auth.ScopeUsersRead, auth.ScopeUsersReadEmail, auth.ScopeUsersWrite, auth.ScopeUsersProfileRead, auth.ScopeUsersProfileWrite, auth.ScopeChannelsRead, auth.ScopeChannelsJoin, auth.ScopeChannelsWrite, auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites, auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite, auth.ScopeReactionsWrite, auth.ScopeReactionsRead, auth.ScopePinsWrite, auth.ScopePinsRead, auth.ScopeBookmarksRead, auth.ScopeBookmarksWrite, auth.ScopeSearchRead, auth.ScopeFilesRead, auth.ScopeFilesWrite, auth.ScopeRemoteFilesRead, auth.ScopeRemoteFilesWrite, auth.ScopeRemoteFilesShare, auth.ScopeTeamRead, auth.ScopeTeamPreferencesRead, auth.ScopeEmojiRead, auth.ScopeAuthorizationsRead, auth.ScopeLinksWrite, auth.ScopeIdentityBasic, auth.ScopeDNDRead, auth.ScopeDNDWrite, auth.ScopeStarsRead, auth.ScopeStarsWrite, auth.ScopeRemindersRead, auth.ScopeRemindersWrite, auth.ScopeUserGroupsRead, auth.ScopeUserGroupsWrite, auth.ScopeCallsRead, auth.ScopeCallsWrite, auth.ScopeWorkflowStepsExecute, auth.ScopeTokensBasic, auth.ScopeDatastoreRead, auth.ScopeDatastoreWrite, auth.ScopeAdmin, auth.ScopeAdminUsersRead, auth.ScopeAdminUsersWrite, auth.ScopeAdminInvitesRead, auth.ScopeAdminInvitesWrite, auth.ScopeAdminConversationsRead, auth.ScopeAdminConversationsWrite, auth.ScopeAdminUserGroupsRead, auth.ScopeAdminUserGroupsWrite, auth.ScopeAdminTeamsRead, auth.ScopeAdminTeamsWrite, auth.ScopeAdminAppsRead, auth.ScopeAdminAppsWrite, auth.ScopeCanvasesRead, auth.ScopeCanvasesWrite, auth.ScopeListsRead, auth.ScopeListsWrite}
 }
 
 func testHandlerWithStore() (http.Handler, *memory.Store) {
@@ -1884,6 +1884,66 @@ func TestInviteConversationNormalizesMembers(t *testing.T) {
 	}
 }
 
+func TestInviteConversationReportsPerUserFailuresAndIsAtomicByDefault(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
+
+	response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U2,U-missing,U1,U3")
+	body := response.Body.String()
+	for _, fragment := range []string{
+		`"ok":false`,
+		`"error":"already_in_channel"`,
+		`"user":"U2"`,
+		`"user":"U-missing"`,
+		`"error":"user_not_found"`,
+		`"user":"U1"`,
+		`"error":"cant_invite_self"`,
+	} {
+		if !strings.Contains(body, fragment) {
+			t.Fatalf("body=%s missing %s", body, fragment)
+		}
+	}
+	member, err := repository.IsConversationMember(context.Background(), "C1", "U3")
+	if err != nil || member {
+		t.Fatalf("U3 member=%v err=%v; default invite must be atomic", member, err)
+	}
+}
+
+func TestInviteConversationForceInvitesValidSubset(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	repository.SeedUser(domain.User{ID: "U3", WorkspaceID: "T1", Name: "carol"})
+
+	response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U-missing,U3&force=true")
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	member, err := repository.IsConversationMember(context.Background(), "C1", "U3")
+	if err != nil || !member {
+		t.Fatalf("U3 member=%v err=%v", member, err)
+	}
+	member, err = repository.IsConversationMember(context.Background(), "C1", "U-missing")
+	if err != nil || member {
+		t.Fatalf("missing user member=%v err=%v", member, err)
+	}
+}
+
+func TestInviteConversationValidatesForceAndCurrentHundredUserLimit(t *testing.T) {
+	handler := testHandler()
+	invalidForce := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U3&force=occasionally")
+	if invalidForce.Code != http.StatusOK || !strings.Contains(invalidForce.Body.String(), `"error":"invalid_arg_name"`) {
+		t.Fatalf("invalid force status=%d body=%s", invalidForce.Code, invalidForce.Body)
+	}
+
+	users := make([]string, 101)
+	for index := range users {
+		users[index] = "U" + strconv.Itoa(index+100)
+	}
+	tooMany := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users="+strings.Join(users, ","))
+	if tooMany.Code != http.StatusOK || !strings.Contains(tooMany.Body.String(), `"error":"too_many_users"`) {
+		t.Fatalf("too many status=%d body=%s", tooMany.Code, tooMany.Body)
+	}
+}
+
 func TestInviteConversationSupportsPrivateChannels(t *testing.T) {
 	handler, repository := testHandlerWithStore()
 	repository.SeedConversation(domain.Conversation{ID: "C-private", WorkspaceID: "T1", Name: "private", IsPrivate: true})
@@ -1902,6 +1962,79 @@ func TestInviteConversationSupportsPrivateChannels(t *testing.T) {
 	if err != nil || len(activity.Items) != 1 || !activity.Items[0].SourceAvailable {
 		t.Fatalf("private invitation activity=%+v err=%v", activity, err)
 	}
+}
+
+func TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix(t *testing.T) {
+	t.Run("bot public channels write invites", func(t *testing.T) {
+		handler, repository := testHandlerWithScopes(auth.ScopeChannelsWriteInvites)
+		if err := repository.RemoveConversationMember(context.Background(), "C1", "U2", events.Event{ID: "E-scope-remove", WorkspaceID: "T1", ActorID: "U1", CreatedAt: time.Now().UTC()}); err != nil {
+			t.Fatal(err)
+		}
+		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C1&users=U2")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("bot private groups write", func(t *testing.T) {
+		handler, repository := testHandlerWithScopes(auth.ScopeGroupsWrite)
+		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", IsPrivate: true})
+		repository.SeedConversationMember("C-private-scope", "U1")
+		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("public scope cannot invite to private channel", func(t *testing.T) {
+		handler, repository := testHandlerWithScopes(auth.ScopeChannelsManage)
+		repository.SeedConversation(domain.Conversation{ID: "C-private-scope", WorkspaceID: "T1", Name: "private-scope", IsPrivate: true})
+		repository.SeedConversationMember("C-private-scope", "U1")
+		response := callSlackForm(t, handler, "/api/conversations.invite", "channel=C-private-scope&users=U2")
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"error":"missing_scope"`) || !strings.Contains(response.Body.String(), `"needed":"groups:write"`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("user public channels write", func(t *testing.T) {
+		repository := memory.New()
+		repository.SeedWorkspace(domain.Workspace{ID: "T1"})
+		repository.SeedUser(domain.User{ID: "U1", WorkspaceID: "T1"})
+		repository.SeedUser(domain.User{ID: "U2", WorkspaceID: "T1"})
+		repository.SeedConversation(domain.Conversation{ID: "C1", WorkspaceID: "T1", Name: "general"})
+		repository.SeedConversationMember("C1", "U1")
+		authenticator, err := auth.NewStatic("user-token", auth.Principal{
+			WorkspaceID: "T1", UserID: "U1", TokenType: "user",
+			Scopes: map[auth.Scope]struct{}{auth.ScopeChannelsWrite: {}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		api, err := NewHandler(service.Messages{Store: repository}, authenticator)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux := http.NewServeMux()
+		api.Register(mux)
+		request := httptest.NewRequest(http.MethodPost, "/api/conversations.invite", strings.NewReader("channel=C1&users=U2"))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Authorization", "Bearer user-token")
+		response := httptest.NewRecorder()
+		mux.ServeHTTP(response, request)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body)
+		}
+	})
+}
+
+func callSlackForm(t *testing.T, handler http.Handler, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Authorization", "Bearer token")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	return response
 }
 
 func TestPostMessageForm(t *testing.T) {

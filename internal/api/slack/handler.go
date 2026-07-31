@@ -4044,9 +4044,17 @@ func (h Handler) authenticateConversationJoin(r *http.Request, botScope, userSco
 }
 
 func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
-	principal, err := h.authenticate(r, auth.ScopeChannelsManage)
+	principal, err := h.authenticate(r, "")
 	if err != nil {
 		writeAuthError(w, err)
+		return
+	}
+	allInviteScopes := []auth.Scope{
+		auth.ScopeChannelsManage, auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites,
+		auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites, auth.ScopeIMWrite, auth.ScopeMPIMWrite,
+	}
+	if !principalHasAnyScope(principal, allInviteScopes...) {
+		writeAuthError(w, missingScopeError{needed: auth.ScopeChannelsManage, provided: permissionScopes(principal)})
 		return
 	}
 	fields, err := decodeFields(w, r)
@@ -4059,14 +4067,49 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "channel_not_found")
 		return
 	}
+	conversation, err := h.Messages.ConversationInfo(r.Context(), principal.WorkspaceID, principal.UserID, channel)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	required := []auth.Scope{auth.ScopeChannelsWrite}
+	switch {
+	case conversation.IsDirect:
+		required = []auth.Scope{auth.ScopeIMWrite}
+	case conversation.IsGroupDirect:
+		required = []auth.Scope{auth.ScopeMPIMWrite}
+	case conversation.IsPrivate:
+		required = []auth.Scope{auth.ScopeGroupsWrite, auth.ScopeGroupsWriteInvites}
+	case principal.TokenType == "bot" || principal.BotID != "":
+		required = []auth.Scope{auth.ScopeChannelsManage, auth.ScopeChannelsWriteInvites}
+	default:
+		required = []auth.Scope{auth.ScopeChannelsWrite, auth.ScopeChannelsWriteInvites}
+	}
+	if !principalHasAnyScope(principal, required...) {
+		writeAuthError(w, missingScopeError{needed: required[0], provided: permissionScopes(principal)})
+		return
+	}
+	if conversation.Archived {
+		writeError(w, "is_archived")
+		return
+	}
+	if conversation.IsDirect || conversation.IsGroupDirect {
+		writeError(w, "method_not_supported_for_channel_type")
+		return
+	}
 	if strings.TrimSpace(fields["users"]) == "" {
 		// /conversations.invite enumerates no_user for a missing users argument.
 		writeError(w, "no_user")
 		return
 	}
+	rawUsers := strings.Split(fields["users"], ",")
+	if len(rawUsers) > 100 {
+		writeError(w, "too_many_users")
+		return
+	}
 	users := make([]domain.UserID, 0)
 	seen := make(map[domain.UserID]struct{})
-	for _, raw := range strings.Split(fields["users"], ",") {
+	for _, raw := range rawUsers {
 		user := domain.UserID(strings.TrimSpace(raw))
 		if user == "" {
 			writeError(w, "invalid_array_arg")
@@ -4078,12 +4121,91 @@ func (h Handler) inviteConversation(w http.ResponseWriter, r *http.Request) {
 		seen[user] = struct{}{}
 		users = append(users, user)
 	}
-	conversation, err := h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, users)
+	force, err := parseBoolField(fields["force"])
+	if err != nil {
+		writeError(w, "invalid_arg_name")
+		return
+	}
+	valid, failures, err := h.conversationInviteCandidates(r, principal, channel, users)
+	if err != nil {
+		writeError(w, mapServiceError(err, "channel_not_found"))
+		return
+	}
+	if len(failures) != 0 && (!force || len(valid) == 0) {
+		items := make([]map[string]any, 0, len(failures))
+		for _, failure := range failures {
+			items = append(items, map[string]any{
+				"user": failure.UserID, "ok": false, "error": failure.Reason,
+			})
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok": false, "error": failures[0].Reason, "errors": items,
+		})
+		return
+	}
+	conversation, err = h.Messages.InviteConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, valid)
 	if err != nil {
 		writeError(w, mapServiceErrorExists(err, "channel_not_found", "already_in_channel"))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "channel": conversationResponse(conversation)})
+}
+
+type conversationInviteFailure struct {
+	UserID domain.UserID
+	Reason string
+}
+
+func (h Handler) conversationInviteCandidates(r *http.Request, principal auth.Principal, channel domain.ConversationID, users []domain.UserID) ([]domain.UserID, []conversationInviteFailure, error) {
+	members := make(map[domain.UserID]struct{})
+	request := domain.PageRequest{Limit: 200}
+	for {
+		page, err := h.Messages.ConversationMembers(r.Context(), principal.WorkspaceID, principal.UserID, channel, request)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, user := range page.Users {
+			members[user.ID] = struct{}{}
+		}
+		if !page.HasMore {
+			break
+		}
+		request.Cursor = page.NextCursor
+	}
+
+	valid := make([]domain.UserID, 0, len(users))
+	failures := make([]conversationInviteFailure, 0)
+	for _, targetID := range users {
+		reason := ""
+		switch {
+		case targetID == principal.UserID:
+			reason = "cant_invite_self"
+		default:
+			if _, err := h.Messages.UserInfo(r.Context(), principal.WorkspaceID, principal.UserID, targetID); err != nil {
+				if !errors.Is(err, store.ErrNotFound) {
+					return nil, nil, err
+				}
+				reason = "user_not_found"
+			} else if _, exists := members[targetID]; exists {
+				reason = "already_in_channel"
+			}
+		}
+		if reason != "" {
+			failures = append(failures, conversationInviteFailure{UserID: targetID, Reason: reason})
+			continue
+		}
+		valid = append(valid, targetID)
+	}
+	return valid, failures, nil
+}
+
+func principalHasAnyScope(principal auth.Principal, scopes ...auth.Scope) bool {
+	for _, scope := range scopes {
+		if principal.HasScope(scope) {
+			return true
+		}
+	}
+	return false
 }
 
 func (h Handler) leaveConversation(w http.ResponseWriter, r *http.Request) {
@@ -8110,6 +8232,9 @@ func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason
 	// not_in_channel, and it was reachable from no route.
 	if errors.Is(err, service.ErrNotInConversation) {
 		return "not_in_channel"
+	}
+	if errors.Is(err, service.ErrCannotInviteSelf) {
+		return "cant_invite_self"
 	}
 	if errors.Is(err, store.ErrAlreadyExists) {
 		if existsReason != "" {

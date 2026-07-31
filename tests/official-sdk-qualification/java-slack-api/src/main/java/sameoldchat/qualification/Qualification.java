@@ -483,6 +483,10 @@ public final class Qualification {
                     com.slack.api.methods.request.conversations.ConversationsInviteRequest.builder()
                             .channel("C1").users(java.util.List.of("U2")).build());
             require(invited.isOk(), "conversations.invite failed: " + invited.getError());
+            com.slack.api.methods.response.conversations.ConversationsInviteResponse forceInvited = methods.conversationsInvite(
+                    com.slack.api.methods.request.conversations.ConversationsInviteRequest.builder()
+                            .channel("C1").users(java.util.List.of("U-missing", "U3")).force(true).build());
+            require(forceInvited.isOk(), "forced conversations.invite failed: " + forceInvited.getError());
             com.slack.api.methods.response.conversations.ConversationsKickResponse kicked = methods.conversationsKick(
                     com.slack.api.methods.request.conversations.ConversationsKickRequest.builder()
                             .channel("C1").user("U2").build());

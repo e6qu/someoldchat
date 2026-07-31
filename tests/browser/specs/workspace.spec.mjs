@@ -65,7 +65,7 @@ async function installActivityBot(page, request) {
     display_information: { name },
     oauth_config: {
       redirect_urls: [redirectURI],
-      scopes: { bot: ['channels:join', 'channels:manage', 'chat:write'] },
+      scopes: { bot: ['channels:join', 'channels:manage', 'groups:write', 'chat:write'] },
     },
   }, redirectURI);
 

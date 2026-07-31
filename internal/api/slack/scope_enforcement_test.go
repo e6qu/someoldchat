@@ -25,11 +25,11 @@ import (
 //
 //   - chat.* uses chat:write where the snapshot says chat:write:bot /
 //     chat:write:user, which Slack replaced with the single chat:write;
-//   - conversations.* mutators use channels:manage where the snapshot says
-//     channels:write / groups:write / im:write / mpim:write, which Slack
-//     replaced with channels:manage. conversations.join is the exception:
-//     current Slack grants bot tokens channels:join and user tokens
-//     channels:write;
+//   - most conversations.* mutators use channels:manage where the snapshot says
+//     channels:write / groups:write / im:write / mpim:write. Current
+//     conversations.join and conversations.invite are exceptions with
+//     token- and channel-type-specific scope matrices covered by dedicated
+//     tests below;
 //   - files.* writes use files:write where the snapshot says files:write:user;
 //
 // Routes this repository adds and the snapshot does not describe at all
@@ -149,6 +149,9 @@ func scopedRoutes() []scopedRoute {
 		{http.MethodPost, "/api/conversations.create", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.canvases.create", auth.ScopeCanvasesWrite},
 		{http.MethodPost, "/api/conversations.join", auth.ScopeChannelsJoin},
+		// The table can name only one scope. The route's current public/private
+		// bot/user alternatives are exercised by
+		// TestInviteConversationUsesCurrentTokenAndChannelScopeMatrix.
 		{http.MethodPost, "/api/conversations.invite", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.leave", auth.ScopeChannelsManage},
 		{http.MethodPost, "/api/conversations.kick", auth.ScopeChannelsManage},
@@ -263,9 +266,14 @@ func scopedRoutes() []scopedRoute {
 func TestEveryScopedMethodRejectsATokenMissingItsScope(t *testing.T) {
 	// apps.connections.open reads an app-level token through Handler.SocketAuth,
 	// a different authenticator from the one this fixture builds, so withholding a
-	// scope from the user token proves nothing about it. It stays in scopedRoutes
-	// so the coverage assertion below can see it.
-	separateAuthenticator := map[string]struct{}{"/api/apps.connections.open": {}}
+	// scope from the user token proves nothing about it. conversations.invite has
+	// a current alternative-scope matrix rather than one mandatory scope. Both
+	// stay in scopedRoutes so the coverage assertion below can see them, and both
+	// have dedicated tests.
+	separateAuthenticator := map[string]struct{}{
+		"/api/apps.connections.open": {},
+		"/api/conversations.invite":  {},
+	}
 	for _, route := range scopedRoutes() {
 		if _, ok := separateAuthenticator[route.path]; ok {
 			continue

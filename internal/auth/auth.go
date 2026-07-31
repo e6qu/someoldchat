@@ -35,6 +35,11 @@ const (
 	ScopeChannelsJoin            Scope = "channels:join"
 	ScopeChannelsWrite           Scope = "channels:write"
 	ScopeChannelsManage          Scope = "channels:manage"
+	ScopeChannelsWriteInvites    Scope = "channels:write.invites"
+	ScopeGroupsWrite             Scope = "groups:write"
+	ScopeGroupsWriteInvites      Scope = "groups:write.invites"
+	ScopeIMWrite                 Scope = "im:write"
+	ScopeMPIMWrite               Scope = "mpim:write"
 	ScopeReactionsWrite          Scope = "reactions:write"
 	ScopeReactionsRead           Scope = "reactions:read"
 	ScopePinsWrite               Scope = "pins:write"
@@ -462,6 +467,11 @@ var allScopes = []Scope{
 	ScopeChannelsJoin,
 	ScopeChannelsWrite,
 	ScopeChannelsManage,
+	ScopeChannelsWriteInvites,
+	ScopeGroupsWrite,
+	ScopeGroupsWriteInvites,
+	ScopeIMWrite,
+	ScopeMPIMWrite,
 	ScopeReactionsWrite,
 	ScopeReactionsRead,
 	ScopePinsWrite,
