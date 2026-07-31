@@ -347,6 +347,18 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// Stage an edit without publishing: the owner reads the staged head,
+				// while the published revision the run pinned stays live.
+				staged := published
+				staged.Title = "Staged workflow"
+				staged, err = chat.UpdateWorkflow(ctx, "T1", "U1", staged, published.Version, false)
+				if err != nil {
+					return nil, err
+				}
+				ownerView, err := chat.GetWorkflow(ctx, "T1", "U1", staged.ID)
+				if err != nil {
+					return nil, err
+				}
 				workflows, more, _, err := chat.ListWorkflows(ctx, "T1", "U1", domain.PageRequest{Limit: 100})
 				if err != nil {
 					return nil, err
@@ -413,6 +425,7 @@ func parityCases() []parityCase {
 				}
 				return []any{
 					created.Status, loaded.Title, published.Status, published.Version,
+					staged.Status, staged.Version != staged.PublishedVersion, ownerView.Title,
 					len(workflows), more, len(triggers), triggers[0].Type,
 					run.Status, storedRun.Status, storedRun.WorkflowVersion,
 					initialFunction.PermissionType,

@@ -408,14 +408,24 @@ find/use/copy permissions, plan and admin policy, built-in and connector
 functions, typed variable mapping, forms, buttons, branches, icons,
 copy/delete and drag reordering, trigger-change rules,
 activity dashboards, asynchronous CSV
-exports, staged editing while an older published revision remains live,
-cancellation of already-running executions on unpublish, multi-org permission
+exports, cancellation of already-running executions on unpublish, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
 limits, and controlled live-Slack outcomes remain.
 `function_executed.bot_access_token` is also
 unimplemented because installation credentials are deliberately stored only
 as hashes; completing it requires a secure retrievable execution-credential
 design, not a fabricated token.
+
+The staged-editing pass then lets a published workflow keep executing its
+published revision while its owner edits a draft. A non-publish update keeps
+the head row published and lets Version diverge from PublishedVersion — the
+marker that staged edits exist — and every run keeps pinning PublishedVersion,
+so a step removed from the draft never reaches an in-flight execution. The
+revision table now carries description, callback id, and input schema alongside
+title and steps, so a non-owner reading the directory or a run view sees the
+published revision's metadata rather than the staged draft; only the owner and
+the execution path read the live head. Discarding staged changes and
+per-step change tracking remain.
 
 The trigger-worker pass then replaced the configuration-only scheduled,
 webhook, message, reaction, join, and list trigger types with durable

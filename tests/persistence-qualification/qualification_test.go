@@ -393,6 +393,10 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	if err != nil || len(revisions) != 2 || revisions[0].Version != 1 || revisions[1].Version != 2 {
 		t.Fatalf("workflow revisions=%+v err=%v", revisions, err)
 	}
+	if revisions[1].Title != "Published triage" || revisions[1].Description != "Durable workflow" ||
+		revisions[1].InputSchema != `{"type":"object"}` || revisions[1].CallbackID != "triage" {
+		t.Fatalf("workflow revision metadata=%+v", revisions[1])
+	}
 
 	trigger := domain.WorkflowTrigger{
 		ID: triggerID, WorkflowID: workflowID, WorkspaceID: workspaceID, AppID: workflow.AppID,

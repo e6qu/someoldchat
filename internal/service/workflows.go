@@ -152,13 +152,6 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 		return domain.WorkflowDefinition{}, err
 	}
 	unpublish := !publish && value.Status == domain.WorkflowDisabled
-	// A published workflow must keep executing its published revision while
-	// edits are staged. The current store does not yet retain a separate mutable
-	// draft snapshot, so rejecting that transition is safer than either taking
-	// the workflow offline or executing unpublished steps.
-	if !publish && current.Status == domain.WorkflowPublished && !unpublish {
-		return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
-	}
 	value.Title = strings.TrimSpace(value.Title)
 	value.Description = strings.TrimSpace(value.Description)
 	value.CallbackID = strings.TrimSpace(value.CallbackID)
@@ -189,15 +182,24 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	value.UpdatedAt = time.Now().UTC()
 	value.Version = expectedVersion + 1
 	value.PublishedVersion = current.PublishedVersion
+	// A staged edit to a published workflow keeps the published revision live:
+	// the head row carries the draft, runs keep pinning PublishedVersion, and
+	// Version diverging from PublishedVersion is the marker that staged edits
+	// exist. Unpublish takes the workflow offline; every other edit leaves a
+	// draft or published head exactly as the caller's action says.
 	value.Status = domain.WorkflowDraft
 	topic := "workflow.updated"
-	if publish {
+	switch {
+	case publish:
 		value.Status = domain.WorkflowPublished
 		value.PublishedVersion = expectedVersion + 1
 		topic = "workflow.published"
-	} else if unpublish {
+	case unpublish:
 		value.Status = domain.WorkflowDisabled
 		topic = "workflow.unpublished"
+	case current.Status == domain.WorkflowPublished:
+		// Stage the edit without taking the published revision offline.
+		value.Status = domain.WorkflowPublished
 	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload(topic,
 		events.String("workflow_id", string(value.ID)),
@@ -247,14 +249,33 @@ func (m Messages) ListWorkflows(ctx context.Context, workspaceID domain.Workspac
 	}
 	more := len(visible) > request.Limit
 	if !more {
-		return visible, false, "", nil
+		return m.projectVisible(ctx, actor, visible), false, "", nil
 	}
 	visible = visible[:request.Limit]
 	next, err := domain.NewListCursor(string(visible[len(visible)-1].ID))
 	if err != nil {
 		return nil, false, "", err
 	}
-	return visible, true, next, nil
+	return m.projectVisible(ctx, actor, visible), true, next, nil
+}
+
+// projectVisible hides staged edits on workflows the caller does not own. The
+// owner reads the live head; every other reader sees the published revision.
+func (m Messages) projectVisible(ctx context.Context, actor domain.UserID, values []domain.WorkflowDefinition) []domain.WorkflowDefinition {
+	projected := make([]domain.WorkflowDefinition, len(values))
+	for index, value := range values {
+		if value.OwnerID == actor {
+			projected[index] = value
+			continue
+		}
+		projection, err := m.publishedProjection(ctx, value)
+		if err != nil {
+			projected[index] = value
+			continue
+		}
+		projected[index] = projection
+	}
+	return projected
 }
 
 func (m Messages) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowDefinition, error) {
@@ -267,6 +288,36 @@ func (m Messages) GetWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 	}
 	if value.OwnerID != actor && value.Status != domain.WorkflowPublished {
 		return domain.WorkflowDefinition{}, store.ErrNotFound
+	}
+	if value.OwnerID == actor {
+		return value, nil
+	}
+	return m.publishedProjection(ctx, value)
+}
+
+// publishedProjection hides staged edits from any caller that is not the owner.
+// The head row carries the draft when a published workflow is being edited, so
+// returning it verbatim would leak unpublished titles and steps to the
+// directory and run views. Only the published revision is public; the owner and
+// the execution path keep reading the live head.
+func (m Messages) publishedProjection(ctx context.Context, value domain.WorkflowDefinition) (domain.WorkflowDefinition, error) {
+	if value.PublishedVersion == 0 || value.Version == value.PublishedVersion {
+		return value, nil
+	}
+	revisions, err := m.Store.ListWorkflowRevisions(ctx, value.WorkspaceID, value.ID)
+	if err != nil {
+		return value, nil
+	}
+	for _, revision := range revisions {
+		if revision.Version != value.PublishedVersion {
+			continue
+		}
+		value.Title = revision.Title
+		value.Description = revision.Description
+		value.CallbackID = revision.CallbackID
+		value.InputSchema = revision.InputSchema
+		value.Steps = revision.Steps
+		return value, nil
 	}
 	return value, nil
 }
