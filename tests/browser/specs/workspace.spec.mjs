@@ -1256,7 +1256,10 @@ test('[COMP-02 COMP-03 DRAFT-01 FILE-01 ACT-02] composer formatting, references,
   await expect(composer).toHaveValue(':tada: ');
 
   const draft = `durable draft ${Date.now()}`;
-  await composer.fill(draft);
+  await Promise.all([
+    page.waitForResponse((response) => response.url().includes('/app/draft?') && response.status() === 204),
+    composer.fill(draft),
+  ]);
   await page.reload();
   await expect(composer).toHaveValue(draft);
 
