@@ -2434,6 +2434,38 @@ func decodeWorkflowInteraction(value *chatv1.WorkflowInteraction) domain.Workflo
 	return interaction
 }
 
+func (r Remote) WorkflowRunExport(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowRun, error) {
+	out, err := r.workflows.WorkflowRunExport(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	runs := make([]domain.WorkflowRun, 0, len(out.GetRuns()))
+	for _, run := range out.GetRuns() {
+		runs = append(runs, decodeWorkflowRun(run))
+	}
+	return runs, nil
+}
+
+func (r Remote) WorkflowFormResponseExport(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowFormResponse, error) {
+	out, err := r.workflows.WorkflowFormResponseExport(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]domain.WorkflowFormResponse, 0, len(out.GetResponses()))
+	for _, response := range out.GetResponses() {
+		responses = append(responses, domain.WorkflowFormResponse{
+			RunID: domain.WorkflowRunID(response.GetRunId()), WorkflowVersion: response.GetWorkflowVersion(),
+			FormTitle: response.GetFormTitle(), Field: response.GetField(), Value: response.GetValue(),
+			SubmittedAt: optionalTimeFromUnixNano(response.GetSubmittedAtUnixNano()),
+		})
+	}
+	return responses, nil
+}
+
 func (r Remote) WorkflowActivity(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowActivity, error) {
 	out, err := r.workflows.WorkflowActivity(ctx, &chatv1.WorkflowGetRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
@@ -5059,6 +5091,40 @@ func (s *Server) WorkflowRunInteraction(ctx context.Context, input *chatv1.Workf
 		StepId: string(interaction.StepID), Kind: interaction.Kind, Title: interaction.Title,
 		Label: interaction.Label, Fields: fields,
 	}, nil
+}
+
+func (s *Server) WorkflowRunExport(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowRunListResponse, error) {
+	runs, err := s.implementation.WorkflowRunExport(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.WorkflowRunListResponse{Runs: make([]*chatv1.WorkflowRun, 0, len(runs))}
+	for _, run := range runs {
+		out.Runs = append(out.Runs, encodeWorkflowRun(run))
+	}
+	return out, nil
+}
+
+func (s *Server) WorkflowFormResponseExport(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowFormResponseListResponse, error) {
+	responses, err := s.implementation.WorkflowFormResponseExport(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	out := &chatv1.WorkflowFormResponseListResponse{Responses: make([]*chatv1.WorkflowFormResponse, 0, len(responses))}
+	for _, response := range responses {
+		out.Responses = append(out.Responses, &chatv1.WorkflowFormResponse{
+			RunId: string(response.RunID), WorkflowVersion: response.WorkflowVersion,
+			FormTitle: response.FormTitle, Field: response.Field, Value: response.Value,
+			SubmittedAtUnixNano: optionalUnixNano(response.SubmittedAt),
+		})
+	}
+	return out, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {

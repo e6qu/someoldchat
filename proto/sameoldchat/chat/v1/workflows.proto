@@ -109,6 +109,23 @@ message WorkflowInteraction {
   repeated WorkflowInteractionField fields = 5;
 }
 
+message WorkflowRunListResponse {
+  repeated WorkflowRun runs = 1;
+}
+
+message WorkflowFormResponse {
+  string run_id = 1;
+  uint64 workflow_version = 2;
+  string form_title = 3;
+  string field = 4;
+  string value = 5;
+  int64 submitted_at_unix_nano = 6;
+}
+
+message WorkflowFormResponseListResponse {
+  repeated WorkflowFormResponse responses = 1;
+}
+
 message WorkflowStepChange {
   int32 position = 1;
   string function_id = 2;
@@ -335,6 +352,8 @@ service WorkflowsService {
   rpc SubmitWorkflowForm(WorkflowFormSubmitRequest) returns (WorkflowStepMutationResponse);
   rpc CompleteWorkflowButton(WorkflowButtonRequest) returns (WorkflowStepMutationResponse);
   rpc WorkflowRunInteraction(WorkflowRunGetRequest) returns (WorkflowInteraction);
+  rpc WorkflowRunExport(WorkflowGetRequest) returns (WorkflowRunListResponse);
+  rpc WorkflowFormResponseExport(WorkflowGetRequest) returns (WorkflowFormResponseListResponse);
   rpc UpdateWorkflow(WorkflowMutationRequest) returns (WorkflowDefinition);
   rpc ListWorkflows(WorkflowListRequest) returns (WorkflowListResponse);
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);

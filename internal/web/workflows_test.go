@@ -508,6 +508,47 @@ func TestWorkflowBuilderSavesAndShowsAnIcon(t *testing.T) {
 	requireContains(t, "updated icon", page.Body.String(), `value="📋"`)
 }
 
+func TestWorkflowBuilderExportsRunsAndFormResponsesAsCSV(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Interactive"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	workflowID := strings.TrimPrefix(workflowURL, "/app/workflows/")
+	postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Interactive"}, "input_schema": {`{}`},
+		"step_type_1": {"form"}, "form_1": {`{"title":"Intake","inputs":{"name":"Name"}}`},
+		"step_type_2": {"function"}, "step_2": {"notify"}, "action": {"publish"},
+	}.Encode(), false)
+	triggered := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Run"}, "type": {"link"},
+	}.Encode(), false)
+	page := get(t, mux, triggered.Header().Get("Location"))
+	trigger := regexp.MustCompile(`/app/workflows/Wf[0-9a-f]+/triggers/(Ft[0-9a-f]+)/run`).FindStringSubmatch(page.Body.String())
+	key := regexp.MustCompile(`name="idempotency_key" value="([^"]+)"`).FindStringSubmatch(page.Body.String())
+	started := postForm(t, mux, workflowURL+"/triggers/"+trigger[1]+"/run", url.Values{
+		"_csrf": {csrf}, "idempotency_key": {key[1]},
+	}.Encode(), false)
+	runURL := started.Header().Get("Location")
+	runPage := get(t, mux, runURL)
+	stepID := regexp.MustCompile(`name="step_id" value="([^"]+)"`).FindStringSubmatch(runPage.Body.String())
+	postForm(t, mux, "/app/workflows/runs/submit/"+strings.TrimPrefix(runURL, "/app/workflows/runs/"), url.Values{
+		"_csrf": {csrf}, "step_id": {stepID[1]}, "field_name": {"Ada"},
+	}.Encode(), false)
+
+	runs := get(t, mux, "/app/workflows/export/runs/"+workflowID)
+	if runs.Code != http.StatusOK || !strings.Contains(runs.Header().Get("Content-Type"), "text/csv") {
+		t.Fatalf("runs export=%d ct=%s", runs.Code, runs.Header().Get("Content-Type"))
+	}
+	requireContains(t, "runs csv", runs.Body.String(), "run_id,trigger,status,started_at,completed_at,error", "Run", "running")
+	forms := get(t, mux, "/app/workflows/export/form-responses/"+workflowID)
+	requireContains(t, "form csv", forms.Body.String(), "run_id,workflow_version,form,field,value,submitted_at", "Intake", "name", "Ada")
+
+	if missing := get(t, mux, "/app/workflows/export/runs/Wfmissing"); missing.Code != http.StatusNotFound {
+		t.Fatalf("missing workflow export=%d", missing.Code)
+	}
+}
+
 func TestWorkflowBuilderCopiesAndDeletesAWorkflow(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	created := postForm(t, mux, "/app/workflows/create", url.Values{

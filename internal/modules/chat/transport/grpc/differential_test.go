@@ -466,11 +466,29 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The owner exports the run history and the submitted form
+				// fields; a member is refused.
+				runExport, err := chat.WorkflowRunExport(ctx, "T1", "U1", "WfForm")
+				if err != nil {
+					return nil, err
+				}
+				formExport, err := chat.WorkflowFormResponseExport(ctx, "T1", "U1", "WfForm")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.WorkflowRunExport(ctx, "T1", "U2", "WfForm"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("member run export error=%v, want ErrNotFound", err)
+				}
+				formValues := make([]string, 0, len(formExport))
+				for _, response := range formExport {
+					formValues = append(formValues, response.FormTitle+":"+response.Field+"="+response.Value)
+				}
 				return []any{
 					memberRun.ID == "WxForm",
 					before.Kind, before.Title, fieldNames, before.StepID,
 					button.Kind, button.Label,
 					run.Status, run.CurrentStep, after.Kind,
+					len(runExport), formValues,
 				}, nil
 			},
 		},

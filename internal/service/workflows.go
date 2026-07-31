@@ -601,6 +601,88 @@ func (m Messages) WorkflowActivity(ctx context.Context, workspaceID domain.Works
 
 const workflowActivityRecentLimit = 5
 
+// workflowExportRunLimit bounds an export to the newest runs so a download is
+// a bounded read rather than an unbounded scan. Slack's own exports are
+// asynchronous at larger scale; a bounded synchronous export is the slice that
+// fits this builder.
+const workflowExportRunLimit = 1000
+
+// WorkflowRunExport returns a workflow's run history for a CSV export. Only
+// the owner exports, matching the activity dashboard's audience.
+func (m Messages) WorkflowRunExport(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowRun, error) {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if current.OwnerID != actor {
+		return nil, store.ErrNotFound
+	}
+	runs, _, _, err := m.Store.ListWorkflowRuns(ctx, workspaceID, workflowID, domain.PageRequest{Limit: workflowExportRunLimit})
+	if err != nil {
+		return nil, err
+	}
+	return runs, nil
+}
+
+// WorkflowFormResponseExport returns every submitted field of every form step
+// across a workflow's runs, one row per field, for a CSV export. Only the
+// owner exports.
+func (m Messages) WorkflowFormResponseExport(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowFormResponse, error) {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if current.OwnerID != actor {
+		return nil, store.ErrNotFound
+	}
+	steps, err := m.workflowStepsAtVersion(ctx, current, current.Version)
+	if err != nil {
+		return nil, err
+	}
+	formTitles := make(map[string]string, len(steps))
+	for _, step := range steps {
+		if step.Type == workflowStepTypeForm && step.Form != nil {
+			formTitles[step.ID] = step.Form.Title
+		}
+	}
+	if len(formTitles) == 0 {
+		return nil, nil
+	}
+	runs, _, _, err := m.Store.ListWorkflowRuns(ctx, workspaceID, workflowID, domain.PageRequest{Limit: workflowExportRunLimit})
+	if err != nil {
+		return nil, err
+	}
+	responses := make([]domain.WorkflowFormResponse, 0)
+	for _, run := range runs {
+		executions, err := m.Store.ListWorkflowRunSteps(ctx, workspaceID, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, execution := range executions {
+			title, isForm := formTitles[execution.EditID]
+			if !isForm || execution.Status != domain.WorkflowStepCompleted {
+				continue
+			}
+			var outputs map[string]any
+			if json.Unmarshal([]byte(execution.Outputs), &outputs) != nil {
+				continue
+			}
+			fields := make([]string, 0, len(outputs))
+			for field := range outputs {
+				fields = append(fields, field)
+			}
+			slices.Sort(fields)
+			for _, field := range fields {
+				responses = append(responses, domain.WorkflowFormResponse{
+					RunID: run.ID, WorkflowVersion: run.WorkflowVersion, FormTitle: title,
+					Field: field, Value: workflowVariableText(outputs[field]), SubmittedAt: execution.UpdatedAt,
+				})
+			}
+		}
+	}
+	return responses, nil
+}
+
 // WorkflowStepChanges reports the step-level differences between a published
 // workflow's staged draft and its published revision. Only the owner reads the
 // live head, so only the owner can observe the changes; a member receives

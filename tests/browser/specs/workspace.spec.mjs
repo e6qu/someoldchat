@@ -2088,6 +2088,7 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.getByLabel('Owning app').selectOption(installed.appID);
   await page.getByLabel('First step').selectOption('confirm');
   await page.getByRole('button', { name: 'Create workflow' }).click();
+  const workflowPath = new URL(page.url()).pathname;
 
   await page.getByLabel('Step 1 type').selectOption('form');
   await page.getByLabel('Step 1 form definition').fill('{"title":"Intake","inputs":{"name":"Name"}}');
@@ -2117,6 +2118,18 @@ test('[WORKFLOW-05] a form step pauses for input and a button step confirms', as
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Confirmed')).toBeVisible();
   await expect(page.getByText('running', { exact: true })).toBeVisible();
+
+  // The owner downloads the submitted form fields and the run history as CSV.
+  const session = { cookie: `sameoldchat_session=${SESSION}` };
+  const formCSV = await request.get(`/app/workflows/export/form-responses/${workflowPath.split('/').pop()}`, { headers: session });
+  expect(formCSV.status()).toBe(200);
+  const formBody = await formCSV.text();
+  expect(formBody).toContain('Intake');
+  expect(formBody).toContain('name');
+  expect(formBody).toContain('Ada');
+  const runsCSV = await request.get(`/app/workflows/export/runs/${workflowPath.split('/').pop()}`, { headers: session });
+  expect(runsCSV.status()).toBe(200);
+  expect(await runsCSV.text()).toContain('running');
   await expectNoSeriousAccessibilityViolations(page);
 });
 

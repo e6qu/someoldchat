@@ -102,6 +102,17 @@ type WorkflowInteractionField struct {
 	Label string
 }
 
+// WorkflowFormResponse is one submitted field of one form step in one run: the
+// unit a form-response CSV export is built from.
+type WorkflowFormResponse struct {
+	RunID           WorkflowRunID
+	WorkflowVersion uint64
+	FormTitle       string
+	Field           string
+	Value           string
+	SubmittedAt     time.Time
+}
+
 type WorkflowTriggerType string
 
 const (
