@@ -1884,11 +1884,14 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await page.getByLabel('Name').fill(workflowName);
   await page.getByLabel('Owning app').selectOption(installed.appID);
   await page.getByLabel('Description').fill('Classify an incident and notify the team');
+  await page.getByLabel('Icon (emoji or short text)').fill('🚨');
   await page.getByLabel('First step').selectOption('triage');
   await page.getByLabel('Workflow reference').fill('incident-triage');
   await page.getByRole('button', { name: 'Create workflow' }).click();
   await expect(page.getByRole('heading', { name: workflowName })).toBeVisible();
   await expect(page.getByText('draft', { exact: true })).toBeVisible();
+  // The icon travels with the workflow and shows on its builder page.
+  await expect(page.locator('.wf-icon')).toHaveText('🚨');
 
   await page.locator('select[name="step_2"]').selectOption('notify');
   await page.getByRole('button', { name: 'Publish' }).click();

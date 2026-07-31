@@ -34,6 +34,7 @@ message WorkflowDefinition {
   string callback_id = 5;
   string title = 6;
   string description = 7;
+  string icon = 15;
   string input_schema = 8;
   string steps = 9;
   string status = 10;

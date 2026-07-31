@@ -242,6 +242,7 @@ type WorkflowDefinition struct {
 	CallbackId        string                 `protobuf:"bytes,5,opt,name=callback_id,json=callbackId,proto3" json:"callback_id,omitempty"`
 	Title             string                 `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
 	Description       string                 `protobuf:"bytes,7,opt,name=description,proto3" json:"description,omitempty"`
+	Icon              string                 `protobuf:"bytes,15,opt,name=icon,proto3" json:"icon,omitempty"`
 	InputSchema       string                 `protobuf:"bytes,8,opt,name=input_schema,json=inputSchema,proto3" json:"input_schema,omitempty"`
 	Steps             string                 `protobuf:"bytes,9,opt,name=steps,proto3" json:"steps,omitempty"`
 	Status            string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`
@@ -328,6 +329,13 @@ func (x *WorkflowDefinition) GetTitle() string {
 func (x *WorkflowDefinition) GetDescription() string {
 	if x != nil {
 		return x.Description
+	}
+	return ""
+}
+
+func (x *WorkflowDefinition) GetIcon() string {
+	if x != nil {
+		return x.Icon
 	}
 	return ""
 }
@@ -3061,7 +3069,7 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\tstep_name\x18\x06 \x01(\tR\bstepName\x12$\n" +
 	"\x0estep_image_url\x18\a \x01(\tR\fstepImageUrl\".\n" +
 	"\x1cWorkflowStepMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xcc\x03\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xe0\x03\n" +
 	"\x12WorkflowDefinition\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x15\n" +
@@ -3070,7 +3078,8 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\vcallback_id\x18\x05 \x01(\tR\n" +
 	"callbackId\x12\x14\n" +
 	"\x05title\x18\x06 \x01(\tR\x05title\x12 \n" +
-	"\vdescription\x18\a \x01(\tR\vdescription\x12!\n" +
+	"\vdescription\x18\a \x01(\tR\vdescription\x12\x12\n" +
+	"\x04icon\x18\x0f \x01(\tR\x04icon\x12!\n" +
 	"\finput_schema\x18\b \x01(\tR\vinputSchema\x12\x14\n" +
 	"\x05steps\x18\t \x01(\tR\x05steps\x12\x16\n" +
 	"\x06status\x18\n" +

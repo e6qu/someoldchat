@@ -2554,7 +2554,7 @@ func (s *Store) CreateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 	s.workflows[value.ID] = value
 	s.workflowRevisions[value.ID] = append(s.workflowRevisions[value.ID], domain.WorkflowRevision{
 		WorkflowID: value.ID, WorkspaceID: value.WorkspaceID, Version: value.Version, Title: value.Title,
-		Description: value.Description, CallbackID: value.CallbackID, InputSchema: value.InputSchema,
+		Description: value.Description, Icon: value.Icon, CallbackID: value.CallbackID, InputSchema: value.InputSchema,
 		Steps: value.Steps, Status: value.Status, CreatedAt: value.UpdatedAt,
 	})
 	s.outbox = append(s.outbox, event)
@@ -2579,7 +2579,7 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 	s.workflows[value.ID] = value
 	s.workflowRevisions[value.ID] = append(s.workflowRevisions[value.ID], domain.WorkflowRevision{
 		WorkflowID: value.ID, WorkspaceID: value.WorkspaceID, Version: value.Version, Title: value.Title,
-		Description: value.Description, CallbackID: value.CallbackID, InputSchema: value.InputSchema,
+		Description: value.Description, Icon: value.Icon, CallbackID: value.CallbackID, InputSchema: value.InputSchema,
 		Steps: value.Steps, Status: value.Status, CreatedAt: value.UpdatedAt,
 	})
 	if value.Status == domain.WorkflowDisabled {
@@ -2692,6 +2692,7 @@ func (s *Store) DiscardWorkflowStagedChanges(_ context.Context, workspace domain
 		}
 		current.Title = revision.Title
 		current.Description = revision.Description
+		current.Icon = revision.Icon
 		current.CallbackID = revision.CallbackID
 		current.InputSchema = revision.InputSchema
 		current.Steps = revision.Steps

@@ -485,6 +485,29 @@ func TestWorkflowBuilderRunsFormAndButtonSteps(t *testing.T) {
 	requireContains(t, "advanced run", runPage.Body.String(), "running", "An app function is running")
 }
 
+func TestWorkflowBuilderSavesAndShowsAnIcon(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"},
+		"function_callback": {"triage"}, "icon": {"🚨"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	directory := get(t, mux, "/app/workflows")
+	requireContains(t, "directory icon", directory.Body.String(), `class="wf-icon"`, "🚨")
+	page := get(t, mux, workflowURL)
+	requireContains(t, "builder icon", page.Body.String(), `name="icon" maxlength="64" value="🚨"`, `class="wf-icon"`)
+
+	updated := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"icon": {"📋"}, "step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+	if updated.Code != http.StatusSeeOther {
+		t.Fatalf("update=%d: %s", updated.Code, updated.Body)
+	}
+	page = get(t, mux, workflowURL)
+	requireContains(t, "updated icon", page.Body.String(), `value="📋"`)
+}
+
 func TestWorkflowBuilderCopiesAndDeletesAWorkflow(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	created := postForm(t, mux, "/app/workflows/create", url.Values{

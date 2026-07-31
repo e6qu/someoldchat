@@ -2236,7 +2236,7 @@ func encodeWorkflowDefinition(value domain.WorkflowDefinition) *chatv1.WorkflowD
 	return &chatv1.WorkflowDefinition{
 		Id: string(value.ID), WorkspaceId: string(value.WorkspaceID), AppId: string(value.AppID),
 		OwnerId: string(value.OwnerID), CallbackId: value.CallbackID, Title: value.Title,
-		Description: value.Description, InputSchema: value.InputSchema, Steps: value.Steps,
+		Description: value.Description, Icon: value.Icon, InputSchema: value.InputSchema, Steps: value.Steps,
 		Status: string(value.Status), Version: value.Version, PublishedVersion: value.PublishedVersion,
 		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
 	}
@@ -2250,7 +2250,7 @@ func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowD
 		ID: domain.WorkflowID(value.GetId()), WorkspaceID: domain.WorkspaceID(value.GetWorkspaceId()),
 		AppID: domain.AppID(value.GetAppId()), OwnerID: domain.UserID(value.GetOwnerId()),
 		CallbackID: value.GetCallbackId(), Title: value.GetTitle(), Description: value.GetDescription(),
-		InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
+		Icon: value.GetIcon(), InputSchema: value.GetInputSchema(), Steps: value.GetSteps(), Status: domain.WorkflowStatus(value.GetStatus()),
 		Version: value.GetVersion(), PublishedVersion: value.GetPublishedVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),

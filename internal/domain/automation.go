@@ -18,6 +18,7 @@ type WorkflowDefinition struct {
 	CallbackID       string
 	Title            string
 	Description      string
+	Icon             string
 	InputSchema      string
 	Steps            string
 	Status           WorkflowStatus
@@ -33,6 +34,7 @@ type WorkflowRevision struct {
 	Version     uint64
 	Title       string
 	Description string
+	Icon        string
 	CallbackID  string
 	InputSchema string
 	Steps       string

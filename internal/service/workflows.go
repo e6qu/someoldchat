@@ -373,6 +373,7 @@ func (m Messages) CreateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	}
 	value.Title = strings.TrimSpace(value.Title)
 	value.Description = strings.TrimSpace(value.Description)
+	value.Icon = strings.TrimSpace(value.Icon)
 	value.CallbackID = strings.TrimSpace(value.CallbackID)
 	if value.Title == "" {
 		return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
@@ -430,6 +431,7 @@ func (m Messages) UpdateWorkflow(ctx context.Context, workspaceID domain.Workspa
 	unpublish := !publish && value.Status == domain.WorkflowDisabled
 	value.Title = strings.TrimSpace(value.Title)
 	value.Description = strings.TrimSpace(value.Description)
+	value.Icon = strings.TrimSpace(value.Icon)
 	value.CallbackID = strings.TrimSpace(value.CallbackID)
 	if value.Title == "" || value.AppID != "" && value.AppID != current.AppID {
 		return domain.WorkflowDefinition{}, ErrInvalidWorkflowStep
@@ -547,6 +549,7 @@ func (m Messages) DuplicateWorkflow(ctx context.Context, workspaceID domain.Work
 		AppID:       current.AppID,
 		Title:       current.Title + " (copy)",
 		Description: current.Description,
+		Icon:        current.Icon,
 		CallbackID:  callbackID,
 		InputSchema: current.InputSchema,
 		Steps:       current.Steps,
@@ -788,6 +791,7 @@ func (m Messages) publishedProjection(ctx context.Context, value domain.Workflow
 		}
 		value.Title = revision.Title
 		value.Description = revision.Description
+		value.Icon = revision.Icon
 		value.CallbackID = revision.CallbackID
 		value.InputSchema = revision.InputSchema
 		value.Steps = revision.Steps

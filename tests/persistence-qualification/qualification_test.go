@@ -368,7 +368,7 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 
 	workflow := domain.WorkflowDefinition{
 		ID: workflowID, WorkspaceID: workspaceID, AppID: "A-workflow", OwnerID: userID,
-		CallbackID: "triage", Title: "Triage", Description: "Durable workflow",
+		CallbackID: "triage", Title: "Triage", Description: "Durable workflow", Icon: "🚨",
 		InputSchema: `{"type":"object"}`, Steps: `[{"function_id":"triage"}]`,
 		Status: domain.WorkflowDraft, CreatedAt: now, UpdatedAt: now,
 	}
@@ -376,10 +376,11 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		t.Fatal(err)
 	}
 	created, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
-	if err != nil || created.Version != 1 || created.Status != domain.WorkflowDraft {
+	if err != nil || created.Version != 1 || created.Status != domain.WorkflowDraft || created.Icon != "🚨" {
 		t.Fatalf("created workflow=%+v err=%v", created, err)
 	}
 	workflow.Title = "Published triage"
+	workflow.Icon = "📋"
 	workflow.Status = domain.WorkflowPublished
 	workflow.PublishedVersion = 2
 	workflow.UpdatedAt = now.Add(time.Second)
@@ -394,8 +395,12 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		t.Fatalf("workflow revisions=%+v err=%v", revisions, err)
 	}
 	if revisions[1].Title != "Published triage" || revisions[1].Description != "Durable workflow" ||
+		revisions[1].Icon != "📋" ||
 		revisions[1].InputSchema != `{"type":"object"}` || revisions[1].CallbackID != "triage" {
 		t.Fatalf("workflow revision metadata=%+v", revisions[1])
+	}
+	if revisions[0].Icon != "🚨" {
+		t.Fatalf("draft revision icon=%q, want 🚨", revisions[0].Icon)
 	}
 
 	trigger := domain.WorkflowTrigger{
@@ -513,12 +518,13 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	}
 	stagedWorkflow := published
 	stagedWorkflow.Title = "Staged and discarded"
+	stagedWorkflow.Icon = "🗑"
 	stagedWorkflow.UpdatedAt = now.Add(5 * time.Second)
 	if err := repository.UpdateWorkflow(ctx, stagedWorkflow, published.Version, event("staged", "workflow.updated", stagedWorkflow.UpdatedAt)); err != nil {
 		t.Fatal(err)
 	}
 	stagedHead, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
-	if err != nil || stagedHead.Title != "Staged and discarded" || stagedHead.Version == stagedHead.PublishedVersion {
+	if err != nil || stagedHead.Title != "Staged and discarded" || stagedHead.Icon != "🗑" || stagedHead.Version == stagedHead.PublishedVersion {
 		t.Fatalf("staged head=%+v err=%v", stagedHead, err)
 	}
 	discarded, err := repository.DiscardWorkflowStagedChanges(ctx, workspaceID, workflowID, stagedHead.Version, event("discard", "workflow.staged_discarded", stagedWorkflow.UpdatedAt))
@@ -526,7 +532,7 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 		t.Fatalf("discard changed=%v err=%v", discarded, err)
 	}
 	afterDiscard, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
-	if err != nil || afterDiscard.Title != workflow.Title || afterDiscard.Version != workflow.PublishedVersion {
+	if err != nil || afterDiscard.Title != workflow.Title || afterDiscard.Icon != workflow.Icon || afterDiscard.Version != workflow.PublishedVersion {
 		t.Fatalf("after discard=%+v err=%v", afterDiscard, err)
 	}
 

@@ -178,7 +178,7 @@ func seedWorkflowParity(t *testing.T, target *memory.Store) {
 	}))
 	workflow := domain.WorkflowDefinition{
 		ID: "WfParity", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "triage-workflow",
-		Title: "Triage workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage request"}]`,
+		Title: "Triage workflow", Icon: "🚨", InputSchema: `{}`, Steps: `[{"function_id":"triage","title":"Triage request"}]`,
 		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
 	}
 	requireSeed(t, target.CreateWorkflow(context.Background(), workflow, events.Event{
@@ -571,7 +571,7 @@ func parityCases() []parityCase {
 					return nil, fmt.Errorf("deleted run error=%v, want ErrNotFound", err)
 				}
 				return []any{
-					duplicate.Title, duplicate.CallbackID, string(duplicate.Status),
+					duplicate.Title, duplicate.CallbackID, string(duplicate.Status), duplicate.Icon,
 					duplicate.Version, duplicate.PublishedVersion, duplicate.Steps,
 				}, nil
 			},
