@@ -325,6 +325,58 @@ func TestWorkflowBuilderMarksPerStepChangesAgainstThePublishedRevision(t *testin
 	}
 }
 
+func TestWorkflowBuilderCopiesAndDeletesAWorkflow(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+		"callback_id": {"incident-triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+
+	copied := postForm(t, mux, workflowURL+"/copy", url.Values{"_csrf": {csrf}}.Encode(), false)
+	if copied.Code != http.StatusSeeOther {
+		t.Fatalf("copy=%d: %s", copied.Code, copied.Body)
+	}
+	copyURL := strings.Split(copied.Header().Get("Location"), "?")[0]
+	if copyURL == workflowURL {
+		t.Fatalf("copy redirected to the source workflow: %s", copied.Header().Get("Location"))
+	}
+	page := get(t, mux, copied.Header().Get("Location"))
+	requireContains(t, "copied workflow", page.Body.String(), "Workflow copied", "Incident triage (copy)", "draft")
+
+	version := regexp.MustCompile(`name="version" value="(\d+)"`).FindStringSubmatch(page.Body.String())
+	if len(version) != 2 {
+		t.Fatalf("copy page missing delete version: %s", page.Body)
+	}
+	stale := postForm(t, mux, copyURL+"/delete", url.Values{
+		"_csrf": {csrf}, "version": {"99"},
+	}.Encode(), false)
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("stale delete=%d: %s", stale.Code, stale.Body)
+	}
+	missing := postForm(t, mux, "/app/workflows/Wfmissing/delete", url.Values{
+		"_csrf": {csrf}, "version": {"1"},
+	}.Encode(), false)
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("missing workflow delete=%d: %s", missing.Code, missing.Body)
+	}
+
+	deleted := postForm(t, mux, copyURL+"/delete", url.Values{
+		"_csrf": {csrf}, "version": {version[1]},
+	}.Encode(), false)
+	if deleted.Code != http.StatusSeeOther {
+		t.Fatalf("delete=%d: %s", deleted.Code, deleted.Body)
+	}
+	directory := get(t, mux, deleted.Header().Get("Location"))
+	requireContains(t, "directory after delete", directory.Body.String(), "Workflow deleted", "Incident triage")
+	if strings.Contains(directory.Body.String(), "Incident triage (copy)") {
+		t.Fatalf("deleted copy still listed: %s", directory.Body)
+	}
+	if gone := get(t, mux, copyURL); gone.Code != http.StatusNotFound {
+		t.Fatalf("deleted workflow page=%d", gone.Code)
+	}
+}
+
 func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	response := postForm(t, mux, "/app/workflows/create", url.Values{

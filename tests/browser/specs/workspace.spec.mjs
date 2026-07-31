@@ -1960,6 +1960,17 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   expect(await invoked.text()).toBe('ok');
   const denied = await request.post(webhookURL.replace(/[0-9a-f]+$/, '0'.repeat(48)), { data: {} });
   expect(denied.status()).toBe(404);
+
+  // A workflow can be duplicated from the builder as a new draft and deleted
+  // again: the copy lands on its own builder page, and deleting it returns to
+  // the directory without it.
+  await page.getByRole('button', { name: 'Copy workflow' }).click();
+  await expect(page.getByText('Workflow copied')).toBeVisible();
+  await expect(page.getByRole('heading', { name: workflowName + ' (copy)' })).toBeVisible();
+  await expect(page.getByText('draft', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Delete workflow' }).click();
+  await expect(page.getByText('Workflow deleted')).toBeVisible();
+  await expect(page.getByRole('link', { name: workflowName + ' (copy)' })).toHaveCount(0);
   await expectNoSeriousAccessibilityViolations(page);
 });
 

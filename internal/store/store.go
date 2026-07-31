@@ -376,6 +376,11 @@ type Store interface {
 	// revision and realigns Version with PublishedVersion. The expectedVersion
 	// is the staged version being discarded.
 	DiscardWorkflowStagedChanges(context.Context, domain.WorkspaceID, domain.WorkflowID, uint64, events.Event) (bool, error)
+	// DeleteWorkflow removes a workflow with its revisions, triggers, runs,
+	// and steps in one transaction, cancelling every running execution with
+	// the workflow_unpublished error first. It reports false when the expected
+	// version moved underneath the caller.
+	DeleteWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID, uint64, events.Event) (bool, error)
 	GetWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID) (domain.WorkflowDefinition, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)

@@ -5694,6 +5694,74 @@ func (s *Store) DiscardWorkflowStagedChanges(ctx context.Context, workspace doma
 	return true, tx.Commit()
 }
 
+// DeleteWorkflow removes the workflow and every record derived from it in one
+// transaction: featured trigger entries, executing steps, runs, triggers,
+// revisions, and finally the head row. Running executions are cancelled with
+// the workflow_unpublished error before their rows go away so a concurrent
+// reader never sees a run vanish mid-flight.
+func (s *Store) DeleteWorkflow(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
+	if workflowID == "" || workspace == "" || expectedVersion == 0 {
+		return false, store.InvalidArgument("invalid workflow deletion")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var version uint64
+	if err := tx.QueryRowContext(ctx, `SELECT version FROM workflows WHERE id = ? AND workspace_id = ?`,
+		workflowID, workspace).Scan(&version); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, store.ErrNotFound
+		}
+		return false, err
+	}
+	if version != expectedVersion {
+		return false, store.ErrConflict
+	}
+	if err := cancelRunningWorkflowRuns(ctx, tx, workflowID, workspace, event.CreatedAt); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM featured_workflows WHERE workspace_id = ?
+		AND trigger_id IN (SELECT id FROM workflow_triggers WHERE workspace_id = ? AND workflow_id = ?)`,
+		workspace, workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_steps WHERE workspace_id = ?
+		AND workflow_run_id IN (SELECT id FROM workflow_runs WHERE workspace_id = ? AND workflow_id = ?)`,
+		workspace, workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_runs WHERE workspace_id = ? AND workflow_id = ?`,
+		workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_triggers WHERE workspace_id = ? AND workflow_id = ?`,
+		workspace, workflowID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_revisions WHERE workspace_id = ? AND workflow_id = ?`,
+		workspace, workflowID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM workflows WHERE workspace_id = ? AND id = ? AND version = ?`,
+		workspace, workflowID, expectedVersion)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, store.ErrConflict
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
 func (s *Store) ListWorkflows(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {
 	if err := store.CheckAscendingPage(request); err != nil {
 		return nil, false, "", err

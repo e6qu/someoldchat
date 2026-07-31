@@ -492,3 +492,74 @@ func TestDiffWorkflowStepsIsPositional(t *testing.T) {
 		t.Fatalf("malformed head changes=%+v, want 2 (all added)", changes)
 	}
 }
+
+func TestDuplicateWorkflowCopiesTheHeadAsANewDraft(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	duplicate, err := messages.DuplicateWorkflow(ctx, "T1", "U1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.ID == "" || duplicate.ID == workflow.ID {
+		t.Fatalf("duplicate id=%q, want a fresh id", duplicate.ID)
+	}
+	if duplicate.Title != "Incident triage (copy)" || duplicate.Status != domain.WorkflowDraft ||
+		duplicate.Version != 1 || duplicate.PublishedVersion != 0 || duplicate.OwnerID != "U1" {
+		t.Fatalf("duplicate=%+v", duplicate)
+	}
+	if duplicate.Steps != workflow.Steps || duplicate.InputSchema != workflow.InputSchema || duplicate.AppID != workflow.AppID {
+		t.Fatalf("duplicate head mismatch: %+v", duplicate)
+	}
+	stored, err := messages.GetWorkflow(ctx, "T1", "U1", duplicate.ID)
+	if err != nil || stored.Title != duplicate.Title {
+		t.Fatalf("stored duplicate=%+v err=%v", stored, err)
+	}
+	// Only the owner duplicates; a member gets the same ErrNotFound they get
+	// from every other owner-scoped workflow operation.
+	if _, err := messages.DuplicateWorkflow(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member duplicate error=%v, want ErrNotFound", err)
+	}
+	// A duplicated callback reference is suffixed so both workflows can be
+	// told apart in callback routing.
+	if duplicate.CallbackID != "" && duplicate.CallbackID == workflow.CallbackID {
+		t.Fatalf("duplicate callback id=%q collides with the source", duplicate.CallbackID)
+	}
+}
+
+func TestDeleteWorkflowCancelsRunsAndRemovesEveryRecord(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "delete-run")
+	if err != nil || run.Status != domain.WorkflowRunRunning {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	if err := messages.DeleteWorkflow(ctx, "T1", "U1", workflow.ID, workflow.Version+1); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale delete error=%v, want ErrConflict", err)
+	}
+	if err := messages.DeleteWorkflow(ctx, "T1", "U2", workflow.ID, workflow.Version); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member delete error=%v, want ErrNotFound", err)
+	}
+	if err := messages.DeleteWorkflow(ctx, "T1", "U1", workflow.ID, workflow.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.GetWorkflow(ctx, "T1", "U1", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted workflow error=%v, want ErrNotFound", err)
+	}
+	// The run and its trigger stop existing with the workflow instead of
+	// dangling as orphaned records.
+	if _, err := repository.GetWorkflowRun(ctx, "T1", run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted run error=%v, want ErrNotFound", err)
+	}
+	if _, err := repository.GetWorkflowTrigger(ctx, "T1", trigger.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted trigger error=%v, want ErrNotFound", err)
+	}
+	if revisions, err := repository.ListWorkflowRevisions(ctx, "T1", workflow.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted revisions error=%v", err)
+	} else if err == nil && len(revisions) != 0 {
+		t.Fatalf("deleted revisions=%+v, want none", revisions)
+	}
+}

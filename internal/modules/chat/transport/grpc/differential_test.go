@@ -327,6 +327,47 @@ func parityCases() []parityCase {
 	}
 	return []parityCase{
 		{
+			name: "workflow duplication and deletion survive the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				duplicate, err := chat.DuplicateWorkflow(ctx, "T1", "U1", "WfParity")
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.DuplicateWorkflow(ctx, "T1", "U2", "WfParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner duplicate error=%v, want ErrNotFound", err)
+				}
+				if err := chat.DeleteWorkflow(ctx, "T1", "U1", duplicate.ID, 99); !errors.Is(err, storepkg.ErrConflict) {
+					return nil, fmt.Errorf("stale delete error=%v, want ErrConflict", err)
+				}
+				if err := chat.DeleteWorkflow(ctx, "T1", "U2", duplicate.ID, duplicate.Version); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("non-owner delete error=%v, want ErrNotFound", err)
+				}
+				if err := chat.DeleteWorkflow(ctx, "T1", "U1", duplicate.ID, duplicate.Version); err != nil {
+					return nil, err
+				}
+				if _, err := chat.GetWorkflow(ctx, "T1", "U1", duplicate.ID); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("deleted duplicate error=%v, want ErrNotFound", err)
+				}
+				// Deleting a published workflow cancels its running run inside
+				// the same transaction, then the workflow, its trigger, and the
+				// run all stop existing.
+				if err := chat.DeleteWorkflow(ctx, "T1", "U1", "WfParity", 1); err != nil {
+					return nil, err
+				}
+				if _, err := chat.GetWorkflow(ctx, "T1", "U1", "WfParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("deleted workflow error=%v, want ErrNotFound", err)
+				}
+				if _, err := chat.GetWorkflowRun(ctx, "T1", "U1", "WxParity"); !errors.Is(err, storepkg.ErrNotFound) {
+					return nil, fmt.Errorf("deleted run error=%v, want ErrNotFound", err)
+				}
+				return []any{
+					duplicate.Title, duplicate.CallbackID, string(duplicate.Status),
+					duplicate.Version, duplicate.PublishedVersion, duplicate.Steps,
+				}, nil
+			},
+		},
+		{
 			name: "workflow permissions discovery and completion survive the composition seam",
 			seed: seedWorkflowParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {

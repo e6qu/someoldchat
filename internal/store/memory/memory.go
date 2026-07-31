@@ -2589,6 +2589,69 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 	return nil
 }
 
+func (s *Store) DeleteWorkflow(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
+	if workflowID == "" || workspace == "" || expectedVersion == 0 {
+		return false, store.InvalidArgument("invalid workflow deletion")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflows[workflowID]
+	if !exists || current.WorkspaceID != workspace {
+		return false, store.ErrNotFound
+	}
+	if current.Version != expectedVersion {
+		return false, store.ErrConflict
+	}
+	for runID, run := range s.workflowRuns {
+		if run.WorkflowID != workflowID || run.WorkspaceID != workspace {
+			continue
+		}
+		if run.Status == domain.WorkflowRunRunning {
+			run.Status = domain.WorkflowRunCancelled
+			run.Error = "workflow_unpublished"
+			run.CompletedAt = event.CreatedAt
+			run.UpdatedAt = event.CreatedAt
+			s.workflowRuns[runID] = run
+		}
+		delete(s.workflowRuns, runID)
+		for stepID, step := range s.workflowSteps {
+			if step.WorkflowRunID != runID {
+				continue
+			}
+			if step.Status == domain.WorkflowStepExecuting {
+				step.Status = domain.WorkflowStepCancelled
+				step.Error = "workflow_unpublished"
+				step.UpdatedAt = event.CreatedAt
+				s.workflowSteps[stepID] = step
+			}
+			delete(s.workflowSteps, stepID)
+		}
+	}
+	for triggerID, trigger := range s.workflowTriggers {
+		if trigger.WorkflowID != workflowID || trigger.WorkspaceID != workspace {
+			continue
+		}
+		delete(s.workflowTriggers, triggerID)
+		for conversation, featured := range s.featuredWorkflows {
+			remaining := make([]domain.FeaturedWorkflow, 0, len(featured))
+			for _, entry := range featured {
+				if entry.TriggerID != triggerID {
+					remaining = append(remaining, entry)
+				}
+			}
+			if len(remaining) == 0 {
+				delete(s.featuredWorkflows, conversation)
+			} else {
+				s.featuredWorkflows[conversation] = remaining
+			}
+		}
+	}
+	delete(s.workflowRevisions, workflowID)
+	delete(s.workflows, workflowID)
+	s.outbox = append(s.outbox, event)
+	return true, nil
+}
+
 func (s *Store) DiscardWorkflowStagedChanges(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
 	if workflowID == "" || workspace == "" || expectedVersion == 0 {
 		return false, store.InvalidArgument("invalid workflow staged-changes discard")

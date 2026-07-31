@@ -621,6 +621,55 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	if cursor, err := repository.GetWorkflowEventCursor(ctx, workspaceID); err != nil || cursor != 41 {
 		t.Fatalf("event cursor after monotonic advance=%d err=%v, want 41", cursor, err)
 	}
+
+	// Deleting removes the workflow and every record derived from it in one
+	// transaction: a running execution is cancelled first, then the workflow,
+	// its revisions, triggers, runs, steps, and featured entries all go away.
+	deletableRun := domain.WorkflowRun{
+		ID: domain.WorkflowRunID("Wx-delete-" + suffix), WorkflowID: workflowID, WorkflowVersion: 2,
+		TriggerID: triggerID, WorkspaceID: workspaceID, AppID: workflow.AppID, ActorID: userID,
+		Status: domain.WorkflowRunRunning, Inputs: `{}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	deletableStep := domain.WorkflowStep{
+		ID: domain.WorkflowStepID("Fx-delete-" + suffix), WorkflowRunID: deletableRun.ID,
+		WorkspaceID: workspaceID, AppID: workflow.AppID, UserID: userID, FunctionID: "FnDelete",
+		EditID: "triage", Status: domain.WorkflowStepExecuting, Inputs: `{}`, Outputs: `{}`,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflowRun(ctx, deletableRun, &deletableStep, []events.Event{
+		event("delete-run", "workflow.run_started", now),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	head, err := repository.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.DeleteWorkflow(ctx, workspaceID, workflowID, head.Version+1, event("delete-stale", "workflow.deleted", now)); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("stale workflow delete error=%v, want ErrConflict", err)
+	}
+	deleted, err := repository.DeleteWorkflow(ctx, workspaceID, workflowID, head.Version, event("delete", "workflow.deleted", now))
+	if err != nil || !deleted {
+		t.Fatalf("delete changed=%v err=%v", deleted, err)
+	}
+	if _, err := repository.GetWorkflow(ctx, workspaceID, workflowID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted workflow error=%v, want ErrNotFound", err)
+	}
+	if _, err := repository.GetWorkflowTrigger(ctx, workspaceID, triggerID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted trigger error=%v, want ErrNotFound", err)
+	}
+	if _, err := repository.GetWorkflowRun(ctx, workspaceID, deletableRun.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted run error=%v, want ErrNotFound", err)
+	}
+	if _, err := repository.GetWorkflowStep(ctx, workspaceID, deletableStep.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted step error=%v, want ErrNotFound", err)
+	}
+	if featured, err := repository.ListFeaturedWorkflows(ctx, workspaceID, []domain.ConversationID{conversationID}); err != nil || len(featured) != 0 {
+		t.Fatalf("featured after delete=%+v err=%v, want none", featured, err)
+	}
+	if _, err := repository.DeleteWorkflow(ctx, workspaceID, workflowID, head.Version, event("delete-again", "workflow.deleted", now)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("repeat delete error=%v, want ErrNotFound", err)
+	}
 }
 
 func coreRepositoryContract(t *testing.T, open opener) {

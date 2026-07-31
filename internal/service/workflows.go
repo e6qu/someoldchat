@@ -251,6 +251,61 @@ func (m Messages) DiscardWorkflowStagedChanges(ctx context.Context, workspaceID 
 	return nil
 }
 
+// DuplicateWorkflow copies a workflow's head into a new draft owned by the
+// actor. Slack duplicates a published workflow into the builder as a new,
+// unpublished workflow, so the copy starts as a draft at version 1 regardless
+// of the source's status.
+func (m Messages) DuplicateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return domain.WorkflowDefinition{}, err
+	}
+	if current.OwnerID != actor {
+		return domain.WorkflowDefinition{}, store.ErrNotFound
+	}
+	callbackID := current.CallbackID
+	if callbackID != "" {
+		callbackID += "-copy"
+	}
+	return m.CreateWorkflow(ctx, workspaceID, actor, domain.WorkflowDefinition{
+		AppID:       current.AppID,
+		Title:       current.Title + " (copy)",
+		Description: current.Description,
+		CallbackID:  callbackID,
+		InputSchema: current.InputSchema,
+		Steps:       current.Steps,
+	})
+}
+
+// DeleteWorkflow removes a workflow and every record derived from it, like
+// Slack's builder delete: revisions, triggers, featured entries, runs, and
+// steps all go away in one transaction, and any execution still running is
+// cancelled first so it ends in a terminal state rather than vanishing.
+func (m Messages) DeleteWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, workflowID domain.WorkflowID, expectedVersion uint64) error {
+	current, err := m.Store.GetWorkflow(ctx, workspaceID, workflowID)
+	if err != nil {
+		return err
+	}
+	if current.OwnerID != actor {
+		return store.ErrNotFound
+	}
+	if expectedVersion != current.Version {
+		return store.ErrConflict
+	}
+	now := time.Now().UTC()
+	event, err := newEvent(workspaceID, actor, events.NewPayload("workflow.deleted",
+		events.String("workflow_id", string(current.ID)),
+		events.String("app_id", string(current.AppID)),
+	), now)
+	if err != nil {
+		return err
+	}
+	if _, err := m.Store.DeleteWorkflow(ctx, workspaceID, workflowID, expectedVersion, event); err != nil {
+		return err
+	}
+	return nil
+}
+
 // WorkflowStepChanges reports the step-level differences between a published
 // workflow's staged draft and its published revision. Only the owner reads the
 // live head, so only the owner can observe the changes; a member receives

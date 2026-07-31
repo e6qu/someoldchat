@@ -2369,6 +2369,24 @@ func (r Remote) WorkflowStepChanges(ctx context.Context, workspaceID domain.Work
 	return decodeWorkflowStepChanges(out.GetChanges()), nil
 }
 
+func (r Remote) DuplicateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) (domain.WorkflowDefinition, error) {
+	out, err := r.workflows.DuplicateWorkflow(ctx, &chatv1.WorkflowGetRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	return decodeWorkflowDefinition(out), err
+}
+
+func (r Remote) DeleteWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID, expectedVersion uint64) error {
+	out, err := r.workflows.DeleteWorkflow(ctx, &chatv1.WorkflowDeleteRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+		ExpectedVersion: expectedVersion,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "delete workflow")
+}
+
 func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition, expectedVersion uint64, publish bool) (domain.WorkflowDefinition, error) {
 	out, err := r.workflows.UpdateWorkflow(ctx, &chatv1.WorkflowMutationRequest{
 		WorkspaceId: string(workspaceID), UserId: string(userID), Workflow: encodeWorkflowDefinition(value),
@@ -4900,6 +4918,27 @@ func (s *Server) WorkflowStepChanges(ctx context.Context, input *chatv1.Workflow
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepChangesResponse{Changes: encodeWorkflowStepChanges(changes)}, nil
+}
+
+func (s *Server) DuplicateWorkflow(ctx context.Context, input *chatv1.WorkflowGetRequest) (*chatv1.WorkflowDefinition, error) {
+	value, err := s.implementation.DuplicateWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowDefinition(value), nil
+}
+
+func (s *Server) DeleteWorkflow(ctx context.Context, input *chatv1.WorkflowDeleteRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	if err := s.implementation.DeleteWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()), input.GetExpectedVersion(),
+	); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {
