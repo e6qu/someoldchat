@@ -156,9 +156,10 @@ func PublishEarliestProductWakeDeadlineWithStatuses(ctx context.Context, schedul
 }
 
 // PublishEarliestProductWakeDeadlineComplete includes every durable product
-// timer, including the start of a future custom status.
-func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled Source, reminders ReminderSource, statuses StatusSource, futureStatuses ScheduledStatusSource, publisher FencedDeadlinePublisher, workspaces ...domain.WorkspaceID) error {
-	if scheduled == nil || reminders == nil || statuses == nil || futureStatuses == nil || publisher == nil {
+// timer, including the start of a future custom status and the next scheduled
+// workflow trigger fire.
+func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled Source, reminders ReminderSource, statuses StatusSource, futureStatuses ScheduledStatusSource, triggers WorkflowScheduleSource, publisher FencedDeadlinePublisher, workspaces ...domain.WorkspaceID) error {
+	if scheduled == nil || reminders == nil || statuses == nil || futureStatuses == nil || triggers == nil || publisher == nil {
 		return errors.New("product wake deadline requires all timer sources and a publisher")
 	}
 	fence, err := publisher.Fence(ctx)
@@ -170,12 +171,13 @@ func PublishEarliestProductWakeDeadlineComplete(ctx context.Context, scheduled S
 	}
 	var earliest time.Time
 	for _, workspace := range workspaces {
-		candidates := make([]time.Time, 0, 4)
+		candidates := make([]time.Time, 0, 5)
 		for _, read := range []func() (time.Time, error){
 			func() (time.Time, error) { return scheduled.EarliestScheduledMessage(ctx, workspace) },
 			func() (time.Time, error) { return reminders.EarliestLaterReminder(ctx, workspace) },
 			func() (time.Time, error) { return statuses.EarliestUserStatusExpiration(ctx, workspace) },
 			func() (time.Time, error) { return futureStatuses.EarliestScheduledStatusStart(ctx, workspace) },
+			func() (time.Time, error) { return triggers.EarliestScheduledWorkflowTrigger(ctx, workspace) },
 		} {
 			value, err := read()
 			if err != nil {

@@ -28,7 +28,9 @@ reminder editing/completion/deletion, `/remind` channel creation, and the
 private `/remind list` projection. It also
 creates and installs a remote-function app, builds and publishes a two-step
 workflow, creates a link trigger, starts one durable execution, reloads its run
-state, and checks the builder and run views for automated accessibility. It also
+state, creates a webhook trigger, invokes its owner-revealed secret URL over
+HTTP, and observes the indistinguishable 404 for a wrong secret, and checks
+the builder and run views for automated accessibility. It also
 schedules a message in the browser's local time zone, verifies that the
 pending item does not appear in channel history, reviews it on the Scheduled
 surface, and cancels it. It signs out through the application UI,

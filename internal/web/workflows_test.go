@@ -116,6 +116,91 @@ func TestWorkflowBuilderPublishesTriggersAndStartsADurableRun(t *testing.T) {
 	}
 }
 
+func TestWorkflowBuilderConfiguresScheduledWebhookAndEventTriggers(t *testing.T) {
+	mux, csrf := seedWorkflowApp(t)
+	created := postForm(t, mux, "/app/workflows/create", url.Values{
+		"_csrf": {csrf}, "title": {"Incident triage"}, "app_id": {"Aworkflow"}, "function_callback": {"triage"},
+	}.Encode(), false)
+	workflowURL := strings.Split(created.Header().Get("Location"), "?")[0]
+	published := postForm(t, mux, workflowURL+"/update", url.Values{
+		"_csrf": {csrf}, "version": {"1"}, "title": {"Incident triage"}, "input_schema": {`{}`},
+		"step_1": {"triage"}, "action": {"publish"},
+	}.Encode(), false)
+	if published.Code != http.StatusSeeOther {
+		t.Fatalf("publish=%d: %s", published.Code, published.Body)
+	}
+
+	scheduled := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Every morning"}, "type": {"scheduled"},
+		"schedule_start": {"2030-05-04T09:30"}, "schedule_timezone": {"Europe/Helsinki"},
+		"schedule_frequency": {"daily"}, "schedule_interval": {"1"},
+	}.Encode(), false)
+	if scheduled.Code != http.StatusSeeOther {
+		t.Fatalf("scheduled trigger=%d: %s", scheduled.Code, scheduled.Body)
+	}
+	page := get(t, mux, scheduled.Header().Get("Location"))
+	requireContains(t, "scheduled trigger", page.Body.String(), "Every morning", "Every 1 daily · Europe/Helsinki", "Next run")
+
+	broken := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Broken"}, "type": {"scheduled"},
+		"schedule_start": {"2030-05-04T09:30"}, "schedule_timezone": {"Not/AZone"},
+		"schedule_frequency": {"daily"},
+	}.Encode(), false)
+	if broken.Code != http.StatusBadRequest {
+		t.Fatalf("invalid timezone=%d: %s", broken.Code, broken.Body)
+	}
+
+	hooked := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Deploy hook"}, "type": {"webhook"},
+	}.Encode(), false)
+	if hooked.Code != http.StatusSeeOther {
+		t.Fatalf("webhook trigger=%d: %s", hooked.Code, hooked.Body)
+	}
+	page = get(t, mux, hooked.Header().Get("Location"))
+	requireContains(t, "webhook trigger", page.Body.String(), "Deploy hook", "Webhook URL", "/services/triggers/T1/")
+	invokePath := regexp.MustCompile(`(/services/triggers/T1/Ft[0-9a-f]+/[0-9a-f]+)`).FindString(page.Body.String())
+	if invokePath == "" {
+		t.Fatalf("webhook URL not rendered: %s", page.Body)
+	}
+
+	watched := postForm(t, mux, workflowURL+"/triggers", url.Values{
+		"_csrf": {csrf}, "title": {"Watch incidents"}, "type": {"message"},
+		"event_channel": {"Cdev"}, "event_keyword": {"incident"},
+	}.Encode(), false)
+	if watched.Code != http.StatusSeeOther {
+		t.Fatalf("message trigger=%d: %s", watched.Code, watched.Body)
+	}
+	page = get(t, mux, watched.Header().Get("Location"))
+	requireContains(t, "message trigger", page.Body.String(), "Watch incidents", "New messages in #general containing &#34;incident&#34;")
+
+	// An enable/disable roundtrip carries the stored configuration: the
+	// schedule and webhook URL survive the toggle instead of being wiped.
+	message := ""
+	for _, article := range strings.Split(page.Body.String(), `<article class="trigger">`) {
+		if strings.Contains(article, "Watch incidents") {
+			message = article
+		}
+	}
+	if message == "" {
+		t.Fatalf("message trigger article missing: %s", page.Body)
+	}
+	version := regexp.MustCompile(`name="version" value="(\d+)"`).FindStringSubmatch(message)
+	config := regexp.MustCompile(`name="config" value="([^"]+)"`).FindStringSubmatch(message)
+	triggerID := regexp.MustCompile(`triggers/(Ft[0-9a-f]+)"`).FindStringSubmatch(message)
+	if len(version) != 2 || len(config) != 2 || len(triggerID) != 2 {
+		t.Fatalf("message trigger form incomplete: %s", message)
+	}
+	toggled := postForm(t, mux, workflowURL+"/triggers/"+triggerID[1], url.Values{
+		"_csrf": {csrf}, "version": {version[1]}, "title": {"Watch incidents"}, "type": {"message"},
+		"config": {strings.ReplaceAll(config[1], "&#34;", `"`)}, "enabled": {"false"},
+	}.Encode(), false)
+	if toggled.Code != http.StatusSeeOther {
+		t.Fatalf("toggle=%d: %s", toggled.Code, toggled.Body)
+	}
+	page = get(t, mux, toggled.Header().Get("Location"))
+	requireContains(t, "disabled message trigger", page.Body.String(), "Watch incidents", "message · disabled", "containing &#34;incident&#34;")
+}
+
 func TestWorkflowBuilderRejectsAFunctionFromAnotherApp(t *testing.T) {
 	mux, csrf := seedWorkflowApp(t)
 	response := postForm(t, mux, "/app/workflows/create", url.Values{

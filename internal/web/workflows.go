@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/sameoldchat/sameoldchat/internal/appmanifest"
 	"github.com/sameoldchat/sameoldchat/internal/auth"
@@ -52,10 +53,24 @@ type workflowTriggerView struct {
 	Type            string
 	Enabled         bool
 	Version         uint64
+	Config          string
+	Summary         string
+	WebhookURL      string
+	NextRun         string
 	IdempotencyKey  string
 	CanRun          bool
 	CanManage       bool
 	WorkflowVersion uint64
+}
+
+type workflowChannelOption struct {
+	ID   string
+	Name string
+}
+
+type workflowListOption struct {
+	ID    string
+	Title string
 }
 
 type workflowsData struct {
@@ -82,6 +97,8 @@ type workflowData struct {
 	Owned           bool
 	InputSchema     string
 	Functions       []workflowFunctionOption
+	Channels        []workflowChannelOption
+	Lists           []workflowListOption
 	StepSlots       []workflowStepSlot
 	StepCount       int
 	Triggers        []workflowTriggerView
@@ -128,12 +145,12 @@ const workflowMarkup = `{{define "title"}}{{.Title}} · Workflow · SameOldChat{
 .step-list,.trigger-list{display:grid;gap:10px;margin:12px 0}.step{display:grid;grid-template-columns:34px minmax(0,1fr);gap:10px;align-items:center}.step b{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--accent);color:var(--on-accent)}.trigger{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;padding:13px;border:1px solid var(--line);border-radius:8px}.trigger h4,.trigger p{margin:0}.trigger p{color:var(--muted);font-size:13px}.trigger-actions{display:flex;gap:7px;align-items:center}.trigger-actions form{margin:0}.trigger-actions button{padding:7px 10px;border:1px solid var(--field-line);border-radius:6px;background:var(--panel-strong);color:var(--text);font-weight:800}.trigger-actions .run button{background:var(--action);color:var(--on-strong);border-color:transparent}.empty{padding:18px;border:1px dashed var(--line);border-radius:8px;color:var(--muted)}
 @media(max-width:650px){.fields{grid-template-columns:1fr}.fields .wide{grid-column:1}.trigger{grid-template-columns:1fr}.trigger-actions{flex-wrap:wrap}}
 </style>{{end}}
-{{define "scripts"}}` + localTimeScript + `{{end}}
+{{define "scripts"}}` + localTimeScript + `<script>(function(){var type=document.getElementById('trigger-type');if(!type)return;var configs=document.querySelectorAll('[data-trigger-config]');function sync(){Array.prototype.forEach.call(configs,function(node){var show=node.getAttribute('data-trigger-config').split(' ').indexOf(type.value)!==-1;node.hidden=!show;node.disabled=!show;Array.prototype.forEach.call(node.querySelectorAll('[data-required]'),function(input){input.required=show})});}type.addEventListener('change',sync);sync()})();</script>{{end}}
 {{define "content"}}<header class="bar"><a href="/app/workflows">← Workflows</a><h1>Workflow Builder</h1><button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">Theme</button></header><main class="layout">
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}<div class="hero"><div><h2>{{.Title}}</h2><p>{{if .Description}}{{.Description}}{{else}}No description{{end}} · version {{.Version}}{{if .Published}}, published version {{.Published}}{{end}}</p></div><span class="status">{{.Status}}</span></div>
 {{if .Owned}}<section class="panel" aria-labelledby="builder-heading"><h3 id="builder-heading">Build workflow</h3><p>Steps run from top to bottom. Publishing makes the current version available to its enabled triggers; unpublished workflows can retain draft changes.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/update"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="step_count" value="{{.StepCount}}"><label>Name<input name="title" maxlength="255" value="{{.Title}}" required></label><label>Workflow reference<input name="callback_id" maxlength="255" value="{{.CallbackID}}"></label><label class="wide">Description<textarea name="description" maxlength="2000">{{.Description}}</textarea></label><label class="wide">Input metadata (JSON object; syntax validation only)<textarea name="input_schema" spellcheck="false">{{.InputSchema}}</textarea></label><fieldset class="wide"><legend>Steps</legend><div class="step-list">{{range .StepSlots}}{{$slot := .}}<label class="step"><b aria-hidden="true">{{.Number}}</b><span><span class="visually-hidden">Step {{.Number}}</span><select name="step_{{.Number}}"{{if eq .Number 1}} required{{end}}><option value="">{{if eq .Number 1}}Choose a function{{else}}No step{{end}}</option>{{range $.Functions}}<option value="{{.CallbackID}}"{{if eq .CallbackID $slot.Selected}} selected{{end}}>{{.Title}} · {{.CallbackID}}</option>{{end}}</select></span></label>{{end}}</div></fieldset><div class="actions">{{if .PublishedStatus}}<button name="action" value="publish" type="submit">Publish changes</button><button class="secondary" name="action" value="unpublish" type="submit">Unpublish</button>{{else}}<button name="action" value="save" type="submit">Save draft</button><button name="action" value="publish" type="submit">Publish</button>{{end}}</div></form></section>
-<section class="panel" aria-labelledby="trigger-heading"><h3 id="trigger-heading">Triggers</h3><p>Create a link or shortcut trigger after the workflow is ready. Scheduled and webhook execution are not offered here until their workers are enabled.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/triggers"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Trigger name<input name="title" maxlength="255" required></label><label>Trigger type<select name="type"><option value="link">Link</option><option value="shortcut">Shortcut</option></select></label><button type="submit">Create trigger</button></form></section>{{end}}
-<section class="panel" aria-labelledby="available-heading"><h3 id="available-heading">Available triggers</h3><div class="trigger-list">{{range .Triggers}}<article class="trigger"><div><h4>{{.Title}}</h4><p>{{.Type}} · {{if .Enabled}}enabled{{else}}disabled{{end}} · workflow v{{.WorkflowVersion}}</p></div><div class="trigger-actions">{{if .CanRun}}<form class="run" method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}/run"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">{{if $.HasInputSchema}}<label>Inputs (JSON)<textarea name="inputs">{}</textarea></label>{{end}}<button type="submit">Run</button></form>{{end}}{{if .CanManage}}<form method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="type" value="{{.Type}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div></article>{{else}}<p class="empty">No triggers have been configured.</p>{{end}}</div></section>
+ <section class="panel" aria-labelledby="trigger-heading"><h3 id="trigger-heading">Triggers</h3><p>Link and shortcut triggers start from a conversation. Scheduled, webhook, message, reaction, join, and list triggers start from their configured condition once the workflow is published.</p><form class="fields" method="post" action="/app/workflows/{{.ID}}/triggers"><input type="hidden" name="_csrf" value="{{.CSRFToken}}"><label>Trigger name<input name="title" maxlength="255" required></label><label>Trigger type<select id="trigger-type" name="type"><option value="link">Link</option><option value="shortcut">Shortcut</option><option value="scheduled">On a schedule</option><option value="webhook">From a webhook</option><option value="message">When a message is posted</option><option value="reaction">When an emoji reaction is used</option><option value="join">When a person joins a channel</option>{{if .Lists}}<option value="list">When a list record changes</option>{{end}}</select></label><fieldset class="wide trigger-config" data-trigger-config="scheduled"><legend>Schedule</legend><div class="fields"><label>Starts at<input type="datetime-local" name="schedule_start" step="60" data-required></label><label>Time zone<input name="schedule_timezone" maxlength="64" value="UTC"></label><label>Repeats<select name="schedule_frequency"><option value="hourly">Hourly</option><option value="daily" selected>Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Every<input type="number" name="schedule_interval" min="1" max="366" value="1"></label></div></fieldset><fieldset class="wide trigger-config" data-trigger-config="webhook"><legend>Webhook</legend><p>Create the trigger to generate its POST URL. The URL is revealed here to the workflow owner.</p></fieldset><fieldset class="wide trigger-config" data-trigger-config="message"><legend>Message event</legend><div class="fields"><label>Channel<select name="event_channel">{{range .Channels}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label><label>Keyword (optional)<input name="event_keyword" maxlength="255"></label></div></fieldset><fieldset class="wide trigger-config" data-trigger-config="reaction"><legend>Reaction event</legend><div class="fields"><label>Channel<select name="event_channel_reaction">{{range .Channels}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label><label>Emoji name (optional)<input name="event_reaction" maxlength="255" placeholder="eyes"></label></div></fieldset><fieldset class="wide trigger-config" data-trigger-config="join"><legend>Join event</legend><div class="fields"><label>Channel<select name="event_channel_join">{{range .Channels}}<option value="{{.ID}}">#{{.Name}}</option>{{end}}</select></label></div></fieldset>{{if .Lists}}<fieldset class="wide trigger-config" data-trigger-config="list"><legend>List record event</legend><div class="fields"><label>List<select name="list_id">{{range .Lists}}<option value="{{.ID}}">{{.Title}}</option>{{end}}</select></label><label>Fires when<select name="list_event"><option value="created">A record is created</option><option value="updated">A record is updated</option></select></label></div></fieldset>{{end}}<button type="submit">Create trigger</button></form></section>{{end}}
+ <section class="panel" aria-labelledby="available-heading"><h3 id="available-heading">Available triggers</h3><div class="trigger-list">{{range .Triggers}}<article class="trigger"><div><h4>{{.Title}}</h4><p>{{.Type}} · {{if .Enabled}}enabled{{else}}disabled{{end}} · workflow v{{.WorkflowVersion}}</p>{{if .Summary}}<p>{{.Summary}}</p>{{end}}{{if .NextRun}}<p>Next run <time datetime="{{.NextRun}}">{{.NextRun}}</time></p>{{end}}{{if .WebhookURL}}<p>Webhook URL <code>{{.WebhookURL}}</code></p>{{end}}</div><div class="trigger-actions">{{if .CanRun}}<form class="run" method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}/run"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="idempotency_key" value="{{.IdempotencyKey}}">{{if $.HasInputSchema}}<label>Inputs (JSON)<textarea name="inputs">{}</textarea></label>{{end}}<button type="submit">Run</button></form>{{end}}{{if .CanManage}}<form method="post" action="/app/workflows/{{$.ID}}/triggers/{{.ID}}"><input type="hidden" name="_csrf" value="{{$.CSRFToken}}"><input type="hidden" name="version" value="{{.Version}}"><input type="hidden" name="title" value="{{.Title}}"><input type="hidden" name="type" value="{{.Type}}"><input type="hidden" name="config" value="{{.Config}}"><input type="hidden" name="enabled" value="{{if .Enabled}}false{{else}}true{{end}}"><button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button></form>{{end}}</div></article>{{else}}<p class="empty">No triggers have been configured.</p>{{end}}</div></section>
 </main>{{end}}`
 
 var workflowTemplate = mustPage(workflowMarkup)
@@ -305,6 +322,118 @@ func workflowSlots(callbacks []string) []workflowStepSlot {
 	return result
 }
 
+func (h Handler) workflowTriggerOptions(ctx context.Context, principal auth.Principal) ([]workflowChannelOption, []workflowListOption, error) {
+	channels := make([]workflowChannelOption, 0)
+	var cursor domain.Cursor
+	for pageIndex := 0; pageIndex < 5; pageIndex++ {
+		page, err := h.Messages.Conversations(ctx, principal.WorkspaceID, principal.UserID, domain.ConversationListRequest{
+			Limit: 200, Cursor: cursor, ExcludeArchived: true,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, conversation := range page.Conversations {
+			if conversation.IsDirect || conversation.IsGroupDirect {
+				continue
+			}
+			channels = append(channels, workflowChannelOption{ID: string(conversation.ID), Name: conversationName(conversation)})
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	sort.Slice(channels, func(left, right int) bool { return channels[left].Name < channels[right].Name })
+	lists := make([]workflowListOption, 0)
+	cursor = ""
+	for pageIndex := 0; pageIndex < 5; pageIndex++ {
+		page, err := h.Messages.Lists(ctx, principal.WorkspaceID, principal.UserID, domain.PageRequest{Limit: 100, Cursor: cursor})
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, list := range page.Lists {
+			lists = append(lists, workflowListOption{ID: string(list.ID), Title: list.Name})
+		}
+		if !page.HasMore || page.NextCursor == "" {
+			break
+		}
+		cursor = page.NextCursor
+	}
+	sort.Slice(lists, func(left, right int) bool { return lists[left].Title < lists[right].Title })
+	return channels, lists, nil
+}
+
+type workflowTriggerConfigView struct {
+	ChannelIDs []string `json:"channel_ids,omitempty"`
+	Keyword    string   `json:"keyword,omitempty"`
+	Reaction   string   `json:"reaction,omitempty"`
+	ListID     string   `json:"list_id,omitempty"`
+	Event      string   `json:"event,omitempty"`
+	StartTime  string   `json:"start_time,omitempty"`
+	Timezone   string   `json:"timezone,omitempty"`
+	Frequency  struct {
+		Type     string `json:"type"`
+		Interval int    `json:"interval,omitempty"`
+	} `json:"frequency,omitempty"`
+}
+
+func workflowTriggerSummary(trigger domain.WorkflowTrigger, channels []workflowChannelOption, lists []workflowListOption) string {
+	var config workflowTriggerConfigView
+	if err := json.Unmarshal([]byte(trigger.Config), &config); err != nil {
+		return ""
+	}
+	channelName := func() string {
+		if len(config.ChannelIDs) == 0 {
+			return "unknown channel"
+		}
+		for _, channel := range channels {
+			if channel.ID == config.ChannelIDs[0] {
+				return "#" + channel.Name
+			}
+		}
+		return "unknown channel"
+	}
+	switch trigger.Type {
+	case "scheduled":
+		interval := config.Frequency.Interval
+		if interval == 0 {
+			interval = 1
+		}
+		timezone := config.Timezone
+		if timezone == "" {
+			timezone = "UTC"
+		}
+		return fmt.Sprintf("Every %d %s · %s", interval, config.Frequency.Type, timezone)
+	case "webhook":
+		return "Starts when the webhook URL receives a POST"
+	case "message":
+		if config.Keyword != "" {
+			return fmt.Sprintf("New messages in %s containing %q", channelName(), config.Keyword)
+		}
+		return "New messages in " + channelName()
+	case "reaction":
+		if config.Reaction != "" {
+			return fmt.Sprintf(":%s: reactions in %s", config.Reaction, channelName())
+		}
+		return "Reactions in " + channelName()
+	case "join":
+		return "People joining " + channelName()
+	case "list":
+		name := "unknown list"
+		for _, list := range lists {
+			if list.ID == config.ListID {
+				name = list.Title
+			}
+		}
+		if config.Event == "updated" {
+			return "Records updated in " + name
+		}
+		return "Records created in " + name
+	default:
+		return ""
+	}
+}
+
 func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 	principal, csrf, ok := h.workflowPrincipal(w, r)
 	if !ok {
@@ -326,6 +455,15 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 		h.writeStoreError(w, err, "Workflow functions are temporarily unavailable.")
 		return
 	}
+	channels := make([]workflowChannelOption, 0)
+	lists := make([]workflowListOption, 0)
+	if value.OwnerID == principal.UserID {
+		channels, lists, err = h.workflowTriggerOptions(r.Context(), principal)
+		if err != nil {
+			h.writeStoreError(w, err, "Workflow trigger options are temporarily unavailable.")
+			return
+		}
+	}
 	triggerViews := make([]workflowTriggerView, 0, len(triggers))
 	for _, trigger := range triggers {
 		key, err := domain.PublicID("workflow_run_")
@@ -334,7 +472,8 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		canRun := false
-		if trigger.Enabled && value.Status == domain.WorkflowPublished {
+		if trigger.Enabled && value.Status == domain.WorkflowPublished &&
+			(trigger.Type == "link" || trigger.Type == "shortcut") {
 			permission, err := h.Messages.GetTriggerPermission(r.Context(), principal.WorkspaceID, principal.UserID, value.AppID, trigger.ID)
 			if err != nil {
 				h.writeStoreError(w, err, "Workflow permissions are temporarily unavailable.")
@@ -342,11 +481,26 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 			}
 			canRun = workflowPermissionAllows(permission, principal, value.OwnerID)
 		}
-		triggerViews = append(triggerViews, workflowTriggerView{
+		view := workflowTriggerView{
 			ID: string(trigger.ID), Title: trigger.Title, Type: trigger.Type, Enabled: trigger.Enabled,
-			Version: trigger.Version, IdempotencyKey: key, CanRun: canRun,
+			Version: trigger.Version, Config: trigger.Config, IdempotencyKey: key, CanRun: canRun,
 			CanManage: value.OwnerID == principal.UserID, WorkflowVersion: value.PublishedVersion,
-		})
+		}
+		if view.CanManage {
+			view.Summary = workflowTriggerSummary(trigger, channels, lists)
+			if !trigger.NextRunAt.IsZero() {
+				view.NextRun = trigger.NextRunAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+			}
+			if trigger.Type == "webhook" {
+				invokeURL, err := h.Messages.WebhookTriggerURL(r.Context(), principal.WorkspaceID, principal.UserID, trigger.ID)
+				if err != nil {
+					h.writeStoreError(w, err, "The webhook URL is temporarily unavailable.")
+					return
+				}
+				view.WebhookURL = invokeURL
+			}
+		}
+		triggerViews = append(triggerViews, view)
 	}
 	inputSchema := strings.TrimSpace(value.InputSchema)
 	if inputSchema == "" {
@@ -359,6 +513,7 @@ func (h Handler) workflow(w http.ResponseWriter, r *http.Request) {
 		CallbackID: value.CallbackID, Status: string(value.Status), Version: value.Version,
 		Published: value.PublishedVersion, UpdatedAt: value.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00"),
 		Owned: value.OwnerID == principal.UserID, InputSchema: inputSchema, Functions: functions,
+		Channels: channels, Lists: lists,
 		StepSlots: slots, StepCount: len(slots), Triggers: triggerViews,
 		HasFunctions: len(functions) != 0, HasInputSchema: inputSchema != "{}",
 		PublishedStatus: value.Status == domain.WorkflowPublished,
@@ -464,6 +619,83 @@ func (h Handler) updateWorkflow(w http.ResponseWriter, r *http.Request) {
 	h.redirectMutation(w, r, "/app/workflows/"+url.PathEscape(string(updated.ID))+"?notice="+url.QueryEscape(notice))
 }
 
+func buildWorkflowTriggerConfig(triggerType string, fields map[string]string) (string, error) {
+	encode := func(value any) (string, error) {
+		encoded, err := json.Marshal(value)
+		return string(encoded), err
+	}
+	switch triggerType {
+	case "link", "shortcut", "webhook":
+		return "{}", nil
+	case "scheduled":
+		startRaw := strings.TrimSpace(fields["schedule_start"])
+		timezone := strings.TrimSpace(fields["schedule_timezone"])
+		if timezone == "" {
+			timezone = "UTC"
+		}
+		location, err := time.LoadLocation(timezone)
+		if err != nil {
+			return "", errors.New("enter a valid IANA time zone such as UTC or Europe/Helsinki")
+		}
+		start, err := time.ParseInLocation("2006-01-02T15:04", startRaw, location)
+		if err != nil {
+			return "", errors.New("choose when the schedule starts")
+		}
+		frequency := strings.TrimSpace(fields["schedule_frequency"])
+		if frequency != "hourly" && frequency != "daily" && frequency != "weekly" && frequency != "monthly" {
+			return "", errors.New("choose how often the schedule repeats")
+		}
+		interval := 1
+		if raw := strings.TrimSpace(fields["schedule_interval"]); raw != "" {
+			parsed, err := strconv.Atoi(raw)
+			if err != nil || parsed < 1 || parsed > 366 {
+				return "", errors.New("the schedule interval must be between 1 and 366")
+			}
+			interval = parsed
+		}
+		return encode(map[string]any{
+			"start_time": start.UTC().Format(time.RFC3339), "timezone": timezone,
+			"frequency": map[string]any{"type": frequency, "interval": interval},
+		})
+	case "message", "reaction", "join":
+		field := "event_channel"
+		if triggerType == "reaction" {
+			field = "event_channel_reaction"
+		} else if triggerType == "join" {
+			field = "event_channel_join"
+		}
+		channel := strings.TrimSpace(fields[field])
+		if channel == "" {
+			return "", errors.New("choose the channel the trigger watches")
+		}
+		config := map[string]any{"channel_ids": []string{channel}}
+		if triggerType == "message" {
+			if keyword := strings.TrimSpace(fields["event_keyword"]); keyword != "" {
+				config["keyword"] = keyword
+			}
+		}
+		if triggerType == "reaction" {
+			reaction := strings.Trim(strings.TrimSpace(fields["event_reaction"]), ":")
+			if reaction != "" {
+				config["reaction"] = reaction
+			}
+		}
+		return encode(config)
+	case "list":
+		listID := strings.TrimSpace(fields["list_id"])
+		if listID == "" {
+			return "", errors.New("choose the list the trigger watches")
+		}
+		event := strings.TrimSpace(fields["list_event"])
+		if event != "created" && event != "updated" {
+			return "", errors.New("choose when the list trigger fires")
+		}
+		return encode(map[string]any{"list_id": listID, "event": event})
+	default:
+		return "", errors.New("choose a trigger type")
+	}
+}
+
 func (h Handler) createWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 	principal, _, ok := h.workflowPrincipal(w, r)
 	if !ok {
@@ -475,12 +707,13 @@ func (h Handler) createWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	workflowID := domain.WorkflowID(strings.TrimSpace(r.PathValue("workflowID")))
 	triggerType := strings.TrimSpace(fields["type"])
-	if triggerType != "link" && triggerType != "shortcut" {
-		h.writeMutationError(w, r, http.StatusBadRequest, "The trigger was not created", "Choose Link or Shortcut.")
+	config, err := buildWorkflowTriggerConfig(triggerType, fields)
+	if err != nil {
+		h.writeMutationError(w, r, http.StatusBadRequest, "The trigger was not created", err.Error()+".")
 		return
 	}
-	_, err := h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
-		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: triggerType, Config: `{}`, Enabled: true,
+	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
+		WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]), Type: triggerType, Config: config, Enabled: true,
 	}, 0)
 	if err != nil {
 		h.writeWorkflowMutationError(w, r, "The trigger was not created", err)
@@ -507,7 +740,7 @@ func (h Handler) updateWorkflowTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	_, err = h.Messages.SetWorkflowTrigger(r.Context(), principal.WorkspaceID, principal.UserID, domain.WorkflowTrigger{
 		ID: triggerID, WorkflowID: workflowID, Title: strings.TrimSpace(fields["title"]),
-		Type: strings.TrimSpace(fields["type"]), Config: `{}`, Enabled: fields["enabled"] == "true",
+		Type: strings.TrimSpace(fields["type"]), Config: strings.TrimSpace(fields["config"]), Enabled: fields["enabled"] == "true",
 	}, version)
 	if err != nil {
 		h.writeWorkflowMutationError(w, r, "The trigger was not updated", err)

@@ -426,6 +426,70 @@ func parityCases() []parityCase {
 			},
 		},
 		{
+			name: "automatic webhook scheduled and event workflow triggers survive the composition seam",
+			seed: seedWorkflowParity,
+			operate: func(ctx context.Context, chat chatCaller) (any, error) {
+				webhook, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					WorkflowID: "WfParity", Title: "Hook", Type: "webhook", Config: `{}`, Enabled: true,
+				}, 0)
+				if err != nil {
+					return nil, err
+				}
+				invokeURL, err := chat.WebhookTriggerURL(ctx, "T1", "U1", webhook.ID)
+				if err != nil {
+					return nil, err
+				}
+				_, deniedErr := chat.WebhookTriggerURL(ctx, "T1", "U2", webhook.ID)
+				_, wrongSecretErr := chat.RunWebhookTrigger(ctx, "T1", webhook.ID, "wrong-secret", `{"item":"hook"}`)
+				secret := invokeURL[strings.LastIndex(invokeURL, "/")+1:]
+				hookRun, err := chat.RunWebhookTrigger(ctx, "T1", webhook.ID, secret, `{"item":"hook"}`)
+				if err != nil {
+					return nil, err
+				}
+				autoRun, err := chat.RunAutomaticWorkflow(ctx, "T1", "FtParity", "C1", `{"item":"auto"}`, "auto-parity")
+				if err != nil {
+					return nil, err
+				}
+				autoReplay, err := chat.RunAutomaticWorkflow(ctx, "T1", "FtParity", "C1", `{"item":"auto"}`, "auto-parity")
+				if err != nil {
+					return nil, err
+				}
+				scheduled, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					WorkflowID: "WfParity", Title: "Hourly", Type: "scheduled",
+					Config:  `{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"hourly"}}`,
+					Enabled: true,
+				}, 0)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					WorkflowID: "WfParity", Title: "On message", Type: "message",
+					Config: `{"channel_ids":["C1"]}`, Enabled: true,
+				}, 0); err != nil {
+					return nil, err
+				}
+				if _, err := chat.PostMessageAs(ctx, "T1", "U1", domain.MessagePostRequest{Conversation: "C1", Text: "fire the trigger"}); err != nil {
+					return nil, err
+				}
+				started, err := chat.DispatchWorkflowEventTriggers(ctx, "T1", 100)
+				if err != nil {
+					return nil, err
+				}
+				again, err := chat.DispatchWorkflowEventTriggers(ctx, "T1", 100)
+				if err != nil {
+					return nil, err
+				}
+				return []any{
+					webhook.Type, strings.HasPrefix(invokeURL, "/services/triggers/T1/"+string(webhook.ID)+"/"),
+					errors.Is(deniedErr, storepkg.ErrNotFound), errors.Is(wrongSecretErr, service.ErrWebhookTriggerSecret),
+					hookRun.Status, hookRun.ActorID,
+					autoRun.Status, autoRun.ID == autoReplay.ID,
+					!scheduled.NextRunAt.IsZero(),
+					started, again,
+				}, nil
+			},
+		},
+		{
 			name: "typed posting channel canvases and app workspace paging survive the composition seam",
 			seed: func(t *testing.T, target *memory.Store) {
 				seedBaseline(t, target)

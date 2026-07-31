@@ -83,6 +83,7 @@ message WorkflowTrigger {
   uint64 version = 9;
   int64 created_at_unix_nano = 10;
   int64 updated_at_unix_nano = 11;
+  int64 next_run_at_unix_nano = 12;
 }
 
 message WorkflowTriggerMutationRequest {
@@ -129,6 +130,40 @@ message WorkflowRunRequest {
   string channel_id = 4;
   string inputs = 5;
   string idempotency_key = 6;
+}
+
+message AutomaticWorkflowRunRequest {
+  string workspace_id = 1;
+  string trigger_id = 2;
+  string channel_id = 3;
+  string inputs = 4;
+  string idempotency_key = 5;
+}
+
+message WebhookWorkflowRunRequest {
+  string workspace_id = 1;
+  string trigger_id = 2;
+  string secret = 3;
+  string inputs = 4;
+}
+
+message WebhookTriggerURLRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string trigger_id = 3;
+}
+
+message WebhookTriggerURLResponse {
+  string url = 1;
+}
+
+message WorkflowEventDispatchRequest {
+  string workspace_id = 1;
+  int32 limit = 2;
+}
+
+message WorkflowEventDispatchResponse {
+  int32 started = 1;
 }
 
 message WorkflowRunGetRequest {
@@ -229,6 +264,10 @@ service WorkflowsService {
   rpc SetWorkflowTrigger(WorkflowTriggerMutationRequest) returns (WorkflowTrigger);
   rpc ListWorkflowTriggers(WorkflowTriggerListRequest) returns (WorkflowTriggerListResponse);
   rpc RunWorkflow(WorkflowRunRequest) returns (WorkflowRun);
+  rpc RunAutomaticWorkflow(AutomaticWorkflowRunRequest) returns (WorkflowRun);
+  rpc RunWebhookTrigger(WebhookWorkflowRunRequest) returns (WorkflowRun);
+  rpc WebhookTriggerURL(WebhookTriggerURLRequest) returns (WebhookTriggerURLResponse);
+  rpc DispatchWorkflowEventTriggers(WorkflowEventDispatchRequest) returns (WorkflowEventDispatchResponse);
   rpc GetWorkflowRun(WorkflowRunGetRequest) returns (WorkflowRun);
   rpc CompleteFunction(FunctionCompletionRequest) returns (WorkflowStepMutationResponse);
   rpc GetFunctionPermission(FunctionPermissionRequest) returns (AutomationPermission);

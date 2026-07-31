@@ -281,12 +281,12 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 	}
 	value.Title = strings.TrimSpace(value.Title)
 	value.Type = strings.TrimSpace(value.Type)
-	if value.Type != "link" && value.Type != "shortcut" && value.Type != "webhook" && value.Type != "scheduled" {
-		return domain.WorkflowTrigger{}, ErrInvalidWorkflowStep
-	}
-	config, err := normalizeJSONObject(value.Config, true)
-	if err != nil {
-		return domain.WorkflowTrigger{}, err
+	switch domain.WorkflowTriggerType(value.Type) {
+	case domain.WorkflowTriggerLink, domain.WorkflowTriggerShortcut, domain.WorkflowTriggerScheduled,
+		domain.WorkflowTriggerWebhook, domain.WorkflowTriggerMessage, domain.WorkflowTriggerReaction,
+		domain.WorkflowTriggerJoin, domain.WorkflowTriggerList:
+	default:
+		return domain.WorkflowTrigger{}, ErrInvalidTriggerConfig
 	}
 	if value.ID == "" {
 		value.ID, err = domain.NewWorkflowTriggerID()
@@ -297,23 +297,27 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 	now := time.Now().UTC()
 	value.WorkspaceID = workspaceID
 	value.AppID = workflow.AppID
-	value.Config = config
 	value.UpdatedAt = now
 	topic := "workflow.trigger_updated"
+	var current *domain.WorkflowTrigger
 	if expectedVersion == 0 {
 		value.CreatedAt = now
 		value.Version = 1
 		topic = "workflow.trigger_created"
 	} else {
-		current, getErr := m.Store.GetWorkflowTrigger(ctx, workspaceID, value.ID)
+		existing, getErr := m.Store.GetWorkflowTrigger(ctx, workspaceID, value.ID)
 		if getErr != nil {
 			return domain.WorkflowTrigger{}, getErr
 		}
-		if current.WorkflowID != value.WorkflowID || current.AppID != workflow.AppID {
+		if existing.WorkflowID != value.WorkflowID || existing.AppID != workflow.AppID {
 			return domain.WorkflowTrigger{}, store.ErrNotFound
 		}
-		value.CreatedAt = current.CreatedAt
+		current = &existing
+		value.CreatedAt = existing.CreatedAt
 		value.Version = expectedVersion + 1
+	}
+	if err := m.normalizeWorkflowTriggerConfig(ctx, &value, current, now); err != nil {
+		return domain.WorkflowTrigger{}, err
 	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload(topic,
 		events.String("workflow_id", string(value.WorkflowID)),
@@ -470,6 +474,28 @@ func (m Messages) newFunctionExecution(ctx context.Context, run domain.WorkflowR
 }
 
 func (m Messages) RunWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, triggerID domain.WorkflowTriggerID, conversationID domain.ConversationID, inputs, idempotencyKey string) (domain.WorkflowRun, error) {
+	return m.runWorkflow(ctx, workspaceID, actor, triggerID, conversationID, inputs, idempotencyKey, false)
+}
+
+// RunAutomaticWorkflow starts a run from a system-driven trigger — a schedule,
+// a webhook invocation, or a workspace event. Trigger permissions gate who may
+// click a link or shortcut; they do not gate a fire the owner already
+// configured, so automatic runs execute as the workflow owner and skip the
+// permission and conversation checks. The published-workflow and
+// enabled-trigger requirements still apply.
+func (m Messages) RunAutomaticWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, triggerID domain.WorkflowTriggerID, conversationID domain.ConversationID, inputs, idempotencyKey string) (domain.WorkflowRun, error) {
+	trigger, err := m.Store.GetWorkflowTrigger(ctx, workspaceID, triggerID)
+	if err != nil {
+		return domain.WorkflowRun{}, err
+	}
+	workflow, err := m.Store.GetWorkflow(ctx, workspaceID, trigger.WorkflowID)
+	if err != nil {
+		return domain.WorkflowRun{}, err
+	}
+	return m.runWorkflow(ctx, workspaceID, workflow.OwnerID, triggerID, conversationID, inputs, idempotencyKey, true)
+}
+
+func (m Messages) runWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, triggerID domain.WorkflowTriggerID, conversationID domain.ConversationID, inputs, idempotencyKey string, automatic bool) (domain.WorkflowRun, error) {
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if idempotencyKey != "" {
 		existing, err := m.Store.GetWorkflowRunByIdempotency(ctx, workspaceID, idempotencyKey)
@@ -494,17 +520,19 @@ func (m Messages) RunWorkflow(ctx context.Context, workspaceID domain.WorkspaceI
 	if workflow.Status != domain.WorkflowPublished || !trigger.Enabled {
 		return domain.WorkflowRun{}, store.ErrConflict
 	}
-	if conversationID != "" {
-		if err := m.authorizeConversation(ctx, workspaceID, actor, conversationID); err != nil {
+	if !automatic {
+		if conversationID != "" {
+			if err := m.authorizeConversation(ctx, workspaceID, actor, conversationID); err != nil {
+				return domain.WorkflowRun{}, err
+			}
+		} else if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 			return domain.WorkflowRun{}, err
 		}
-	} else if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
-		return domain.WorkflowRun{}, err
-	}
-	if allowed, err := m.canRunWorkflowTrigger(ctx, workflow, trigger, actor, conversationID); err != nil {
-		return domain.WorkflowRun{}, err
-	} else if !allowed {
-		return domain.WorkflowRun{}, ErrWorkflowPermissionDenied
+		if allowed, err := m.canRunWorkflowTrigger(ctx, workflow, trigger, actor, conversationID); err != nil {
+			return domain.WorkflowRun{}, err
+		} else if !allowed {
+			return domain.WorkflowRun{}, ErrWorkflowPermissionDenied
+		}
 	}
 	inputs, err = normalizeJSONObject(inputs, true)
 	if err != nil {

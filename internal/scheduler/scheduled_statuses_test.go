@@ -139,7 +139,7 @@ func TestCompleteProductWakeDeadlineIncludesScheduledStatusStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	publisher := &recordingProductDeadline{fence: 12}
-	if err := PublishEarliestProductWakeDeadlineComplete(ctx, source, source, source, source, publisher); err != nil {
+	if err := PublishEarliestProductWakeDeadlineComplete(ctx, source, source, source, source, source, publisher); err != nil {
 		t.Fatal(err)
 	}
 	if publisher.publishedFence != 12 || !publisher.deadline.Equal(start) {

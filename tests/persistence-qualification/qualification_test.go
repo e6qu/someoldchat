@@ -498,6 +498,69 @@ func workflowAutomationRepositoryContract(t *testing.T, open opener) {
 	if err != nil || storedStep.Status != domain.WorkflowStepCompleted || storedStep.Outputs != step.Outputs {
 		t.Fatalf("completed workflow step=%+v err=%v", storedStep, err)
 	}
+
+	occurrence := now.Add(time.Hour)
+	scheduledTrigger := domain.WorkflowTrigger{
+		ID: domain.WorkflowTriggerID("Ft-scheduled-" + suffix), WorkflowID: workflowID, WorkspaceID: workspaceID,
+		AppID: workflow.AppID, Title: "Hourly triage", Type: "scheduled",
+		Config:  `{"start_time":"2026-01-01T00:00:00Z","timezone":"UTC","frequency":{"type":"hourly"}}`,
+		Enabled: true, NextRunAt: occurrence, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.SetWorkflowTrigger(ctx, scheduledTrigger, 0, event("scheduled-trigger", "workflow.trigger_created", now)); err != nil {
+		t.Fatal(err)
+	}
+	storedScheduled, err := repository.GetWorkflowTrigger(ctx, workspaceID, scheduledTrigger.ID)
+	if err != nil || !storedScheduled.NextRunAt.Equal(occurrence) {
+		t.Fatalf("scheduled trigger next_run_at=%s err=%v, want %s", storedScheduled.NextRunAt, err, occurrence)
+	}
+	if due, err := repository.DueScheduledWorkflowTriggers(ctx, workspaceID, occurrence.Add(-time.Second), 10); err != nil || len(due) != 0 {
+		t.Fatalf("early due triggers=%+v err=%v", due, err)
+	}
+	due, err := repository.DueScheduledWorkflowTriggers(ctx, workspaceID, occurrence, 10)
+	if err != nil || len(due) != 1 || due[0].ID != scheduledTrigger.ID {
+		t.Fatalf("due triggers=%+v err=%v", due, err)
+	}
+	earliest, err := repository.EarliestScheduledWorkflowTrigger(ctx, workspaceID)
+	if err != nil || !earliest.Equal(occurrence) {
+		t.Fatalf("earliest scheduled trigger=%s err=%v", earliest, err)
+	}
+	nextOccurrence := occurrence.Add(time.Hour)
+	advanced, err := repository.CompleteScheduledWorkflowTrigger(ctx, workspaceID, scheduledTrigger.ID, occurrence, nextOccurrence,
+		event("fired", "workflow.trigger_fired", occurrence))
+	if err != nil || !advanced {
+		t.Fatalf("complete scheduled trigger advanced=%v err=%v", advanced, err)
+	}
+	if replayed, err := repository.CompleteScheduledWorkflowTrigger(ctx, workspaceID, scheduledTrigger.ID, occurrence, nextOccurrence,
+		event("fired-replay", "workflow.trigger_fired", occurrence)); err != nil || replayed {
+		t.Fatalf("stale schedule completion replayed=%v err=%v", replayed, err)
+	}
+	if earliest, err := repository.EarliestScheduledWorkflowTrigger(ctx, workspaceID); err != nil || !earliest.Equal(nextOccurrence) {
+		t.Fatalf("advanced earliest scheduled trigger=%s err=%v", earliest, err)
+	}
+	eventTrigger := domain.WorkflowTrigger{
+		ID: domain.WorkflowTriggerID("Ft-event-" + suffix), WorkflowID: workflowID, WorkspaceID: workspaceID,
+		AppID: workflow.AppID, Title: "On message", Type: "message",
+		Config: `{"channel_ids":["` + string(conversationID) + `"]}`, Enabled: true, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.SetWorkflowTrigger(ctx, eventTrigger, 0, event("event-trigger", "workflow.trigger_created", now)); err != nil {
+		t.Fatal(err)
+	}
+	eventTriggers, err := repository.ListWorkflowEventTriggers(ctx, workspaceID)
+	if err != nil || len(eventTriggers) != 1 || eventTriggers[0].ID != eventTrigger.ID {
+		t.Fatalf("event triggers=%+v err=%v", eventTriggers, err)
+	}
+	if cursor, err := repository.GetWorkflowEventCursor(ctx, workspaceID); err != nil || cursor != 0 {
+		t.Fatalf("initial event cursor=%d err=%v", cursor, err)
+	}
+	if err := repository.AdvanceWorkflowEventCursor(ctx, workspaceID, 41); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.AdvanceWorkflowEventCursor(ctx, workspaceID, 17); err != nil {
+		t.Fatal(err)
+	}
+	if cursor, err := repository.GetWorkflowEventCursor(ctx, workspaceID); err != nil || cursor != 41 {
+		t.Fatalf("event cursor after monotonic advance=%d err=%v, want 41", cursor, err)
+	}
 }
 
 func coreRepositoryContract(t *testing.T, open opener) {

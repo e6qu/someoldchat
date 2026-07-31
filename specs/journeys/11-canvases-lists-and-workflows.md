@@ -119,7 +119,14 @@ tokens, trigger conflicts, and concurrent publishing are explicit.
   and reopens the database before asserting the workflow and run.
 - The first-party Playwright journey creates and installs a remote-function
   app, creates a two-step draft, publishes it, creates a link trigger, starts
-  one durable execution, reloads the run, and checks accessibility.
+  one durable execution, reloads the run, creates a webhook trigger, invokes
+  its secret URL over real HTTP, observes the indistinguishable 404 for a wrong
+  secret, and checks accessibility.
+- Deterministic service, scheduler, memory, SQLite, PostgreSQL, and dqlite
+  evidence fires scheduled triggers from a durable compare-and-set queue and
+  message, reaction, join, and list triggers from a durable event cursor;
+  wall-clock recurrence is qualified by injected poll instants rather than by
+  sleeping in CI.
 - Differential fixtures compare live Slack object schemas, supported controls,
   and run-state transitions.
 
@@ -141,8 +148,15 @@ notification/workflow effects remain gaps.
 WORKFLOW-01 through WORKFLOW-03 now have a real core slice: a developer-app
 owner can create a durable draft from owned remote app functions, configure ordered
 steps and a JSON input schema, publish or unpublish, create and enable or
-disable link/shortcut triggers, start one idempotent durable run, and reopen
-its exact state. The local and generated gRPC seams expose the same workflow,
+disable link, shortcut, scheduled, webhook, message, reaction, join, and list
+triggers, start one idempotent durable run, and reopen
+its exact state. Scheduled triggers fire from a durable next-occurrence queue
+with hourly, daily, weekly, and monthly calendar recurrence evaluated in the
+configured time zone; webhook triggers run on an unauthenticated POST to a
+secret URL whose stored form is hash plus credential-key ciphertext; message,
+reaction, join, and first-party list record triggers fire from a durable
+per-workspace event cursor with exactly-once run idempotency per source event.
+The local and generated gRPC seams expose the same workflow,
 trigger, run, permission, featured-workflow, step-list, and completion
 operations. App-owned function executions are automatically dispatched through
 Events API or Socket Mode without a manifest event subscription, matching
@@ -151,9 +165,10 @@ Slack's no-scope delivery contract.
 This is not full Slack Workflow Builder parity. Workflow managers, find/use/copy
 permissions, plan/admin policy, Slack built-in and connector functions, typed
 variable mapping, form and button steps, branches, templates and AI creation,
-icons, copy/delete, drag reordering, trigger-change rules, scheduled/webhook/
-list/message/join/reaction trigger workers, activity dashboards, async workflow
-and form-response CSV export, staged edits that leave an older published
+icons, copy/delete, drag reordering, trigger-change rules, schedule frequency
+variants beyond hourly/daily/weekly/monthly (named weekdays, month-end
+semantics), trigger inputs wired to step variables, activity dashboards, async
+workflow and form-response CSV export, staged edits that leave an older published
 revision live, cancellation of already-running executions on unpublish,
 enforcement of typed workflow/function input and output schemas, multi-org
 permissions, exact rate limits, and controlled live-Slack outcomes remain

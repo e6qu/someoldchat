@@ -45,6 +45,25 @@ type WorkflowStepVersion struct {
 	WorkflowVersionCreated string     `json:"workflow_version_created"`
 }
 
+type WorkflowTriggerType string
+
+const (
+	WorkflowTriggerLink      WorkflowTriggerType = "link"
+	WorkflowTriggerShortcut  WorkflowTriggerType = "shortcut"
+	WorkflowTriggerScheduled WorkflowTriggerType = "scheduled"
+	WorkflowTriggerWebhook   WorkflowTriggerType = "webhook"
+	WorkflowTriggerMessage   WorkflowTriggerType = "message"
+	WorkflowTriggerReaction  WorkflowTriggerType = "reaction"
+	WorkflowTriggerJoin      WorkflowTriggerType = "join"
+	WorkflowTriggerList      WorkflowTriggerType = "list"
+)
+
+// EventWorkflowTriggerTypes are the trigger types a workspace event dispatcher
+// fires. Scheduled and webhook triggers have their own execution paths.
+var EventWorkflowTriggerTypes = []WorkflowTriggerType{
+	WorkflowTriggerMessage, WorkflowTriggerReaction, WorkflowTriggerJoin, WorkflowTriggerList,
+}
+
 type WorkflowTrigger struct {
 	ID          WorkflowTriggerID
 	WorkflowID  WorkflowID
@@ -54,9 +73,14 @@ type WorkflowTrigger struct {
 	Type        string
 	Config      string
 	Enabled     bool
-	Version     uint64
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// NextRunAt is the next scheduled fire time for a scheduled trigger. It is
+	// zero for every other type, and the schedule worker's compare-and-set
+	// fence: editing the trigger replaces it, so a worker that read the old
+	// value cannot fire a superseded schedule.
+	NextRunAt time.Time
+	Version   uint64
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type WorkflowRunStatus string
