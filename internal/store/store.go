@@ -378,6 +378,15 @@ type Store interface {
 	SetWorkflowTrigger(context.Context, domain.WorkflowTrigger, uint64, events.Event) error
 	GetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID) (domain.WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)
+	// The scheduled/event trigger queue methods define an empty workspace as
+	// the global queue, matching the scheduled-message and reminder queues the
+	// same worker process drives.
+	DueScheduledWorkflowTriggers(context.Context, domain.WorkspaceID, time.Time, int) ([]domain.WorkflowTrigger, error)
+	EarliestScheduledWorkflowTrigger(context.Context, domain.WorkspaceID) (time.Time, error)
+	CompleteScheduledWorkflowTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID, time.Time, time.Time, events.Event) (bool, error)
+	ListWorkflowEventTriggers(context.Context, domain.WorkspaceID) ([]domain.WorkflowTrigger, error)
+	GetWorkflowEventCursor(context.Context, domain.WorkspaceID) (uint64, error)
+	AdvanceWorkflowEventCursor(context.Context, domain.WorkspaceID, uint64) error
 	CreateWorkflowRun(context.Context, domain.WorkflowRun, *domain.WorkflowStep, []events.Event) error
 	AdvanceWorkflowRun(context.Context, domain.WorkflowStep, *domain.WorkflowStep, domain.WorkflowRun, int, []events.Event) error
 	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.WorkflowRunID) (domain.WorkflowRun, error)

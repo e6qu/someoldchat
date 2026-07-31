@@ -184,9 +184,13 @@ CREATE TABLE IF NOT EXISTS workflow_triggers (
  id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
  type TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}', enabled INTEGER NOT NULL DEFAULT 1,
+ next_run_at INTEGER NOT NULL DEFAULT 0,
  version INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS workflow_triggers_workflow ON workflow_triggers(workspace_id, workflow_id, id);
+CREATE TABLE IF NOT EXISTS workflow_event_cursor (
+ workspace_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS workflow_runs (
  id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL REFERENCES workflows(id), workflow_version INTEGER NOT NULL,
  trigger_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL REFERENCES workspaces(id), app_id TEXT NOT NULL,
@@ -464,7 +468,7 @@ CREATE TABLE IF NOT EXISTS list_downloads (
 );
 `
 
-const schemaVersion = 121
+const schemaVersion = 122
 
 // storedTimestampColumns lists every TEXT column that holds an encoded instant.
 // Each of them takes part in an ORDER BY, a keyset-pagination predicate, a
@@ -2708,6 +2712,25 @@ func (s *Store) migrateOn(ctx context.Context, db queryExecutor) error {
 			return fmt.Errorf("backfill workflow revisions: %w", err)
 		}
 	}
+	if version < 122 {
+		columns, err := s.tableColumns(ctx, db, "workflow_triggers")
+		if err != nil {
+			return fmt.Errorf("inspect workflow triggers: %w", err)
+		}
+		if _, exists := columns["next_run_at"]; !exists {
+			if _, err := db.ExecContext(ctx, `ALTER TABLE workflow_triggers ADD COLUMN next_run_at INTEGER NOT NULL DEFAULT 0`); err != nil {
+				return fmt.Errorf("migrate workflow trigger schedules: %w", err)
+			}
+		}
+		if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS workflow_triggers_due ON workflow_triggers(type, enabled, next_run_at, id)`); err != nil {
+			return fmt.Errorf("index workflow trigger schedules: %w", err)
+		}
+		if _, err := db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS workflow_event_cursor (
+			workspace_id TEXT PRIMARY KEY, sequence INTEGER NOT NULL
+		)`); err != nil {
+			return fmt.Errorf("migrate workflow event cursor: %w", err)
+		}
+	}
 	// ON CONFLICT DO NOTHING rather than INSERT OR IGNORE: SQLite's OR IGNORE
 	// suppresses every constraint class, while the PostgreSQL rewrite of it only
 	// suppresses unique conflicts, so the two profiles disagreed about which
@@ -2978,7 +3001,7 @@ func (s *Store) sessionColumns(ctx context.Context, db queryExecutor) (map[strin
 }
 
 func (s *Store) tableColumns(ctx context.Context, db queryExecutor, table string) (map[string]bool, error) {
-	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflow_steps" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
+	if table != "outbox" && table != "messages" && table != "ephemeral_messages" && table != "sessions" && table != "users" && table != "workspace_members" && table != "workspaces" && table != "conversations" && table != "scheduled_messages" && table != "scheduled_message_files" && table != "drafts" && table != "draft_attachments" && table != "later_reminders" && table != "files" && table != "external_uploads" && table != "invite_requests" && table != "lifecycle_state" && table != "socket_mode_connections" && table != "list_downloads" && table != "oauth_codes" && table != "schema_backfills" && table != "tokens" && table != "slack_apps" && table != "views" && table != "workflow_steps" && table != "workflow_triggers" && table != "recent_searches" && table != "canvases" && table != "lists" && table != "list_items" {
 		return nil, errors.New("unsupported schema table")
 	}
 	rows, err := db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
@@ -5625,17 +5648,20 @@ func (s *Store) ListWorkflowRevisions(ctx context.Context, workspace domain.Work
 	return values, nil
 }
 
-const workflowTriggerColumns = `id, workflow_id, workspace_id, app_id, title, type, config, enabled, version, created_at, updated_at`
+const workflowTriggerColumns = `id, workflow_id, workspace_id, app_id, title, type, config, enabled, next_run_at, version, created_at, updated_at`
 
 func scanWorkflowTrigger(row interface{ Scan(...any) error }) (domain.WorkflowTrigger, error) {
 	var value domain.WorkflowTrigger
-	var created, updated int64
+	var created, updated, nextRun int64
 	var enabled int
 	if err := row.Scan(&value.ID, &value.WorkflowID, &value.WorkspaceID, &value.AppID, &value.Title, &value.Type,
-		&value.Config, &enabled, &value.Version, &created, &updated); err != nil {
+		&value.Config, &enabled, &nextRun, &value.Version, &created, &updated); err != nil {
 		return domain.WorkflowTrigger{}, err
 	}
 	value.Enabled = enabled != 0
+	if nextRun != 0 {
+		value.NextRunAt = time.Unix(0, nextRun).UTC()
+	}
 	value.CreatedAt = time.Unix(0, created).UTC()
 	value.UpdatedAt = time.Unix(0, updated).UTC()
 	return value, nil
@@ -5661,18 +5687,18 @@ func (s *Store) SetWorkflowTrigger(ctx context.Context, value domain.WorkflowTri
 	if expectedVersion == 0 {
 		value.Version = 1
 		_, err = tx.ExecContext(ctx, `INSERT INTO workflow_triggers(
-			id, workflow_id, workspace_id, app_id, title, type, config, enabled, version, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, workflow_id, workspace_id, app_id, title, type, config, enabled, next_run_at, version, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			value.ID, value.WorkflowID, value.WorkspaceID, value.AppID, value.Title, value.Type, value.Config,
-			boolInt(value.Enabled), value.Version, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
+			boolInt(value.Enabled), workflowTime(value.NextRunAt), value.Version, value.CreatedAt.UTC().UnixNano(), value.UpdatedAt.UTC().UnixNano())
 		if err != nil {
 			return classify(err)
 		}
 	} else {
 		result, updateErr := tx.ExecContext(ctx, `UPDATE workflow_triggers SET
-			workflow_id = ?, app_id = ?, title = ?, type = ?, config = ?, enabled = ?, version = ?, updated_at = ?
+			workflow_id = ?, app_id = ?, title = ?, type = ?, config = ?, enabled = ?, next_run_at = ?, version = ?, updated_at = ?
 			WHERE id = ? AND workspace_id = ? AND workflow_id = ? AND app_id = ? AND version = ?`,
-			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, boolInt(value.Enabled), expectedVersion+1,
+			value.WorkflowID, value.AppID, value.Title, value.Type, value.Config, boolInt(value.Enabled), workflowTime(value.NextRunAt), expectedVersion+1,
 			value.UpdatedAt.UTC().UnixNano(), value.ID, value.WorkspaceID, value.WorkflowID, value.AppID, expectedVersion)
 		if updateErr != nil {
 			return classify(updateErr)
@@ -5725,6 +5751,127 @@ func (s *Store) ListWorkflowTriggers(ctx context.Context, workspace domain.Works
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+// workflowTriggerScope narrows a trigger query to one workspace. An empty
+// workspace is the worker's global queue and matches every workspace, the same
+// contract the scheduled-message and reminder queues use.
+func workflowTriggerScope(workspace domain.WorkspaceID) (string, []any) {
+	if workspace == "" {
+		return "", nil
+	}
+	return ` AND workspace_id = ?`, []any{workspace}
+}
+
+func (s *Store) DueScheduledWorkflowTriggers(ctx context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowTrigger, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("workflow trigger limit must be positive")
+	}
+	scope, args := workflowTriggerScope(workspace)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowTriggerColumns+` FROM workflow_triggers
+		WHERE type = 'scheduled' AND enabled = 1 AND next_run_at > 0 AND next_run_at <= ?`+scope+`
+		ORDER BY next_run_at, id LIMIT ?`, append([]any{now.UTC().UnixNano()}, append(args, limit)...)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowTrigger, 0)
+	for rows.Next() {
+		value, scanErr := scanWorkflowTrigger(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) EarliestScheduledWorkflowTrigger(ctx context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	scope, args := workflowTriggerScope(workspace)
+	var next int64
+	err := s.db.QueryRowContext(ctx, `SELECT MIN(next_run_at) FROM workflow_triggers
+		WHERE type = 'scheduled' AND enabled = 1 AND next_run_at > 0`+scope, args...).Scan(&next)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if next == 0 {
+		return time.Time{}, nil
+	}
+	return time.Unix(0, next).UTC(), nil
+}
+
+// CompleteScheduledWorkflowTrigger advances a fired trigger to its next
+// occurrence. The compare-and-set fence is the schedule itself: a trigger the
+// owner edited or disabled since the worker read it has a different
+// next_run_at, so the stale fire cannot move the new schedule.
+func (s *Store) CompleteScheduledWorkflowTrigger(ctx context.Context, workspace domain.WorkspaceID, triggerID domain.WorkflowTriggerID, expectedNextRunAt, nextRunAt time.Time, event events.Event) (bool, error) {
+	if triggerID == "" || expectedNextRunAt.IsZero() || nextRunAt.IsZero() {
+		return false, store.InvalidArgument("scheduled workflow trigger completion is invalid")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE workflow_triggers SET next_run_at = ?
+		WHERE id = ? AND workspace_id = ? AND type = 'scheduled' AND enabled = 1 AND next_run_at = ?`,
+		workflowTime(nextRunAt), triggerID, workspace, expectedNextRunAt.UTC().UnixNano())
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, nil
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
+}
+
+func (s *Store) ListWorkflowEventTriggers(ctx context.Context, workspace domain.WorkspaceID) ([]domain.WorkflowTrigger, error) {
+	scope, args := workflowTriggerScope(workspace)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+workflowTriggerColumns+` FROM workflow_triggers
+		WHERE type IN ('message', 'reaction', 'join', 'list') AND enabled = 1`+scope+` ORDER BY id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	values := make([]domain.WorkflowTrigger, 0)
+	for rows.Next() {
+		value, scanErr := scanWorkflowTrigger(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
+func (s *Store) GetWorkflowEventCursor(ctx context.Context, workspace domain.WorkspaceID) (uint64, error) {
+	var sequence uint64
+	err := s.db.QueryRowContext(ctx, `SELECT sequence FROM workflow_event_cursor WHERE workspace_id = ?`, workspace).Scan(&sequence)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	return sequence, nil
+}
+
+// AdvanceWorkflowEventCursor moves the dispatcher cursor monotonically: a
+// racing dispatcher that already saw further events can never be rewound by
+// one that saw fewer. Replay is safe regardless because every started run
+// carries an idempotency key derived from the source event.
+func (s *Store) AdvanceWorkflowEventCursor(ctx context.Context, workspace domain.WorkspaceID, sequence uint64) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO workflow_event_cursor(workspace_id, sequence) VALUES (?, ?)
+		ON CONFLICT(workspace_id) DO UPDATE SET sequence = excluded.sequence
+		WHERE workflow_event_cursor.sequence < excluded.sequence`, workspace, sequence)
+	return err
 }
 
 const workflowRunColumns = `id, workflow_id, workflow_version, trigger_id, workspace_id, app_id, actor_id, conversation_id, status, inputs, outputs, error, current_step, idempotency_key, created_at, updated_at, completed_at`
@@ -13229,9 +13376,15 @@ func (s *Store) ListEventsAfter(ctx context.Context, workspace domain.WorkspaceI
 		return nil, store.InvalidArgument("event limit must be positive")
 	}
 	predicate, excluded := internalTopicPredicate("topic")
-	args := append([]any{workspace, after}, excluded...)
+	args := []any{after}
+	scope := ""
+	if workspace != "" {
+		scope = ` AND workspace_id = ?`
+		args = append(args, workspace)
+	}
+	args = append(args, excluded...)
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE workspace_id = ? AND sequence > ?`+predicate+` ORDER BY sequence LIMIT ?`, args...)
+	rows, err := s.db.QueryContext(ctx, `SELECT sequence, id, workspace_id, actor_id, topic, payload, private_payload, created_at FROM outbox WHERE sequence > ?`+scope+predicate+` ORDER BY sequence LIMIT ?`, args...)
 	if err != nil {
 		return nil, err
 	}

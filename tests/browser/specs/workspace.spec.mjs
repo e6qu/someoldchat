@@ -1911,6 +1911,17 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await page.getByRole('button', { name: 'Publish' }).click();
   await expect(page.getByText('Workflow published')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Run' })).toBeVisible();
+
+  await page.getByLabel('Trigger name').fill('Deploy webhook');
+  await page.getByLabel('Trigger type').selectOption('webhook');
+  await page.getByRole('button', { name: 'Create trigger' }).click();
+  await expect(page.getByText('Trigger created')).toBeVisible();
+  const webhookURL = await page.locator('code', { hasText: '/services/triggers/' }).first().textContent();
+  const invoked = await request.post(webhookURL, { data: { item: 'deployed' } });
+  expect(invoked.status()).toBe(200);
+  expect(await invoked.text()).toBe('ok');
+  const denied = await request.post(webhookURL.replace(/[0-9a-f]+$/, '0'.repeat(48)), { data: {} });
+  expect(denied.status()).toBe(404);
   await expectNoSeriousAccessibilityViolations(page);
 });
 

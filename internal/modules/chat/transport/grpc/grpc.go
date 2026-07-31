@@ -2263,6 +2263,7 @@ func encodeWorkflowTrigger(value domain.WorkflowTrigger) *chatv1.WorkflowTrigger
 		AppId: string(value.AppID), Title: value.Title, Type: value.Type, Config: value.Config,
 		Enabled: value.Enabled, Version: value.Version,
 		CreatedAtUnixNano: optionalUnixNano(value.CreatedAt), UpdatedAtUnixNano: optionalUnixNano(value.UpdatedAt),
+		NextRunAtUnixNano: optionalUnixNano(value.NextRunAt),
 	}
 }
 
@@ -2277,6 +2278,7 @@ func decodeWorkflowTrigger(value *chatv1.WorkflowTrigger) domain.WorkflowTrigger
 		Enabled: value.GetEnabled(), Version: value.GetVersion(),
 		CreatedAt: optionalTimeFromUnixNano(value.GetCreatedAtUnixNano()),
 		UpdatedAt: optionalTimeFromUnixNano(value.GetUpdatedAtUnixNano()),
+		NextRunAt: optionalTimeFromUnixNano(value.GetNextRunAtUnixNano()),
 	}
 }
 
@@ -2372,6 +2374,41 @@ func (r Remote) RunWorkflow(ctx context.Context, workspaceID domain.WorkspaceID,
 		ChannelId: string(conversationID), Inputs: inputs, IdempotencyKey: idempotencyKey,
 	})
 	return decodeWorkflowRun(out), err
+}
+
+func (r Remote) RunAutomaticWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, triggerID domain.WorkflowTriggerID, conversationID domain.ConversationID, inputs, idempotencyKey string) (domain.WorkflowRun, error) {
+	out, err := r.workflows.RunAutomaticWorkflow(ctx, &chatv1.AutomaticWorkflowRunRequest{
+		WorkspaceId: string(workspaceID), TriggerId: string(triggerID),
+		ChannelId: string(conversationID), Inputs: inputs, IdempotencyKey: idempotencyKey,
+	})
+	return decodeWorkflowRun(out), err
+}
+
+func (r Remote) RunWebhookTrigger(ctx context.Context, workspaceID domain.WorkspaceID, triggerID domain.WorkflowTriggerID, secret, inputs string) (domain.WorkflowRun, error) {
+	out, err := r.workflows.RunWebhookTrigger(ctx, &chatv1.WebhookWorkflowRunRequest{
+		WorkspaceId: string(workspaceID), TriggerId: string(triggerID), Secret: secret, Inputs: inputs,
+	})
+	return decodeWorkflowRun(out), err
+}
+
+func (r Remote) WebhookTriggerURL(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, triggerID domain.WorkflowTriggerID) (string, error) {
+	out, err := r.workflows.WebhookTriggerURL(ctx, &chatv1.WebhookTriggerURLRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), TriggerId: string(triggerID),
+	})
+	if err != nil {
+		return "", err
+	}
+	return out.GetUrl(), nil
+}
+
+func (r Remote) DispatchWorkflowEventTriggers(ctx context.Context, workspaceID domain.WorkspaceID, limit int) (int, error) {
+	out, err := r.workflows.DispatchWorkflowEventTriggers(ctx, &chatv1.WorkflowEventDispatchRequest{
+		WorkspaceId: string(workspaceID), Limit: int32(limit),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(out.GetStarted()), nil
 }
 
 func (r Remote) GetWorkflowRun(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, runID domain.WorkflowRunID) (domain.WorkflowRun, error) {
@@ -4860,6 +4897,49 @@ func (s *Server) RunWorkflow(ctx context.Context, input *chatv1.WorkflowRunReque
 		return nil, mapError(err)
 	}
 	return encodeWorkflowRun(value), nil
+}
+
+func (s *Server) RunAutomaticWorkflow(ctx context.Context, input *chatv1.AutomaticWorkflowRunRequest) (*chatv1.WorkflowRun, error) {
+	value, err := s.implementation.RunAutomaticWorkflow(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.WorkflowTriggerID(input.GetTriggerId()),
+		domain.ConversationID(input.GetChannelId()), input.GetInputs(), input.GetIdempotencyKey(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowRun(value), nil
+}
+
+func (s *Server) RunWebhookTrigger(ctx context.Context, input *chatv1.WebhookWorkflowRunRequest) (*chatv1.WorkflowRun, error) {
+	value, err := s.implementation.RunWebhookTrigger(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.WorkflowTriggerID(input.GetTriggerId()),
+		input.GetSecret(), input.GetInputs(),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return encodeWorkflowRun(value), nil
+}
+
+func (s *Server) WebhookTriggerURL(ctx context.Context, input *chatv1.WebhookTriggerURLRequest) (*chatv1.WebhookTriggerURLResponse, error) {
+	value, err := s.implementation.WebhookTriggerURL(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowTriggerID(input.GetTriggerId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WebhookTriggerURLResponse{Url: value}, nil
+}
+
+func (s *Server) DispatchWorkflowEventTriggers(ctx context.Context, input *chatv1.WorkflowEventDispatchRequest) (*chatv1.WorkflowEventDispatchResponse, error) {
+	started, err := s.implementation.DispatchWorkflowEventTriggers(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), int(input.GetLimit()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowEventDispatchResponse{Started: int32(started)}, nil
 }
 
 func (s *Server) GetWorkflowRun(ctx context.Context, input *chatv1.WorkflowRunGetRequest) (*chatv1.WorkflowRun, error) {

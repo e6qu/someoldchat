@@ -19,25 +19,29 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkflowsService_StepCompleted_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/StepCompleted"
-	WorkflowsService_StepFailed_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/StepFailed"
-	WorkflowsService_UpdateStep_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateStep"
-	WorkflowsService_CreateWorkflow_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/CreateWorkflow"
-	WorkflowsService_GetWorkflow_FullMethodName               = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflow"
-	WorkflowsService_UpdateWorkflow_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
-	WorkflowsService_ListWorkflows_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
-	WorkflowsService_SetWorkflowTrigger_FullMethodName        = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
-	WorkflowsService_ListWorkflowTriggers_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflowTriggers"
-	WorkflowsService_RunWorkflow_FullMethodName               = "/sameoldchat.chat.v1.WorkflowsService/RunWorkflow"
-	WorkflowsService_GetWorkflowRun_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflowRun"
-	WorkflowsService_CompleteFunction_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
-	WorkflowsService_GetFunctionPermission_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/GetFunctionPermission"
-	WorkflowsService_SetFunctionPermission_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/SetFunctionPermission"
-	WorkflowsService_GetTriggerPermission_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/GetTriggerPermission"
-	WorkflowsService_SetTriggerPermission_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/SetTriggerPermission"
-	WorkflowsService_SetFeaturedWorkflows_FullMethodName      = "/sameoldchat.chat.v1.WorkflowsService/SetFeaturedWorkflows"
-	WorkflowsService_ListFeaturedWorkflows_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/ListFeaturedWorkflows"
-	WorkflowsService_ListFunctionWorkflowSteps_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/ListFunctionWorkflowSteps"
+	WorkflowsService_StepCompleted_FullMethodName                 = "/sameoldchat.chat.v1.WorkflowsService/StepCompleted"
+	WorkflowsService_StepFailed_FullMethodName                    = "/sameoldchat.chat.v1.WorkflowsService/StepFailed"
+	WorkflowsService_UpdateStep_FullMethodName                    = "/sameoldchat.chat.v1.WorkflowsService/UpdateStep"
+	WorkflowsService_CreateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/CreateWorkflow"
+	WorkflowsService_GetWorkflow_FullMethodName                   = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflow"
+	WorkflowsService_UpdateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
+	WorkflowsService_ListWorkflows_FullMethodName                 = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
+	WorkflowsService_SetWorkflowTrigger_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
+	WorkflowsService_ListWorkflowTriggers_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflowTriggers"
+	WorkflowsService_RunWorkflow_FullMethodName                   = "/sameoldchat.chat.v1.WorkflowsService/RunWorkflow"
+	WorkflowsService_RunAutomaticWorkflow_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/RunAutomaticWorkflow"
+	WorkflowsService_RunWebhookTrigger_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/RunWebhookTrigger"
+	WorkflowsService_WebhookTriggerURL_FullMethodName             = "/sameoldchat.chat.v1.WorkflowsService/WebhookTriggerURL"
+	WorkflowsService_DispatchWorkflowEventTriggers_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/DispatchWorkflowEventTriggers"
+	WorkflowsService_GetWorkflowRun_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflowRun"
+	WorkflowsService_CompleteFunction_FullMethodName              = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
+	WorkflowsService_GetFunctionPermission_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/GetFunctionPermission"
+	WorkflowsService_SetFunctionPermission_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/SetFunctionPermission"
+	WorkflowsService_GetTriggerPermission_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/GetTriggerPermission"
+	WorkflowsService_SetTriggerPermission_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/SetTriggerPermission"
+	WorkflowsService_SetFeaturedWorkflows_FullMethodName          = "/sameoldchat.chat.v1.WorkflowsService/SetFeaturedWorkflows"
+	WorkflowsService_ListFeaturedWorkflows_FullMethodName         = "/sameoldchat.chat.v1.WorkflowsService/ListFeaturedWorkflows"
+	WorkflowsService_ListFunctionWorkflowSteps_FullMethodName     = "/sameoldchat.chat.v1.WorkflowsService/ListFunctionWorkflowSteps"
 )
 
 // WorkflowsServiceClient is the client API for WorkflowsService service.
@@ -54,6 +58,10 @@ type WorkflowsServiceClient interface {
 	SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error)
 	ListWorkflowTriggers(ctx context.Context, in *WorkflowTriggerListRequest, opts ...grpc.CallOption) (*WorkflowTriggerListResponse, error)
 	RunWorkflow(ctx context.Context, in *WorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
+	RunAutomaticWorkflow(ctx context.Context, in *AutomaticWorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
+	RunWebhookTrigger(ctx context.Context, in *WebhookWorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
+	WebhookTriggerURL(ctx context.Context, in *WebhookTriggerURLRequest, opts ...grpc.CallOption) (*WebhookTriggerURLResponse, error)
+	DispatchWorkflowEventTriggers(ctx context.Context, in *WorkflowEventDispatchRequest, opts ...grpc.CallOption) (*WorkflowEventDispatchResponse, error)
 	GetWorkflowRun(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRun, error)
 	CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	GetFunctionPermission(ctx context.Context, in *FunctionPermissionRequest, opts ...grpc.CallOption) (*AutomationPermission, error)
@@ -173,6 +181,46 @@ func (c *workflowsServiceClient) RunWorkflow(ctx context.Context, in *WorkflowRu
 	return out, nil
 }
 
+func (c *workflowsServiceClient) RunAutomaticWorkflow(ctx context.Context, in *AutomaticWorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowRun)
+	err := c.cc.Invoke(ctx, WorkflowsService_RunAutomaticWorkflow_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) RunWebhookTrigger(ctx context.Context, in *WebhookWorkflowRunRequest, opts ...grpc.CallOption) (*WorkflowRun, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowRun)
+	err := c.cc.Invoke(ctx, WorkflowsService_RunWebhookTrigger_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) WebhookTriggerURL(ctx context.Context, in *WebhookTriggerURLRequest, opts ...grpc.CallOption) (*WebhookTriggerURLResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WebhookTriggerURLResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_WebhookTriggerURL_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) DispatchWorkflowEventTriggers(ctx context.Context, in *WorkflowEventDispatchRequest, opts ...grpc.CallOption) (*WorkflowEventDispatchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowEventDispatchResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_DispatchWorkflowEventTriggers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workflowsServiceClient) GetWorkflowRun(ctx context.Context, in *WorkflowRunGetRequest, opts ...grpc.CallOption) (*WorkflowRun, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowRun)
@@ -277,6 +325,10 @@ type WorkflowsServiceServer interface {
 	SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, *WorkflowTriggerListRequest) (*WorkflowTriggerListResponse, error)
 	RunWorkflow(context.Context, *WorkflowRunRequest) (*WorkflowRun, error)
+	RunAutomaticWorkflow(context.Context, *AutomaticWorkflowRunRequest) (*WorkflowRun, error)
+	RunWebhookTrigger(context.Context, *WebhookWorkflowRunRequest) (*WorkflowRun, error)
+	WebhookTriggerURL(context.Context, *WebhookTriggerURLRequest) (*WebhookTriggerURLResponse, error)
+	DispatchWorkflowEventTriggers(context.Context, *WorkflowEventDispatchRequest) (*WorkflowEventDispatchResponse, error)
 	GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error)
 	CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error)
 	GetFunctionPermission(context.Context, *FunctionPermissionRequest) (*AutomationPermission, error)
@@ -324,6 +376,18 @@ func (UnimplementedWorkflowsServiceServer) ListWorkflowTriggers(context.Context,
 }
 func (UnimplementedWorkflowsServiceServer) RunWorkflow(context.Context, *WorkflowRunRequest) (*WorkflowRun, error) {
 	return nil, status.Error(codes.Unimplemented, "method RunWorkflow not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) RunAutomaticWorkflow(context.Context, *AutomaticWorkflowRunRequest) (*WorkflowRun, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunAutomaticWorkflow not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) RunWebhookTrigger(context.Context, *WebhookWorkflowRunRequest) (*WorkflowRun, error) {
+	return nil, status.Error(codes.Unimplemented, "method RunWebhookTrigger not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) WebhookTriggerURL(context.Context, *WebhookTriggerURLRequest) (*WebhookTriggerURLResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WebhookTriggerURL not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) DispatchWorkflowEventTriggers(context.Context, *WorkflowEventDispatchRequest) (*WorkflowEventDispatchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DispatchWorkflowEventTriggers not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) GetWorkflowRun(context.Context, *WorkflowRunGetRequest) (*WorkflowRun, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetWorkflowRun not implemented")
@@ -552,6 +616,78 @@ func _WorkflowsService_RunWorkflow_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkflowsService_RunAutomaticWorkflow_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AutomaticWorkflowRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).RunAutomaticWorkflow(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_RunAutomaticWorkflow_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).RunAutomaticWorkflow(ctx, req.(*AutomaticWorkflowRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_RunWebhookTrigger_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WebhookWorkflowRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).RunWebhookTrigger(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_RunWebhookTrigger_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).RunWebhookTrigger(ctx, req.(*WebhookWorkflowRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_WebhookTriggerURL_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WebhookTriggerURLRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).WebhookTriggerURL(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_WebhookTriggerURL_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).WebhookTriggerURL(ctx, req.(*WebhookTriggerURLRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_DispatchWorkflowEventTriggers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowEventDispatchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).DispatchWorkflowEventTriggers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_DispatchWorkflowEventTriggers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).DispatchWorkflowEventTriggers(ctx, req.(*WorkflowEventDispatchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorkflowsService_GetWorkflowRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(WorkflowRunGetRequest)
 	if err := dec(in); err != nil {
@@ -760,6 +896,22 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RunWorkflow",
 			Handler:    _WorkflowsService_RunWorkflow_Handler,
+		},
+		{
+			MethodName: "RunAutomaticWorkflow",
+			Handler:    _WorkflowsService_RunAutomaticWorkflow_Handler,
+		},
+		{
+			MethodName: "RunWebhookTrigger",
+			Handler:    _WorkflowsService_RunWebhookTrigger_Handler,
+		},
+		{
+			MethodName: "WebhookTriggerURL",
+			Handler:    _WorkflowsService_WebhookTriggerURL_Handler,
+		},
+		{
+			MethodName: "DispatchWorkflowEventTriggers",
+			Handler:    _WorkflowsService_DispatchWorkflowEventTriggers_Handler,
 		},
 		{
 			MethodName: "GetWorkflowRun",

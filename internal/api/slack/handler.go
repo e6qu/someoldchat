@@ -403,6 +403,7 @@ func (h Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/openid.connect.userInfo", h.openIDConnectUserInfo)
 	mux.HandleFunc("POST /api/openid.connect.userInfo", h.openIDConnectUserInfo)
 	mux.HandleFunc("POST /services/{workspace}/{app}/{secret}", h.incomingWebhook)
+	mux.HandleFunc("POST /services/triggers/{workspace}/{trigger}/{secret}", h.workflowTriggerWebhook)
 	mux.HandleFunc("POST /internal/admin/incoming-webhooks/create", h.adminIncomingWebhookCreate)
 	mux.HandleFunc("POST /internal/admin/incoming-webhooks/enable", h.adminIncomingWebhookEnable)
 	mux.HandleFunc("GET /api/files.getUploadURLExternal", h.filesGetUploadURLExternal)
@@ -8734,13 +8735,13 @@ func mapServiceErrorExists(err error, notFoundReason, existsReason string) strin
 //     ErrIdempotencyConflict branch below and answered `hash_conflict` where the
 //     idempotency contract requires `rate_limited`.
 func mapServiceErrorNamed(err error, notFoundReason, invalidReason, existsReason string) string {
-	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) {
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, service.ErrSlashCommandNotFound) || errors.Is(err, service.ErrWebhookTriggerSecret) {
 		return notFoundReason
 	}
 	if errors.Is(err, store.ErrScheduledMessageLimit) || errors.Is(err, service.ErrScheduledTooMany) || errors.Is(err, store.ErrScheduledStatusLimit) || errors.Is(err, service.ErrScheduledStatusLimit) {
 		return "restricted_too_many"
 	}
-	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
+	if errors.Is(err, service.ErrInvalidMessage) || errors.Is(err, service.ErrInvalidTimestamp) || errors.Is(err, service.ErrInvalidConversation) || errors.Is(err, service.ErrInvalidReaction) || errors.Is(err, service.ErrInvalidFile) || errors.Is(err, service.ErrInvalidProfile) || errors.Is(err, service.ErrInvalidScheduledStatus) || errors.Is(err, service.ErrInvalidSnooze) || errors.Is(err, service.ErrInvalidCall) || errors.Is(err, service.ErrInvalidUserGroup) || errors.Is(err, service.ErrInvalidEphemeral) || errors.Is(err, service.ErrInvalidEmoji) || errors.Is(err, service.ErrInvalidView) || errors.Is(err, service.ErrInvalidDialog) || errors.Is(err, service.ErrInvalidBot) || errors.Is(err, service.ErrInvalidConversationPrefs) || errors.Is(err, service.ErrInvalidRemoteFile) || errors.Is(err, service.ErrInvalidInviteRequest) || errors.Is(err, service.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidIntegrationLogs) || errors.Is(err, service.ErrInvalidOAuth) || errors.Is(err, service.ErrInvalidOAuthClient) || errors.Is(err, service.ErrInvalidBookmark) || errors.Is(err, store.ErrInvalidConversationType) || errors.Is(err, store.ErrInvalidAppApproval) || errors.Is(err, service.ErrInvalidCanvas) || errors.Is(err, service.ErrInvalidList) || errors.Is(err, service.ErrInvalidEntity) || errors.Is(err, service.ErrInvalidExternalUpload) || errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, service.ErrInvalidAccessLog) || errors.Is(err, service.ErrInvalidMigration) || errors.Is(err, service.ErrInvalidReminder) || errors.Is(err, service.ErrInvalidLaterReminder) || errors.Is(err, service.ErrReminderTimeInPast) || errors.Is(err, service.ErrInvalidSearch) || errors.Is(err, service.ErrInvalidWorkflowStep) || errors.Is(err, service.ErrInvalidTriggerConfig) || errors.Is(err, service.ErrInvalidWorkspace) || errors.Is(err, service.ErrInvalidAppResponse) || errors.Is(err, service.ErrInvalidTrigger) || errors.Is(err, service.ErrSlashCommandInThread) {
 		return invalidReason
 	}
 	if errors.Is(err, service.ErrAppInteractionUnavailable) {
@@ -10161,6 +10162,41 @@ func (h Handler) incomingWebhook(w http.ResponseWriter, r *http.Request) {
 			reason = "invalid_payload"
 		}
 		writeIncomingWebhookError(w, status, reason)
+		return
+	}
+	writePlain(w, http.StatusOK, "ok")
+}
+
+// workflowTriggerWebhook receives the external POST that fires a webhook
+// trigger. Like an incoming webhook, the path secret is the whole credential:
+// an unknown workspace, trigger, or secret, a disabled trigger, and an
+// unpublished workflow all answer the same plain-text 404 `no_team`, and a
+// successful fire answers the literal string "ok". The posted JSON object
+// becomes the run's inputs.
+func (h Handler) workflowTriggerWebhook(w http.ResponseWriter, r *http.Request) {
+	workspaceID := domain.WorkspaceID(r.PathValue("workspace"))
+	triggerID := domain.WorkflowTriggerID(r.PathValue("trigger"))
+	secret := r.PathValue("secret")
+	inputs := "{}"
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
+		return
+	}
+	if trimmed := strings.TrimSpace(string(body)); trimmed != "" {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(trimmed), &object); err != nil || object == nil {
+			writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
+			return
+		}
+		inputs = trimmed
+	}
+	if _, err := h.Messages.RunWebhookTrigger(r.Context(), workspaceID, triggerID, secret, inputs); err != nil {
+		if errors.Is(err, service.ErrWebhookTriggerSecret) || errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			writeIncomingWebhookError(w, http.StatusNotFound, "no_team")
+			return
+		}
+		writeIncomingWebhookError(w, http.StatusBadRequest, "invalid_payload")
 		return
 	}
 	writePlain(w, http.StatusOK, "ok")

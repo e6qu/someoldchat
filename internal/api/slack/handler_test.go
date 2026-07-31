@@ -987,6 +987,78 @@ func seedFunctionExecution(t *testing.T, repository *memory.Store, executionID d
 	}
 }
 
+func TestWorkflowTriggerWebhookRunsOnlyWithThePathSecret(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflow := domain.WorkflowDefinition{
+		ID: "WfHook", WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", CallbackID: "hook-workflow",
+		Title: "Hook workflow", InputSchema: `{}`, Steps: `[{"function_id":"triage"}]`,
+		Status: domain.WorkflowPublished, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflow(ctx, workflow, events.Event{ID: "workflow-hook", WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	trigger := domain.WorkflowTrigger{
+		ID: "FtHook", WorkflowID: workflow.ID, WorkspaceID: "T1", AppID: "A1", Title: "Hook",
+		Type: "webhook", Config: `{"webhook_secret_hash":"` + domain.HashToken("hook-secret") + `"}`,
+		Enabled: true, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.SetWorkflowTrigger(ctx, trigger, 0, events.Event{ID: "trigger-hook", WorkspaceID: "T1", Topic: "workflow.trigger_created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	post := func(path, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		result := httptest.NewRecorder()
+		handler.ServeHTTP(result, req)
+		return result
+	}
+	base := "/services/triggers/T1/FtHook/"
+	for _, tc := range []struct{ name, path, body string }{
+		{"wrong secret", base + "wrong-secret", `{"item":"a"}`},
+		{"unknown trigger", "/services/triggers/T1/FtMissing/hook-secret", `{"item":"a"}`},
+		{"unknown workspace", "/services/triggers/T9/FtHook/hook-secret", `{"item":"a"}`},
+		{"bad payload", base + "hook-secret", `["not-an-object"]`},
+	} {
+		result := post(tc.path, tc.body)
+		want := http.StatusNotFound
+		if tc.name == "bad payload" {
+			want = http.StatusBadRequest
+		}
+		if result.Code != want {
+			t.Fatalf("%s status=%d body=%s, want %d", tc.name, result.Code, result.Body, want)
+		}
+	}
+	empty := post(base+"hook-secret", "")
+	if empty.Code != http.StatusBadRequest {
+		// An empty body is a valid invocation with empty inputs, not an error.
+		if empty.Code != http.StatusOK || empty.Body.String() != "ok" {
+			t.Fatalf("empty body status=%d body=%s", empty.Code, empty.Body)
+		}
+	}
+	invoked := post(base+"hook-secret", `{"item":"from-hook"}`)
+	if invoked.Code != http.StatusOK || invoked.Body.String() != "ok" {
+		t.Fatalf("invoke status=%d body=%s", invoked.Code, invoked.Body)
+	}
+	runs, _, _, err := repository.ListWorkflowRuns(ctx, "T1", workflow.ID, domain.PageRequest{Limit: 10})
+	if err != nil || len(runs) == 0 {
+		t.Fatalf("runs=%+v err=%v", runs, err)
+	}
+	var hooked *domain.WorkflowRun
+	for index := range runs {
+		if runs[index].Inputs == `{"item":"from-hook"}` {
+			hooked = &runs[index]
+		}
+	}
+	if hooked == nil {
+		t.Fatalf("no run carried the webhook inputs: %+v", runs)
+	}
+	if hooked.TriggerID != trigger.ID || hooked.ActorID != "U1" || hooked.Status != domain.WorkflowRunRunning {
+		t.Fatalf("webhook run=%+v", *hooked)
+	}
+}
+
 func TestCurrentWorkflowPermissionFeaturedAndStepMethodsAreDurable(t *testing.T) {
 	handler, repository := testHandlerWithStore()
 	ctx := context.Background()

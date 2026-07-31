@@ -46,6 +46,7 @@ type Store struct {
 	workflows                     map[domain.WorkflowID]domain.WorkflowDefinition
 	workflowRevisions             map[domain.WorkflowID][]domain.WorkflowRevision
 	workflowTriggers              map[domain.WorkflowTriggerID]domain.WorkflowTrigger
+	workflowEventCursor           map[domain.WorkspaceID]uint64
 	workflowRuns                  map[domain.WorkflowRunID]domain.WorkflowRun
 	automationPermissions         map[string]domain.AutomationPermission
 	featuredWorkflows             map[domain.ConversationID][]domain.FeaturedWorkflow
@@ -184,7 +185,7 @@ type memoryAppEventCursor struct {
 }
 
 func New() *Store {
-	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
+	return &Store{lists: make(map[domain.ListID]domain.List), listItems: make(map[domain.ListID]map[domain.ListItemID]domain.ListItem), listAccess: make(map[string]domain.ListAccess), listDownloads: make(map[domain.ListDownloadID]domain.ListDownload), fileShares: make(map[domain.FileID][]domain.ConversationID), externalUploads: make(map[domain.ExternalUploadID]domain.ExternalUpload), incomingWebhooks: make(map[domain.IncomingWebhookID]domain.IncomingWebhook), appDatastoreItems: make(map[string]domain.AppDatastoreItem), appInstallations: make(map[string]domain.AppInstallation), apps: make(map[domain.AppID]domain.App), appManifestRevisions: make(map[domain.AppID][]domain.AppManifestRevision), appTriggers: make(map[string]domain.AppTrigger), appResponseURLs: make(map[string]domain.AppResponseURL), appConfigurationTokens: make(map[string]domain.AppConfigurationToken), appConfigurationRefreshTokens: make(map[string]string), openidRefreshTokens: make(map[string]domain.OpenIDRefreshToken), workspaces: make(map[domain.WorkspaceID]domain.Workspace), members: make(map[string]domain.WorkspaceMembership), users: make(map[domain.UserID]domain.User), userExpirations: make(map[domain.UserID]time.Time), conversations: make(map[domain.ConversationID]domain.Conversation), conversationPrefs: make(map[domain.ConversationID]domain.ConversationPrefs), conversationAccess: make(map[domain.ConversationID][]domain.UserGroupID), conversationTeams: make(map[domain.ConversationID]map[domain.WorkspaceID]struct{}), conversationOrg: make(map[domain.ConversationID]bool), closedDirects: make(map[string]struct{}), inviteRequests: make(map[domain.InviteRequestID]domain.InviteRequest), appApprovals: make(map[domain.AppID]domain.AppApproval), permissionRequests: make(map[domain.AppRequestID]domain.AppPermissionRequest), views: make(map[domain.ViewID]domain.View), workflowSteps: make(map[domain.WorkflowStepID]domain.WorkflowStep), workflows: make(map[domain.WorkflowID]domain.WorkflowDefinition), workflowRevisions: make(map[domain.WorkflowID][]domain.WorkflowRevision), workflowTriggers: make(map[domain.WorkflowTriggerID]domain.WorkflowTrigger), workflowEventCursor: make(map[domain.WorkspaceID]uint64), workflowRuns: make(map[domain.WorkflowRunID]domain.WorkflowRun), automationPermissions: make(map[string]domain.AutomationPermission), featuredWorkflows: make(map[domain.ConversationID][]domain.FeaturedWorkflow), dialogs: make(map[domain.DialogID]domain.Dialog), bots: make(map[domain.BotID]domain.Bot), migrations: make(map[string]domain.UserMigration), oauthClients: make(map[string]domain.OAuthClient), oauthCodes: make(map[string]memoryOAuthCode), oauthRefreshGrants: make(map[string]domain.OAuthRefreshGrant), rtmConnections: make(map[string]domain.RTMConnection), socketConnections: make(map[string]domain.SocketModeConnection), socketConnectionActive: make(map[string]bool), socketResponses: make(map[string]domain.SocketModeResponse), socketInteractions: make(map[string]domain.SocketModeInteraction), socketCursors: make(map[domain.AppID]uint64), appEventCursors: make(map[string]memoryAppEventCursor), memberships: make(map[domain.ConversationID]map[domain.UserID]struct{}), tokens: make(map[string]domain.TokenRecord), appTokens: make(map[string]domain.AppTokenRecord), sessions: make(map[string]domain.SessionRecord), oidcLogoutTokens: make(map[string]time.Time), authMethods: make(map[string]domain.AuthMethod), externalIdentities: make(map[string]domain.ExternalIdentity), messages: make(map[domain.ConversationID][]domain.Message), outboxLeases: make(map[uint64]memoryLease), delivered: make(map[uint64]bool), idempotency: make(map[string]domain.MessageID), nextAttempt: make(map[uint64]time.Time), readCursors: make(map[string]domain.ReadCursor), workspaceNotificationPrefs: make(map[string]domain.WorkspaceNotificationPreferences), conversationNotificationPrefs: make(map[string]domain.ConversationNotificationPreferences), threadFollows: make(map[string]bool), activityItems: make(map[domain.ActivityID]domain.ActivityItem), activityPreferences: make(map[string]domain.ActivityPreferences), reactions: make(map[domain.MessageID]map[string]domain.Reaction), pins: make(map[domain.MessageID]map[domain.UserID]domain.Pin), files: make(map[domain.FileID]domain.File), fileComments: make(map[domain.FileCommentID]domain.FileComment), remoteFiles: make(map[domain.FileID]domain.RemoteFile), remoteFileShares: make(map[domain.FileID][]domain.ConversationID), dnd: make(map[domain.UserID]domain.DoNotDisturb), stars: make(map[domain.UserID]map[domain.MessageID]domain.Star), savedItems: make(map[domain.SavedItemID]domain.SavedItem), reminders: make(map[domain.ReminderID]domain.Reminder), laterReminders: make(map[domain.LaterReminderID]domain.LaterReminder), laterReminderLeases: make(map[domain.LaterReminderID]memoryLease), laterReminderNextAttempt: make(map[domain.LaterReminderID]time.Time), scheduled: make(map[domain.ScheduledMessageID]domain.ScheduledMessage), scheduledLeases: make(map[domain.ScheduledMessageID]memoryLease), scheduledDelivered: make(map[domain.ScheduledMessageID]bool), scheduledNextAttempt: make(map[domain.ScheduledMessageID]time.Time), drafts: make(map[string]domain.Draft), userGroups: make(map[domain.UserGroupID]domain.UserGroup), calls: make(map[domain.CallID]domain.Call), emojis: make(map[string]domain.CustomEmoji), bookmarks: make(map[domain.BookmarkID]domain.Bookmark), canvases: make(map[domain.CanvasID]domain.Canvas), canvasAccess: make(map[string]domain.CanvasAccess)}
 }
 
 func emojiKey(workspace domain.WorkspaceID, name string) string {
@@ -2669,6 +2670,105 @@ func (s *Store) ListWorkflowTriggers(_ context.Context, workspace domain.Workspa
 		return strings.Compare(string(left.ID), string(right.ID))
 	})
 	return values, nil
+}
+
+func (s *Store) DueScheduledWorkflowTriggers(_ context.Context, workspace domain.WorkspaceID, now time.Time, limit int) ([]domain.WorkflowTrigger, error) {
+	if limit <= 0 {
+		return nil, store.InvalidArgument("workflow trigger limit must be positive")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowTrigger, 0)
+	for _, value := range s.workflowTriggers {
+		if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || value.NextRunAt.IsZero() || value.NextRunAt.After(now) {
+			continue
+		}
+		if workspace != "" && value.WorkspaceID != workspace {
+			continue
+		}
+		values = append(values, value)
+	}
+	slices.SortFunc(values, func(left, right domain.WorkflowTrigger) int {
+		if !left.NextRunAt.Equal(right.NextRunAt) {
+			return left.NextRunAt.Compare(right.NextRunAt)
+		}
+		return strings.Compare(string(left.ID), string(right.ID))
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	return values, nil
+}
+
+func (s *Store) EarliestScheduledWorkflowTrigger(_ context.Context, workspace domain.WorkspaceID) (time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var earliest time.Time
+	for _, value := range s.workflowTriggers {
+		if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || value.NextRunAt.IsZero() {
+			continue
+		}
+		if workspace != "" && value.WorkspaceID != workspace {
+			continue
+		}
+		if earliest.IsZero() || value.NextRunAt.Before(earliest) {
+			earliest = value.NextRunAt
+		}
+	}
+	return earliest, nil
+}
+
+func (s *Store) CompleteScheduledWorkflowTrigger(_ context.Context, workspace domain.WorkspaceID, triggerID domain.WorkflowTriggerID, expectedNextRunAt, nextRunAt time.Time, event events.Event) (bool, error) {
+	if triggerID == "" || expectedNextRunAt.IsZero() || nextRunAt.IsZero() {
+		return false, store.InvalidArgument("scheduled workflow trigger completion is invalid")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, exists := s.workflowTriggers[triggerID]
+	if !exists || value.WorkspaceID != workspace {
+		return false, nil
+	}
+	if value.Type != string(domain.WorkflowTriggerScheduled) || !value.Enabled || !value.NextRunAt.Equal(expectedNextRunAt) {
+		return false, nil
+	}
+	value.NextRunAt = nextRunAt.UTC()
+	s.workflowTriggers[triggerID] = value
+	s.outbox = append(s.outbox, event)
+	return true, nil
+}
+
+func (s *Store) ListWorkflowEventTriggers(_ context.Context, workspace domain.WorkspaceID) ([]domain.WorkflowTrigger, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values := make([]domain.WorkflowTrigger, 0)
+	for _, value := range s.workflowTriggers {
+		if !slices.Contains(domain.EventWorkflowTriggerTypes, domain.WorkflowTriggerType(value.Type)) || !value.Enabled {
+			continue
+		}
+		if workspace != "" && value.WorkspaceID != workspace {
+			continue
+		}
+		values = append(values, value)
+	}
+	slices.SortFunc(values, func(left, right domain.WorkflowTrigger) int {
+		return strings.Compare(string(left.ID), string(right.ID))
+	})
+	return values, nil
+}
+
+func (s *Store) GetWorkflowEventCursor(_ context.Context, workspace domain.WorkspaceID) (uint64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.workflowEventCursor[workspace], nil
+}
+
+func (s *Store) AdvanceWorkflowEventCursor(_ context.Context, workspace domain.WorkspaceID, sequence uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.workflowEventCursor[workspace] < sequence {
+		s.workflowEventCursor[workspace] = sequence
+	}
+	return nil
 }
 
 func (s *Store) CreateWorkflowRun(_ context.Context, value domain.WorkflowRun, firstStep *domain.WorkflowStep, emitted []events.Event) error {
@@ -6993,7 +7093,7 @@ func (s *Store) ListEventsAfter(_ context.Context, workspace domain.WorkspaceID,
 	result := make([]events.Record, 0, limit)
 	for sequence, event := range s.outbox {
 		current := uint64(sequence + 1)
-		if current <= after || event.WorkspaceID != workspace || store.InternalTopic(event.Topic) {
+		if current <= after || workspace != "" && event.WorkspaceID != workspace || store.InternalTopic(event.Topic) {
 			continue
 		}
 		result = append(result, events.Record{Sequence: current, Event: event})

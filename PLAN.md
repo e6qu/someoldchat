@@ -406,8 +406,8 @@ API and Socket Mode.
 The same pass keeps the remaining boundary explicit. Workflow managers,
 find/use/copy permissions, plan and admin policy, built-in and connector
 functions, typed variable mapping, forms, buttons, branches, icons,
-copy/delete and drag reordering, trigger-change rules, scheduled/webhook/list/
-message/join/reaction trigger workers, activity dashboards, asynchronous CSV
+copy/delete and drag reordering, trigger-change rules,
+activity dashboards, asynchronous CSV
 exports, staged editing while an older published revision remains live,
 cancellation of already-running executions on unpublish, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
@@ -416,6 +416,28 @@ limits, and controlled live-Slack outcomes remain.
 unimplemented because installation credentials are deliberately stored only
 as hashes; completing it requires a secure retrievable execution-credential
 design, not a fabricated token.
+
+The trigger-worker pass then replaced the configuration-only scheduled,
+webhook, message, reaction, join, and list trigger types with durable
+execution. Scheduled triggers carry a next-occurrence column and fire from a
+compare-and-set queue whose earliest occurrence joins the lifecycle
+wake-deadline publication; hourly, daily, weekly, and monthly recurrence is
+evaluated as wall-clock calendar arithmetic in the configured IANA zone so a
+daily 09:00 survives daylight-saving transitions. Webhook triggers execute on
+an unauthenticated POST to `/services/triggers/{workspace}/{trigger}/{secret}`:
+the secret is stored as a hash plus credential-key ciphertext, revealed only to
+the workflow owner, and unknown workspace, trigger, or secret, a disabled
+trigger, and an unpublished workflow all answer the same plain-text 404. A
+workspace event dispatcher tails the durable journal behind a monotonic cursor
+and fires channel-bound message (with optional keyword), reaction (with
+optional emoji), join, and first-party list record triggers; every fire —
+scheduled occurrence, event match — carries a derived idempotency key, so a
+crashed or racing worker starts one run. Automatic fires execute as the
+workflow owner and bypass link/shortcut run permissions while still requiring
+a published workflow and an enabled trigger. Named weekday schedules,
+month-end semantics, trigger inputs wired to step variables, Slack-list
+(rather than first-party list) triggers, webhook secret rotation UX, and
+durable trigger-failure surfacing beyond the run ledger remain.
 
 The journey contract is also checked upstream on every SDK CI run.
 `make external-contract-qualification` fetches current official Slack Help and

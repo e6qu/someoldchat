@@ -171,6 +171,16 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 		logger.Error("configure scheduled status worker", "error", err)
 		return exitConfiguration
 	}
+	workflowScheduleWorker, err := scheduler.NewWorkflowScheduleWorker(runtime.Store, runtime.Service, *limit)
+	if err != nil {
+		logger.Error("configure workflow schedule worker", "error", err)
+		return exitConfiguration
+	}
+	workflowEventWorker, err := scheduler.NewWorkflowEventWorker(runtime.Service, *limit)
+	if err != nil {
+		logger.Error("configure workflow event worker", "error", err)
+		return exitConfiguration
+	}
 	var deadlinePublisher scheduler.FencedDeadlinePublisher
 	if *wakeDeadlineURL != "" {
 		deadlinePublisher, err = scheduler.NewActivatorDeadlinePublisher(*wakeDeadlineURL, *wakeDeadlineToken, nil)
@@ -184,9 +194,9 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			return nil
 		}
 		if workspaceID == "" {
-			return scheduler.PublishEarliestProductWakeDeadlineComplete(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, runtime.Store, deadlinePublisher)
+			return scheduler.PublishEarliestProductWakeDeadlineComplete(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, runtime.Store, runtime.Store, deadlinePublisher)
 		}
-		return scheduler.PublishEarliestProductWakeDeadlineComplete(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, runtime.Store, deadlinePublisher, workspaceID)
+		return scheduler.PublishEarliestProductWakeDeadlineComplete(cycleContext, runtime.ScheduledSource, runtime.ReminderSource, runtime.Store, runtime.Store, runtime.Store, deadlinePublisher, workspaceID)
 	}
 	workerContext, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -212,11 +222,19 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			if statusErr != nil {
 				logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
 			}
+			workflowScheduleCount, workflowScheduleErr := workflowScheduleWorker.RunOnce(cycleContext, "")
+			if workflowScheduleErr != nil {
+				logger.Error("workflow schedule execution failed", "count", workflowScheduleCount, "error", workflowScheduleErr)
+			}
+			workflowEventCount, workflowEventErr := workflowEventWorker.RunOnce(cycleContext, "")
+			if workflowEventErr != nil {
+				logger.Error("workflow event dispatch failed", "count", workflowEventCount, "error", workflowEventErr)
+			}
 			deadlineErr := publishDeadline(cycleContext, "")
 			if deadlineErr != nil {
 				logger.Error("wake deadline publication failed", "error", deadlineErr)
 			}
-			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, statusErr, deadlineErr)
+			return eventCount > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, errors.Join(eventErr, scheduledErr, reminderErr, scheduledStatusErr, statusErr, workflowScheduleErr, workflowEventErr, deadlineErr)
 		}
 		var failures error
 		count, err := worker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
@@ -244,12 +262,22 @@ func run(ctx context.Context, logger *slog.Logger, args []string) int {
 			failures = errors.Join(failures, statusErr)
 			logger.Error("status expiration failed", "count", statusCount, "error", statusErr)
 		}
+		workflowScheduleCount, workflowScheduleErr := workflowScheduleWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if workflowScheduleErr != nil {
+			failures = errors.Join(failures, workflowScheduleErr)
+			logger.Error("workflow schedule execution failed", "count", workflowScheduleCount, "error", workflowScheduleErr)
+		}
+		workflowEventCount, workflowEventErr := workflowEventWorker.RunOnce(cycleContext, domain.WorkspaceID(*workspace))
+		if workflowEventErr != nil {
+			failures = errors.Join(failures, workflowEventErr)
+			logger.Error("workflow event dispatch failed", "count", workflowEventCount, "error", workflowEventErr)
+		}
 		deadlineErr := publishDeadline(cycleContext, domain.WorkspaceID(*workspace))
 		if deadlineErr != nil {
 			failures = errors.Join(failures, deadlineErr)
 			logger.Error("wake deadline publication failed", "error", deadlineErr)
 		}
-		return count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0, failures
+		return count > 0 || scheduledCount > 0 || reminderCount > 0 || scheduledStatusCount > 0 || statusCount > 0 || workflowScheduleCount > 0 || workflowEventCount > 0, failures
 	}
 	return pollWithinFailureBudget(workerContext, logger, cycle, *poll, *failureBudget)
 }

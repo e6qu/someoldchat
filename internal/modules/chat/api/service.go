@@ -147,6 +147,10 @@ type Service interface {
 	SetWorkflowTrigger(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTrigger, uint64) (domain.WorkflowTrigger, error)
 	ListWorkflowTriggers(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowID) ([]domain.WorkflowTrigger, error)
 	RunWorkflow(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerID, domain.ConversationID, string, string) (domain.WorkflowRun, error)
+	RunAutomaticWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID, domain.ConversationID, string, string) (domain.WorkflowRun, error)
+	RunWebhookTrigger(context.Context, domain.WorkspaceID, domain.WorkflowTriggerID, string, string) (domain.WorkflowRun, error)
+	WebhookTriggerURL(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowTriggerID) (string, error)
+	DispatchWorkflowEventTriggers(context.Context, domain.WorkspaceID, int) (int, error)
 	GetWorkflowRun(context.Context, domain.WorkspaceID, domain.UserID, domain.WorkflowRunID) (domain.WorkflowRun, error)
 	CompleteFunction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowStepID, string, string) error
 	GetFunctionPermission(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) (domain.AutomationPermission, error)

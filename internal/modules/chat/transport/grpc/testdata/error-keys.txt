@@ -68,6 +68,7 @@ service.invalid_snooze
 service.invalid_stream_chunks
 service.invalid_timestamp
 service.invalid_trigger
+service.invalid_trigger_config
 service.invalid_user_group
 service.invalid_view
 service.invalid_workflow_step
@@ -89,6 +90,7 @@ service.scheduled_time_too_far
 service.scheduled_too_many
 service.slash_command_in_thread
 service.slash_command_not_found
+service.webhook_trigger_secret
 service.workflow_function_not_found
 service.workflow_permission_denied
 store.already_exists
