@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -360,5 +361,134 @@ func TestDiscardWorkflowStagedChangesRevertsToThePublishedRevision(t *testing.T)
 	// Discarding with no staged changes is a user error, not a conflict.
 	if err := messages.DiscardWorkflowStagedChanges(ctx, "T1", "U1", workflow.ID, after.Version); !errors.Is(err, ErrInvalidWorkflowStep) {
 		t.Fatalf("discard with no staged changes error=%v, want ErrInvalidWorkflowStep", err)
+	}
+}
+
+func TestWorkflowStepChangesTracksAddedChangedAndRemovedSteps(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	publishedVersion := workflow.PublishedVersion
+
+	// Publish a two-step revision so later staged edits have a real second
+	// position to diverge from.
+	twoSteps := workflow
+	twoSteps.Steps = `[{"function_id":"triage","title":"Triage incident"},{"function_id":"notify","title":"Notify channel"}]`
+	twoSteps, err := messages.UpdateWorkflow(ctx, "T1", "U1", twoSteps, workflow.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID)
+	if err != nil || len(changes) != 0 {
+		t.Fatalf("published workflow changes=%+v err=%v, want none", changes, err)
+	}
+
+	// Change step 2, keep step 1, and append a new step 3.
+	staged := twoSteps
+	staged.Steps = `[{"function_id":"triage","title":"Triage incident"},{"function_id":"triage","title":"Triage incident"},{"function_id":"notify","title":"Notify channel"}]`
+	staged, err = messages.UpdateWorkflow(ctx, "T1", "U1", staged, twoSteps.Version, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err = messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 2 || changes[0] != (domain.WorkflowStepChange{Position: 2, FunctionID: "triage", Change: domain.WorkflowStepChangeChanged}) ||
+		changes[1] != (domain.WorkflowStepChange{Position: 3, FunctionID: "notify", Change: domain.WorkflowStepChangeAdded}) {
+		t.Fatalf("changes=%+v", changes)
+	}
+
+	// Removing the trailing steps reports them as removed against the published
+	// revision rather than as unchanged empty slots.
+	staged.Steps = `[{"function_id":"triage","title":"Triage incident"}]`
+	staged, err = messages.UpdateWorkflow(ctx, "T1", "U1", staged, staged.Version, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err = messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 || changes[0] != (domain.WorkflowStepChange{Position: 2, FunctionID: "notify", Change: domain.WorkflowStepChangeRemoved}) {
+		t.Fatalf("removed changes=%+v", changes)
+	}
+
+	// Publishing realigns the head, so the differences disappear.
+	staged.Status = domain.WorkflowPublished
+	staged, err = messages.UpdateWorkflow(ctx, "T1", "U1", staged, staged.Version, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID); err != nil || len(changes) != 0 {
+		t.Fatalf("published changes=%+v err=%v, want none", changes, err)
+	}
+
+	// A member never reads the staged head, so the staged differences are
+	// hidden behind ErrNotFound just as they are from the discard operation.
+	staged.Steps = twoSteps.Steps
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", staged, staged.Version, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := messages.WorkflowStepChanges(ctx, "T1", "U2", workflow.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("member changes error=%v, want ErrNotFound", err)
+	}
+	if changes, err := messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID); err != nil || len(changes) != 1 || changes[0] != (domain.WorkflowStepChange{Position: 2, FunctionID: "notify", Change: domain.WorkflowStepChangeAdded}) {
+		t.Fatalf("owner changes=%+v err=%v", changes, err)
+	}
+	if after, err := messages.GetWorkflow(ctx, "T1", "U1", workflow.ID); err != nil || after.PublishedVersion == publishedVersion {
+		t.Fatalf("published version did not advance: after=%+v err=%v", after, err)
+	}
+}
+
+func TestWorkflowStepChangesSurvivesDiscardAndDraft(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	staged := workflow
+	staged.Steps = `[]`
+	staged, err := messages.UpdateWorkflow(ctx, "T1", "U1", staged, workflow.Version, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID)
+	if err != nil || len(changes) != 1 || changes[0].Change != domain.WorkflowStepChangeRemoved {
+		t.Fatalf("empty draft changes=%+v err=%v", changes, err)
+	}
+	if err := messages.DiscardWorkflowStagedChanges(ctx, "T1", "U1", workflow.ID, staged.Version); err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := messages.WorkflowStepChanges(ctx, "T1", "U1", workflow.ID); err != nil || len(changes) != 0 {
+		t.Fatalf("after discard changes=%+v err=%v, want none", changes, err)
+	}
+
+	// A draft that was never published has no published revision to diff against.
+	draft, err := messages.CreateWorkflow(ctx, "T1", "U1", domain.WorkflowDefinition{
+		AppID: "A1", Title: "Unpublished draft", InputSchema: `{}`,
+		Steps: `[{"function_id":"triage","title":"Triage incident"}]`,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes, err := messages.WorkflowStepChanges(ctx, "T1", "U1", draft.ID); err != nil || len(changes) != 0 {
+		t.Fatalf("draft changes=%+v err=%v, want none", changes, err)
+	}
+}
+
+func TestDiffWorkflowStepsIsPositional(t *testing.T) {
+	published := `[{"function_id":"triage","title":"A"},{"function_id":"notify","title":"B"}]`
+	// Reordering the two steps is a change at both positions: the diff does not
+	// invent an edit script, it labels each slot against the published step at
+	// the same index.
+	reordered := `[{"function_id":"notify","title":"B"},{"function_id":"triage","title":"A"}]`
+	got := diffWorkflowSteps(published, reordered)
+	want := []domain.WorkflowStepChange{
+		{Position: 1, FunctionID: "notify", Change: domain.WorkflowStepChangeChanged},
+		{Position: 2, FunctionID: "triage", Change: domain.WorkflowStepChangeChanged},
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("reordered changes=%+v, want %+v", got, want)
+	}
+	if changes := diffWorkflowSteps(published, published); len(changes) != 0 {
+		t.Fatalf("identical changes=%+v, want none", changes)
+	}
+	if changes := diffWorkflowSteps(`not json`, published); len(changes) != 2 {
+		t.Fatalf("malformed head changes=%+v, want 2 (all added)", changes)
 	}
 }

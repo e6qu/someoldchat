@@ -432,8 +432,18 @@ completion time so a late function completion is rejected; a cancelled run is
 a terminal state like any other. Discarding staged changes reverts the head to
 the published revision, prunes the staged revision rows, and emits a
 `workflow.staged_discarded` event, so the next update publishes from the
-realigned version instead of colliding with the discarded draft. Per-step
-change tracking remains.
+realigned version instead of colliding with the discarded draft.
+
+The per-step change tracking pass then completes the builder's view of a
+published workflow with staged edits. The owner-only `WorkflowStepChanges`
+operation diffs the live head against the published revision positionally: each
+head step is labeled added, changed, or removed relative to the step at the same
+index, and trailing published steps with no head step are reported removed. The
+builder renders a badge on every changed or added step and lists the removed
+steps beneath the step list, so the owner sees exactly what publishing would
+change. A published head or a workflow with no published revision yields no
+changes, and the wire method is covered by the differential parity suite
+alongside every other chat operation.
 
 The trigger-worker pass then replaced the configuration-only scheduled,
 webhook, message, reaction, join, and list trigger types with durable

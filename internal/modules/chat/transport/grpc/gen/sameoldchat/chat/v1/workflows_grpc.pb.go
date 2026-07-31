@@ -25,6 +25,7 @@ const (
 	WorkflowsService_CreateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/CreateWorkflow"
 	WorkflowsService_GetWorkflow_FullMethodName                   = "/sameoldchat.chat.v1.WorkflowsService/GetWorkflow"
 	WorkflowsService_DiscardWorkflowStagedChanges_FullMethodName  = "/sameoldchat.chat.v1.WorkflowsService/DiscardWorkflowStagedChanges"
+	WorkflowsService_WorkflowStepChanges_FullMethodName           = "/sameoldchat.chat.v1.WorkflowsService/WorkflowStepChanges"
 	WorkflowsService_UpdateWorkflow_FullMethodName                = "/sameoldchat.chat.v1.WorkflowsService/UpdateWorkflow"
 	WorkflowsService_ListWorkflows_FullMethodName                 = "/sameoldchat.chat.v1.WorkflowsService/ListWorkflows"
 	WorkflowsService_SetWorkflowTrigger_FullMethodName            = "/sameoldchat.chat.v1.WorkflowsService/SetWorkflowTrigger"
@@ -55,6 +56,7 @@ type WorkflowsServiceClient interface {
 	CreateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	GetWorkflow(ctx context.Context, in *WorkflowGetRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	DiscardWorkflowStagedChanges(ctx context.Context, in *WorkflowDiscardStagedRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	WorkflowStepChanges(ctx context.Context, in *WorkflowStepChangesRequest, opts ...grpc.CallOption) (*WorkflowStepChangesResponse, error)
 	UpdateWorkflow(ctx context.Context, in *WorkflowMutationRequest, opts ...grpc.CallOption) (*WorkflowDefinition, error)
 	ListWorkflows(ctx context.Context, in *WorkflowListRequest, opts ...grpc.CallOption) (*WorkflowListResponse, error)
 	SetWorkflowTrigger(ctx context.Context, in *WorkflowTriggerMutationRequest, opts ...grpc.CallOption) (*WorkflowTrigger, error)
@@ -137,6 +139,16 @@ func (c *workflowsServiceClient) DiscardWorkflowStagedChanges(ctx context.Contex
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WorkflowStepMutationResponse)
 	err := c.cc.Invoke(ctx, WorkflowsService_DiscardWorkflowStagedChanges_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workflowsServiceClient) WorkflowStepChanges(ctx context.Context, in *WorkflowStepChangesRequest, opts ...grpc.CallOption) (*WorkflowStepChangesResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowStepChangesResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_WorkflowStepChanges_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -333,6 +345,7 @@ type WorkflowsServiceServer interface {
 	CreateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
 	GetWorkflow(context.Context, *WorkflowGetRequest) (*WorkflowDefinition, error)
 	DiscardWorkflowStagedChanges(context.Context, *WorkflowDiscardStagedRequest) (*WorkflowStepMutationResponse, error)
+	WorkflowStepChanges(context.Context, *WorkflowStepChangesRequest) (*WorkflowStepChangesResponse, error)
 	UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error)
 	ListWorkflows(context.Context, *WorkflowListRequest) (*WorkflowListResponse, error)
 	SetWorkflowTrigger(context.Context, *WorkflowTriggerMutationRequest) (*WorkflowTrigger, error)
@@ -377,6 +390,9 @@ func (UnimplementedWorkflowsServiceServer) GetWorkflow(context.Context, *Workflo
 }
 func (UnimplementedWorkflowsServiceServer) DiscardWorkflowStagedChanges(context.Context, *WorkflowDiscardStagedRequest) (*WorkflowStepMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DiscardWorkflowStagedChanges not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) WorkflowStepChanges(context.Context, *WorkflowStepChangesRequest) (*WorkflowStepChangesResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WorkflowStepChanges not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) UpdateWorkflow(context.Context, *WorkflowMutationRequest) (*WorkflowDefinition, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateWorkflow not implemented")
@@ -556,6 +572,24 @@ func _WorkflowsService_DiscardWorkflowStagedChanges_Handler(srv interface{}, ctx
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(WorkflowsServiceServer).DiscardWorkflowStagedChanges(ctx, req.(*WorkflowDiscardStagedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkflowsService_WorkflowStepChanges_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WorkflowStepChangesRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).WorkflowStepChanges(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_WorkflowStepChanges_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).WorkflowStepChanges(ctx, req.(*WorkflowStepChangesRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -914,6 +948,10 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "DiscardWorkflowStagedChanges",
 			Handler:    _WorkflowsService_DiscardWorkflowStagedChanges_Handler,
+		},
+		{
+			MethodName: "WorkflowStepChanges",
+			Handler:    _WorkflowsService_WorkflowStepChanges_Handler,
 		},
 		{
 			MethodName: "UpdateWorkflow",

@@ -2257,6 +2257,30 @@ func decodeWorkflowDefinition(value *chatv1.WorkflowDefinition) domain.WorkflowD
 	}
 }
 
+func encodeWorkflowStepChanges(changes []domain.WorkflowStepChange) []*chatv1.WorkflowStepChange {
+	encoded := make([]*chatv1.WorkflowStepChange, 0, len(changes))
+	for _, change := range changes {
+		encoded = append(encoded, &chatv1.WorkflowStepChange{
+			Position: int32(change.Position), FunctionId: change.FunctionID, Change: string(change.Change),
+		})
+	}
+	return encoded
+}
+
+func decodeWorkflowStepChanges(changes []*chatv1.WorkflowStepChange) []domain.WorkflowStepChange {
+	decoded := make([]domain.WorkflowStepChange, 0, len(changes))
+	for _, change := range changes {
+		if change == nil {
+			continue
+		}
+		decoded = append(decoded, domain.WorkflowStepChange{
+			Position: int(change.GetPosition()), FunctionID: change.GetFunctionId(),
+			Change: domain.WorkflowStepChangeType(change.GetChange()),
+		})
+	}
+	return decoded
+}
+
 func encodeWorkflowTrigger(value domain.WorkflowTrigger) *chatv1.WorkflowTrigger {
 	return &chatv1.WorkflowTrigger{
 		Id: string(value.ID), WorkflowId: string(value.WorkflowID), WorkspaceId: string(value.WorkspaceID),
@@ -2333,6 +2357,16 @@ func (r Remote) DiscardWorkflowStagedChanges(ctx context.Context, workspaceID do
 		return err
 	}
 	return requireAcknowledgement(out.GetOk(), "discard workflow staged changes")
+}
+
+func (r Remote) WorkflowStepChanges(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, workflowID domain.WorkflowID) ([]domain.WorkflowStepChange, error) {
+	out, err := r.workflows.WorkflowStepChanges(ctx, &chatv1.WorkflowStepChangesRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), WorkflowId: string(workflowID),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return decodeWorkflowStepChanges(out.GetChanges()), nil
 }
 
 func (r Remote) UpdateWorkflow(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, value domain.WorkflowDefinition, expectedVersion uint64, publish bool) (domain.WorkflowDefinition, error) {
@@ -4855,6 +4889,17 @@ func (s *Server) DiscardWorkflowStagedChanges(ctx context.Context, input *chatv1
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) WorkflowStepChanges(ctx context.Context, input *chatv1.WorkflowStepChangesRequest) (*chatv1.WorkflowStepChangesResponse, error) {
+	changes, err := s.implementation.WorkflowStepChanges(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()),
+		domain.WorkflowID(input.GetWorkflowId()),
+	)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepChangesResponse{Changes: encodeWorkflowStepChanges(changes)}, nil
 }
 
 func (s *Server) UpdateWorkflow(ctx context.Context, input *chatv1.WorkflowMutationRequest) (*chatv1.WorkflowDefinition, error) {

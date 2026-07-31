@@ -1895,6 +1895,27 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('Workflow published')).toBeVisible();
   await expect(page.getByText('published', { exact: true })).toBeVisible();
 
+  // A staged edit is labeled against the published revision step by step:
+  // replacing step 2 marks it changed, truncating the head marks the removed
+  // step, and extending the head marks an added step.
+  await page.locator('select[name="step_2"]').selectOption('triage');
+  await page.getByRole('button', { name: 'Save staged changes' }).click();
+  await expect(page.getByText('Staged changes saved')).toBeVisible();
+  await expect(page.getByLabel('Step 2 changed')).toBeVisible();
+  await page.locator('select[name="step_2"]').selectOption('');
+  await page.getByRole('button', { name: 'Save staged changes' }).click();
+  await expect(page.getByText('Staged changes saved')).toBeVisible();
+  await expect(page.locator('[data-removed-step="2"]', { hasText: 'Notify channel' })).toBeVisible();
+  await page.locator('select[name="step_2"]').selectOption('triage');
+  await page.locator('select[name="step_3"]').selectOption('notify');
+  await page.getByRole('button', { name: 'Save staged changes' }).click();
+  await expect(page.getByText('Staged changes saved')).toBeVisible();
+  await expect(page.getByLabel('Step 2 changed')).toBeVisible();
+  await expect(page.getByLabel('Step 3 added')).toBeVisible();
+  await expect(page.locator('[data-removed-step]')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Publish changes' }).click();
+  await expect(page.getByText('Workflow published')).toBeVisible();
+
   await page.getByLabel('Trigger name').fill('Start incident triage');
   await page.getByLabel('Trigger type').selectOption('link');
   await page.getByRole('button', { name: 'Create trigger' }).click();

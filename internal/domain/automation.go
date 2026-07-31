@@ -48,6 +48,30 @@ type WorkflowStepVersion struct {
 	WorkflowVersionCreated string     `json:"workflow_version_created"`
 }
 
+type WorkflowStepChangeType string
+
+const (
+	// WorkflowStepChangeAdded marks a step slot that exists in the staged draft
+	// but not in the published revision.
+	WorkflowStepChangeAdded WorkflowStepChangeType = "added"
+	// WorkflowStepChangeChanged marks a step slot whose function differs from
+	// the published revision's step at the same position.
+	WorkflowStepChangeChanged WorkflowStepChangeType = "changed"
+	// WorkflowStepChangeRemoved marks a step slot that exists in the published
+	// revision but no longer in the staged draft.
+	WorkflowStepChangeRemoved WorkflowStepChangeType = "removed"
+)
+
+// WorkflowStepChange is one step-level difference between a published
+// workflow's staged draft and its published revision. Position is one-based and
+// names the head slot the difference applies to, which is how the builder
+// renders its step list.
+type WorkflowStepChange struct {
+	Position   int
+	FunctionID string
+	Change     WorkflowStepChangeType
+}
+
 type WorkflowTriggerType string
 
 const (
