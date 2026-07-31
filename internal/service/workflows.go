@@ -1462,21 +1462,15 @@ func (m Messages) advanceStep(ctx context.Context, workspaceID domain.WorkspaceI
 }
 
 func (m Messages) GetWorkflowRun(ctx context.Context, workspaceID domain.WorkspaceID, actor domain.UserID, runID domain.WorkflowRunID) (domain.WorkflowRun, error) {
+	// Slack's run views are shareable across the workspace: a run link opens
+	// for any member, which is also how a member reaches the form or button
+	// the run is parked on. authorizeWorkspace already proved membership.
 	if err := m.authorizeWorkspace(ctx, workspaceID, actor); err != nil {
 		return domain.WorkflowRun{}, err
 	}
 	run, err := m.Store.GetWorkflowRun(ctx, workspaceID, runID)
 	if err != nil {
 		return domain.WorkflowRun{}, err
-	}
-	if run.ActorID != actor {
-		workflow, workflowErr := m.Store.GetWorkflow(ctx, workspaceID, run.WorkflowID)
-		if workflowErr != nil {
-			return domain.WorkflowRun{}, workflowErr
-		}
-		if workflow.OwnerID != actor {
-			return domain.WorkflowRun{}, store.ErrNotFound
-		}
 	}
 	return run, nil
 }

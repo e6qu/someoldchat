@@ -1895,6 +1895,16 @@ test('[WORKFLOW-01 WORKFLOW-02 WORKFLOW-03] Workflow Builder publishes a trigger
   await expect(page.getByText('Workflow published')).toBeVisible();
   await expect(page.getByText('published', { exact: true })).toBeVisible();
 
+  // Steps reorder in place: moving a step up swaps every field between the
+  // two slots, and moving it back restores the order. Nothing is persisted
+  // until a save, so the published order below is unchanged.
+  await page.getByRole('button', { name: 'Move step 2 up' }).click();
+  await expect(page.locator('select[name="step_1"]')).toHaveValue('notify');
+  await expect(page.locator('select[name="step_2"]')).toHaveValue('triage');
+  await page.getByRole('button', { name: 'Move step 1 down' }).click();
+  await expect(page.locator('select[name="step_1"]')).toHaveValue('triage');
+  await expect(page.locator('select[name="step_2"]')).toHaveValue('notify');
+
   // A staged edit is labeled against the published revision step by step:
   // replacing step 2 marks it changed, truncating the head marks the removed
   // step, and extending the head marks an added step.

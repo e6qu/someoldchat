@@ -429,8 +429,14 @@ func parityCases() []parityCase {
 			name: "form and button steps resume across the composition seam",
 			seed: seedFormParity,
 			operate: func(ctx context.Context, chat chatCaller) (any, error) {
-				// The run view reports the form the run is parked on.
+				// The run view reports the form the run is parked on, and a
+				// member can open that run view to reach it (run views are
+				// workspace-shareable, matching the interaction audience).
 				before, err := chat.WorkflowRunInteraction(ctx, "T1", "U2", "WxForm")
+				if err != nil {
+					return nil, err
+				}
+				memberRun, err := chat.GetWorkflowRun(ctx, "T1", "U2", "WxForm")
 				if err != nil {
 					return nil, err
 				}
@@ -461,6 +467,7 @@ func parityCases() []parityCase {
 					return nil, err
 				}
 				return []any{
+					memberRun.ID == "WxForm",
 					before.Kind, before.Title, fieldNames, before.StepID,
 					button.Kind, button.Label,
 					run.Status, run.CurrentStep, after.Kind,

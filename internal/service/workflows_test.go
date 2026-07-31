@@ -564,10 +564,14 @@ func TestWorkflowFormAndButtonStepsPauseForHumanInput(t *testing.T) {
 	}
 
 	// A form step parks the run waiting. A member (not the owner) can submit,
-	// the same audience Slack grants a form link.
+	// the same audience Slack grants a form link — and the member can open the
+	// run view to reach it, which is why run views are workspace-shareable.
 	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "interactive-run")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := messages.GetWorkflowRun(ctx, "T1", "U2", run.ID); err != nil {
+		t.Fatalf("member could not open the run view: %v", err)
 	}
 	executions, err := repository.ListWorkflowRunSteps(ctx, "T1", run.ID)
 	if err != nil || len(executions) != 1 || executions[0].Status != domain.WorkflowStepWaiting {
