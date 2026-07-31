@@ -19,11 +19,16 @@ import (
 
 type workflowFunctionDefinition struct {
 	ID         string       `json:"id,omitempty"`
+	Type       string       `json:"type,omitempty"`
 	FunctionID string       `json:"function_id"`
 	AppID      domain.AppID `json:"app_id,omitempty"`
 	Title      string       `json:"title,omitempty"`
 	Inputs     any          `json:"inputs,omitempty"`
 }
+
+// workflowStepTypeFunction is the default step kind: an app function callback.
+// Form and button steps are additional kinds with their own execution model.
+const workflowStepTypeFunction = "function"
 
 type functionExecutionSnapshot struct {
 	AppID               domain.AppID          `json:"app_id"`
@@ -73,16 +78,37 @@ func normalizeWorkflowSteps(raw string) (string, []workflowFunctionDefinition, e
 	if json.Unmarshal([]byte(raw), &values) != nil || values == nil {
 		return "", nil, ErrInvalidWorkflowStep
 	}
+	seen := make(map[string]int, len(values))
 	for index := range values {
 		values[index].ID = strings.TrimSpace(values[index].ID)
+		values[index].Type = strings.TrimSpace(values[index].Type)
 		values[index].FunctionID = strings.TrimSpace(values[index].FunctionID)
 		values[index].Title = strings.TrimSpace(values[index].Title)
+		if values[index].Type == "" {
+			values[index].Type = workflowStepTypeFunction
+		}
+		if values[index].Type != workflowStepTypeFunction {
+			return "", nil, ErrInvalidWorkflowStep
+		}
 		if values[index].FunctionID == "" {
 			return "", nil, ErrInvalidWorkflowStep
 		}
+		// Step ids route branches and variable references, so they must be
+		// unique. An explicit duplicate is a definition error; a defaulted id
+		// colliding with an earlier step is suffixed, which keeps existing
+		// workflows that repeat one function valid.
 		if values[index].ID == "" {
 			values[index].ID = values[index].FunctionID
+			for suffix := 2; ; suffix++ {
+				if _, taken := seen[values[index].ID]; !taken {
+					break
+				}
+				values[index].ID = fmt.Sprintf("%s-%d", values[index].FunctionID, suffix)
+			}
+		} else if _, taken := seen[values[index].ID]; taken {
+			return "", nil, ErrInvalidWorkflowStep
 		}
+		seen[values[index].ID] = index
 	}
 	encoded, err := json.Marshal(values)
 	if err != nil {
@@ -361,7 +387,9 @@ func (m Messages) WorkflowStepChanges(ctx context.Context, workspaceID domain.Wo
 // diffWorkflowSteps compares two step lists positionally. Each slot is judged
 // against the published revision's step at the same index, so inserting a step
 // above another marks every later position as changed until the next publish
-// realigns them; the builder labels each numbered slot with exactly this.
+// realigns them; the builder labels each numbered slot with exactly this. A
+// slot counts as changed when any part of its step definition moved — the
+// function, its title, or the routing metadata — not just the callback.
 func diffWorkflowSteps(publishedRaw, headRaw string) []domain.WorkflowStepChange {
 	published := decodeWorkflowStepFunctions(publishedRaw)
 	head := decodeWorkflowStepFunctions(headRaw)
@@ -377,13 +405,30 @@ func diffWorkflowSteps(publishedRaw, headRaw string) []domain.WorkflowStepChange
 			changes = append(changes, domain.WorkflowStepChange{
 				Position: position, FunctionID: head[index].FunctionID, Change: domain.WorkflowStepChangeAdded,
 			})
-		case head[index].FunctionID != published[index].FunctionID:
+		case canonicalWorkflowStep(head[index]) != canonicalWorkflowStep(published[index]):
 			changes = append(changes, domain.WorkflowStepChange{
 				Position: position, FunctionID: head[index].FunctionID, Change: domain.WorkflowStepChangeChanged,
 			})
 		}
 	}
 	return changes
+}
+
+// canonicalWorkflowStep renders one step in its normalized JSON form so two
+// definitions compare by content, not by the caller's whitespace or field
+// order. Revisions written before step types existed decode with an empty
+// type, which the default repairs. Marshal errors are impossible for this
+// struct shape, so a failure collapses to the zero string, which still
+// differs from any valid encoding.
+func canonicalWorkflowStep(step workflowFunctionDefinition) string {
+	if step.Type == "" {
+		step.Type = workflowStepTypeFunction
+	}
+	encoded, err := json.Marshal(step)
+	if err != nil {
+		return ""
+	}
+	return string(encoded)
 }
 
 func decodeWorkflowStepFunctions(raw string) []workflowFunctionDefinition {

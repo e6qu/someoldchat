@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -490,6 +491,51 @@ func TestDiffWorkflowStepsIsPositional(t *testing.T) {
 	}
 	if changes := diffWorkflowSteps(`not json`, published); len(changes) != 2 {
 		t.Fatalf("malformed head changes=%+v, want 2 (all added)", changes)
+	}
+	// A step whose metadata moved but whose callback did not is still a
+	// change: the diff compares the whole step definition.
+	renamed := `[{"function_id":"triage","title":"Renamed"},{"function_id":"notify","title":"B"}]`
+	got = diffWorkflowSteps(published, renamed)
+	want = []domain.WorkflowStepChange{{Position: 1, FunctionID: "triage", Change: domain.WorkflowStepChangeChanged}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("renamed changes=%+v, want %+v", got, want)
+	}
+	// A revision written before step types existed decodes with an empty
+	// type; it must not phantom-diff against the normalized head.
+	legacy := `[{"id":"triage","function_id":"triage","title":"A"},{"id":"notify","function_id":"notify","title":"B"}]`
+	normalized := `[{"id":"triage","type":"function","function_id":"triage","title":"A"},{"id":"notify","type":"function","function_id":"notify","title":"B"}]`
+	if changes := diffWorkflowSteps(legacy, normalized); len(changes) != 0 {
+		t.Fatalf("legacy revision changes=%+v, want none", changes)
+	}
+}
+
+func TestNormalizeWorkflowStepsAssignsUniqueIDs(t *testing.T) {
+	encoded, steps, err := normalizeWorkflowSteps(`[{"function_id":"triage"},{"function_id":"triage"},{"function_id":"triage"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{steps[0].ID, steps[1].ID, steps[2].ID}
+	if !slices.Equal(ids, []string{"triage", "triage-2", "triage-3"}) {
+		t.Fatalf("defaulted ids=%v", ids)
+	}
+	if !strings.Contains(encoded, `"type":"function"`) || !strings.Contains(encoded, `"id":"triage-2"`) {
+		t.Fatalf("normalized encoding=%s", encoded)
+	}
+	if _, _, err := normalizeWorkflowSteps(`[{"id":"a","function_id":"triage"},{"id":"a","function_id":"notify"}]`); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("duplicate explicit id error=%v, want ErrInvalidWorkflowStep", err)
+	}
+	if _, _, err := normalizeWorkflowSteps(`[{"type":"branch","function_id":"triage"}]`); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("unknown step type error=%v, want ErrInvalidWorkflowStep", err)
+	}
+	// An explicit id that survives defaulting wins over a later defaulted
+	// collision: the defaulted step is suffixed instead.
+	_, steps, err = normalizeWorkflowSteps(`[{"id":"triage-2","function_id":"notify"},{"function_id":"triage"},{"function_id":"triage"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids = []string{steps[0].ID, steps[1].ID, steps[2].ID}
+	if !slices.Equal(ids, []string{"triage-2", "triage", "triage-3"}) {
+		t.Fatalf("mixed ids=%v", ids)
 	}
 }
 
