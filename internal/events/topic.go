@@ -321,6 +321,7 @@ var topicRules = []topicRule{
 		note: "current function_executed reference: dispatched automatically when a function owned by the target app runs; no event subscription or scope is required"},
 	{topic: "workflow.step_configured", note: "not pinned: workflow_step_execute postdates the snapshot"},
 	{topic: "workflow.trigger_fired", note: "not pinned: a scheduled-trigger execution record has no Slack event"},
+	{topic: "workflow.staged_discarded", note: "not pinned: discarding a workflow draft is an internal product concept"},
 	{topic: "workflow.step_completed", note: "not pinned: workflow_step_execute postdates the snapshot"},
 	{topic: "workflow.step_failed", note: "not pinned: workflow_step_execute postdates the snapshot"},
 	{topic: "saved_item.created", recipient: true,

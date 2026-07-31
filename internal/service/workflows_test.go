@@ -283,3 +283,82 @@ func TestStagedWorkflowEditKeepsRunningExecutionOnThePublishedRevision(t *testin
 		t.Fatalf("run drifted off the published revision: %+v", execution)
 	}
 }
+
+func TestUnpublishCancelsRunningExecutions(t *testing.T) {
+	ctx, repository, messages, workflow := seedWorkflowTriggerWorld(t)
+	trigger, err := messages.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+		WorkflowID: workflow.ID, Title: "Run", Type: "link", Config: `{}`, Enabled: true,
+	}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, err := messages.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{}`, "cancel-run")
+	if err != nil || run.Status != domain.WorkflowRunRunning {
+		t.Fatalf("run=%+v err=%v", run, err)
+	}
+	// The function_executed event carries the execution step's ID.
+	records, err := repository.ListEventsAfter(ctx, "T1", 0, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var executionID domain.WorkflowStepID
+	for _, record := range records {
+		if record.Event.Topic != "function_executed" {
+			continue
+		}
+		delivered, _ := events.Deliverable(record.Event)
+		if id, ok := delivered.Field("function_execution_id"); ok {
+			executionID = domain.WorkflowStepID(id)
+		}
+	}
+	if executionID == "" {
+		t.Fatal("no function_executed event found for the running workflow")
+	}
+
+	// Unpublish the workflow: the in-flight run and its executing step are
+	// cancelled atomically with the status transition.
+	unpublished := workflow
+	unpublished.Status = domain.WorkflowDisabled
+	if _, err := messages.UpdateWorkflow(ctx, "T1", "U1", unpublished, workflow.Version, false); err != nil {
+		t.Fatal(err)
+	}
+	cancelled, err := repository.GetWorkflowRun(ctx, "T1", run.ID)
+	if err != nil || cancelled.Status != domain.WorkflowRunCancelled || cancelled.CompletedAt.IsZero() || cancelled.Error != "workflow_unpublished" {
+		t.Fatalf("run after unpublish=%+v err=%v", cancelled, err)
+	}
+	cancelledStep, err := repository.GetWorkflowStep(ctx, "T1", executionID)
+	if err != nil || cancelledStep.Status != domain.WorkflowStepCancelled {
+		t.Fatalf("step after unpublish=%+v err=%v", cancelledStep, err)
+	}
+
+	// A late function completion is refused: the run is no longer executing.
+	if err := messages.CompleteFunction(ctx, "T1", "U1", workflow.AppID, executionID, `{"result":"late"}`, ""); !errors.Is(err, ErrFunctionNotRunning) {
+		t.Fatalf("late complete error=%v, want ErrFunctionNotRunning", err)
+	}
+}
+
+func TestDiscardWorkflowStagedChangesRevertsToThePublishedRevision(t *testing.T) {
+	ctx, _, messages, workflow := seedWorkflowTriggerWorld(t)
+	publishedVersion := workflow.PublishedVersion
+	staged := workflow
+	staged.Title = "Staged and discarded"
+	staged.Steps = `[]`
+	staged, err := messages.UpdateWorkflow(ctx, "T1", "U1", staged, workflow.Version, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if staged.Version == publishedVersion {
+		t.Fatal("staged edit did not diverge")
+	}
+	if err := messages.DiscardWorkflowStagedChanges(ctx, "T1", "U1", workflow.ID, staged.Version); err != nil {
+		t.Fatalf("discard error=%v", err)
+	}
+	after, err := messages.GetWorkflow(ctx, "T1", "U1", workflow.ID)
+	if err != nil || after.Title == "Staged and discarded" || after.Version != publishedVersion {
+		t.Fatalf("after discard=%+v err=%v", after, err)
+	}
+	// Discarding with no staged changes is a user error, not a conflict.
+	if err := messages.DiscardWorkflowStagedChanges(ctx, "T1", "U1", workflow.ID, after.Version); !errors.Is(err, ErrInvalidWorkflowStep) {
+		t.Fatalf("discard with no staged changes error=%v, want ErrInvalidWorkflowStep", err)
+	}
+}

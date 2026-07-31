@@ -239,6 +239,7 @@ const (
 	WorkflowStepExecuting  WorkflowStepStatus = "executing"
 	WorkflowStepCompleted  WorkflowStepStatus = "completed"
 	WorkflowStepFailed     WorkflowStepStatus = "failed"
+	WorkflowStepCancelled  WorkflowStepStatus = "cancelled"
 )
 
 type WorkflowStep struct {

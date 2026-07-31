@@ -372,6 +372,10 @@ type Store interface {
 	GetWorkflowStep(context.Context, domain.WorkspaceID, domain.WorkflowStepID) (domain.WorkflowStep, error)
 	CreateWorkflow(context.Context, domain.WorkflowDefinition, events.Event) error
 	UpdateWorkflow(context.Context, domain.WorkflowDefinition, uint64, events.Event) error
+	// DiscardWorkflowStagedChanges reverts the head row to the published
+	// revision and realigns Version with PublishedVersion. The expectedVersion
+	// is the staged version being discarded.
+	DiscardWorkflowStagedChanges(context.Context, domain.WorkspaceID, domain.WorkflowID, uint64, events.Event) (bool, error)
 	GetWorkflow(context.Context, domain.WorkspaceID, domain.WorkflowID) (domain.WorkflowDefinition, error)
 	ListWorkflows(context.Context, domain.WorkspaceID, domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error)
 	ListWorkflowRevisions(context.Context, domain.WorkspaceID, domain.WorkflowID) ([]domain.WorkflowRevision, error)

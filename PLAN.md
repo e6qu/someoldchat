@@ -408,7 +408,7 @@ find/use/copy permissions, plan and admin policy, built-in and connector
 functions, typed variable mapping, forms, buttons, branches, icons,
 copy/delete and drag reordering, trigger-change rules,
 activity dashboards, asynchronous CSV
-exports, cancellation of already-running executions on unpublish, multi-org permission
+exports, multi-org permission
 semantics, typed workflow/function input and output enforcement, exact rate
 limits, and controlled live-Slack outcomes remain.
 `function_executed.bot_access_token` is also
@@ -424,8 +424,16 @@ so a step removed from the draft never reaches an in-flight execution. The
 revision table now carries description, callback id, and input schema alongside
 title and steps, so a non-owner reading the directory or a run view sees the
 published revision's metadata rather than the staged draft; only the owner and
-the execution path read the live head. Discarding staged changes and
-per-step change tracking remain.
+the execution path read the live head. The unpublish-and-discard pass closes
+the remaining lifecycle gaps. Unpublishing a published workflow atomically
+cancels every running run and executing step in the same transaction that
+disables it, stamping both with the `workflow_unpublished` error and a
+completion time so a late function completion is rejected; a cancelled run is
+a terminal state like any other. Discarding staged changes reverts the head to
+the published revision, prunes the staged revision rows, and emits a
+`workflow.staged_discarded` event, so the next update publishes from the
+realigned version instead of colliding with the discarded draft. Per-step
+change tracking remains.
 
 The trigger-worker pass then replaced the configuration-only scheduled,
 webhook, message, reaction, join, and list trigger types with durable

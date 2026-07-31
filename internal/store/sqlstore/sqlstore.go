@@ -5604,6 +5604,11 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 		value.CallbackID, value.InputSchema, value.Steps, value.Status, value.UpdatedAt.UTC().UnixNano()); err != nil {
 		return classify(err)
 	}
+	if value.Status == domain.WorkflowDisabled {
+		if err := cancelRunningWorkflowRuns(ctx, tx, value.ID, value.WorkspaceID, value.UpdatedAt); err != nil {
+			return err
+		}
+	}
 	if err := insertOutbox(ctx, tx, event); err != nil {
 		return err
 	}
@@ -5613,6 +5618,80 @@ func (s *Store) UpdateWorkflow(ctx context.Context, value domain.WorkflowDefinit
 func (s *Store) GetWorkflow(ctx context.Context, workspace domain.WorkspaceID, id domain.WorkflowID) (domain.WorkflowDefinition, error) {
 	value, err := scanWorkflow(s.db.QueryRowContext(ctx, `SELECT `+workflowColumns+` FROM workflows WHERE workspace_id = ? AND id = ?`, workspace, id))
 	return value, translateNotFound(err)
+}
+
+// cancelRunningWorkflowRuns cancels every executing step and running run of a
+// workflow inside an existing transaction. Steps are cancelled first so the
+// subquery that selects their runs still finds status = 'running' rows.
+func cancelRunningWorkflowRuns(ctx context.Context, tx *sql.Tx, workflowID domain.WorkflowID, workspace domain.WorkspaceID, now time.Time) error {
+	completedAt := workflowTime(now)
+	if _, err := tx.ExecContext(ctx, `UPDATE workflow_steps SET status = ?, error = 'workflow_unpublished', updated_at = ?
+		WHERE status = ? AND workspace_id = ?
+		AND workflow_run_id IN (SELECT id FROM workflow_runs WHERE workspace_id = ? AND workflow_id = ? AND status = ?)`,
+		domain.WorkflowStepCancelled, completedAt,
+		domain.WorkflowStepExecuting, workspace,
+		workspace, workflowID, domain.WorkflowRunRunning); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE workflow_runs SET status = ?, error = 'workflow_unpublished', completed_at = ?, updated_at = ?
+		WHERE workspace_id = ? AND workflow_id = ? AND status = ?`,
+		domain.WorkflowRunCancelled, completedAt, completedAt,
+		workspace, workflowID, domain.WorkflowRunRunning); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Store) DiscardWorkflowStagedChanges(ctx context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
+	if workflowID == "" || workspace == "" || expectedVersion == 0 {
+		return false, store.InvalidArgument("invalid workflow staged-changes discard")
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var publishedVersion uint64
+	if err := tx.QueryRowContext(ctx, `SELECT published_version FROM workflows WHERE id = ? AND workspace_id = ? AND version = ?`,
+		workflowID, workspace, expectedVersion).Scan(&publishedVersion); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, store.ErrNotFound
+		}
+		return false, err
+	}
+	if publishedVersion == 0 || publishedVersion == expectedVersion {
+		return false, store.InvalidArgument("workflow has no staged changes to discard")
+	}
+	var title, description, callbackID, inputSchema, steps string
+	if err := tx.QueryRowContext(ctx, `SELECT title, description, callback_id, input_schema, steps
+		FROM workflow_revisions WHERE workflow_id = ? AND workspace_id = ? AND version = ?`,
+		workflowID, workspace, publishedVersion).Scan(&title, &description, &callbackID, &inputSchema, &steps); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE workflows SET
+		title = ?, description = ?, callback_id = ?, input_schema = ?, steps = ?, version = published_version, updated_at = ?
+		WHERE id = ? AND workspace_id = ? AND version = ?`,
+		title, description, callbackID, inputSchema, steps, event.CreatedAt.UTC().UnixNano(),
+		workflowID, workspace, expectedVersion)
+	if err != nil {
+		return false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if changed == 0 {
+		return false, store.ErrConflict
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workflow_revisions
+		WHERE workflow_id = ? AND workspace_id = ? AND version > ?`,
+		workflowID, workspace, publishedVersion); err != nil {
+		return false, err
+	}
+	if err := insertOutbox(ctx, tx, event); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 func (s *Store) ListWorkflows(ctx context.Context, workspace domain.WorkspaceID, request domain.PageRequest) ([]domain.WorkflowDefinition, bool, domain.Cursor, error) {

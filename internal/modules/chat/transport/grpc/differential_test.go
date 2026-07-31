@@ -359,6 +359,13 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				if err := chat.DiscardWorkflowStagedChanges(ctx, "T1", "U1", staged.ID, staged.Version); err != nil {
+					return nil, err
+				}
+				discarded, err := chat.GetWorkflow(ctx, "T1", "U1", staged.ID)
+				if err != nil {
+					return nil, err
+				}
 				workflows, more, _, err := chat.ListWorkflows(ctx, "T1", "U1", domain.PageRequest{Limit: 100})
 				if err != nil {
 					return nil, err
@@ -426,6 +433,7 @@ func parityCases() []parityCase {
 				return []any{
 					created.Status, loaded.Title, published.Status, published.Version,
 					staged.Status, staged.Version != staged.PublishedVersion, ownerView.Title,
+					discarded.Title, discarded.Version == discarded.PublishedVersion,
 					len(workflows), more, len(triggers), triggers[0].Type,
 					run.Status, storedRun.Status, storedRun.WorkflowVersion,
 					initialFunction.PermissionType,

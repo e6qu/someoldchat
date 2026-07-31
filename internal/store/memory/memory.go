@@ -2564,8 +2564,70 @@ func (s *Store) UpdateWorkflow(_ context.Context, value domain.WorkflowDefinitio
 		Description: value.Description, CallbackID: value.CallbackID, InputSchema: value.InputSchema,
 		Steps: value.Steps, Status: value.Status, CreatedAt: value.UpdatedAt,
 	})
+	if value.Status == domain.WorkflowDisabled {
+		for runID, run := range s.workflowRuns {
+			if run.WorkflowID == value.ID && run.WorkspaceID == value.WorkspaceID && run.Status == domain.WorkflowRunRunning {
+				run.Status = domain.WorkflowRunCancelled
+				run.Error = "workflow_unpublished"
+				run.CompletedAt = value.UpdatedAt
+				run.UpdatedAt = value.UpdatedAt
+				s.workflowRuns[runID] = run
+			}
+		}
+		for stepID, step := range s.workflowSteps {
+			if step.WorkspaceID == value.WorkspaceID && step.Status == domain.WorkflowStepExecuting {
+				if run, ok := s.workflowRuns[step.WorkflowRunID]; ok && run.WorkflowID == value.ID && run.Status == domain.WorkflowRunCancelled {
+					step.Status = domain.WorkflowStepCancelled
+					step.Error = "workflow_unpublished"
+					step.UpdatedAt = value.UpdatedAt
+					s.workflowSteps[stepID] = step
+				}
+			}
+		}
+	}
 	s.outbox = append(s.outbox, event)
 	return nil
+}
+
+func (s *Store) DiscardWorkflowStagedChanges(_ context.Context, workspace domain.WorkspaceID, workflowID domain.WorkflowID, expectedVersion uint64, event events.Event) (bool, error) {
+	if workflowID == "" || workspace == "" || expectedVersion == 0 {
+		return false, store.InvalidArgument("invalid workflow staged-changes discard")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.workflows[workflowID]
+	if !exists || current.WorkspaceID != workspace {
+		return false, store.ErrNotFound
+	}
+	if current.Version != expectedVersion {
+		return false, store.ErrConflict
+	}
+	if current.PublishedVersion == 0 || current.Version == current.PublishedVersion {
+		return false, store.InvalidArgument("workflow has no staged changes to discard")
+	}
+	for _, revision := range s.workflowRevisions[workflowID] {
+		if revision.Version != current.PublishedVersion {
+			continue
+		}
+		current.Title = revision.Title
+		current.Description = revision.Description
+		current.CallbackID = revision.CallbackID
+		current.InputSchema = revision.InputSchema
+		current.Steps = revision.Steps
+		current.Version = current.PublishedVersion
+		current.UpdatedAt = event.CreatedAt
+		s.workflows[workflowID] = current
+		var remaining []domain.WorkflowRevision
+		for _, old := range s.workflowRevisions[workflowID] {
+			if old.Version <= current.PublishedVersion {
+				remaining = append(remaining, old)
+			}
+		}
+		s.workflowRevisions[workflowID] = remaining
+		s.outbox = append(s.outbox, event)
+		return true, nil
+	}
+	return false, store.ErrConflict
 }
 
 func (s *Store) GetWorkflow(_ context.Context, workspace domain.WorkspaceID, id domain.WorkflowID) (domain.WorkflowDefinition, error) {
