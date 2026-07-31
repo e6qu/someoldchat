@@ -26,8 +26,18 @@ message WorkflowStepMutationResponse {
   bool ok = 1;
 }
 
+message FunctionCompletionRequest {
+  string workspace_id = 1;
+  string user_id = 2;
+  string app_id = 3;
+  string function_execution_id = 4;
+  string outputs = 5;
+  string error = 6;
+}
+
 service WorkflowsService {
   rpc StepCompleted(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
   rpc StepFailed(WorkflowStepRequest) returns (WorkflowStepMutationResponse);
   rpc UpdateStep(WorkflowStepUpdateRequest) returns (WorkflowStepMutationResponse);
+  rpc CompleteFunction(FunctionCompletionRequest) returns (WorkflowStepMutationResponse);
 }

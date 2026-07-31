@@ -910,7 +910,8 @@ func TestWorkflowMethodsHTTPPersistLifecycle(t *testing.T) {
 }
 
 func TestFunctionsCompleteSuccessHTTPValidatesAndCompletes(t *testing.T) {
-	handler := testHandler()
+	handler, repository := testHandlerWithStore()
+	seedFunctionExecution(t, repository, "execution-http")
 	request := httptest.NewRequest(http.MethodPost, "/api/functions.completeSuccess", strings.NewReader(url.Values{
 		"function_execution_id": {"execution-http"},
 		"outputs":               {`{"result":"ok"}`},
@@ -941,6 +942,8 @@ func TestFunctionsCompleteSuccessHTTPValidatesAndCompletes(t *testing.T) {
 }
 
 func TestFunctionsCompleteErrorHTTPValidatesAndCompletes(t *testing.T) {
+	handler, repository := testHandlerWithStore()
+	seedFunctionExecution(t, repository, "execution-error-http")
 	request := httptest.NewRequest(http.MethodPost, "/api/functions.completeError", strings.NewReader(url.Values{
 		"function_execution_id": {"execution-error-http"},
 		"error":                 {"function failed"},
@@ -948,9 +951,37 @@ func TestFunctionsCompleteErrorHTTPValidatesAndCompletes(t *testing.T) {
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Authorization", "Bearer token")
 	response := httptest.NewRecorder()
-	testHandler().ServeHTTP(response, request)
+	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ok":true`) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
+func seedFunctionExecution(t *testing.T, repository *memory.Store, executionID domain.WorkflowStepID) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	workflowID := domain.WorkflowID("workflow-" + string(executionID))
+	runID := domain.WorkflowRunID("run-" + string(executionID))
+	workflow := domain.WorkflowDefinition{
+		ID: workflowID, WorkspaceID: "T1", AppID: "A1", OwnerID: "U1", Title: "HTTP workflow",
+		InputSchema: `{}`, Steps: `[{"function_id":"callback"}]`, Status: domain.WorkflowPublished,
+		Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflow(ctx, workflow, events.Event{ID: domain.EventID("workflow-" + string(executionID)), WorkspaceID: "T1", Topic: "workflow.created", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	run := domain.WorkflowRun{
+		ID: runID, WorkflowID: workflowID, WorkflowVersion: 1, WorkspaceID: "T1", AppID: "A1",
+		ActorID: "U1", Status: domain.WorkflowRunRunning, Inputs: `{}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	step := domain.WorkflowStep{
+		ID: executionID, WorkflowRunID: runID, WorkspaceID: "T1", AppID: "A1", UserID: "U1",
+		FunctionID: "FnCallback", EditID: "callback", Status: domain.WorkflowStepExecuting,
+		Inputs: `{}`, Outputs: `{}`, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repository.CreateWorkflowRun(ctx, run, &step, []events.Event{{ID: domain.EventID("run-" + string(executionID)), WorkspaceID: "T1", Topic: "workflow.run_started", CreatedAt: now}}); err != nil {
+		t.Fatal(err)
 	}
 }
 

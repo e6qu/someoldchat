@@ -233,6 +233,90 @@ func (x *WorkflowStepMutationResponse) GetOk() bool {
 	return false
 }
 
+type FunctionCompletionRequest struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId         string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	UserId              string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	AppId               string                 `protobuf:"bytes,3,opt,name=app_id,json=appId,proto3" json:"app_id,omitempty"`
+	FunctionExecutionId string                 `protobuf:"bytes,4,opt,name=function_execution_id,json=functionExecutionId,proto3" json:"function_execution_id,omitempty"`
+	Outputs             string                 `protobuf:"bytes,5,opt,name=outputs,proto3" json:"outputs,omitempty"`
+	Error               string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *FunctionCompletionRequest) Reset() {
+	*x = FunctionCompletionRequest{}
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FunctionCompletionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FunctionCompletionRequest) ProtoMessage() {}
+
+func (x *FunctionCompletionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_sameoldchat_chat_v1_workflows_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FunctionCompletionRequest.ProtoReflect.Descriptor instead.
+func (*FunctionCompletionRequest) Descriptor() ([]byte, []int) {
+	return file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *FunctionCompletionRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetAppId() string {
+	if x != nil {
+		return x.AppId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetFunctionExecutionId() string {
+	if x != nil {
+		return x.FunctionExecutionId
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetOutputs() string {
+	if x != nil {
+		return x.Outputs
+	}
+	return ""
+}
+
+func (x *FunctionCompletionRequest) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
 var File_sameoldchat_chat_v1_workflows_proto protoreflect.FileDescriptor
 
 const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
@@ -253,13 +337,21 @@ const file_sameoldchat_chat_v1_workflows_proto_rawDesc = "" +
 	"\tstep_name\x18\x06 \x01(\tR\bstepName\x12$\n" +
 	"\x0estep_image_url\x18\a \x01(\tR\fstepImageUrl\".\n" +
 	"\x1cWorkflowStepMutationResponse\x12\x0e\n" +
-	"\x02ok\x18\x01 \x01(\bR\x02ok2\xdc\x02\n" +
+	"\x02ok\x18\x01 \x01(\bR\x02ok\"\xd2\x01\n" +
+	"\x19FunctionCompletionRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x15\n" +
+	"\x06app_id\x18\x03 \x01(\tR\x05appId\x122\n" +
+	"\x15function_execution_id\x18\x04 \x01(\tR\x13functionExecutionId\x12\x18\n" +
+	"\aoutputs\x18\x05 \x01(\tR\aoutputs\x12\x14\n" +
+	"\x05error\x18\x06 \x01(\tR\x05error2\xd3\x03\n" +
 	"\x10WorkflowsService\x12l\n" +
 	"\rStepCompleted\x12(.sameoldchat.chat.v1.WorkflowStepRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12i\n" +
 	"\n" +
 	"StepFailed\x12(.sameoldchat.chat.v1.WorkflowStepRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12o\n" +
 	"\n" +
-	"UpdateStep\x12..sameoldchat.chat.v1.WorkflowStepUpdateRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
+	"UpdateStep\x12..sameoldchat.chat.v1.WorkflowStepUpdateRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponse\x12u\n" +
+	"\x10CompleteFunction\x12..sameoldchat.chat.v1.FunctionCompletionRequest\x1a1.sameoldchat.chat.v1.WorkflowStepMutationResponseBhZfgithub.com/sameoldchat/sameoldchat/internal/modules/chat/transport/grpc/gen/sameoldchat/chat/v1;chatv1b\x06proto3"
 
 var (
 	file_sameoldchat_chat_v1_workflows_proto_rawDescOnce sync.Once
@@ -273,21 +365,24 @@ func file_sameoldchat_chat_v1_workflows_proto_rawDescGZIP() []byte {
 	return file_sameoldchat_chat_v1_workflows_proto_rawDescData
 }
 
-var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_sameoldchat_chat_v1_workflows_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_sameoldchat_chat_v1_workflows_proto_goTypes = []any{
 	(*WorkflowStepRequest)(nil),          // 0: sameoldchat.chat.v1.WorkflowStepRequest
 	(*WorkflowStepUpdateRequest)(nil),    // 1: sameoldchat.chat.v1.WorkflowStepUpdateRequest
 	(*WorkflowStepMutationResponse)(nil), // 2: sameoldchat.chat.v1.WorkflowStepMutationResponse
+	(*FunctionCompletionRequest)(nil),    // 3: sameoldchat.chat.v1.FunctionCompletionRequest
 }
 var file_sameoldchat_chat_v1_workflows_proto_depIdxs = []int32{
 	0, // 0: sameoldchat.chat.v1.WorkflowsService.StepCompleted:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
 	0, // 1: sameoldchat.chat.v1.WorkflowsService.StepFailed:input_type -> sameoldchat.chat.v1.WorkflowStepRequest
 	1, // 2: sameoldchat.chat.v1.WorkflowsService.UpdateStep:input_type -> sameoldchat.chat.v1.WorkflowStepUpdateRequest
-	2, // 3: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2, // 4: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	2, // 5: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	3, // 3: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:input_type -> sameoldchat.chat.v1.FunctionCompletionRequest
+	2, // 4: sameoldchat.chat.v1.WorkflowsService.StepCompleted:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2, // 5: sameoldchat.chat.v1.WorkflowsService.StepFailed:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2, // 6: sameoldchat.chat.v1.WorkflowsService.UpdateStep:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	2, // 7: sameoldchat.chat.v1.WorkflowsService.CompleteFunction:output_type -> sameoldchat.chat.v1.WorkflowStepMutationResponse
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -304,7 +399,7 @@ func file_sameoldchat_chat_v1_workflows_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_sameoldchat_chat_v1_workflows_proto_rawDesc), len(file_sameoldchat_chat_v1_workflows_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

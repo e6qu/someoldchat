@@ -140,6 +140,7 @@ type Service interface {
 	WorkflowStepCompleted(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	WorkflowStepFailed(context.Context, domain.WorkspaceID, domain.UserID, string, string) error
 	WorkflowUpdateStep(context.Context, domain.WorkspaceID, domain.UserID, string, string, string, string, string) error
+	CompleteFunction(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, domain.WorkflowStepID, string, string) error
 	OpenDialog(context.Context, domain.WorkspaceID, domain.UserID, domain.AppID, string, string) error
 	BotInfo(context.Context, domain.WorkspaceID, domain.UserID, domain.BotID) (domain.Bot, error)
 	MigrationExchange(context.Context, domain.WorkspaceID, domain.UserID, []domain.UserID, bool) (domain.MigrationExchange, error)

@@ -2218,6 +2218,17 @@ func (r Remote) WorkflowUpdateStep(ctx context.Context, workspaceID domain.Works
 	return nil
 }
 
+func (r Remote) CompleteFunction(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, executionID domain.WorkflowStepID, outputs, failure string) error {
+	out, err := r.workflows.CompleteFunction(ctx, &chatv1.FunctionCompletionRequest{
+		WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID),
+		FunctionExecutionId: string(executionID), Outputs: outputs, Error: failure,
+	})
+	if err != nil {
+		return err
+	}
+	return requireAcknowledgement(out.GetOk(), "complete function")
+}
+
 func (r Remote) OpenDialog(ctx context.Context, workspaceID domain.WorkspaceID, userID domain.UserID, appID domain.AppID, triggerID, payload string) error {
 	out, err := r.dialogs.OpenDialog(ctx, &chatv1.OpenDialogRequest{WorkspaceId: string(workspaceID), UserId: string(userID), AppId: string(appID), TriggerId: triggerID, Payload: payload})
 	if err != nil {
@@ -4459,6 +4470,16 @@ func (s *Server) StepFailed(ctx context.Context, input *chatv1.WorkflowStepReque
 
 func (s *Server) UpdateStep(ctx context.Context, input *chatv1.WorkflowStepUpdateRequest) (*chatv1.WorkflowStepMutationResponse, error) {
 	if err := s.implementation.WorkflowUpdateStep(ctx, domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), input.GetWorkflowStepEditId(), input.GetInputs(), input.GetOutputs(), input.GetStepName(), input.GetStepImageUrl()); err != nil {
+		return nil, mapError(err)
+	}
+	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil
+}
+
+func (s *Server) CompleteFunction(ctx context.Context, input *chatv1.FunctionCompletionRequest) (*chatv1.WorkflowStepMutationResponse, error) {
+	if err := s.implementation.CompleteFunction(ctx,
+		domain.WorkspaceID(input.GetWorkspaceId()), domain.UserID(input.GetUserId()), domain.AppID(input.GetAppId()),
+		domain.WorkflowStepID(input.GetFunctionExecutionId()), input.GetOutputs(), input.GetError(),
+	); err != nil {
 		return nil, mapError(err)
 	}
 	return &chatv1.WorkflowStepMutationResponse{Ok: true}, nil

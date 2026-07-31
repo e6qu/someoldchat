@@ -1414,7 +1414,7 @@ func (h Handler) workflowUpdateStep(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) functionsCompleteSuccess(w http.ResponseWriter, r *http.Request) {
-	fields, ok := h.functionCompletionFields(w, r, "outputs")
+	fields, principal, ok := h.functionCompletionFields(w, r, "outputs")
 	if !ok {
 		return
 	}
@@ -1423,32 +1423,56 @@ func (h Handler) functionsCompleteSuccess(w http.ResponseWriter, r *http.Request
 		writeError(w, "invalid_arg_name")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
-}
-
-func (h Handler) functionsCompleteError(w http.ResponseWriter, r *http.Request) {
-	_, ok := h.functionCompletionFields(w, r, "error")
-	if !ok {
+	if err := h.Messages.CompleteFunction(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, domain.WorkflowStepID(strings.TrimSpace(fields["function_execution_id"])), fields["outputs"], ""); err != nil {
+		writeFunctionCompletionError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request, requiredField string) (map[string]string, bool) {
+func (h Handler) functionsCompleteError(w http.ResponseWriter, r *http.Request) {
+	fields, principal, ok := h.functionCompletionFields(w, r, "error")
+	if !ok {
+		return
+	}
+	if err := h.Messages.CompleteFunction(r.Context(), principal.WorkspaceID, principal.UserID, principal.AppID, domain.WorkflowStepID(strings.TrimSpace(fields["function_execution_id"])), "", fields["error"]); err != nil {
+		writeFunctionCompletionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (h Handler) functionCompletionFields(w http.ResponseWriter, r *http.Request, requiredField string) (map[string]string, auth.Principal, bool) {
 	fields, err := decodeFields(w, r)
 	if err != nil {
 		writeDecodeError(w, err)
-		return nil, false
+		return nil, auth.Principal{}, false
 	}
-	if _, err := h.authenticate(r, ""); err != nil {
+	principal, err := h.authenticate(r, "")
+	if err != nil {
 		writeAuthError(w, err)
-		return nil, false
+		return nil, auth.Principal{}, false
 	}
 	if strings.TrimSpace(fields["function_execution_id"]) == "" || strings.TrimSpace(fields[requiredField]) == "" {
 		writeError(w, "invalid_arg_name")
-		return nil, false
+		return nil, auth.Principal{}, false
 	}
-	return fields, true
+	return fields, principal, true
+}
+
+func writeFunctionCompletionError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, service.ErrFunctionAccessDenied):
+		writeError(w, "access_denied")
+	case errors.Is(err, service.ErrFunctionNotRunning), errors.Is(err, store.ErrConflict):
+		writeError(w, "execution_not_in_running_state")
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, "function_execution_not_found")
+	case errors.Is(err, service.ErrInvalidWorkflowStep), errors.Is(err, store.ErrInvalidArgument):
+		writeError(w, "invalid_arguments")
+	default:
+		writeError(w, mapServiceError(err, "invalid_arguments"))
+	}
 }
 
 func (h Handler) dialogOpen(w http.ResponseWriter, r *http.Request) {

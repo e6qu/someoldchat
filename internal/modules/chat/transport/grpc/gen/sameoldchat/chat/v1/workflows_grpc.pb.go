@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkflowsService_StepCompleted_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/StepCompleted"
-	WorkflowsService_StepFailed_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/StepFailed"
-	WorkflowsService_UpdateStep_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/UpdateStep"
+	WorkflowsService_StepCompleted_FullMethodName    = "/sameoldchat.chat.v1.WorkflowsService/StepCompleted"
+	WorkflowsService_StepFailed_FullMethodName       = "/sameoldchat.chat.v1.WorkflowsService/StepFailed"
+	WorkflowsService_UpdateStep_FullMethodName       = "/sameoldchat.chat.v1.WorkflowsService/UpdateStep"
+	WorkflowsService_CompleteFunction_FullMethodName = "/sameoldchat.chat.v1.WorkflowsService/CompleteFunction"
 )
 
 // WorkflowsServiceClient is the client API for WorkflowsService service.
@@ -31,6 +32,7 @@ type WorkflowsServiceClient interface {
 	StepCompleted(ctx context.Context, in *WorkflowStepRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	StepFailed(ctx context.Context, in *WorkflowStepRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 	UpdateStep(ctx context.Context, in *WorkflowStepUpdateRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
+	CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error)
 }
 
 type workflowsServiceClient struct {
@@ -71,6 +73,16 @@ func (c *workflowsServiceClient) UpdateStep(ctx context.Context, in *WorkflowSte
 	return out, nil
 }
 
+func (c *workflowsServiceClient) CompleteFunction(ctx context.Context, in *FunctionCompletionRequest, opts ...grpc.CallOption) (*WorkflowStepMutationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WorkflowStepMutationResponse)
+	err := c.cc.Invoke(ctx, WorkflowsService_CompleteFunction_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // WorkflowsServiceServer is the server API for WorkflowsService service.
 // All implementations should embed UnimplementedWorkflowsServiceServer
 // for forward compatibility.
@@ -78,6 +90,7 @@ type WorkflowsServiceServer interface {
 	StepCompleted(context.Context, *WorkflowStepRequest) (*WorkflowStepMutationResponse, error)
 	StepFailed(context.Context, *WorkflowStepRequest) (*WorkflowStepMutationResponse, error)
 	UpdateStep(context.Context, *WorkflowStepUpdateRequest) (*WorkflowStepMutationResponse, error)
+	CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error)
 }
 
 // UnimplementedWorkflowsServiceServer should be embedded to have
@@ -95,6 +108,9 @@ func (UnimplementedWorkflowsServiceServer) StepFailed(context.Context, *Workflow
 }
 func (UnimplementedWorkflowsServiceServer) UpdateStep(context.Context, *WorkflowStepUpdateRequest) (*WorkflowStepMutationResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateStep not implemented")
+}
+func (UnimplementedWorkflowsServiceServer) CompleteFunction(context.Context, *FunctionCompletionRequest) (*WorkflowStepMutationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompleteFunction not implemented")
 }
 func (UnimplementedWorkflowsServiceServer) testEmbeddedByValue() {}
 
@@ -170,6 +186,24 @@ func _WorkflowsService_UpdateStep_Handler(srv interface{}, ctx context.Context, 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkflowsService_CompleteFunction_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FunctionCompletionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkflowsServiceServer).CompleteFunction(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkflowsService_CompleteFunction_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkflowsServiceServer).CompleteFunction(ctx, req.(*FunctionCompletionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // WorkflowsService_ServiceDesc is the grpc.ServiceDesc for WorkflowsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -188,6 +222,10 @@ var WorkflowsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "UpdateStep",
 			Handler:    _WorkflowsService_UpdateStep_Handler,
+		},
+		{
+			MethodName: "CompleteFunction",
+			Handler:    _WorkflowsService_CompleteFunction_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

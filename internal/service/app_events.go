@@ -229,6 +229,8 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, appID d
 		return prepareAppMessageEvent(ctx, state, authorizations, record)
 	case "file.created", "file.shared", "file.unshared":
 		return prepareAppFileEvent(ctx, state, authorizations, record)
+	case "function_executed":
+		return prepareFunctionExecutedEvent(appID, authorizations, record)
 	default:
 		if channelID, scoped := eventChannelID(record.Event); scoped {
 			authorizations, err = visibleAppAuthorizations(ctx, state, authorizations, channelID)
@@ -238,6 +240,33 @@ func PrepareAppEvent(ctx context.Context, state AppEventProjectionStore, appID d
 		}
 		return withEventAuthorizations(record, authorizations)
 	}
+}
+
+func prepareFunctionExecutedEvent(appID domain.AppID, authorizations []domain.AppAuthorization, record events.Record) (events.Record, bool, error) {
+	var snapshot functionExecutionSnapshot
+	if strings.TrimSpace(record.Event.PrivatePayload) == "" ||
+		json.Unmarshal([]byte(record.Event.PrivatePayload), &snapshot) != nil ||
+		snapshot.AppID == "" || snapshot.FunctionExecutionID == "" || snapshot.WorkflowRunID == "" ||
+		len(snapshot.Function) == 0 || len(snapshot.Inputs) == 0 {
+		return events.Record{}, false, events.ErrPayloadFieldInvalid
+	}
+	if snapshot.AppID != appID {
+		return record, false, nil
+	}
+	projected, err := events.New(record.Event.ID, record.Event.WorkspaceID, record.Event.ActorID,
+		events.NewPayload("function_executed",
+			events.String("target_app_id", string(snapshot.AppID)),
+			events.JSON("function", string(snapshot.Function)),
+			events.JSON("inputs", string(snapshot.Inputs)),
+			events.String("function_execution_id", string(snapshot.FunctionExecutionID)),
+			events.String("workflow_execution_id", string(snapshot.WorkflowRunID)),
+		), record.Event.CreatedAt)
+	if err != nil {
+		return events.Record{}, false, err
+	}
+	projected.Authorizations = record.Event.Authorizations
+	record.Event = projected
+	return withEventAuthorizations(record, authorizations)
 }
 
 func scopedAppAuthorizations(ctx context.Context, state AppEventProjectionStore, event events.Event, authorizations []domain.AppAuthorization) ([]domain.AppAuthorization, error) {
