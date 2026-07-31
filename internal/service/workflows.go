@@ -848,6 +848,15 @@ func (m Messages) SetWorkflowTrigger(ctx context.Context, workspaceID domain.Wor
 	if err := m.normalizeWorkflowTriggerConfig(ctx, &value, current, now); err != nil {
 		return domain.WorkflowTrigger{}, err
 	}
+	// A published workflow's trigger is fixed: Slack lets the owner enable or
+	// disable it but not reconfigure it without unpublishing, because runs pin
+	// the published revision's behavior. On a published workflow an update may
+	// only flip Enabled; any other change is rejected.
+	if current != nil && workflow.Status == domain.WorkflowPublished {
+		if value.Title != current.Title || value.Type != current.Type || value.Config != current.Config {
+			return domain.WorkflowTrigger{}, store.ErrConflict
+		}
+	}
 	event, err := newEvent(workspaceID, actor, events.NewPayload(topic,
 		events.String("workflow_id", string(value.WorkflowID)),
 		events.String("trigger_id", string(value.ID)),

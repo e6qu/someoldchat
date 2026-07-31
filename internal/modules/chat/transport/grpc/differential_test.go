@@ -644,6 +644,14 @@ func parityCases() []parityCase {
 				if err != nil {
 					return nil, err
 				}
+				// The workflow is published, so its trigger can be toggled but
+				// not reconfigured: a title change is rejected with ErrConflict.
+				if _, err := chat.SetWorkflowTrigger(ctx, "T1", "U1", domain.WorkflowTrigger{
+					ID: trigger.ID, WorkflowID: published.ID, Title: "Renamed", Type: trigger.Type,
+					Config: trigger.Config, Enabled: trigger.Enabled,
+				}, trigger.Version); !errors.Is(err, storepkg.ErrConflict) {
+					return nil, fmt.Errorf("published trigger reconfigure error=%v, want ErrConflict", err)
+				}
 				run, err := chat.RunWorkflow(ctx, "T1", "U1", trigger.ID, "C1", `{"item":"request"}`, "workflow-parity")
 				if err != nil {
 					return nil, err
